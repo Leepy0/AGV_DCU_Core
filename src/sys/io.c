@@ -114,9 +114,11 @@ uint32_t io_out_mask(void) { return s_out; }
 
 void io_out_masks(uint32_t set, uint32_t clr) { s_out = (s_out & ~clr) | set; }
 
+static uint32_t s_seq_keep;
+void io_seq_keep(uint32_t mask) { s_seq_keep = mask; }
 void io_seq_outputs_off(void)
 {
-    s_out &= ~(0xFFFFUL | (1UL << OUT_IF_1) | (1UL << OUT_IF_2));
+    s_out &= ~((0xFFFFUL | (1UL << OUT_IF_1) | (1UL << OUT_IF_2)) & ~s_seq_keep);
 }
 
 static uint16_t pin(uint16_t id)

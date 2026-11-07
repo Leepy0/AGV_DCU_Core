@@ -121,7 +121,7 @@ void     run_standby_auto_off(void) { s_run.standby = 0; s_run.standby_auto = 0;
 void run_request_restart(uint16_t sec)
 {
     D.wait_start = 1;
-    s_run.wait_sec = (int16_t)((sec != 0u) ? sec : (uint16_t)param_get(P_AUTO_START_SEC));
+    s_run.wait_sec = (int16_t)sec;
     s_run.wait_ticks = 0;
 }
 

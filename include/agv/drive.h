@@ -144,7 +144,7 @@ typedef struct {
 extern agv_drive_t agv_drive;
 
 /* 상위 모듈이 구현한다 */
-void run_request_restart(uint16_t sec);                  /* 재출발 예약. 0 = P_AUTO_START_SEC */
+void run_request_restart(uint16_t sec);                  /* 재출발 예약. sec 초 뒤. 0 = 바로 */
 int  link_send(const uint16_t *buf, uint16_t n);         /* 통째로 큐에 넣으면 1, 여유 없으면 0 */
 
 #endif /* AGV_DRIVE_H */

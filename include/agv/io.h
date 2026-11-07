@@ -42,6 +42,7 @@ uint32_t io_out_mask(void);                        /* 출력 ID 0~31 래치 */
 void     io_out_masks(uint32_t set, uint32_t clr); /* clr 먼저, 그다음 set */
 void     io_force(uint16_t id, uint16_t on, uint16_t ms);   /* 관리 프로토콜 OF */
 void     io_force_clear(uint16_t id);
+void     io_seq_keep(uint32_t mask);
 void     io_seq_outputs_off(void);                 /* Auto_Loading_Init 의 출력 OFF 대체 */
 void     io_write(void);                           /* 10 ms 끝 */
 #endif

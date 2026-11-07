@@ -10,7 +10,7 @@
 
 #include "agv/types.h"
 
-/* 시퀀스 요청 ID. 값은 우선순위(작을수록 먼저)이며 레거시 Auto_Run_Process 분기 순서를 따른다. */
+/* 시퀀스 요청 ID. 겹친 요청은 사이트 대응표(site_seqs) 순서로 실행한다 */
 typedef enum {
     SEQ_NONE = 0,
     SEQ_LOAD,            /* Loading_Ready_Flag */

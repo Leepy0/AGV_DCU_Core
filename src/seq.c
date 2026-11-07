@@ -453,16 +453,16 @@ void seq_cancel(uint16_t id)
 void seq_run(void)
 {
     if (!s_seq.active && (s_site != 0)) {
-        uint16_t id;
-        for (id = SEQ_NONE + 1; id < SEQ_MAX; id++) {
-            if (seq_request_flag[id]) {
-                const seq_def_t *def = find_def(s_site->seqs, s_site->nseqs, id);
-                if (def != 0) {
-                    runner_start(&s_seq, def, 0);
-                    break;
-                }
-                seq_request_flag[id] = 0;   /* 이 프로파일에 표가 없다 */
+        uint16_t i, id;
+        for (i = 0; i < s_site->nseqs; i++) {
+            const seq_def_t *def = &s_site->seqs[i];
+            if (((def->profile == 0) || (def->profile == s_profile)) && seq_request_flag[def->id]) {
+                runner_start(&s_seq, def, 0);
+                break;
             }
+        }
+        if (!s_seq.active) {
+            for (id = SEQ_NONE + 1; id < SEQ_MAX; id++) { seq_request_flag[id] = 0; }
         }
     }
     if (s_seq.active) { runner_scan(&s_seq); }
