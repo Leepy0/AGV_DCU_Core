@@ -535,6 +535,44 @@ static void test_compensate(void)
     tick();
     len = (uint16_t)P.stop_len;
     assert(D.stop_pulses == (int16_t)(len - 3));
+
+    /* 정지 중 다른 태그는 남은 거리를 바꾸지 않는다. 속도 태그든 정지 태그든 같다 */
+    run_encoder(0, 20000);
+    tag_frame(2, '7', 0);
+    run_encoder(0, 20000);
+    guide_reply(0);
+    tick();
+    assert(D.stop_pulses == (int16_t)(len - 5));
+    tag_frame(8, '8', 0);
+    run_encoder(0, 20000);
+    guide_reply(0);
+    tick();
+    assert(D.stop_pulses == (int16_t)(len - 6));
+
+    /* 일시정지 감속 중에는 실제 이동만큼만 줄고, 태그는 거리를 바꾸지 않는다 */
+    D.pause_stop = 1;
+    run_scan(5);                         /* 스캔마다 왼쪽 펄스 1개 */
+    assert(D.stop_pulses == (int16_t)(len - 11));
+    assert(stop_is_pause(stop_reason()));
+    tag_frame(2, '9', 0);
+    guide_reply(0);
+    tick();
+    assert(D.stop_pulses == (int16_t)(len - 11));
+    assert(D.flag_stopping == 1);
+
+    /* 재출발 대기 뒤 끊긴 위치 정지를 남은 거리로 이어 간다 */
+    {
+        int i;
+        for (i = 0; i < 40; i++) { guide_reply(0); tick(); }   /* 멈춰서 기다림. 센서는 계속 응답 */
+    }
+    assert(D.stop_err == 0);
+    D.pause_stop = 0;
+    guide_reply(0);
+    tick();
+    guide_reply(0);
+    tick();
+    assert(stop_is_position(stop_reason()));
+    assert(D.stop_pulses == (int16_t)(len - 11));
     printf("  compensate ok\n");
 }
 static void test_rfid_retry(void)

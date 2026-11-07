@@ -33,6 +33,7 @@ void tagact_stop(void) { D.flag_stopping = 1; }
 
 void tagact_stop_length(void)
 {
+    if (D.flag_stopping) { return; }     /* 진행 중인 정지의 거리를 바꾸지 않는다 */
     D.flag_stopping = 1;
     D.stop_pulses = D.backward ? P.stop_len : P.fwd_stop_len;
     stop_request_tag();
@@ -192,12 +193,13 @@ static void act_exec(uint16_t code, uint16_t next)
     }
 }
 
-void tagact_run(uint16_t tag)
+int tagact_run(uint16_t tag)
 {
     int16_t was_stopping = D.flag_stopping;
     int16_t prev_len = D.stop_pulses;
     const tag_rule_t *r = rule_find(tag);
     uint16_t i, irq;
+    int started;
 
     if (r != 0) {
         for (i = 0; (i < 4u) && (r->act[i] != 0u); i++) {
@@ -206,15 +208,17 @@ void tagact_run(uint16_t tag)
             i = (uint16_t)(i + second);
         }
     }
-    /* shortcut: 레거시 태그 함수 꼬리를 따른다. 정지 중이면 어떤 태그든 거리를 다시 건다.
-     * 방향별 정지 거리를 쓰는 타입을 옮길 때 사이트 선택으로 바꾼다 */
-    if (D.flag_stopping) { D.stop_pulses = P.stop_len; }
+    /* 이 태그로 시작된 정지만 거리를 건다. 레거시는 정지 중 태그마다 다시 걸어 정지 위치가 밀렸다.
+     * shortcut: 방향별 정지 거리를 쓰는 타입을 옮길 때 사이트 선택으로 바꾼다 */
+    started = (int)(D.flag_stopping && !was_stopping);
+    if (started) { D.stop_pulses = P.stop_len; }
     s_display_tag = tag;
     irq = hal_irq_save();
     D.straight_cnt = 0;
     hal_irq_restore(irq);
     /* 이 태그로 새 정지가 시작될 때만 요청한다 */
     if (D.flag_stopping && (!was_stopping || (prev_len != D.stop_pulses))) { stop_request_tag(); }
+    return started;
 }
 
 uint16_t tagact_display_tag(void) { return s_display_tag; }

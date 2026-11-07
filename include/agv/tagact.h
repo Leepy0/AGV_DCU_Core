@@ -42,7 +42,7 @@ enum { TAG_COND_NONE = 0, TAG_COND_FORBACK_MODE, TAG_COND_LOW_BATTERY, TAG_COND_
 
 void     tagact_bind(const tag_rule_t *rules, uint16_t n, uint16_t profile);
 uint16_t tagact_display_tag(void);
-void     tagact_run(uint16_t tag);                                     /* DA_Tag_Selection 대체 */
+int      tagact_run(uint16_t tag);     /* DA_Tag_Selection 대체. 반환 1 = 이 태그로 새 정지가 시작됨 */
 uint16_t tagact_dry_run(uint16_t tag, uint16_t *acts, uint16_t cap);  /* 실행하지 않고 액션 열거 (관리 TT/TR) */
 
 /* 개별 액션 (사용자 정의 코드용) */

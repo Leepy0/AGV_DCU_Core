@@ -236,8 +236,8 @@ static void on_event(const rx_item_t *it)
     tag_history_push();
     if (kind == 'T') {
         int32_t d = tag_distance(it, num);
-        tagact_run((uint16_t)num);
-        tagact_compensate(d);
+        /* 진행 중인 정지의 남은 거리는 ISR 이 이미 줄이고 있다. 새 정지만 보정한다 */
+        if (tagact_run((uint16_t)num)) { tagact_compensate(d); }
         return;
     }
     s_rfid.valid = 0;
