@@ -22,7 +22,7 @@ foreach ($f in $src) {
 if ($failed -ne 0) { Write-Output "COMPILE FAILED: $failed"; exit 1 }
 
 & $cl -v28 -ml -mt --float_support=softlib -z "--output_file=$Out.out" "--map_file=$Out.map" `
-    --stack_size=0x400 --heap_size=0 --rom_model --warn_sections --reread_libs `
+    --stack_size=0x400 --heap_size=0 --rom_model --warn_sections --reread_libs --entry_point=code_start `
     "-i$cgt\lib" @objs cmd/F2808_app_direct.cmd "--library=rts2800_ml.lib"
 if ($LASTEXITCODE -ne 0) { Write-Output 'LINK FAILED'; exit 1 }
 Write-Output "linked $Out.out"

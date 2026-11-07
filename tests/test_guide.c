@@ -361,6 +361,14 @@ int main(void)
       assert(guide_on_request() == 0);
       assert(guide_on_request() == ERR_GUIDE_COMM);
 
+      /* 리셋은 오류만 지운다. 센서가 죽은 채면 감시가 다시 잡는다 */
+      guide_comm_clear();
+      assert(guide_comm_error() == 0);
+      assert(guide_on_request() == 0);
+      assert(guide_on_request() == 0);
+      assert(guide_on_request() == 0);
+      assert(guide_on_request() == ERR_GUIDE_COMM);
+
       /* 전환하면 오류와 판정이 함께 초기화되고, 전환 중 무응답은 두절이 아니다 */
       guide_on_sensor_switch();
       assert(guide_comm_error() == 0);

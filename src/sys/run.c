@@ -103,7 +103,14 @@ void     run_rail_cut_clear(void)   { s_rail_cut = 0; }
 void     run_reset_request(void)    { s_run.reset_req = 1; }
 void     run_wait_start(void)       { D.wait_start = 1; }
 void     run_wait_cancel(void)      { D.wait_start = 0; }
-void     run_forback_input(uint16_t id) { s_forback_in = id; }
+void     run_forback_input(uint16_t id)
+{
+    /* 입력이 바뀐 스캔에 거짓 에지가 생겨 릴레이가 뒤집히지 않게 한다 */
+    if (id != s_forback_in) {
+        s_forback_in = id;
+        s_run.fb_prev = 0;
+    }
+}
 void     run_remote_pause(uint16_t on)  { s_remote_pause = on; }
 void     run_restart_now(void)      { D.run_restart = 1; }
 void     run_dir_change(int16_t c)  { s_run.dir_change = c; }

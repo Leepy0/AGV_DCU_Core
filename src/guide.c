@@ -221,10 +221,9 @@ int16_t guide_on_request(void)
 
 int16_t guide_comm_error(void) { return s_comm.error; }
 
-/* 오류 해제. 다음 유효 응답까지 다시 판정하지 않는다 */
+/* 오류 해제. 감시는 유지한다. 주행 중 리셋 뒤에도 무응답이면 다시 잡는다 */
 void guide_comm_clear(void)
 {
-    s_comm.armed = 0;
     s_comm.waiting = 0;
     s_comm.miss = 0;
     s_comm.bad = 0;
