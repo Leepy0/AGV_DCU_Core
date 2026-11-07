@@ -92,6 +92,7 @@ void comm_rx_byte(uint16_t byte)
         (void)hal_sci_send(HAL_SCI_B, &byte, 1);
         return;
     }
+    if (D.ui_mode >= UI_IO_IN) { return; }
     ev = frame_feed(byte);
     if (frame_stat()->closed != closed) { s_flash = RX_FLASH_TICKS; }   /* 버린 프레임도 표시한다 (원본 동작) */
     if (ev == FRAME_EV_NONE) { return; }

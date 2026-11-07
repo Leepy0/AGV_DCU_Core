@@ -477,8 +477,8 @@ static void test_stop_switch_aborts(void)
     printf("  stop aborts seq+act ok\n");
 }
 
-/* 원본처럼 ETX 로 끝난 프레임이면 버려져도 수신 점을 켠다. E 는 ID 가 달라도 받는다 */
-static void test_rx_tag_id(void)
+/* 원본처럼 ETX 로 끝난 프레임이면 버려져도 수신 점을 켠다. 리더 보드의 MsgID 'Z' 도 받는다 */
+static void test_rx_tag_reader(void)
 {
     boot();
     while (comm_rx_flash()) { }
@@ -490,7 +490,7 @@ static void test_rx_tag_id(void)
     while (comm_rx_flash()) { }
     drive_up();
     run_scan(30);
-    send_frame("E0199T00200000000", 0);
+    tag_frame(2, 'Z', 0);
     run_scan(1);
     assert(tx_has('A', 'E'));
     assert(D.speed_cmd == P.llow_speed);
@@ -762,6 +762,79 @@ static void test_acs_off(void)
     printf("  acs off ok\n");
 }
 
+/* 전원을 켤 때 MODE + UP: 입력 번호 표시, 출력 번호 선택, SET 켬, RESET 끔 */
+static void test_io_test(void)
+{
+    uint16_t d[5];
+    int i, tx;
+
+    host_reset();
+    memset(&D, 0, sizeof(D));
+    for (i = BUS_IN_A; i <= BUS_IN_D; i++) { host.bus_in[i] = 0xFF; }
+    host.bus_in[BUS_EXT_IN_A] = host.bus_in[BUS_EXT_IN_B] = 0xFF;
+    host.key = KEY_MODE + KEY_UP;
+    sys_boot();
+    ticks(60);
+    assert(!sys_power_on());
+    ui_digits(d);
+    assert((d[0] == 30) && (d[1] == 15) && (d[2] == 29) && (d[3] == 30));   /* TEST */
+    host.key = 0;
+    ticks(5);
+    assert(D.ui_mode == UI_IO_IN);
+    assert(!sys_power_on());
+
+    host.bus_in[BUS_IN_D] &= (uint16_t)~4u;           /* 번호 16 */
+    ticks(2);
+    ui_digits(d);
+    assert((d[3] == 1) && (d[4] == 6));
+    host.bus_in[BUS_IN_A] &= (uint16_t)~4u;           /* 번호 1 이 앞선다 */
+    ticks(2);
+    ui_digits(d);
+    assert((d[3] == 0) && (d[4] == 1));
+    host.bus_in[BUS_IN_A] |= 4u;
+    host.bus_in[BUS_IN_D] |= 4u;
+
+    key(KEY_MODE);
+    assert(D.ui_mode == UI_IO_OUT);
+    assert(host.bus_out[BUS_LAMP] == 0x7Fu);          /* 전부 꺼짐 */
+    key(KEY_SET);                                     /* 1 = AGV_BACK */
+    assert(!(host.bus_out[BUS_LAMP] & 0x08));
+    key(KEY_RESET);
+    assert(host.bus_out[BUS_LAMP] & 0x08);
+    key(KEY_DOWN);                                    /* 아래 한계 1 */
+    ui_digits(d);
+    assert((d[3] == 0) && (d[4] == 1));
+
+    key(KEY_SHIFT);
+    key(KEY_UP);
+    key(KEY_UP);                                      /* 21 = 확장 출력 1 */
+    ui_digits(d);
+    assert((d[3] == 2) && (d[4] == 1));
+    key(KEY_SET);
+    assert(!(host.bus_out[BUS_EXT_OUT_A] & 0x01));
+    key(KEY_UP);
+    key(KEY_UP);                                      /* 위 한계 36 = 확장 출력 16 */
+    ui_digits(d);
+    assert((d[3] == 3) && (d[4] == 6));
+    key(KEY_SET);
+    assert(!(host.bus_out[BUS_EXT_OUT_B] & 0x80));
+
+    key(KEY_DOWN);
+    key(KEY_DOWN);
+    key(KEY_DOWN);                                    /* 6 */
+    key(KEY_SHIFT);
+    for (i = 0; i < 4; i++) { key(KEY_UP); }          /* 10 = 스피커 */
+    key(KEY_SET);
+    assert(host.sound == 1);
+    assert(!(host.bus_out[BUS_AMP] & 0x44));          /* 앰프 런 꺼짐 */
+
+    tx = host.sci[HAL_SCI_A].tx_len;
+    tag_frame(2, '1', 0);
+    ticks(2);
+    assert(host.sci[HAL_SCI_A].tx_len == tx);         /* 시험 중에는 통신도 멈춘다 */
+    printf("  io test ok\n");
+}
+
 int main(void)
 {
     setvbuf(stdout, 0, _IONBF, 0);
@@ -782,7 +855,7 @@ int main(void)
     test_amp_alarm();
     test_stop_switch_aborts();
     test_tag();
-    test_rx_tag_id();
+    test_rx_tag_reader();
     test_compensate();
     test_rfid_retry();
     test_cross();
@@ -790,6 +863,7 @@ int main(void)
     test_ui();
     test_para_init();
     test_lamp();
+    test_io_test();
     test_acs_off();
     printf("test_sys ok\n");
     return 0;

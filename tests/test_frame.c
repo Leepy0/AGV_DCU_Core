@@ -68,6 +68,9 @@ int main(void)
     assert(send("E3F07T01200000000", 0) == FRAME_EV_OK);
     /* [2] 는 'T' 번호의 백의 자리라 '0' 도 정상이다 */
     assert(send("E0107T01200000000", 0) == FRAME_EV_OK);
+    /* 리더 보드는 'E' 의 MsgID 로 'Z' 를 보낸다. 다른 종류는 그대로 검사한다 */
+    assert(send("E0Z07T00400000000", 0) == FRAME_EV_OK);
+    assert(send("W3Z07C00000000000", 0) == FRAME_EV_NONE);
     /* 'T' 는 [7] 이 번호 자리가 아니다 */
     assert(send("E3107TX1200000000", 0) == FRAME_EV_OK);
 
@@ -110,13 +113,13 @@ int main(void)
     assert(send("E3107T01210000000", 1) == FRAME_EV_NONE);     /* [10] != '0' */
     assert(frame_stat()->bcc_err == before.bcc_err + 3);
 
-    /* AGV ID 불일치. E 를 뺀 종류는 버린다. BCC 불량 T 도 내 ID 가 아니면 후보가 아니다 */
+    /* AGV ID 불일치. BCC 불량 T 도 내 ID 가 아니면 후보가 아니다 */
     before = *frame_stat();
-    assert(send("E3108T01200000000", 0) == FRAME_EV_OK);       /* E 는 세기만 하고 받는다 */
+    assert(send("E3108T01200000000", 0) == FRAME_EV_NONE);
     assert(send("C3108C001", 0) == FRAME_EV_NONE);
     assert(frame_stat()->id_mismatch == before.id_mismatch + 2);
     assert(send("E3108T01200000000", 1) == FRAME_EV_NONE);
-    assert(send("W31A7C00000000000", 0) == FRAME_EV_NONE);     /* ID 자리에 문자 */
+    assert(send("E31A7T01200000000", 0) == FRAME_EV_NONE);     /* ID 자리에 문자 */
 
     /* 종류 */
     before = *frame_stat();
@@ -128,7 +131,7 @@ int main(void)
     /* PAN·MsgID 범위 */
     before = *frame_stat();
     assert(send("EG107T01200000000", 0) == FRAME_EV_NONE);
-    assert(send("E3G07T01200000000", 0) == FRAME_EV_NONE);
+    assert(send("W3G07C00000000000", 0) == FRAME_EV_NONE);
     assert(frame_stat()->pan_err == before.pan_err + 1);
     assert(frame_stat()->msgid_err == before.msgid_err + 1);
 

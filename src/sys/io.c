@@ -160,6 +160,51 @@ static void lamp_mirror(uint16_t *lamp, uint16_t *ext_a, uint16_t *ext_b)
     }
 }
 
+/* IO 시험 번호 1~16 의 입력 위치. 21~36 은 확장 입력 A·B 순서 그대로다 */
+static const uint16_t s_test_in[16] = {
+    POS(RAW_A, 2), POS(RAW_A, 3), POS(RAW_B, 0), POS(RAW_A, 4), POS(RAW_A, 5), POS(RAW_A, 7), POS(RAW_A, 6), POS(RAW_B, 1),
+    POS(RAW_B, 2), POS(RAW_C, 4), POS(RAW_C, 5), POS(RAW_C, 6), POS(RAW_C, 7), POS(RAW_D, 0), POS(RAW_D, 1), POS(RAW_D, 2)
+};
+
+uint16_t io_test_ext_board(void) { return s_ext_board; }
+
+/* 레거시처럼 원시 비트가 0 인 첫 번호를 준다. 고활성 입력도 극성을 뒤집지 않는다 */
+uint16_t io_test_input(void)
+{
+    uint16_t i;
+
+    for (i = 0; i < 16u; i++) {
+        uint16_t p = s_test_in[i];
+        if (((s_raw[p >> 4] >> (p & 15u)) & 1u) == 0u) { return (uint16_t)(i + 1u); }
+    }
+    for (i = 0; i < 16u; i++) {
+        uint16_t raw = (i < 8u) ? s_raw[RAW_EXT_A] : s_raw[RAW_EXT_B];
+        if (((raw >> (i & 7u)) & 1u) == 0u) { return (uint16_t)(i + 21u); }
+    }
+    return 0;
+}
+
+void io_test_write(const uint16_t *v)
+{
+    /* 번호 8·6·7·1·2·3·9 가 램프 바이트 b0~b6 이다 */
+    static const uint16_t lamp_num[7] = { 8, 6, 7, 1, 2, 3, 9 };
+    uint16_t i, lamp = 0, ext_a = 0, ext_b = 0;
+
+    for (i = 0; i < 7u; i++) { lamp |= (uint16_t)((v[lamp_num[i]] & 1u) << i); }
+    lamp |= (uint16_t)(((v[4] ^ 1u) & 1u) << 7);   /* 번호 4 는 BRAKE_1. 레거시가 뒤집어 낸다 */
+    for (i = 0; i < 8u; i++) {
+        ext_a |= (uint16_t)((v[21u + i] & 1u) << i);
+        ext_b |= (uint16_t)((v[29u + i] & 1u) << i);
+    }
+    hal_bus_write(BUS_AMP, amp_image());
+    hal_bus_write(BUS_LAMP, lamp);
+    if (s_ext_board) {
+        hal_bus_write(BUS_EXT_OUT_A, ext_a);
+        hal_bus_write(BUS_EXT_OUT_B, ext_b);
+    }
+    hal_sound((uint16_t)(v[10] == 0u));
+}
+
 void io_write(void)
 {
     uint16_t i, lamp = 0, ext_a = 0, ext_b = 0;

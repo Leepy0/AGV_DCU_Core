@@ -5,6 +5,7 @@
 #include "agv/drive.h"
 #include "agv/hal.h"
 #include "agv/io.h"
+#include "agv/ioport.h"
 #include "agv/link.h"
 #include "agv/param.h"
 #include "agv/run.h"
@@ -77,7 +78,7 @@ static const char s_lamp_name[UI_LAMP_EXT_COUNT] = { 'G', 'R', 'Y' };
 
 static struct {
     /* 키 */
-    uint16_t scan, row[2];
+    uint16_t scan, row[2], seg_b7;
     volatile uint16_t buffer;     /* Read_Key_buffer */
     uint16_t buffer_old, data, data_old, confirm;
     uint16_t long_cnt, long_press;
@@ -99,6 +100,8 @@ static struct {
     uint16_t pulse_cnt, pulse_flag;
     /* 태그 이력 표시 */
     uint16_t hist_ticks, hist_n;
+    /* IO 시험 출력. 0 = 켜짐 */
+    uint16_t test_out[IO_TEST_OUT_LAST + 1u];
 } s_ui;
 
 void ui_reset(void)
@@ -107,6 +110,7 @@ void ui_reset(void)
     uint16_t *p = (uint16_t *)&s_ui;
     for (i = 0; i < sizeof(s_ui) / sizeof(uint16_t); i++) { p[i] = 0; }
     s_ui.place = 1;
+    s_ui.seg_b7 = SEG_BRAKE2;
     for (i = 0; i < DISP_DIGITS; i++) { s_ui.digit[i] = DIGIT_NONE; }
 }
 
@@ -126,7 +130,7 @@ static uint16_t any_error(void) { return (D.system_err != 0) || (D.stop_err != 0
 
 static void blink_step(void)
 {
-    uint16_t blink = (D.ui_mode == UI_PARAM)
+    uint16_t blink = (D.ui_mode == UI_PARAM) || (D.ui_mode == UI_IO_OUT)
                   || ((D.ui_mode == UI_AUTO) && any_error())
                   || ((D.ui_mode == UI_JOG) && ((D.rpm_avg[0] > BLINK_RPM) || (D.rpm_avg[1] > BLINK_RPM)));
 
@@ -179,7 +183,7 @@ void ui_isr(uint16_t key_input)
     s_ui.cursor = (uint16_t)((s_ui.cursor + 1u) % DISP_DIGITS);
     order = s_ui.cursor;
     value = s_ui.digit[order];
-    if (D.ui_mode == UI_PARAM) {
+    if ((D.ui_mode == UI_PARAM) || (D.ui_mode == UI_IO_OUT)) {
         if (!s_ui.blink_on && ((s_ui.flick >> order) & 1u)) { value = DIGIT_NONE; }
     }
     else if (!s_ui.blink_on) {
@@ -187,7 +191,7 @@ void ui_isr(uint16_t key_input)
     }
     dot = (uint16_t)((s_ui.dot >> order) & 1u);
     if ((order == 4u) && comm_rx_flash()) { dot = 1; }
-    hal_bus_write(BUS_SEG, (uint16_t)(SEG_BRAKE2 | key_out | (~(1u << order) & 0x1Fu)));
+    hal_bus_write(BUS_SEG, (uint16_t)(s_ui.seg_b7 | key_out | (~(1u << order) & 0x1Fu)));
     hal_bus_write(BUS_DISP, seg_code(order, value, dot));
 }
 
@@ -434,6 +438,34 @@ static void key_set(void)
     }
 }
 
+/* ---- IO 시험 ---- */
+
+static void test_out_step(int16_t sign)
+{
+    int16_t last = (int16_t)(io_test_ext_board() ? IO_TEST_OUT_LAST : IO_TEST_BOARD_LAST);
+
+    s_ui.value = (int16_t)(s_ui.value + sign * place_value());
+    if (s_ui.value < 1)         { s_ui.value = 1; }
+    else if (s_ui.value > last) { s_ui.value = last; }
+}
+
+static void test_key(void)
+{
+    if (s_ui.data == KEY_MODE) {
+        D.ui_mode = (D.ui_mode == UI_IO_IN) ? UI_IO_OUT : UI_IO_IN;
+        return;
+    }
+    if (D.ui_mode != UI_IO_OUT) { return; }
+    switch (s_ui.data) {
+    case KEY_SHIFT: s_ui.place = (s_ui.place == 1) ? 2 : 1; break;
+    case KEY_UP:    test_out_step(1); break;
+    case KEY_DOWN:  test_out_step(-1); break;
+    case KEY_SET:   s_ui.test_out[s_ui.value] = 0; break;
+    case KEY_RESET: s_ui.test_out[s_ui.value] = 1; break;
+    default: break;
+    }
+}
+
 static void key_process(void)
 {
     if (s_ui.long_cnt > KEY_LONG) {
@@ -451,6 +483,13 @@ static void key_process(void)
         s_ui.buffer_old = s_ui.buffer;
         s_ui.confirm = 0;
         s_ui.long_cnt = 0;
+    }
+    if (D.ui_mode >= UI_IO_IN) {
+        if (s_ui.data != s_ui.data_old) {
+            test_key();
+            s_ui.data_old = s_ui.data;
+        }
+        return;
     }
     if (s_ui.data == s_ui.data_old) {
         /* 길게 누르면 위·아래·자리 이동만 반복한다 */
@@ -689,6 +728,43 @@ static void display_update(void)
     }
     else { show_param(); }
     show_history();
+}
+
+/* ---- IO 시험 표시 ---- */
+
+void ui_iotest_wait(void) { show(letter('T'), letter('E'), letter('S'), letter('T'), DIGIT_NONE); }
+
+void ui_iotest_enter(void)
+{
+    uint16_t i;
+
+    for (i = 0; i <= IO_TEST_OUT_LAST; i++) { s_ui.test_out[i] = 1; }
+    s_ui.value = 1;
+    s_ui.place = 1;
+    s_ui.data_old = s_ui.data;
+    D.ui_mode = UI_IO_IN;
+}
+
+void ui_iotest_run(void)
+{
+    key_process();
+    s_ui.dot = 0;
+    s_ui.flick = 0;
+    if (D.ui_mode == UI_IO_IN) {
+        uint16_t n = io_test_input();
+        show(letter('I'), letter('N'), DIGIT_NONE, digit_of((int16_t)n, 10), digit_of((int16_t)n, 1));
+    }
+    else {
+        show(letter('O'), letter('U'), letter('T'), digit_of(s_ui.value, 10), digit_of(s_ui.value, 1));
+        s_ui.flick = (uint16_t)(1u << (5 - s_ui.place));
+        if (s_ui.test_out[s_ui.value] == 0u) { s_ui.dot = 1u << 4; }
+    }
+    s_ui.seg_b7 = s_ui.test_out[5] ? 0u : SEG_BRAKE2;   /* 번호 5 는 BRAKE_2. 레거시가 뒤집어 낸다 */
+    io_test_write(s_ui.test_out);
+    if (++s_ui.pulse_cnt >= PULSE_TICKS) {
+        s_ui.pulse_cnt = 0;
+        hal_led_toggle();
+    }
 }
 
 /* ---- 램프·부저 ---- */

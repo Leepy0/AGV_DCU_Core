@@ -11,4 +11,11 @@ uint16_t io_isr_read(void);          /* 2 ms: 입력 버스를 읽고 키 입력
 void     io_latch(void);             /* 10 ms 시작 */
 void     io_probe_ext_board(void);   /* 전원 안정 뒤 한 번 */
 uint16_t io_jog_bits(void);
+
+/* IO 시험. 번호 1~10 은 보드 출력, 21~36 은 확장 출력 1~16. 값 0 = 켜짐 */
+#define IO_TEST_OUT_LAST 36u
+#define IO_TEST_BOARD_LAST 10u
+uint16_t io_test_ext_board(void);
+uint16_t io_test_input(void);        /* 첫 활성 입력 번호, 없으면 0 */
+void     io_test_write(const uint16_t *v);   /* v[0..IO_TEST_OUT_LAST] */
 #endif

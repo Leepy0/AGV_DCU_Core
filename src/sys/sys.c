@@ -26,9 +26,11 @@
 #define TICKS_PER_10MS   5u
 #define ADC_START_TICK   3u     /* 10 ms 작업 한 틱 전에 변환을 시작한다 */
 #define POWER_ON_SCANS   50u    /* 전원 안정 500 ms */
+#define IO_TEST_KEYS     (KEY_MODE + KEY_UP)   /* 전원을 켤 때 누르면 IO 시험 */
+enum { IO_TEST_NONE = 0, IO_TEST_WAIT, IO_TEST_ON };
 
 static volatile uint16_t s_ticks, s_tick10;
-static uint16_t s_phase, s_scans, s_power_on, s_alive, s_overrun;
+static uint16_t s_phase, s_scans, s_power_on, s_alive, s_overrun, s_io_test;
 
 uint16_t sys_overrun(void)  { return s_overrun; }
 uint16_t sys_ticks(void)    { return s_ticks; }
@@ -55,7 +57,7 @@ void sys_boot(void)
     /* RAM 은 codestart 가 지운다. 앰프 출력과 직결된 구조체는 여기서 한 번 더 지운다 */
     memset((void *)&agv_drive, 0, sizeof(agv_drive));
     s_ticks = s_tick10 = 0;
-    s_phase = s_scans = s_power_on = s_alive = s_overrun = 0;
+    s_phase = s_scans = s_power_on = s_alive = s_overrun = s_io_test = 0;
     hal_sys_init();
     motor_reset();
     stop_reset();
@@ -87,6 +89,10 @@ static void scan_10ms(void)
 {
     D.action_err = 0;              /* 상태형 오류는 매 틱 다시 계산한다 */
     io_latch();
+    if (s_io_test == IO_TEST_ON) {   /* 주행과 ACS 는 멈춘다. 끝내려면 전원을 다시 켠다 */
+        ui_iotest_run();
+        return;
+    }
     comm_poll();
     if (s_power_on) {
         guide_poll();
@@ -97,9 +103,17 @@ static void scan_10ms(void)
         run_after_motor();
         ui_run();
     }
+    else if (s_io_test == IO_TEST_WAIT) {
+        ui_iotest_wait();
+        if (ui_key() == 0u) {
+            s_io_test = IO_TEST_ON;
+            ui_iotest_enter();
+        }
+    }
     else if (++s_scans >= POWER_ON_SCANS) {
-        s_power_on = 1;
         io_probe_ext_board();
+        if (ui_key() == IO_TEST_KEYS) { s_io_test = IO_TEST_WAIT; }
+        else                          { s_power_on = 1; }
     }
     acs_schedule();
     io_write();

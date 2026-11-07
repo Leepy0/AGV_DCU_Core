@@ -111,12 +111,9 @@ static frame_ev_t judge(void)
     }
     /* [2] 는 PAN 이지만 'T' 는 번호의 백의 자리, 'S' 는 부명령이라 '0' 도 정상이다 */
     if (!is_hex_upper(b[2])) { s_stat.pan_err++;   return FRAME_EV_NONE; }
-    if (!is_hex_upper(b[3])) { s_stat.msgid_err++; return FRAME_EV_NONE; }   /* 구 ACS 호환: 수신 '0' 허용 */
-    if (!agv_id_matches(b)) {
-        s_stat.id_mismatch++;
-        /* 'E' 의 ID 는 보드 설정값이고 원본도 보지 않는다. 버리면 태그가 모두 사라진다 */
-        if (type != 'E') { return FRAME_EV_NONE; }
-    }
+    /* 구 ACS 호환: 수신 '0' 허용. 리더 보드는 'E' 의 MsgID 자리에 'Z' 를 보낸다(실차 확인) */
+    if ((type != 'E') && !is_hex_upper(b[3])) { s_stat.msgid_err++; return FRAME_EV_NONE; }
+    if (!agv_id_matches(b))  { s_stat.id_mismatch++; return FRAME_EV_NONE; }
     if (!fields_ok(b))       { s_stat.field_err++; return FRAME_EV_NONE; }
     s_stat.ok++;
     return FRAME_EV_OK;

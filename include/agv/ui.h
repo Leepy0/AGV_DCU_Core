@@ -24,6 +24,9 @@ enum { DISP_SET_SPEED = 1, DISP_CUR_SPEED, DISP_TOTAL_TIME, DISP_TAG_COUNT, DISP
 void     ui_reset(void);
 void     ui_isr(uint16_t key_input);    /* 2 ms: 키 스캔, 깜박임, 7세그 한 자리 */
 void     ui_run(void);                  /* 10 ms: 키 처리, 램프, 부저 */
+void     ui_iotest_wait(void);          /* IO 시험 진입 대기: TEST 표시 */
+void     ui_iotest_enter(void);
+void     ui_iotest_run(void);           /* 10 ms: IO 시험 키·표시·출력 */
 void     ui_digits(uint16_t *out);      /* 시험용: 지금 표시 색인 5자리 */
 int16_t  ui_para_number(void);
 uint16_t ui_key(void);                 /* 지금 눌린 키 값 */

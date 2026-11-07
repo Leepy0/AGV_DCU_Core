@@ -14,7 +14,8 @@ typedef enum { RUN_READY = 300, RUN_JOG, RUN_DRIVE, RUN_TURN } run_mode_t;      
 typedef enum {                                                                        /* Traveling_step */
     DRIVE_CHANGE_SPEED = 400, DRIVE_CRUISE, DRIVE_OBS_STOP, DRIVE_COMM, DRIVE_RISK_STOP, DRIVE_RISK_RESUME
 } drive_step_t;
-typedef enum { UI_AUTO = 101, UI_JOG, UI_PARAM, UI_REMOTE } ui_mode_t;                /* current_mode */
+typedef enum { UI_AUTO = 101, UI_JOG, UI_PARAM, UI_REMOTE,
+               UI_IO_IN = 120, UI_IO_OUT } ui_mode_t;                                 /* current_mode */
 
 /* 앰프 방향 (motorMotionDirection, Turn_Direction 의 값) */
 enum { MOTION_FWD = 0, MOTION_BACK = 1, MOTION_CCW = 2, MOTION_CW = 3 };
