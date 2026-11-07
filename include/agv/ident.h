@@ -1,8 +1,9 @@
 /* ident.h - 식별 시험. 튜닝 모드에서 SHIFT 로 고르고 START.
  * 교차선 X, Y 사이(L ≈ 5 m)를 혼자 오가며 잰다. 선마다 정렬 180도 회전.
  *  0회: 최저 속도로 선을 찾아 돌고, 다음 선까지 재서 L 을 구한다.
- *  1~6회: 속도 단계 (회 - 1) / 2 (최고 속도의 1/3, 2/3, 1)로 직진하며 조향·구동 응답을 재고
- *         SL 정지한 뒤 최저 속도로 다음 선까지 가서 돈다. 6회가 끝나면 선 위에서 멈춰 기다린다.
+ *  1~6회: 속도 단계 (회 - 1) / 2 (최고 속도의 1/3, 2/3, 1)로 직진하며 조향·구동 응답을 잰다.
+ *         짝수 회는 SL 정지한 뒤, 홀수 회는 서지 않고 감속해 최저 속도로 다음 선까지 가서 돈다.
+ *         6회가 끝나면 선 위에서 멈춰 기다린다.
  * 결과는 agv_ident 에 쌓인다. CCS Expressions 에 agv_ident 를 넣고 펼쳐 읽는다.
  * 값이 -1 이면 그 응답이 창 안에 목표에 닿지 않은 것이다 */
 #ifndef AGV_IDENT_H
@@ -23,14 +24,15 @@ typedef struct {             /* 측정 한 회 */
     float   tq_l, tq_r;      /* 평균 토크 지령 */
     float   ripple_l, ripple_r;   /* rpm 표준편차 */
     float   ramp_lag_mpm;    /* 가속 중 지령 - 실제 속도 최대 */
+    float   dec_lag_mpm;     /* 감속 중 실제 - 지령 속도 최대 (홀수 회) */
     float   lat_delay_ms;    /* 옆 계단(4칸) 10% 도달 */
     float   lat_t63_ms;      /* 63% 도달 */
     float   lat_rise_ms;     /* 10 → 90% */
     float   lat_over_pct;    /* 넘침 */
     float   lat_settle_ms;   /* ±10% 안에 든 뒤 안 나간 시각 */
     float   lat_err_mm;      /* 창 끝 평균 - 목표 */
-    float   run_m;           /* 선에서 SL 정지까지 거리 */
-    float   stop_mm;         /* SL 정지 명령부터 멈출 때까지 거리 */
+    float   run_m;           /* 선에서 측정 끝(SL 정지·감속 시작)까지 거리 */
+    float   stop_mm;         /* SL 정지 명령부터 멈출 때까지 거리 (짝수 회만) */
     float   stop_ms;
     float   hold_ms;         /* 정속 측정 창. 남은 거리로 정한다 */
     float   lat_ms;          /* 옆 계단 창 */

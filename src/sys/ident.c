@@ -1,14 +1,17 @@
 /* ident.c - 식별 시험. 교차선 X, Y 사이를 오가며 잰다. 순서 번호(FND, 실패 코드):
  *  1 가속, 2 안정 0.5 s, 3 정속 측정, 4·5 속도 계단 올림·내림(1회만), 6 옆 계단, 7 SL 정지,
  *  8 최저 속도로 선 찾기, 9 정렬 180도 회전 뒤 재출발
- * 0회는 8 → 9 → 8(L 측정) → 9. 1~6회는 회전 중심이 선 위에서 출발해 1 → 7 → 8 → 9.
- * 정속·옆 계단 창은 남은 거리로 정한다. 센서가 먼 선 300 mm 앞에서 서도록 SL 정지 시작점을 둔다.
+ * 0회는 8 → 9 → 8(L 측정) → 9. 1~6회는 회전 중심이 선 위에서 출발한다.
+ *  짝수 회(2, 4, 6): 1 → 7 SL 정지 → 8 → 9. 센서가 먼 선 300 mm 앞에서 서도록 SL 정지 시작점을 둔다.
+ *  홀수 회(1, 3, 5): 1 → 8. 서지 않고 감속하며 선을 찾는다. 선 100 mm 앞에서 최저 속도가 되게 감속을 건다.
+ * 정속·옆 계단 창은 남은 거리로 정한다.
  * 옆 계단은 조향 지령(p_test)을 4칸 옮겨 폐루프 응답을 본다. 속도 계단은 램프 없이 지령을 바꾼다.
  * 실패 코드 = 회 × 10 + 순서. 08 은 0회에 선을 못 찾았거나 L < 2 m (track_mm 가 0 이 아니면 후자) */
 #include <math.h>
 #include <string.h>
 #include "agv/ident.h"
 #include "agv/drive.h"
+#include "agv/motor.h"
 #include "agv/param.h"
 #include "agv/run.h"
 #include "agv/stop.h"
@@ -34,6 +37,8 @@
 #define SEEK_OVER_MM     1000.0f  /* 1~6회 선 찾기는 L 보다 이만큼 더 가면 실패 */
 #define TRACK_MIN_MM     2000.0f
 #define MARGIN_MM        300.0f   /* 센서가 먼 선 앞에 남길 거리 */
+#define DEC_MARGIN_MM    100.0f   /* 감속 회: 최저 속도가 된 뒤 선까지 남길 거리 */
+#define DEC_LAG_TICKS    15       /* 감속 회: 실제 속도가 지령을 늦게 따라가는 몫 */
 #define PLAN_SLACK       0.95f    /* 창 계획 여유. 창이 끝나기 전에 budget 에 닿지 않게 */
 
 enum { PH_RAMP = 1, PH_SETTLE, PH_HOLD, PH_SPD_UP, PH_SPD_DOWN, PH_LAT, PH_STOP, PH_SEEK, PH_TURN };
@@ -266,10 +271,27 @@ static void fit_ff(void)
     agv_ident.tq_offset = (sy - (agv_ident.ff_suggest / 1000.0f) * sx) / n;
 }
 
-/* 회전 중심이 선 위에서 출발한다. SL 정지는 늦어도 budget 에서 시작해야 센서가 먼 선 앞에 선다 */
+/* 지금 속도에서 최저 속도까지 감속하는 거리. 주행 램프를 그대로 돌려 본다 */
+static float decel_mm(int16_t from)
+{
+    const float k = 1000.0f / 6000.0f / P.one_meter_rpm;                  /* rpm·틱 → mm */
+    int16_t v = from, a = 0, n = 0;
+    float sum = (float)from * (float)DEC_LAG_TICKS;
+
+    while ((v > P.min_speed) && (n < 3000)) {
+        (void)motor_scv_core(P.min_speed, &v, P.acc, P.dcc, P.llow_speed, P.min_speed, P.min_speed, 1, &a);
+        sum += (float)v;
+        n++;
+    }
+    return sum * k;
+}
+
+static int sl_pass(void) { return (PASS & 1u) == 0u; }
+
+/* 회전 중심이 선 위에서 출발한다. SL 정지나 감속은 늦어도 budget 에서 시작해야 센서가 먼 선 앞에 선다 */
 static void pass_begin(void)
 {
-    float sl = (float)(D.backward ? P.stop_len : P.fwd_stop_len) / P.one_length_pulse;
+    float sl;
 
     if (s_id.retry) {
         s_id.retry = 0;
@@ -278,7 +300,13 @@ static void pass_begin(void)
     }
     else { agv_ident.pass++; }
     if (pass_rpm() < level_rpm()) { agv_ident.lv[PASS - 1u].cut |= 2; }   /* 낮춘 속도로 잰다 */
-    s_id.budget = agv_ident.track_mm - P.guide_dist_mm - MARGIN_MM - sl;
+    if (sl_pass()) {
+        sl = (float)(D.backward ? P.stop_len : P.fwd_stop_len) / P.one_length_pulse;
+        s_id.budget = agv_ident.track_mm - P.guide_dist_mm - MARGIN_MM - sl;
+    }
+    else {
+        s_id.budget = agv_ident.track_mm - P.guide_dist_mm - DEC_MARGIN_MM - decel_mm(pass_rpm());
+    }
     D.p_test = 0;
     enter(PH_RAMP);
 }
@@ -310,9 +338,17 @@ static void lat_begin(const ident_level_t *lv)
     enter(PH_LAT);
 }
 
+/* 측정 끝. 짝수 회는 SL 정지, 홀수 회는 최저 속도로 감속하며 바로 선을 찾는다('h' 응답을 켠다) */
 static void sl_stop(void)
 {
     D.p_test = 0;
+    if (!sl_pass()) {
+        agv_ident.lv[PASS - 1u].run_m = mm_since(s_id.begin) / 1000.0f;
+        set_speed(P.min_speed, 1);
+        tune_cross_clear();
+        enter(PH_SEEK);
+        return;
+    }
     agv_ident.stop_sl_mm = (float)(D.backward ? P.stop_len : P.fwd_stop_len) / P.one_length_pulse;
     s_id.start = travel();
     tagact_stop_length();
@@ -415,6 +451,10 @@ int ident_run(void)
     }
     if (stopped || D.flag_stopping) { return fail_now(); }
     if (ph == PH_SEEK) {
+        if ((PASS > 0u) && (D.step == DRIVE_CHANGE_SPEED)) {   /* 감속 중 실제 - 지령 */
+            float lag = ((float)(D.rpm_avg[0] + D.rpm_avg[1]) * 0.5f - (float)D.vin_out) / P.one_meter_rpm;
+            if (lag > lv->dec_lag_mpm) { lv->dec_lag_mpm = lag; }
+        }
         set_speed(P.min_speed, 1);
         if (tune_lines() >= 1u) { return cross_seen(); }
         if (mm_since(s_id.begin) > ((PASS == 0u) ? FIND_LIMIT_MM : agv_ident.track_mm + SEEK_OVER_MM)) {
