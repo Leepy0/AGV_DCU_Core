@@ -253,6 +253,52 @@ int main(void)
       assert(D.p_kp == 35.0f * 1.3f);
       (void)param_set(P_GUIDE_CURVE_DETECT, 0); }
 
+    /* 선택 비트: 변화율 항 부호. 칼만 상태를 고정해 두 경우의 출력을 비교한다 */
+    { float out_p, out_a, out_b;
+      int k;
+      for (k = 0; k < 3; k++) {
+          setup();
+          D.guide_pos = 3;
+          D.guide_kf_init = 1;
+          D.kf_pos = 3.0f;
+          D.kf_rate = (k == 0) ? 0.0f : 50.0f;    /* y = 0 이라 변화율이 유지된다 */
+          D.kf_p00 = D.kf_p11 = 0.0f; D.kf_p01 = 0.0f;
+          (void)param_set(P_OPT_FLAGS, (k == 2) ? OPT_STEER_D_SIGN : 0);
+          steer_run(0);
+          if (k == 0) { out_p = D.p_pi_out; } else if (k == 1) { out_a = D.p_pi_out; } else { out_b = D.p_pi_out; }
+      }
+      assert(out_a != out_p);
+      assert(near0((out_a - out_p) + (out_b - out_p)) < 1e-3f);
+      assert(out_b < out_a);                      /* 양의 변화율에는 음의 감쇠 */
+      (void)param_set(P_OPT_FLAGS, 0); }
+
+    /* 선택 비트: 10 ms 조향은 칼만 dt 0.01 */
+    setup();
+    (void)param_set(P_OPT_FLAGS, OPT_STEER_10MS);
+    D.guide_pos = 4;
+    steer_run(1);
+    D.guide_pos = 8;
+    steer_run(1);
+    { float pos = D.kf_pos, rate = D.kf_rate;
+      D.guide_all_off = 1;
+      steer_run(1);
+      assert(D.kf_pos == pos + rate * 0.01f); }
+    (void)param_set(P_OPT_FLAGS, 0);
+
+    /* 선택 비트: 칼만 위치를 조향 입력으로 */
+    setup();
+    D.guide_kf_init = 1;
+    D.kf_pos = 5.0f;
+    D.kf_rate = 0.0f;
+    D.guide_pos = 0;
+    D.guide_all_off = 1;                           /* 예측만: kf_pos 가 5 로 남는다 */
+    steer_run(0);
+    assert(D.p_err == 0);
+    (void)param_set(P_OPT_FLAGS, OPT_KF_POSITION);
+    steer_run(0);
+    assert(D.p_err == -5);
+    (void)param_set(P_OPT_FLAGS, 0);
+
     puts("test_steer ok");
     return 0;
 }

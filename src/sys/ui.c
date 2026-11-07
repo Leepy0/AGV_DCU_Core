@@ -26,7 +26,7 @@
 #define HISTORY_TICKS    500
 #define GROUP_USE_LAST   15     /* 메뉴 순서표의 그룹 경계 */
 #define GROUP_OTHER_FIRST 16
-#define GROUP_OTHER_LAST 49
+#define GROUP_OTHER_LAST 52
 #define PARA_EDIT_LAST   46     /* 이 번호까지 편집한다 */
 #define EDIT_OFF_FLAG    0
 #define SCREEN_LIST      10     /* 이 값을 더하면 번호 목록 화면 */
@@ -60,7 +60,7 @@ static const uint16_t s_menu[] = {
     P_STATION_NO, P_BRANCH_MODE, P_TAG_DIGITS, P_STEER_KP, P_STEER_KI, P_SWITCH_START_NUM, P_TAG_TYPE,
     P_COMM_LINK, P_ACS_STANDBY, P_BRANCH_OFFSET, P_CROSS_IN_TIME, P_ACS_RETRY_LEGACY, P_ACS_RETRY_SEC,
     P_GUIDE_CURVE_DETECT, P_LEGACY_QUIRKS, P_ERR_REPORT_MIN, P_CROSS_RETRY_100MS, P_CROSS_MODE,
-    P_STEER_RPM_OFFSET, P_GUIDE_TIMEOUT, P_ACS_VERSION, P_LAMP_EXT_USE, P_PARA_INIT, P_VERSION, P_BAT_DV,
+    P_STEER_RPM_OFFSET, P_GUIDE_TIMEOUT, P_OPT_FLAGS, P_SPEED_FF, P_ENC_STALL_TICKS, P_ACS_VERSION, P_LAMP_EXT_USE, P_PARA_INIT, P_VERSION, P_BAT_DV,
     P_BAT_PERCENT
 };
 
@@ -74,7 +74,7 @@ static const para_view_t s_view[P_COUNT] = {
     {"ACD", 2}, {"SSN", 2}, {"TTY", 1}, {"MPU", 2}, {"FL ", 3}, {"ASS", 2}, {"BGO", 2}, {"CIT", 2}, {"WRT", 2},
     {"CT ", 3}, {"SO-", 2}, {"SU ", 3}, {"EST", 2}, {"RCI", 2}, {"LUS", 2}, {"C- ", 3}, {"CO-", 2}, {"AV-", 2},
     {"INT", 2}, {"V_ ", 3}, {"VT ", 3}, {"CR ", 3},
-    {"GD ", 3}
+    {"GD ", 3}, {"OPT", 2}, {"FF ", 3}, {"ES ", 2}
 };
 static const char s_lamp_name[UI_LAMP_EXT_COUNT] = { 'G', 'R', 'Y' };
 
@@ -132,7 +132,8 @@ void ui_digits(uint16_t *out)
 static int16_t safety_error(void)
 {
     if ((D.system_err == ERR_ESTOP) || (D.system_err == ERR_BUMPER)
-        || (D.system_err == ERR_AMP_L_OVERLOAD) || (D.system_err == ERR_AMP_R_OVERLOAD)) {
+        || (D.system_err == ERR_AMP_L_OVERLOAD) || (D.system_err == ERR_AMP_R_OVERLOAD)
+        || (D.system_err == ERR_ENC_L_STALL) || (D.system_err == ERR_ENC_R_STALL)) {
         return D.system_err;
     }
     return (D.action_err == ERR_OBSTACLE) ? D.action_err : 0;
@@ -449,7 +450,8 @@ static void key_set(void)
         commit();
     }
     else {
-        s_ui.edit = (s_ui.para <= PARA_EDIT_LAST) || (s_ui.para == P_GUIDE_DIST_MM) || (s_ui.para >= UI_PARA_LAMP_FIRST);
+        s_ui.edit = (s_ui.para <= PARA_EDIT_LAST) || ((s_ui.para >= P_GUIDE_DIST_MM) && (s_ui.para < P_COUNT))
+                 || (s_ui.para >= UI_PARA_LAMP_FIRST);
         if ((int16_t)para_digits(s_ui.para) < s_ui.place) { s_ui.place = 1; }
     }
 }

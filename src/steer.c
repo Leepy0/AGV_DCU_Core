@@ -83,7 +83,7 @@ static float sched_ratio(int16_t v_abs)
 }
 
 /* 등속도 모델. 측정치는 센서 위치값 그대로다 */
-static void kalman_step(int16_t curve_now)
+static void kalman_step(int16_t curve_now, float dt)
 {
     if (D.guide_kf_init == 0) {
         D.kf_pos = (float)D.guide_pos;
@@ -96,10 +96,10 @@ static void kalman_step(int16_t curve_now)
         float q_scale = curve_now ? GUIDE_KF_Q_BOOST : 1.0f;
         float q00 = GUIDE_KF_Q_POS * q_scale;
         float q11 = GUIDE_KF_Q_RATE * q_scale;
-        float pos_pred = D.kf_pos + (D.kf_rate * GUIDE_KF_DT);
+        float pos_pred = D.kf_pos + (D.kf_rate * dt);
         float rate_pred = D.kf_rate;
-        float p00_pred = D.kf_p00 + (2.0f * GUIDE_KF_DT * D.kf_p01) + (GUIDE_KF_DT * GUIDE_KF_DT * D.kf_p11) + q00;
-        float p01_pred = D.kf_p01 + (GUIDE_KF_DT * D.kf_p11);
+        float p00_pred = D.kf_p00 + (2.0f * dt * D.kf_p01) + (dt * dt * D.kf_p11) + q00;
+        float p01_pred = D.kf_p01 + (dt * D.kf_p11);
         float p11_pred = D.kf_p11 + q11;
 
         if (!D.guide_all_off) {
@@ -124,10 +124,10 @@ static void kalman_step(int16_t curve_now)
 }
 
 /* 좁은·넓은 가이드 공통. 임계값만 다르다. 반환은 불감대를 적용한 위치값 */
-static float gains_and_deadband(int16_t v_abs, float r, int16_t curve_now, int16_t tuning_type,
+static float gains_and_deadband(float pos, int16_t v_abs, float r, int16_t curve_now, int16_t tuning_type,
                                 int16_t dev_threshold, int16_t linear_zone)
 {
-    float sen = (float)D.guide_pos;
+    float sen = pos;
     int16_t band;
 
     if (param_get(P_STEER_KP) == 0) {
@@ -163,19 +163,25 @@ void steer_run(int16_t tuning_type)
     float   r = sched_ratio(v_abs);
     int16_t curve_now = curve_detected() ? 1 : 0;
     int16_t clear_integral;
-    float   sen;
+    float   sen, pos;
+    /* 10 ms 조향: 칼만 dt 와 적분 이득을 주기에 맞춘다 */
+    int16_t fast = param_opt(OPT_STEER_10MS);
+    float   dt = fast ? (GUIDE_KF_DT * 0.5f) : GUIDE_KF_DT;
+    float   i_scale = fast ? 0.5f : 1.0f;
 
     /* 위험 감속·재가속 중에는 커브 반응성 부스트를 전부 걸지 않는다 */
     if (D.risk_stop) { curve_now = param_quirk(QUIRK_CURVE_NOW) ? 1 : 0; }
 
-    kalman_step(curve_now);
+    kalman_step(curve_now, dt);
 
-    sen = (float)D.guide_pos;
+    /* 기존은 센서 원시값이다. 칼만 위치는 6.89 mm 양자화와 한 틱 지연을 줄인다 */
+    pos = param_opt(OPT_KF_POSITION) ? D.kf_pos : (float)D.guide_pos;
+    sen = pos;
     if (D.guide_wide == 0) {
-        sen = gains_and_deadband(v_abs, r, curve_now, tuning_type, GUIDE_KP_DEV_THRESHOLD, GUIDE_LINEAR_ZONE);
+        sen = gains_and_deadband(pos, v_abs, r, curve_now, tuning_type, GUIDE_KP_DEV_THRESHOLD, GUIDE_LINEAR_ZONE);
     }
     else if (D.guide_wide == 1) {
-        sen = gains_and_deadband(v_abs, r, curve_now, tuning_type, GUIDE_KP_DEV_THRESHOLD_WIDE, GUIDE_LINEAR_ZONE_WIDE);
+        sen = gains_and_deadband(pos, v_abs, r, curve_now, tuning_type, GUIDE_KP_DEV_THRESHOLD_WIDE, GUIDE_LINEAR_ZONE_WIDE);
     }
 
     /* 조향 기준이나 운전 상태가 바뀌면 적분 기억을 지운다 */
@@ -217,9 +223,11 @@ void steer_run(int16_t tuning_type)
 
         p_out = D.p_kp * (float)D.p_err * geom;
         rate_ff = GUIDE_KD_RATE * (!D.backward ? D.kf_rate : -D.kf_rate) * geom;
+        /* 오차 = 지령 - 위치 이므로 감쇠는 -Kd × 위치 변화율이다. 기존 부호는 반대다 */
+        if (param_opt(OPT_STEER_D_SIGN)) { rate_ff = -rate_ff; }
 
         if (!clear_integral && !D.flag_stopping && !stop_is_braking()) {
-            i_candidate = s_steer.i_out + (D.p_ki * (float)D.p_err * geom);
+            i_candidate = s_steer.i_out + (D.p_ki * (float)D.p_err * geom * i_scale);
             unsat = p_out + i_candidate + rate_ff;
             /* 이미 포화된 출력을 더 미는 방향일 때만 적분을 멈춘다 */
             if (!(((unsat > (float)limit) && (D.p_err > 0)) || ((unsat < (float)-limit) && (D.p_err < 0)))) {

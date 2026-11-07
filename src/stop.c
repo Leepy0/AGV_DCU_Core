@@ -455,6 +455,12 @@ static void resume_after_pause(void)
         D.scv_accel = 0;
         s_ctrl.floor_rpm = saved_floor;
         s_ctrl.candidate_floor_rpm = saved_floor;
+        /* 기존은 0 에서 바닥 속도까지만 올려 남은 거리를 기어간다. 남은 거리가 길면 최대 속도로 가속했다가
+         * 거리 제동으로 들어간다 (회전 각 제어와 같은 경로) */
+        if (param_opt(OPT_RESUME_CRUISE) && stop_is_position(s_paused.reason)
+            && (s_ctrl.phase == STOP_PHASE_DECELERATE) && (s_ctrl.braking_start_pulses <= 0)) {
+            s_ctrl.phase = STOP_PHASE_CRUISE;
+        }
         s_paused_valid = 0;
     }
     else if (D.flag_stopping) {

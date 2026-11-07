@@ -386,6 +386,35 @@ int main(void)
     motor_run();
     assert(D.amp_dir == MOTION_BACK && D.sound_on == 1);
 
+    /* 속도 피드포워드: 오차 0 이어도 지령에 비례한 토크 */
+    setup();
+    D.control = RUN_TURN;
+    D.rpm_avg[0] = D.rpm_avg[1] = 1000;
+    motor_speed_pi(1000);
+    assert(D.tq_cmd[0] == 0);
+    (void)param_set(P_SPEED_FF, 100);
+    motor_speed_pi(1000);
+    assert(D.tq_cmd[0] == 100 && D.tq_cmd[1] == 100);
+    (void)param_set(P_SPEED_FF, 0);
+
+    /* 엔코더 고착: 지령 바닥 이상, 오른쪽만 펄스, 왼쪽은 N 틱 무펄스 */
+    setup();
+    D.amp_run = 1;
+    D.w_cmd[0] = D.w_cmd[1] = 500;
+    for (int i = 0; i < 20; i++) { motor_encoder_pulse(1); motor_feedback_update(); motor_stall_check(); }
+    assert(D.system_err == 0);                     /* 꺼져 있다 */
+    (void)param_set(P_ENC_STALL_TICKS, 5);
+    for (int i = 0; i < 4; i++) { motor_encoder_pulse(1); motor_feedback_update(); motor_stall_check(); }
+    assert(D.system_err == 0);
+    motor_encoder_pulse(1); motor_feedback_update(); motor_stall_check();
+    assert(D.system_err == ERR_ENC_L_STALL);
+    setup();
+    D.amp_run = 1;
+    D.w_cmd[0] = D.w_cmd[1] = 500;
+    for (int i = 0; i < 20; i++) { motor_feedback_update(); motor_stall_check(); }
+    assert(D.system_err == 0);                     /* 둘 다 멈추면 고착이 아니다 (정지 상태) */
+    (void)param_set(P_ENC_STALL_TICKS, 0);
+
     puts("test_motor ok");
     return 0;
 }

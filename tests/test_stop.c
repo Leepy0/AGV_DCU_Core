@@ -238,6 +238,27 @@ int main(void)
     tick(0);
     assert(stop_phase() == STOP_PHASE_IDLE && D.step == DRIVE_CHANGE_SPEED);
 
+    /* 선택 비트: 재개 때 남은 거리가 길면 바닥 속도 위로 가속한다 */
+    { int16_t peak_off = 0, peak_on = 0, k;
+      for (k = 0; k < 2; k++) {
+          setup(2000);
+          (void)param_set(P_OPT_FLAGS, k ? OPT_RESUME_CRUISE : 0);   /* setup 이 EEPROM 을 지운다 */
+          D.stop_pulses = 6000;
+          D.flag_stopping = 1;
+          stop_request_tag();
+          for (int i = 0; i < 20; i++) { tick(0); }
+          D.pause_stop = 1;
+          for (int t = 0; t < 3000 && stop_phase() != STOP_PHASE_COMPLETE; t++) { tick(0); }
+          D.pause_stop = 0;
+          tick(0);
+          { int16_t peak = 0;
+            for (int t = 0; t < 400; t++) { tick(0); if (D.vin_out > peak) { peak = D.vin_out; } }
+            if (k) { peak_on = peak; } else { peak_off = peak; } }
+      }
+      assert(peak_off <= STOP_MIN_RPM);
+      assert(peak_on > STOP_MIN_RPM + 100);
+      (void)param_set(P_OPT_FLAGS, 0); }
+
     /* 위험 감속 표시는 일시정지 완료·정지 완료에서 내려간다 */
     setup(1500);
     D.risk_stop = 1;

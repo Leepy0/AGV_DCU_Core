@@ -23,6 +23,8 @@ enum { MOTION_FWD = 0, MOTION_BACK = 1, MOTION_CCW = 2, MOTION_CW = 3 };
 /* 오류 코드. ACS 로 전송되므로 값 고정 */
 #define ERR_AMP_L_OVERLOAD  200
 #define ERR_AMP_R_OVERLOAD  201
+#define ERR_ENC_L_STALL     202   /* 지령은 있는데 왼쪽 엔코더만 멈춤 */
+#define ERR_ENC_R_STALL     203
 #define ERR_ESTOP           204
 #define ERR_BUMPER          205
 #define ERR_PARAM_LIMIT     250

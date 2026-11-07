@@ -40,6 +40,7 @@ static struct {
     int16_t  pre_rpm[2];
     int16_t  hist[2][5];       /* w_rpm_flt_add1~5 */
     int16_t  steer_gate;       /* CntTimer50ms */
+    int16_t  stall_cnt[2];     /* 지령이 바닥 속도 이상인 연속 틱 */
 } s_motor;
 
 void motor_reset(void)
@@ -54,6 +55,7 @@ void motor_reset(void)
         for (k = 0; k < 5; k++) { s_motor.hist[i][k] = 0; }
     }
     s_motor.steer_gate = 0;
+    s_motor.stall_cnt[0] = s_motor.stall_cnt[1] = 0;
 }
 
 void    motor_encoder_pulse(uint16_t wheel) { s_motor.pulse_seq[wheel]++; }
@@ -99,6 +101,29 @@ void motor_feedback_update(void)
         s_motor.hist[i][0] = D.rpm[i];
     }
     D.rpm_fit_sum = (int16_t)(D.rpm_flt[0] + D.rpm_flt[1]);
+}
+
+/* 지령은 바닥 속도 이상인데 한쪽 바퀴만 펄스가 끊기면 엔코더·바퀴 이상이다.
+ * 램프 구간은 지령 연속 틱으로, 정지 바닥 학습 구간은 제동 중 제외로 뺀다 */
+void motor_stall_check(void)
+{
+    int16_t n = P.stall_ticks;
+    uint16_t i;
+
+    if ((n <= 0) || !D.amp_run || stop_is_braking() || ((D.control != RUN_DRIVE) && (D.control != RUN_TURN))) {
+        s_motor.stall_cnt[0] = s_motor.stall_cnt[1] = 0;
+        return;
+    }
+    for (i = 0; i < 2; i++) {
+        if (D.w_cmd[i] >= STOP_MIN_RPM) { if (s_motor.stall_cnt[i] < IDLE_TICKS_MAX) { s_motor.stall_cnt[i]++; } }
+        else                            { s_motor.stall_cnt[i] = 0; }
+    }
+    for (i = 0; i < 2; i++) {
+        uint16_t other = 1u - i;
+        if ((s_motor.stall_cnt[i] >= n) && (s_motor.idle[i] >= n) && (s_motor.idle[other] < n) && (D.system_err == 0)) {
+            D.system_err = (i == 0) ? ERR_ENC_L_STALL : ERR_ENC_R_STALL;
+        }
+    }
 }
 
 /* ---- 속도 PI ---- */
@@ -151,7 +176,11 @@ void motor_speed_pi(int16_t input)
         D.iref_fb[i] = MOTOR_SPEED_KP * (float)D.w_err[i] + D.iref_it[i];
         D.w_pi_out[i] = D.iref_fb[i];
         if (D.w_pi_out[i] > MOTOR_TORQUE_LIMIT) { D.w_pi_out[i] = MOTOR_TORQUE_LIMIT; }
-        D.tq_cmd[i] = (D.w_pi_out[i] > 0.0f) ? (int16_t)D.w_pi_out[i] : 0;
+        {   /* 피드포워드: 지령 rpm 에 비례한 토크를 더해 PI 가 메울 몫을 줄인다 */
+            float tq = D.w_pi_out[i] + (P.speed_ff * (float)D.w_cmd[i]);
+            if (tq > MOTOR_TORQUE_LIMIT) { tq = MOTOR_TORQUE_LIMIT; }
+            D.tq_cmd[i] = (tq > 0.0f) ? (int16_t)tq : 0;
+        }
     }
 }
 
@@ -480,9 +509,10 @@ void motor_run(void)
 {
     if (!D.flag_stopping && (stop_phase() == STOP_PHASE_IDLE)) { D.immediate_stop = 0; }
     motor_feedback_update();
+    motor_stall_check();
 
     s_motor.steer_gate++;
-    if (s_motor.steer_gate > 1) {
+    if (param_opt(OPT_STEER_10MS) || (s_motor.steer_gate > 1)) {
         int16_t tuning = (D.vin_out > P.low_speed) ? 2 : 1;
         D.offset_kp = (int16_t)((float)D.w_cmd[0] * 0.0001f * (float)param_get(P_STEER_RPM_OFFSET));
         steer_run(tuning);

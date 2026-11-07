@@ -26,6 +26,9 @@ enum {
     P_ACS_VERSION,
     P_PARA_INIT, P_VERSION, P_BAT_DV, P_BAT_PERCENT,
     P_GUIDE_DIST_MM,        /* 50: 회전 중심에서 가이드센서까지 mm. 체크섬 밖 EEPROM 115 에 따로 둔다 */
+    P_OPT_FLAGS,            /* 51: 시험용 개선 스위치 비트. 0 = 전부 기존 동작 */
+    P_SPEED_FF,             /* 52: 속도 피드포워드, 1000 rpm 당 토크 지령. 0 = 끔 */
+    P_ENC_STALL_TICKS,      /* 53: 엔코더 고착 판정 틱(10 ms). 0 = 끔 */
     P_COUNT
 };
 #define P_SAVED_LAST 45   /* 이 번호까지 EEPROM 에 저장한다 */
@@ -44,6 +47,12 @@ enum {
 #define PARAM_GUIDE_DIST_LOW     100
 #define PARAM_GUIDE_DIST_UP      999
 
+/* P_OPT_FLAGS 비트. 기본 0 이 기존 동작이다. 실차 A/B 뒤 기본값을 정한다 */
+#define OPT_STEER_10MS     0x01u   /* 조향을 10 ms 마다 돌린다 (기존 20 ms) */
+#define OPT_STEER_D_SIGN   0x02u   /* 변화율 항 부호를 뒤집어 감쇠로 쓴다 */
+#define OPT_RESUME_CRUISE  0x04u   /* 일시정지 재개 때 남은 거리가 길면 최대 속도까지 가속한다 */
+#define OPT_KF_POSITION    0x08u   /* 조향 입력을 칼만 추정 위치로 쓴다 (기존 원시값) */
+
 /* 저장 계층. 부팅 경로의 write 는 끝난 뒤 돌아와야 한다.
  * 운전 중에는 저장 큐에 넣는 구현으로 바꿔 끼워도 된다 */
 typedef struct {
@@ -60,6 +69,8 @@ typedef struct {
     int16_t target_speed, low_speed, llow_speed, min_speed, turn_speed, jog_speed;
     int16_t llow_min, turn_min;                     /* gLLow_Minimum_Speed, gTurn_Minimum_Speed */
     float   guide_dist_mm;                          /* P_GUIDE_DIST_MM */
+    float   speed_ff;                               /* P_SPEED_FF / 1000: rpm 당 토크 */
+    int16_t stall_ticks;                            /* P_ENC_STALL_TICKS */
     int16_t turn_16, turn_32, turn_90, turn_180;
     int16_t tag_pulse[12];                          /* const_Tag_Num_Pulse */
     int16_t tag_number, tag_total_pulse;            /* gTag_Number, Tag_Total_Pulse. Tag_nea 는 tag_pulse[n] */
@@ -88,6 +99,7 @@ void     param_default(uint16_t kind);
 /* 기본값 세트별 P_AGV_TYPE. 사이트 값이라 앱이 준다. 0 이 초기값 */
 void     param_default_types(int16_t kind1, int16_t kind2, int16_t kind3);
 int16_t  param_quirk(uint16_t bit);
+int16_t  param_opt(uint16_t bit);                          /* P_OPT_FLAGS 비트 */
 int16_t  param_rpm(int16_t m_per_min);                     /* GetSpeed_Pulse */
 int16_t  param_digit(int16_t value, int16_t place);        /* Get_Decimal_Point_Value */
 
