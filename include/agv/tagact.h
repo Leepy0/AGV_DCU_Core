@@ -40,6 +40,7 @@ enum { TAG_COND_NONE = 0, TAG_COND_FORBACK_MODE, TAG_COND_LOW_BATTERY, TAG_COND_
 #define TA_CALL           0x0D00   /* 인자: 사용자 함수 표 인덱스 */
 
 void     tagact_bind(const tag_rule_t *rules, uint16_t n, uint16_t profile);
+uint16_t tagact_display_tag(void);
 void     tagact_run(uint16_t tag);                                     /* DA_Tag_Selection 대체 */
 uint16_t tagact_dry_run(uint16_t tag, uint16_t *acts, uint16_t cap);  /* 실행하지 않고 액션 열거 (관리 TT/TR) */
 

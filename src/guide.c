@@ -221,6 +221,16 @@ int16_t guide_on_request(void)
 
 int16_t guide_comm_error(void) { return s_comm.error; }
 
+/* 오류 해제. 다음 유효 응답까지 다시 판정하지 않는다 */
+void guide_comm_clear(void)
+{
+    s_comm.armed = 0;
+    s_comm.waiting = 0;
+    s_comm.miss = 0;
+    s_comm.bad = 0;
+    s_comm.error = 0;
+}
+
 static uint16_t raw_bit(const guide_rx_t *rx, uint16_t n)
 {
     if (n < 32) { return (uint16_t)((rx->led_lo >> n) & 1UL); }

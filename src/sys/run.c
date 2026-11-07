@@ -42,6 +42,8 @@
 
 static volatile uint32_t s_pulses[2];
 static volatile int32_t  s_rail_cut, s_curve_cnt;
+static uint16_t s_forback_in = IN_IF_5;
+static uint16_t s_remote_pause;
 
 static struct {
     int16_t idle;             /* gFlag_AGV_None_Action */
@@ -100,6 +102,9 @@ int32_t  run_rail_cut(void)         { return s_rail_cut; }
 void     run_rail_cut_clear(void)   { s_rail_cut = 0; }
 void     run_reset_request(void)    { s_run.reset_req = 1; }
 void     run_wait_start(void)       { D.wait_start = 1; }
+void     run_wait_cancel(void)      { D.wait_start = 0; }
+void     run_forback_input(uint16_t id) { s_forback_in = id; }
+void     run_remote_pause(uint16_t on)  { s_remote_pause = on; }
 void     run_restart_now(void)      { D.run_restart = 1; }
 void     run_dir_change(int16_t c)  { s_run.dir_change = c; }
 int16_t  run_standby_num(void)      { return s_run.standby; }
@@ -482,7 +487,7 @@ static void stop_hold_check(int16_t stop_on)
 
 static void manual_forback(int16_t start_edge)
 {
-    int16_t fb = (int16_t)io_in(IN_IF_5);
+    int16_t fb = (int16_t)io_in(s_forback_in);
     /* 저활성 입력의 상승 에지 = 논리 하강. 놓는 순간에 동작한다 */
     int16_t fb_edge = (int16_t)(s_run.fb_prev && !fb);
 
@@ -505,8 +510,10 @@ static void input_filter(void)
     s_run.start_prev = start_on;
     s_run.stop_prev = stop_on;
 
-    if (io_in(IN_REMOTE_START)) { D.pause_stop = 0; }
-    if (io_in(IN_REMOTE_STOP))  { D.pause_stop = 1; }
+    if (s_remote_pause) {
+        if (io_in(IN_REMOTE_START)) { D.pause_stop = 0; }
+        if (io_in(IN_REMOTE_STOP))  { D.pause_stop = 1; }
+    }
 
     if (!stop_on && start_edge && report) { run_report_start(); }
     if ((!stop_on && start_edge) || D.run_restart) {
@@ -537,6 +544,7 @@ static void reset_and_alarm(void)
 {
     D.amp_reset = 0;
     if (s_run.reset_req) {
+        guide_comm_clear();
         if ((D.system_err == ERR_AMP_L_OVERLOAD) || (D.system_err == ERR_AMP_R_OVERLOAD)) { D.amp_reset = 1; }
         s_run.reset_req = 0;
         D.system_err = D.stop_err = D.action_err = 0;

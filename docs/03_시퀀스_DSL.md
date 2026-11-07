@@ -118,8 +118,8 @@ SELECT_END
 ```c
 /* site/<name>/io_map.h */
 
-/* 레거시 표준 배선: CW 는 FB 1개, CCW 는 Power + FB 2개 */
-#define BELT1_CW     OUTS( CV1_FB )
+/* 레거시 표준 배선: CW 는 Power 1개, CCW 는 Power + FB 2개 */
+#define BELT1_CW     OUTS( CV1_POWER )
 #define BELT1_CCW    OUTS( CV1_POWER, CV1_FB )
 
 /* 방향별 출력 1개씩 */
@@ -137,7 +137,7 @@ BELT_ON ( 2, CW )
 BELT_OFF( 2 )          /* 그 벨트 출력 전부 OFF */
 ```
 
-- 레거시 `First_Belt_On_Off_Process(InOut, OnOff)`는 `(1,1)`이면 Power·FB, `(0,1)`이면 FB만 켠다. 이 함수를 쓰던 코드는 위 표준 배선으로 옮기고, `InOut`을 사이트별로 CW·CCW에 대응시킨다. 레거시 주석의 방향 표기와 실제 회전 방향은 현장에서 확인한다.
+- 레거시 `First_Belt_On_Off_Process(InOut, OnOff)`는 `(1,1)`이면 Power·FB, `(0,1)`이면 Power만 켠다. 이 함수를 쓰던 코드는 위 표준 배선으로 옮기고, `InOut`을 사이트별로 CW·CCW에 대응시킨다. 레거시 주석의 방향 표기와 실제 회전 방향은 현장에서 확인한다.
 - 없는 방향을 켜면 컴파일 오류다.
 - 벨트 표나 코드 없이 출력 마스크로 펼쳐지므로 `SK_OUT` 스텝 하나로 끝난다.
 

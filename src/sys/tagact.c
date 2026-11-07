@@ -18,7 +18,7 @@
 #define LOW_BATTERY_DV    230   /* 저전압 판정과 같은 값 */
 
 static const tag_rule_t *s_rules;
-static uint16_t s_nrules, s_profile;
+static uint16_t s_nrules, s_profile, s_display_tag;
 
 void tagact_bind(const tag_rule_t *rules, uint16_t n, uint16_t profile)
 {
@@ -194,7 +194,7 @@ void tagact_run(uint16_t tag)
     int16_t was_stopping = D.flag_stopping;
     int16_t prev_len = D.stop_pulses;
     const tag_rule_t *r = rule_find(tag);
-    uint16_t i;
+    uint16_t i, irq;
 
     if (r != 0) {
         for (i = 0; (i < 4u) && (r->act[i] != 0u); i++) {
@@ -203,9 +203,18 @@ void tagact_run(uint16_t tag)
             i = (uint16_t)(i + second);
         }
     }
+    /* shortcut: 레거시 태그 함수 꼬리를 따른다. 정지 중이면 어떤 태그든 거리를 다시 건다.
+     * 방향별 정지 거리를 쓰는 타입을 옮길 때 사이트 선택으로 바꾼다 */
+    if (D.flag_stopping) { D.stop_pulses = P.stop_len; }
+    s_display_tag = tag;
+    irq = hal_irq_save();
+    D.straight_cnt = 0;
+    hal_irq_restore(irq);
     /* 이 태그로 새 정지가 시작될 때만 요청한다 */
     if (D.flag_stopping && (!was_stopping || (prev_len != D.stop_pulses))) { stop_request_tag(); }
 }
+
+uint16_t tagact_display_tag(void) { return s_display_tag; }
 
 uint16_t tagact_dry_run(uint16_t tag, uint16_t *acts, uint16_t cap)
 {

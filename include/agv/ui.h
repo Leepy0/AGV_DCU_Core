@@ -26,6 +26,7 @@ void     ui_isr(uint16_t key_input);    /* 2 ms: 키 스캔, 깜박임, 7세그 
 void     ui_run(void);                  /* 10 ms: 키 처리, 램프, 부저 */
 void     ui_digits(uint16_t *out);      /* 시험용: 지금 표시 색인 5자리 */
 int16_t  ui_para_number(void);
+uint16_t ui_key(void);                 /* 지금 눌린 키 값 */
 int16_t  ui_lamp_ext(uint16_t i);
 void     ui_lamp_ext_set(uint16_t i, int16_t value);
 #endif

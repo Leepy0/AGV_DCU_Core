@@ -1,4 +1,5 @@
 /* sys.c - 부팅과 10 ms 스케줄러. 순서: docs/01_아키텍처.md 2절 */
+#include <string.h>
 #include "agv/sys.h"
 #include "agv/acs.h"
 #include "agv/comm.h"
@@ -51,6 +52,8 @@ void sys_boot(void)
 {
     int16_t err;
 
+    /* RAM 은 codestart 가 지운다. 앰프 출력과 직결된 구조체는 여기서 한 번 더 지운다 */
+    memset((void *)&agv_drive, 0, sizeof(agv_drive));
     s_ticks = s_tick10 = 0;
     s_phase = s_scans = s_power_on = s_alive = s_overrun = 0;
     hal_sys_init();

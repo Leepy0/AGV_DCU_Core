@@ -67,7 +67,7 @@ void seq_pick_profile(void)
     s_profile = 0;
     for (i = 0; (s_site != 0) && (i < s_site->nprofiles); i++) {
         const profile_row_t *row = &s_site->profiles[i];
-        if ((row->agv_type == (uint16_t)type) && ((uint16_t)id >= row->id_from) && ((uint16_t)id <= row->id_to)) {
+        if (((row->agv_type == 0u) || (row->agv_type == (uint16_t)type)) && ((uint16_t)id >= row->id_from) && ((uint16_t)id <= row->id_to)) {
             s_profile = row->profile;
             break;
         }

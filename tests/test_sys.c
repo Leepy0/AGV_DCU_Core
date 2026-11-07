@@ -524,7 +524,7 @@ static void test_compensate(void)
 
     /* 수신 뒤 처리 전에 달린 만큼 정지 거리에서 뺀다 */
     boot();
-    (void)param_set(P_STOP_LEN_FWD_MM, 100);
+    (void)param_set(P_STOP_LEN_MM, 100);
     drive_up();
     run_scan(20);
     tag_frame(8, '6', 0);          /* 프레임 큐에 들어가며 거리 스냅샷 */
@@ -533,32 +533,32 @@ static void test_compensate(void)
     run_encoder(0, 20000);
     guide_reply(0);
     tick();
-    len = (uint16_t)P.fwd_stop_len;
+    len = (uint16_t)P.stop_len;
     assert(D.stop_pulses == (int16_t)(len - 3));
     printf("  compensate ok\n");
 }
 static void test_rfid_retry(void)
 {
     boot();
-    (void)param_set(P_STOP_LEN_FWD_MM, 100);
+    (void)param_set(P_STOP_LEN_MM, 100);
     drive_up();
     run_scan(20);
     tag_frame(8, '4', 1);          /* 체크섬이 깨진 첫 수신 */
     run_scan(5);
     tag_frame(8, '5', 0);          /* 재전송: 첫 수신 뒤 달린 거리를 뺀다 */
     run_scan(1);
-    assert(D.stop_pulses == (int16_t)(P.fwd_stop_len - 6));
+    assert(D.stop_pulses == (int16_t)(P.stop_len - 6));
 
     /* 번호가 다른 재전송은 보상하지 않는다 */
     boot();
-    (void)param_set(P_STOP_LEN_FWD_MM, 100);
+    (void)param_set(P_STOP_LEN_MM, 100);
     drive_up();
     run_scan(20);
     tag_frame(9, '4', 1);
     run_scan(5);
     tag_frame(8, '5', 0);
     run_scan(1);
-    assert(D.stop_pulses == (int16_t)(P.fwd_stop_len - 1));
+    assert(D.stop_pulses == (int16_t)(P.stop_len - 1));
     printf("  rfid retry ok\n");
 }
 
@@ -679,6 +679,18 @@ static void test_lamp(void)
     printf("  lamp ok\n");
 }
 
+static void test_boot_garbage(void)
+{
+    /* 리셋 직후 쓰레기 값으로 차가 움직이면 안 된다 */
+    host_reset();
+    memset((void *)&D, 0xA5, sizeof(D));
+    sys_boot();
+    ticks(200);
+    assert(!D.flag_run && !D.flag_ready && !D.flag_jog_on && !D.flag_turn);
+    assert(host.dac[0] == 0 && host.dac[1] == 0);
+    printf("  boot garbage ok\n");
+}
+
 static void test_acs_off(void)
 {
     boot();
@@ -697,6 +709,7 @@ int main(void)
 {
     setvbuf(stdout, 0, _IONBF, 0);
     signal(SIGABRT, on_abort);
+    test_boot_garbage();
     test_link();
     test_boot();
     test_scheduler();

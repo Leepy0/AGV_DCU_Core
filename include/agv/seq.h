@@ -112,6 +112,7 @@ typedef struct {
 /* 반환: 0 대기, 1 완료(다음 스텝), 2 실패 */
 typedef int (*seq_call_fn)(seq_ctx_t *ctx);
 
+/* agv_type 0 = 타입 무관. 빌드가 곧 사이트인 경우에 쓴다 */
 typedef struct { uint16_t profile, agv_type, id_from, id_to; } profile_row_t;
 
 typedef struct {

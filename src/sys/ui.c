@@ -71,7 +71,7 @@ static const para_view_t s_view[P_COUNT] = {
     {"CT ", 3}, {"SO-", 2}, {"SU ", 3}, {"EST", 2}, {"RCI", 2}, {"LUS", 2}, {"C- ", 3}, {"CO-", 2}, {"AV-", 2},
     {"INT", 2}, {"V_ ", 3}, {"VT ", 3}, {"CR ", 3}
 };
-static const char s_lamp_name[UI_LAMP_EXT_COUNT] = { 'R', 'G', 'Y' };
+static const char s_lamp_name[UI_LAMP_EXT_COUNT] = { 'G', 'R', 'Y' };
 
 static struct {
     /* 키 */
@@ -160,6 +160,8 @@ static uint16_t seg_code(uint16_t order, uint16_t value, uint16_t dot)
     if (dot && s_ui.blink_on) { x = (uint16_t)(x + s_seg[SEG_DOT]); }
     return (order < 2u) ? seg_rotate(x) : x;
 }
+
+uint16_t ui_key(void) { return s_ui.buffer; }
 
 void ui_isr(uint16_t key_input)
 {

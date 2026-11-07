@@ -179,6 +179,11 @@ void io_write(void)
     hal_dac_write(1, (uint16_t)agv_drive.tq_cmd[1]);
     hal_sound((uint16_t)agv_drive.sound_on);
     if (!s_enabled) {
+        /* OE 를 열기 전에 확장 래치를 모두 끈다. 보드 유무 판정은 500 ms 뒤에 끝난다 */
+        if (!s_ext_board) {
+            hal_bus_write(BUS_EXT_OUT_A, 0xFFu);
+            hal_bus_write(BUS_EXT_OUT_B, 0xFFu);
+        }
         hal_bus_enable();
         s_enabled = 1;
     }

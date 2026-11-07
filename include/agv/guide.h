@@ -88,7 +88,8 @@ void     guide_parse(const uint16_t *buf, uint16_t len, guide_rx_t *rx);
 int16_t  guide_feed(uint16_t byte, guide_rx_t *rx);
 /* 요청을 보낸 스캔에만 부른다. 무응답 판정은 여기서만 한다. 반환 0 또는 ERR_GUIDE_COMM */
 int16_t  guide_on_request(void);
-int16_t  guide_comm_error(void);          /* 0 또는 ERR_GUIDE_COMM. 전환·시작 때까지 유지 */
+int16_t  guide_comm_error(void);          /* 0 또는 ERR_GUIDE_COMM. 전환·시작·STOP 리셋 때까지 유지 */
+void     guide_comm_clear(void);          /* STOP 리셋에서 호출 */
 
 /* 좌우 비트만 칸 순서로 모은다 */
 uint32_t guide_lateral(const guide_rx_t *rx);

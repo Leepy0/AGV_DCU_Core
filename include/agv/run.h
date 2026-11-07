@@ -24,6 +24,9 @@ void     run_rail_cut_clear(void);
 void     run_seq_init(void);               /* Auto_Loading_Init */
 void     run_reset_request(void);          /* Flag_Reset_control */
 void     run_wait_start(void);             /* Flag_Wait_Start = ON */
+void     run_wait_cancel(void);            /* Flag_Wait_Start = OFF */
+void     run_forback_input(uint16_t id);   /* 수동 방향 전환 입력. 기본 IN_IF_5 */
+void     run_remote_pause(uint16_t on);    /* 리모컨 입력의 일시정지 사용. 기본 끔 */
 void     run_restart_now(void);            /* Flag_Run_Restart = ON */
 void     run_dir_change(int16_t code);     /* Dir_Change_Flag: 1 전진, 2 후진 */
 void     run_relay(int16_t backward, int16_t save);    /* ForBack_Relay_Change */
