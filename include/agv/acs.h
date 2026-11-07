@@ -45,6 +45,10 @@ void     acs_set_pan(uint16_t pan);            /* 수신 [2] 문자 */
 void     acs_cross_in(int16_t id);
 void     acs_cross_out(int16_t id);
 int16_t  acs_cross_num(uint16_t which);
+uint16_t acs_cross_acked(uint16_t which);
+uint16_t acs_cross_retry(uint16_t which);
+void     acs_cross_release(uint16_t which);   /* ACS 허가 또는 초기화: 재전송과 대기를 끝낸다 */
+void     acs_cross_clear(void);
 
 /* 스테이션 큐. push 반환 1 추가, 0 중복·0번·가득 참 */
 int      acs_station_push(int16_t n);

@@ -125,6 +125,8 @@ typedef struct {
  * 반환 0 정상, 그 외 첫 금지 스텝이 있는 ACT ID. */
 uint16_t seq_bind(const seq_site_t *site);
 uint16_t seq_profile(void);
+void     seq_pick_profile(void);   /* 파라미터를 읽은 뒤나 바꾼 뒤 프로파일을 다시 고른다 */
+int      seq_call_once(uint16_t idx);   /* 사용자 함수를 한 번 부른다. 태그 A_CALL */
 
 /* 시퀀스: 정지 완료 뒤 run 모듈이 seq_run() 을 호출한다. 한 번에 하나만 활성 */
 void     seq_request(uint16_t id);

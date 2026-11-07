@@ -310,6 +310,14 @@ static int16_t read_all(void)
     return (s_set[0] == sum_saved()) ? 1 : 0;
 }
 
+void param_store_set(const param_store_t *store) { s_store = store; }
+
+void param_limit(uint16_t idx, int16_t *low, int16_t *up)
+{
+    *low = (idx <= P_PARA_INIT) ? s_limit[idx].low : 0;
+    *up = (idx <= P_PARA_INIT) ? s_limit[idx].up : 0;
+}
+
 int16_t param_boot(const param_store_t *store, int16_t version)
 {
     uint16_t attempt;

@@ -3,6 +3,7 @@
 #include "agv/acs.h"
 #include "agv/drive.h"
 #include "agv/io.h"
+#include "agv/log.h"
 #include "agv/param.h"
 #include "agv/tagact.h"
 
@@ -57,22 +58,36 @@ static int16_t forbidden_in_act(uint16_t kind)
         || (kind == SK_ERROR_HOLD) || (kind == SK_END_RESTART);
 }
 
-uint16_t seq_bind(const seq_site_t *site)
+void seq_pick_profile(void)
 {
-    uint16_t i, k;
+    uint16_t i;
     int16_t type = param_get(P_AGV_TYPE);
     int16_t id = param_get(P_AGV_ID);
 
-    s_site = site;
-    s_nacts = site->nacts;
     s_profile = 0;
-    for (i = 0; i < site->nprofiles; i++) {
-        const profile_row_t *row = &site->profiles[i];
+    for (i = 0; (s_site != 0) && (i < s_site->nprofiles); i++) {
+        const profile_row_t *row = &s_site->profiles[i];
         if ((row->agv_type == (uint16_t)type) && ((uint16_t)id >= row->id_from) && ((uint16_t)id <= row->id_to)) {
             s_profile = row->profile;
             break;
         }
     }
+}
+
+int seq_call_once(uint16_t idx)
+{
+    static seq_ctx_t ctx;
+    if ((s_site == 0) || (idx >= s_site->ncalls)) { return 2; }
+    return s_site->calls[idx](&ctx);
+}
+
+uint16_t seq_bind(const seq_site_t *site)
+{
+    uint16_t i, k;
+
+    s_site = site;
+    s_nacts = site->nacts;
+    seq_pick_profile();
     for (i = 0; i < site->nacts; i++) {
         for (k = 0; k < site->acts[i].nsteps; k++) {
             if (forbidden_in_act(site->acts[i].steps[k].kind)) {
@@ -383,7 +398,7 @@ static uint16_t eval_step(seq_runner_t *r, const seq_step_t *s)
         D.action_err = (int16_t)s->arg0;
         return cond_true(s) ? jump(r, s->target) : (uint16_t)R_WAIT;
     case SK_ACT_START:
-        (void)act_start(s->arg0);
+        if (act_start(s->arg0) == 2) { log_event(LOG_ACT_NO_SLOT, (int16_t)s->arg0, 0); }
         return R_NEXT;
     case SK_WAIT_ACT:
         return act_is_busy(s->arg0) ? (uint16_t)R_WAIT : (uint16_t)R_NEXT;

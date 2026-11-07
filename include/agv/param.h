@@ -72,6 +72,8 @@ extern param_dv_t param_dv;
 
 /* 부팅: 1회 초기화 → 읽기 3회 시도 → 파생값. 반환 0 정상, 그 외 ERR_PARAM_* */
 int16_t  param_boot(const param_store_t *store, int16_t version);
+void     param_store_set(const param_store_t *store);       /* 부팅 뒤 저장 계층 교체 */
+void     param_limit(uint16_t idx, int16_t *low, int16_t *up);
 int16_t  param_get(uint16_t idx);
 /* 한계 검사 → 값 저장 → 파생값 갱신 → 저장 계층 쓰기. 반환 0 정상, -1 한계 벗어남 */
 int16_t  param_set(uint16_t idx, int16_t value);

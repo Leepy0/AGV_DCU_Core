@@ -33,6 +33,7 @@ void     io_out_masks(uint32_t set, uint32_t clr) { fake_out = (fake_out & ~clr)
 void     io_seq_outputs_off(void) { fake_seq_off_count++; fake_out = 0; }
 
 void run_request_restart(uint16_t sec) { (void)sec; fake_restart_count++; }
+void log_event(uint16_t code, int16_t a, int16_t b) { (void)code; (void)a; (void)b; }
 
 int link_send(const uint16_t *buf, uint16_t n)
 {

@@ -1,6 +1,10 @@
 # 변경 이력
 
 ## 미릴리스 (2026-11-07)
+- 2단계 HAL: `hal/f2808` (PLL, 워치독, 플래시 대기, PIE, Timer0, GPIO, 버스, SPI DAC, eCAP, SCI, Microwire EEPROM, ADC, codestart), `hal/host`. TI 헤더 없음.
+- 3단계 조립: `src/sys` (메인 스케줄러, `run`, `comm`, `guide_poll`, `tagact`, `ui`, `storage`, `io`, `link`, `log`), 빈 예제 사이트, `tools/build_target.ps1`, `tests/test_sys.c`.
+- SCI 를 16단 FIFO 로 바꿨다 (원본은 FIFO 꺼짐). 수신 오버런과 오류를 실제로 복구한다.
+- 기존 모듈 추가: `seq_pick_profile`, `seq_call_once`, `param_limit`, `param_store_set`, `acs_cross_release`, `acs_cross_clear`, ACT 슬롯 부족·재전송 포기 로그.
 - 1단계 코어 구현: `motor`(rpm 피드백, 속도 PI, S커브, 주행 단계, 테이프 회전 정렬), `stop`(MotorStop), `steer`, `branch`, `guide`, `frame`, `acs`, `seq`, `param`과 호스트 단위 시험.
 - `guide`: `'a'`·`'h'` 해석, 바이트 파서, LED 덩어리 추적, 필터(기본 꺼짐), 센서 전환 초기화, 두절(255) 판정. `P_GUIDE_CURVE_DETECT` = 2 로 위치 소스 선택.
 - 고친 결함: `curve_now` 반전, 테이프 회전 Step 2, `nGuide_Risk_Stop_Flag` 잔류, `'h'` 자리표 (`P_LEGACY_QUIRKS` b0~b3 으로 구동작 재현), 재전송 CT²·선두 대기, `set[40]` 곱 넘침, `DA_EST_cnt` 잔류, 스테이션 큐 상한, 부팅 직후 교차로 판정.

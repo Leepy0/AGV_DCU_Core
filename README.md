@@ -2,7 +2,7 @@
 
 AGV 주행 제어기 DCU(TI TMS320F2808) 펌웨어의 **코어 라이브러리**. 주행·조향·정지 제어, 가이드센서, ACS 통신, 파라미터·EEPROM, I/O, 시퀀스 인터프리터, 관리 프로토콜, FOTA 연계를 담는다. 사이트별 동작(시퀀스·태그·I/O 배선)은 담지 않는다. 그것은 앱 저장소(사내)에서 이 라이브러리를 벤더링해 작성한다.
 
-현재 상태: **하드웨어 무관 순수 로직과 호스트 단위 시험**. HAL, 런 조정, 태그 액션, 키·표시, 메인 스케줄러는 아직 없다.
+현재 상태: **순수 로직, F2808 HAL, 런 조정·통신·표시·저장, 메인 스케줄러까지 구현**. 실기 검증 전이다. 관리 프로토콜, FOTA, WiFi 링크 전용 처리는 아직 없다.
 
 ## 문서
 
@@ -22,18 +22,20 @@ AGV 주행 제어기 DCU(TI TMS320F2808) 펌웨어의 **코어 라이브러리**
 
 ```
 include/agv/   공개 헤더 (types.h, drive.h, param.h, motor.h, stop.h, steer.h, branch.h, guide.h, frame.h, acs.h, seq.h, seq_dsl.h, tagact.h, io.h, mgmt.h)
-src/           모듈 구현
-hal/f2808/     레지스터 HAL (예정)
-hal/host/      PC 시뮬레이션 HAL (예정)
+src/           하드웨어 무관 모듈 구현
+src/sys/       조립 계층: 메인 스케줄러, 런 조정, 수신 처리, 태그 액션, 키·표시, 저장, 로그
+hal/f2808/     레지스터 HAL. TI 헤더 없이 빌드된다
+hal/host/      PC 시험용 HAL
+examples/      빈 사이트. 코어 단독 링크 검증용
 cmd/           OTA 앱 영역 링커 명령 파일 (브릿지 레포 예제 기준, 실기 검증 전 잠정)
-tools/         라이브러리 빌드 스크립트, 표 출력 도구 (예정)
+tools/         build_target.ps1 (cl2000 컴파일·링크). 라이브러리 빌드, 표 출력 도구는 예정
 tests/         test_dsl.c (표 매크로 검사), 호스트 단위 시험. 실행: powershell -File tests/run_host.ps1
 docs/          설계 문서
 ```
 
-## 빌드 (예정)
+## 빌드
 
-- 타깃: TI C2000 CGT 18.12.2.LTS, `cl2000 -v28 -ml -mt --c99 --float_support=softlib`, `ar2000 -r`로 `lib/agv_dcu_core.lib`.
+- 타깃: TI C2000 CGT 18.12.2.LTS, `powershell -File tools/build_target.ps1 -Site <사이트 폴더>`. `cl2000 -v28 -ml -mt --c99 --float_support=softlib` 로 컴파일하고 `cmd/F2808_app_direct.cmd` 로 링크한다. `ar2000 -r` 라이브러리 빌드는 예정.
 - 호스트: gcc, `-DAGV_HOST_BUILD`, `tests/` 실행.
 - 릴리스: `agv_dcu_core-<ver>.zip` = `lib/` + `include/` + `cmd/` + `CHANGELOG.md`. 앱 저장소는 이 zip을 `third_party/agv_dcu_core/<ver>/`에 풀어 커밋한다.
 

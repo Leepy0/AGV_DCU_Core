@@ -2,6 +2,7 @@
 #include "agv/acs.h"
 #include "agv/drive.h"
 #include "agv/frame.h"
+#include "agv/log.h"
 #include "agv/param.h"
 #include "agv/seq.h"
 
@@ -72,6 +73,8 @@ const acs_stat_t *acs_stat(void)    { return &s_stat; }
 int16_t  acs_station_get(uint16_t idx)   { return (idx < ACS_STATION_MAX) ? s_station[idx] : 0; }
 uint16_t acs_station_count(void)         { return s_station_cnt; }
 int16_t  acs_cross_num(uint16_t which)   { return s_cross[which].num; }
+uint16_t acs_cross_acked(uint16_t which) { return s_cross[which].ack; }
+uint16_t acs_cross_retry(uint16_t which) { return s_cross[which].retry; }
 
 void acs_reset(void)
 {
@@ -287,6 +290,7 @@ static void slots_tick(uint16_t may_send)
         s->timer = iv + jitter_span(iv);
         if (s->try_total >= ACS_MAX_TRY) {
             s_stat.give_up++;
+            log_event(LOG_ACS_GIVE_UP, (int16_t)s->info, s->num);
             acs_slot_clear((uint16_t)cand);
         }
     }
@@ -313,6 +317,20 @@ static void cross_begin(acs_cross_t *c, int16_t id)
     c->delay = 0;
     c->bat = param_get(P_BAT_DV);
     c->msgid = frame_msgid_next();
+}
+
+void acs_cross_release(uint16_t which)
+{
+    cross_clear(&s_cross[which]);
+    s_cross[which].delay = 0;
+    if (which == ACS_CROSS_IN) { D.cross_in_flag = D.cross_in_on = 0; }
+    else                       { D.cross_out_flag = D.cross_out_on = 0; }
+}
+
+void acs_cross_clear(void)
+{
+    acs_cross_release(ACS_CROSS_IN);
+    acs_cross_release(ACS_CROSS_OUT);
 }
 
 void acs_cross_in(int16_t id)

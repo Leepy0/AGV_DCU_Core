@@ -16,5 +16,13 @@ foreach ($t in 'frame', 'acs', 'param', 'seq', 'motor', 'stop', 'steer', 'guide'
     & "build/t/test_$t.exe"
     if ($LASTEXITCODE -ne 0) { Write-Output "FAIL $t"; $failed++ }
 }
+# Assembly test: real upper modules on the host HAL, without fakes
+$sys = @($src) + (Get-ChildItem src/sys/*.c, hal/host/*.c | ForEach-Object { $_.FullName })
+& gcc -std=gnu99 -Wall -DAGV_HOST_BUILD -Iinclude -Ihal/host tests/test_sys.c @sys -o build/t/test_system.exe -lm
+if ($LASTEXITCODE -ne 0) { Write-Output 'BUILD FAIL sys'; $failed++ }
+else {
+    & build/t/test_system.exe
+    if ($LASTEXITCODE -ne 0) { Write-Output 'FAIL sys'; $failed++ }
+}
 if ($failed -ne 0) { Write-Output "FAILED: $failed"; exit 1 }
 Write-Output 'ALL PASSED'

@@ -44,7 +44,8 @@ void     tagact_run(uint16_t tag);                                     /* DA_Tag
 uint16_t tagact_dry_run(uint16_t tag, uint16_t *acts, uint16_t cap);  /* 실행하지 않고 액션 열거 (관리 TT/TR) */
 
 /* 개별 액션 (사용자 정의 코드용) */
-void tagact_stop(void);
+void tagact_stop(void);          /* 정지 거리 없이 멈춘다. A_STOP */
+void tagact_stop_length(void);   /* 방향별 정지 거리 뒤 멈춘다 */
 void tagact_speed(uint16_t level);
 void tagact_forback(dir_t d);
 void tagact_turn(turn_dir_t d, uint16_t deg, dir_t fb, uint16_t autostart, uint16_t obs);

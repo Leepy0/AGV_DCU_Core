@@ -20,11 +20,19 @@ typedef enum { UI_AUTO = 101, UI_JOG, UI_PARAM, UI_REMOTE } ui_mode_t;          
 enum { MOTION_FWD = 0, MOTION_BACK = 1, MOTION_CCW = 2, MOTION_CW = 3 };
 
 /* 오류 코드. ACS 로 전송되므로 값 고정 */
+#define ERR_AMP_L_OVERLOAD  200
+#define ERR_AMP_R_OVERLOAD  201
+#define ERR_ESTOP           204
+#define ERR_BUMPER          205
 #define ERR_PARAM_LIMIT     250
 #define ERR_PARAM_CHECKSUM  251
 #define ERR_GUIDE_COMM      255
+#define ERR_GUIDE_RANGE     257
+#define ERR_GUIDE_SENSOR    258
+#define ERR_BAT_OVER        260
 #define ERR_BRANCH_TIMEOUT  265
 #define ERR_STOP_APPROACH   277
+#define ERR_BAT_LOW         280
 #define ERR_OBSTACLE        281
 #define ERR_CROSS_WAIT      285
 #define ERR_CROSS_NO_ACK    286
@@ -57,6 +65,7 @@ typedef struct {
     int16_t motion;                  /* motorMotionDirection */
     int16_t amp_dir;                 /* 앰프에 낼 방향 (Driving_Forward_Backward 의 인자) */
     int16_t amp_run;                 /* AMP_x_RUNZ */
+    int16_t amp_reset;               /* AMP_x_RESETZ 한 틱 펄스 */
     int16_t sound_on;
     int16_t speed_cmd;               /* gDriving_speed */
     int16_t cur_speed;               /* nCurrent_Speed */

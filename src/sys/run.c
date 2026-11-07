@@ -1,0 +1,845 @@
+/* run.c - 런 조정: 시작·정지·비상, 오류 처리, 대기 시작, 시퀀스 디스패치, 주행 시작 처리 */
+#include "agv/run.h"
+#include "agv/acs.h"
+#include "agv/comm.h"
+#include "agv/drive.h"
+#include "agv/guide.h"
+#include "agv/hal.h"
+#include "agv/io.h"
+#include "agv/ioport.h"
+#include "agv/link.h"
+#include "agv/motor.h"
+#include "agv/param.h"
+#include "agv/seq.h"
+#include "agv/stop.h"
+#include "agv/storage.h"
+#include "agv/tagact.h"
+#include "agv/ui.h"
+
+#define D agv_drive
+#define P param_dv
+
+#define BAT_OVER_DV        280
+#define BAT_LOW_DV         230
+#define BAT_LOW_TICKS      1000
+#define BAT_ADC_INIT       3200u
+#define BAT_SCALE          0.0814f
+#define START_LOW_DONE     2        /* Inital_start 완료 값 */
+#define START_ALIGN_RANGE  3
+#define START_ALIGN_TICKS  10
+#define START_HOLD_TICKS   100      /* START 를 1 s 누르면 고속 */
+#define AUTO_SPEED_RANGE   3
+#define AUTO_CURVE_RANGE   7
+#define AUTO_SLOW_MIN_MPM  25
+#define AUTO_SLOW_MAX_MPM  60
+#define STOP_HOLD_TICKS    300      /* STOP 3 s 길게 누름 */
+#define STATUS_TICKS       6000     /* 60 s 'P' 보고 */
+#define STANDBY_TICKS      6000
+#define ERR_ACTION_LIMIT   280      /* 이보다 작은 action_err 는 시퀀스를 끊는다 */
+#define BUMPER_RUN_VIN     30
+#define WAIT_SEC_TICKS     100
+#define NO_ACTION_TYPE     2        /* 이 차종군은 Auto Start 를 유지한다 */
+
+static volatile uint32_t s_pulses[2];
+static volatile int32_t  s_rail_cut, s_curve_cnt;
+
+static struct {
+    int16_t idle;             /* gFlag_AGV_None_Action */
+    int16_t auto_start;       /* Flag_Auto_Start */
+    int16_t reset_req;        /* Flag_Reset_control */
+    int16_t seq_go;           /* 이번 틱에 시퀀스를 평가한다 */
+    int16_t dir_change;       /* Dir_Change_Flag */
+    int16_t wait_sec, wait_ticks;
+    int16_t start_prev, stop_prev, fb_prev;
+    int16_t stop_hold;        /* Cnt_Stop_SW_1sec_Flag */
+    int16_t bumper_run, bumper_cnt;
+    int16_t standby, standby_auto, standby_cnt;
+    int16_t status_cnt;
+    int16_t bat_low_cnt;
+    uint16_t bat_filtered;
+    int16_t init_step, init_cnt;      /* Inital_start, Inital_cnt */
+    int16_t drive_started;            /* Flag_Driving_start */
+    int16_t was_stopping, prev_len;   /* 이번 틱 정지 요청 판단 */
+} s_run;
+
+static void drive_pre(void);
+
+void run_reset(void)
+{
+    s_pulses[0] = s_pulses[1] = 0;
+    s_rail_cut = s_curve_cnt = 0;
+    s_run.idle = 0;
+    s_run.auto_start = 0;
+    s_run.reset_req = 0;
+    s_run.seq_go = 0;
+    s_run.dir_change = 0;
+    s_run.wait_sec = s_run.wait_ticks = 0;
+    s_run.start_prev = s_run.stop_prev = 0;
+    s_run.fb_prev = 0;
+    s_run.stop_hold = 0;
+    s_run.bumper_run = s_run.bumper_cnt = 0;
+    s_run.standby = s_run.standby_auto = s_run.standby_cnt = 0;
+    s_run.status_cnt = 0;
+    s_run.bat_low_cnt = 0;
+    s_run.bat_filtered = BAT_ADC_INIT;
+    s_run.init_step = s_run.init_cnt = 0;
+    s_run.drive_started = 0;
+    D.ui_mode = UI_AUTO;
+    D.control = RUN_READY;
+    D.step = DRIVE_CHANGE_SPEED;
+    D.obs_use = 1;
+    D.speed_cmd = P.low_speed;
+    D.tape_slip_ratio = 1.0f;
+    D.drive_pre = drive_pre;
+}
+
+uint32_t run_pulses(uint16_t wheel) { return s_pulses[wheel]; }
+int      run_is_idle(void)          { return s_run.idle; }
+int      run_auto_started(void)     { return s_run.auto_start; }
+int32_t  run_rail_cut(void)         { return s_rail_cut; }
+void     run_rail_cut_clear(void)   { s_rail_cut = 0; }
+void     run_reset_request(void)    { s_run.reset_req = 1; }
+void     run_wait_start(void)       { D.wait_start = 1; }
+void     run_restart_now(void)      { D.run_restart = 1; }
+void     run_dir_change(int16_t c)  { s_run.dir_change = c; }
+int16_t  run_standby_num(void)      { return s_run.standby; }
+void     run_standby_auto_off(void) { s_run.standby = 0; s_run.standby_auto = 0; }
+
+/* 0 이면 P_AUTO_START_SEC */
+void run_request_restart(uint16_t sec)
+{
+    D.wait_start = 1;
+    s_run.wait_sec = (int16_t)((sec != 0u) ? sec : (uint16_t)param_get(P_AUTO_START_SEC));
+    s_run.wait_ticks = 0;
+}
+
+/* eCAP ISR. 정지 거리는 전진 좌, 후진 우 바퀴로 잰다 */
+void run_encoder(uint16_t wheel, uint32_t period)
+{
+    motor_encoder_pulse(wheel);
+    D.period[wheel] = (int32_t)period;
+    s_pulses[wheel]++;
+    s_rail_cut++;
+    s_curve_cnt++;
+    if (wheel == 1u) { D.straight_cnt++; }
+    if ((D.branch_ready > 0) || (D.branch_start > 0)) {
+        if (wheel == 0u) { D.cnt_branch_l++; }
+        else             { D.cnt_branch_r++; }
+    }
+    if ((D.backward != 0) == (wheel == 1u)) {
+        if (D.stop_pulses > 0) { D.stop_pulses--; }
+    }
+    if (D.flag_turn && (D.turn_pulses > 0)) { D.turn_pulses--; }
+}
+
+/* ---- ACS 보고 ---- */
+
+static void standby_forget(void)
+{
+    s_run.standby = 0;
+    s_run.standby_auto = 0;
+    s_run.status_cnt = 0;
+    acs_slot_clear(ACS_SLOT_STANDBY);
+}
+
+void run_report_start(void)
+{
+    standby_forget();
+    acs_report_slot(ACS_SLOT_START, 0);
+}
+
+void run_report_stop(void)
+{
+    standby_forget();
+    acs_report_slot(ACS_SLOT_STOP, 0);
+}
+
+void run_standby(int16_t id, int16_t reset)
+{
+    D.wait_start = 0;
+    if (reset) { acs_station_reset(); }
+    s_run.standby = id;
+    if ((id > 0) && (D.turn_pulses == 0) && (D.turn_motion == 0)) {
+        stop_request_rapid(STOP_REASON_COMMAND);
+        D.flag_stopping = 1;
+        s_run.standby_auto = 1;
+    }
+    s_run.status_cnt = 0;
+    acs_report_slot(ACS_SLOT_STANDBY, id);
+}
+
+void run_standby_clear(int16_t id)
+{
+    s_run.standby = 0;
+    s_run.standby_auto = 0;
+    s_run.status_cnt = 0;
+    acs_report_slot(ACS_SLOT_STANDBY_CLEAR, id);
+}
+
+/* ---- 초기화 ---- */
+
+void run_seq_init(void)
+{
+    seq_abort_all();
+    comm_recent_clear();
+    acs_cross_clear();
+    D.tape_stop_id = 0;
+    D.tape_turn_dir = 0;
+    D.stopping_process = 0;
+}
+
+static void tape_clear(void)
+{
+    D.tape_align = 0;
+    D.tape_step = 0;
+    D.tape_max = 0;
+    D.tape_total_pulse = 0;
+    D.tape_slip_ratio = 1.0f;
+    D.tape_target_cnt = 0.0f;
+    D.tape_lost_cnt = 0;
+}
+
+/* Initial_Start */
+static void start_run(void)
+{
+    D.flag_ready = 1;
+    s_run.init_step = 0;
+    s_run.init_cnt = 0;
+    s_run.drive_started = 0;
+    D.drive_start_cnt = 0;
+    D.turn_pulses = 0;
+    D.branch_return_cnt = 0;
+    D.control = RUN_READY;
+    D.wait_start = 0;
+    D.run_restart = 0;
+    D.turn_motion = 0;
+    D.p_cmd = 0;
+    D.straight_cnt = 0;
+    s_rail_cut = 0;
+    s_curve_cnt = 0;
+    D.pause_stop = 0;
+    D.cross_in_on = D.cross_out_on = 0;
+    s_run.standby_auto = 0;
+    s_run.standby_cnt = 0;
+    run_seq_init();
+    s_run.wait_sec = 0;
+    s_run.wait_ticks = 0;
+    link_guide_init();
+    guide_poll_start();
+}
+
+/* STOP 스위치. 누르고 있는 동안 매 틱 들어온다 */
+static void stop_switch(void)
+{
+    stop_request_rapid(STOP_REASON_SWITCH);
+    s_run.auto_start = 0;
+    D.flag_stopping = 1;
+    D.stop_pulses = 0;
+    D.wait_start = 0;
+    D.run_restart = 0;
+    D.turn_motion = 0;
+    D.turn_pulses = 0;
+    s_run.reset_req = 1;
+    D.drive_start_cnt = 0;
+    s_run.bumper_run = 0;
+    s_run.bumper_cnt = 0;
+    D.pause_stop = 0;
+    D.cross_in_on = D.cross_out_on = 0;
+    run_seq_init();
+    act_abort_all();
+    D.ext_sen_on = 0;
+    s_run.standby = 0;
+    s_run.standby_auto = 0;
+    s_run.standby_cnt = 0;
+    tape_clear();
+    P.dcc = param_get(P_DCC);
+}
+
+void run_command_stop(void)
+{
+    s_run.auto_start = 0;
+    stop_request_rapid(STOP_REASON_COMMAND);
+    D.flag_stopping = 1;
+    D.stop_pulses = 0;
+    D.wait_start = 0;
+    D.run_restart = 0;
+    D.turn_motion = 0;
+    run_seq_init();
+    act_abort_all();
+    run_report_stop();
+    s_run.reset_req = 1;
+}
+
+/* ---- 릴레이 ---- */
+
+void run_relay(int16_t backward, int16_t save)
+{
+    if ((backward != 0) == (D.backward != 0)) { return; }
+    io_out(OUT_AGV_BACK, (uint16_t)(backward != 0));
+    D.backward = (int16_t)(backward != 0);
+    if (save) { keep_set(KEEP_BACKWARD, D.backward); }
+}
+
+void run_boot_restore(void)
+{
+    uint16_t i;
+    int16_t cnt = keep_get(KEEP_STATION_CNT);
+    int16_t pan = keep_get(KEEP_PAN);
+
+    /* 호기별 상태는 빈 EEPROM(0xFFFF)이면 쓰지 않는다 */
+    if (keep_get(KEEP_BACKWARD) == 1) { run_relay(1, 0); }
+    if ((cnt >= 0) && (cnt <= KEEP_STATION_SLOTS)) {
+        for (i = 0; i < KEEP_STATION_SLOTS; i++) {
+            acs_station_set(i, keep_get((uint16_t)(KEEP_STATION0 + i)), (uint16_t)cnt);
+        }
+    }
+    if ((pan >= 1) && (pan <= 'F' - '0')) { acs_set_pan((uint16_t)(pan + '0')); }
+    for (i = 0; i < COMM_TAG_HISTORY; i++) {
+        comm_tag_restore(i, keep_get((uint16_t)(KEEP_TAG_INDEX0 + i)), keep_get((uint16_t)(KEEP_TAG_NUM0 + i)));
+    }
+    for (i = 0; i < UI_LAMP_EXT_COUNT; i++) {
+        int16_t v = keep_get((uint16_t)(KEEP_LAMP_EXT0 + i));
+        ui_lamp_ext_set(i, (v < 0) ? 0 : v);
+    }
+}
+
+static void keep_sync(void)
+{
+    uint16_t i;
+
+    for (i = 0; i < KEEP_STATION_SLOTS; i++) {
+        keep_set((uint16_t)(KEEP_STATION0 + i), acs_station_get(i));
+    }
+    keep_set(KEEP_STATION_CNT, (int16_t)acs_station_count());
+    keep_set(KEEP_PAN, (int16_t)(acs_pan() - '0'));
+    for (i = 0; i < COMM_TAG_HISTORY; i++) {
+        keep_set((uint16_t)(KEEP_TAG_INDEX0 + i), comm_tag_index(i));
+        keep_set((uint16_t)(KEEP_TAG_NUM0 + i), comm_tag_num(i));
+    }
+    for (i = 0; i < UI_LAMP_EXT_COUNT; i++) {
+        keep_set((uint16_t)(KEEP_LAMP_EXT0 + i), ui_lamp_ext(i));
+    }
+    keep_flush_if_changed();
+}
+
+/* ---- 배터리 ---- */
+
+static int16_t charge_rate(int16_t dv)
+{
+    static const int16_t table[][2] = {
+        {250, 999}, {249, 950}, {248, 900}, {247, 850}, {246, 800}, {245, 750}, {244, 700}, {243, 650},
+        {242, 600}, {240, 550}, {239, 520}, {238, 500}, {237, 450}, {236, 400}, {235, 350}, {234, 300},
+        {232, 250}, {230, 200}, {226, 100}
+    };
+    uint16_t i;
+    for (i = 0; i < sizeof(table) / sizeof(table[0]); i++) {
+        if (dv >= table[i][0]) { return table[i][1]; }
+    }
+    return 0;
+}
+
+static void battery_check(void)
+{
+    uint16_t raw = (uint16_t)(hal_adc_battery() >> 4);
+    int16_t dv;
+
+    s_run.bat_filtered = (uint16_t)((float)s_run.bat_filtered * 0.6f + (float)raw * 0.4f);
+    dv = (int16_t)((int16_t)((float)s_run.bat_filtered * BAT_SCALE) + param_digit(param_get(P_BAT_OFFSET_DV), 1));
+    (void)param_set(P_BAT_DV, dv);
+    (void)param_set(P_BAT_PERCENT, charge_rate(dv));
+    if (dv > BAT_OVER_DV) { D.stop_err = ERR_BAT_OVER; }
+    if (dv < BAT_LOW_DV) {
+        if (++s_run.bat_low_cnt > BAT_LOW_TICKS) {
+            D.action_err = ERR_BAT_LOW;
+            s_run.bat_low_cnt = BAT_LOW_TICKS;
+        }
+    }
+    else {
+        s_run.bat_low_cnt = 0;
+    }
+}
+
+/* ---- Auto_Run_Process ---- */
+
+static void wait_tick(void)
+{
+    if (s_run.wait_sec <= 0) {
+        D.wait_start = 0;
+        D.run_restart = 1;
+    }
+    else if (s_run.wait_ticks >= WAIT_SEC_TICKS) {
+        s_run.wait_sec--;
+        s_run.wait_ticks = 0;
+    }
+    else {
+        s_run.wait_ticks++;
+    }
+}
+
+static int16_t seq_requested(void)
+{
+    uint16_t id;
+    if (seq_is_active()) { return 1; }
+    for (id = SEQ_NONE + 1; id < SEQ_MAX; id++) {
+        if (seq_request_flag[id]) { return 1; }
+    }
+    return 0;
+}
+
+static void request_tag_if_new(int16_t was_stopping, int16_t prev_len)
+{
+    if (D.flag_stopping && (!was_stopping || (D.stop_pulses != prev_len))
+        && !(D.flag_turn && (D.control == RUN_TURN))) {
+        stop_request_tag();
+    }
+}
+
+static void auto_run(void)
+{
+    int16_t was_stopping = D.flag_stopping;
+    int16_t prev_len = D.stop_pulses;
+
+    s_run.idle = 0;
+    s_run.seq_go = 0;
+    if (D.stop_err == ERR_STOP_APPROACH) { return; }      /* 실패한 접근은 리셋이 필요하다 */
+    if ((D.ui_mode == UI_AUTO) && !D.flag_ready && !D.flag_run && !D.flag_stopping) {
+        if (s_run.dir_change != 0) {
+            run_relay((int16_t)(s_run.dir_change != 1), 1);
+            s_run.dir_change = 0;
+        }
+        else if (D.turn_motion != 0) {
+            s_run.seq_go = (int16_t)seq_is_active();
+            if (D.turn_pulses > 0) {
+                D.flag_turn = 1;
+                D.control = RUN_TURN;
+            }
+            else {
+                D.turn_motion = 0;
+                D.flag_stopping = 1;
+                D.turn_pulses = 0;
+            }
+        }
+        else if (D.wait_start) {
+            wait_tick();
+        }
+        else if (seq_requested()) {
+            s_run.seq_go = 1;
+        }
+        else {
+            if (P.agv_type_mode != NO_ACTION_TYPE) { s_run.auto_start = 0; }
+            s_run.idle = 1;
+        }
+    }
+    if (s_run.idle) { keep_sync(); }
+    request_tag_if_new(was_stopping, prev_len);
+}
+
+/* ---- 입력 처리 ---- */
+
+static void bumper_check(void)
+{
+    int16_t for_on = (int16_t)io_in(IN_BUMPER_1);
+    int16_t back_on = (int16_t)io_in(IN_BUMPER_2);
+    int16_t keep = param_get(P_BUMPER_USE);
+
+    if ((D.vin_out > 0) && (((P.for_bumper >= 1) && for_on) || ((P.back_bumper >= 1) && back_on))) {
+        D.estop = 1;
+        D.system_err = ERR_BUMPER;
+        if ((P.for_bumper >= 2) || (P.back_bumper >= 2)) {
+            if (D.flag_run && !D.flag_stopping && (D.vin_out > BUMPER_RUN_VIN)) {
+                s_run.bumper_run = 1;
+                s_run.bumper_cnt = (int16_t)(keep * ((P.for_bumper >= 2) ? 10 : 100));
+            }
+        }
+    }
+    /* 범퍼가 풀리고 정지가 끝났으면 대기 뒤 스스로 재출발 */
+    if ((D.system_err == ERR_BUMPER) && s_run.bumper_run && s_run.idle
+        && ((P.for_bumper == 0) || !for_on) && ((P.back_bumper == 0) || !back_on)) {
+        s_run.bumper_cnt--;
+        if (s_run.bumper_cnt <= 0) {
+            s_run.bumper_run = 0;
+            D.wait_start = 1;
+            D.estop = 0;
+            D.obs_use = 1;
+            D.system_err = 0;
+        }
+    }
+}
+
+static void stop_hold_check(int16_t stop_on)
+{
+    if (!stop_on || (D.ui_mode != UI_AUTO)) {
+        s_run.stop_hold = 0;
+        return;
+    }
+    if (++s_run.stop_hold >= STOP_HOLD_TICKS) {
+        if (acs_station_get(0) > 0) { acs_report_slot(ACS_SLOT_LOADING, acs_station_get(0)); }
+        s_run.stop_hold = 0;
+        s_run.standby = 0;
+        acs_station_reset();
+    }
+}
+
+static void manual_forback(int16_t start_edge)
+{
+    int16_t fb = (int16_t)io_in(IN_IF_5);
+    /* 저활성 입력의 상승 에지 = 논리 하강. 놓는 순간에 동작한다 */
+    int16_t fb_edge = (int16_t)(s_run.fb_prev && !fb);
+
+    s_run.fb_prev = fb;
+    if (s_run.auto_start || D.flag_run) { return; }
+    if ((P.forback_mode > 0) && (((D.ui_mode == UI_PARAM) && start_edge) || fb_edge)) {
+        run_relay((int16_t)!D.backward, 1);
+    }
+}
+
+static void input_filter(void)
+{
+    int16_t start_on = (int16_t)io_in(IN_START_SW);
+    int16_t stop_on = (int16_t)io_in(IN_STOP_SW);
+    /* 원본은 원시 값의 상승 에지다. 스위치가 저활성이라 "놓는 순간"이다 */
+    int16_t start_edge = (int16_t)(s_run.start_prev && !start_on);
+    int16_t stop_edge = (int16_t)(s_run.stop_prev && !stop_on);
+    int16_t report = (param_get(P_ACS_VERSION) == 2) || (param_get(P_ACS_VERSION) == 11);
+
+    s_run.start_prev = start_on;
+    s_run.stop_prev = stop_on;
+
+    if (io_in(IN_REMOTE_START)) { D.pause_stop = 0; }
+    if (io_in(IN_REMOTE_STOP))  { D.pause_stop = 1; }
+
+    if (!stop_on && start_edge && report) { run_report_start(); }
+    if ((!stop_on && start_edge) || D.run_restart) {
+        if (s_run.idle) {
+            s_run.auto_start = 1;
+            start_run();
+        }
+    }
+    D.stop_sw = stop_on;
+    if (stop_on) { stop_switch(); }
+    if (report && stop_edge) { run_report_stop(); }
+
+    /* E-STOP·범퍼는 리셋보다 뒤에 있어 누르고 있는 동안 해제되지 않는다 */
+    if (io_in(IN_ESTOP)) {
+        D.estop = 1;
+        D.system_err = ERR_ESTOP;
+        run_seq_init();
+        act_abort_all();
+    }
+    bumper_check();
+    stop_hold_check(stop_on);
+    manual_forback(start_edge);
+}
+
+/* ---- error_check 앞부분: motor_run 전에 끝낸다 ---- */
+
+static void reset_and_alarm(void)
+{
+    D.amp_reset = 0;
+    if (s_run.reset_req) {
+        if ((D.system_err == ERR_AMP_L_OVERLOAD) || (D.system_err == ERR_AMP_R_OVERLOAD)) { D.amp_reset = 1; }
+        s_run.reset_req = 0;
+        D.system_err = D.stop_err = D.action_err = 0;
+        D.estop = 0;
+    }
+    if (io_in(IN_AMP_L_OVERLOAD)) { D.system_err = ERR_AMP_L_OVERLOAD; }
+    if (io_in(IN_AMP_R_OVERLOAD)) { D.system_err = ERR_AMP_R_OVERLOAD; }
+}
+
+static void apply_errors(void)
+{
+    if (D.system_err != 0) {
+        D.amp_run = 0;
+        D.wait_start = 0;
+        D.run_restart = 0;
+    }
+    if (D.stop_err != 0) {
+        D.flag_stopping = 1;
+        if (D.stop_err != ERR_STOP_APPROACH) { D.stop_pulses = 0; }
+    }
+    if (!D.cross_in_flag && !D.cross_in_on && !D.cross_out_flag && !D.cross_out_on
+        && (D.step == DRIVE_COMM)) {
+        D.step = DRIVE_CHANGE_SPEED;
+    }
+}
+
+/* ---- 조그 (jog_process) ---- */
+
+static int16_t square_acc(int16_t target)
+{
+    int16_t v = D.vin_out;
+    int16_t acc = (v > P.llow_speed) ? P.acc : ((P.acc < 5) ? P.acc : 5);
+    int16_t dcc = (v > 2 * P.min_speed) ? P.dcc : ((P.dcc < 60) ? P.dcc : 60);
+
+    if ((target - v) >= 0) {
+        v = (int16_t)(v + ((v >= 0) ? acc : dcc));
+        if (target <= v) { v = target; }
+    }
+    else {
+        v = (int16_t)(v - ((v >= 0) ? dcc : acc));
+        if (target >= v) { v = target; }
+    }
+    if ((target == 0) && (P.min_speed > v)) { v = 0; }
+    D.vin_out = v;
+    return v;
+}
+
+static int16_t limit_add(int16_t value, int16_t delta, int16_t lower, int16_t upper)
+{
+    value = (int16_t)(value + delta);
+    if (value > upper) { return upper; }
+    if (value < lower) { return lower; }
+    return value;
+}
+
+static int16_t s_key_l, s_key_r;
+
+static void jog_curve(int16_t *add, int16_t *other, int16_t *key, int16_t dir)
+{
+    if (D.jog_left_only || D.jog_right_only) { return; }
+    D.amp_dir = dir;
+    *key = 1;
+    *add = limit_add(*add, -5, (int16_t)-P.jog_speed, 0);
+    *other = 0;
+    D.jog_rpm = square_acc(P.jog_speed);
+}
+
+static void jog_step(void)
+{
+    uint16_t bits = io_jog_bits();
+
+    D.jog_bits = (int16_t)bits;
+    if ((bits == 0xFu) || (bits == 0u) || D.jog_stopping) {
+        D.jog_stopping = 1;
+        D.add_speed_l = D.add_speed_r = 0;
+        s_key_l = s_key_r = 0;
+        D.jog_rpm = square_acc(0);
+        if (D.jog_rpm <= 10) {
+            D.jog_left_only = D.jog_right_only = 0;
+            D.jog_stopping = 0;
+            D.w_pi_out[0] = D.w_pi_out[1] = 0.0f;
+            D.w_err[0] = D.w_err[1] = 0;
+        }
+        return;
+    }
+    switch (bits) {
+    case 0xEu:
+        D.amp_dir = MOTION_FWD;
+        D.jog_rpm = square_acc(P.jog_speed);
+        break;
+    case 0xDu:
+        D.amp_dir = MOTION_BACK;
+        D.jog_rpm = square_acc(P.jog_speed);
+        break;
+    case 0xBu:
+        if (!s_key_l && !s_key_r) {
+            D.amp_dir = MOTION_FWD;
+            D.jog_left_only = 1;
+            D.add_speed_l = 0;
+            D.add_speed_r = limit_add(D.add_speed_r, 5, 0, 400);
+            D.jog_rpm = square_acc(D.add_speed_r);
+        }
+        break;
+    case 0x7u:
+        if (!s_key_l && !s_key_r) {
+            D.amp_dir = MOTION_FWD;
+            D.jog_right_only = 1;
+            D.add_speed_l = limit_add(D.add_speed_l, 5, 0, 400);
+            D.add_speed_r = 0;
+            D.jog_rpm = square_acc(D.add_speed_l);
+        }
+        break;
+    case 0xAu:
+        jog_curve(&D.add_speed_l, &D.add_speed_r, &s_key_l, MOTION_FWD);
+        break;
+    case 0x9u:
+        jog_curve(&D.add_speed_l, &D.add_speed_r, &s_key_l, MOTION_BACK);
+        break;
+    case 0x6u:
+        jog_curve(&D.add_speed_r, &D.add_speed_l, &s_key_r, MOTION_FWD);
+        break;
+    case 0x5u:
+        jog_curve(&D.add_speed_r, &D.add_speed_l, &s_key_r, MOTION_BACK);
+        break;
+    case 0x3u:
+        if (!s_key_l && !s_key_r) {
+            D.amp_dir = D.jog_left_only ? MOTION_CCW : MOTION_CW;
+            D.add_speed_l = limit_add(D.add_speed_l, 5, 0, 200);
+            D.add_speed_r = limit_add(D.add_speed_r, 5, 0, 200);
+            D.jog_rpm = square_acc(D.add_speed_r);
+        }
+        break;
+    default:
+        D.jog_rpm = 0;
+        break;
+    }
+}
+
+/* ---- 주행 시작 처리 (motor_drive_step 앞) ---- */
+
+static int16_t guide_within(int16_t range)
+{
+    return (D.guide_pos <= range) && (D.guide_pos >= (int16_t)-range);
+}
+
+static void start_low_speed(void)
+{
+    int16_t tag_clear = D.backward ? !D.tag_r : !D.tag_l;
+
+    if (s_run.init_step >= START_LOW_DONE) { return; }
+    if (tag_clear) { s_run.init_step = 1; }
+    if (s_run.init_step == 1) {
+        if (guide_within(START_ALIGN_RANGE)) {
+            if (++s_run.init_cnt > START_ALIGN_TICKS) {
+                D.speed_cmd = P.low_speed;
+                D.step = DRIVE_CHANGE_SPEED;
+                s_run.init_step = START_LOW_DONE;
+            }
+        }
+        else {
+            s_run.init_cnt = 0;
+        }
+    }
+}
+
+static void start_switch_high(void)
+{
+    if (s_run.drive_started || (s_run.init_step != START_LOW_DONE)) { return; }
+    if (io_in(IN_START_SW)) { D.drive_start_cnt++; }
+    else                    { D.drive_start_cnt = 0; }
+    if (D.drive_start_cnt >= START_HOLD_TICKS) {
+        D.speed_cmd = P.target_speed;
+        D.step = DRIVE_CHANGE_SPEED;
+        s_run.drive_started = 1;
+    }
+    if (D.tag_l || D.tag_r) { s_run.drive_started = 1; }
+}
+
+static void auto_speed_change(void)
+{
+    int16_t set_speed = param_get(P_SPEED_HIGH);
+
+    if (D.flag_stopping) { return; }
+    if (P.auto_drive_mode && (P.low_speed >= D.speed_cmd) && guide_within(AUTO_SPEED_RANGE)) {
+        if (P.straight_len <= D.straight_cnt) {
+            D.speed_cmd = P.target_speed;
+            D.step = DRIVE_CHANGE_SPEED;
+        }
+    }
+    else {
+        D.straight_cnt = 0;
+    }
+    if ((set_speed >= AUTO_SLOW_MIN_MPM) && (set_speed <= AUTO_SLOW_MAX_MPM) && P.auto_slow_mode
+        && (P.low_speed < D.speed_cmd)) {
+        if (!guide_within(AUTO_CURVE_RANGE)) {
+            if ((int32_t)P.tag_pulse[2] <= s_curve_cnt) {
+                D.speed_cmd = P.low_speed;
+                D.step = DRIVE_CHANGE_SPEED;
+            }
+        }
+        else {
+            s_curve_cnt = 0;
+        }
+    }
+}
+
+static void drive_pre(void)
+{
+    start_low_speed();
+    start_switch_high();
+    if (D.obs_use) { auto_speed_change(); }
+}
+
+/* ---- 테이프 찾아 정지 (DA_Tape_Stop) ---- */
+
+static uint16_t led_total(void)
+{
+    uint16_t i, n = 0;
+    uint32_t v = D.guide_wide ? D.guide_led32 : (uint32_t)D.guide_led;
+    for (i = 0; i < 16u; i++) { n = (uint16_t)(n + (uint16_t)((v >> i) & 1UL)); }
+    return n;
+}
+
+#define TAPE_LED_MIN 6      /* 교차 테이프로 볼 점등 수 */
+
+static struct { int16_t prev_id; uint32_t start_len; int16_t hits; } s_tape;
+
+static void tape_stop(void)
+{
+    int16_t id = D.tape_stop_id;
+
+    if (id == 0) { s_tape.prev_id = 0; s_tape.hits = 0; return; }
+    if (id != s_tape.prev_id) {
+        s_tape.prev_id = id;
+        s_tape.start_len = s_pulses[0];
+    }
+    D.speed_cmd = P.min_speed;
+    D.step = DRIVE_CHANGE_SPEED;
+    if (led_total() >= TAPE_LED_MIN) {
+        if (++s_tape.hits > 1) {
+            D.flag_stopping = 1;
+            seq_request((uint16_t)id);
+            D.stop_pulses = 0;
+            D.tape_stop_id = 0;
+            s_tape.hits = 0;
+            stop_request_tag();
+        }
+    }
+    else if ((int32_t)(s_pulses[0] - s_tape.start_len) > 2L * P.stop_len) {
+        D.system_err = ERR_GUIDE_SENSOR;
+        D.tape_stop_id = 0;
+    }
+}
+
+/* ---- 공개 10 ms ---- */
+
+void run_coordinate(void)
+{
+    D.tag_l = (int16_t)io_in(IN_TAG_L);
+    D.tag_r = (int16_t)io_in(IN_TAG_R);
+    D.obs_f = (int16_t)io_in(IN_OBS_F);
+    D.obs_b = (int16_t)io_in(IN_OBS_B);
+
+    reset_and_alarm();
+    battery_check();
+    tape_stop();
+    auto_run();
+    input_filter();
+    apply_errors();
+    if (D.flag_jog_on && (D.control == RUN_JOG)) { jog_step(); }
+    s_run.was_stopping = D.flag_stopping;
+    s_run.prev_len = D.stop_pulses;
+}
+
+void run_seq(void)
+{
+    if (s_run.seq_go) { seq_run(); }
+    act_run();
+    request_tag_if_new(s_run.was_stopping, s_run.prev_len);
+}
+
+void run_after_motor(void)
+{
+    if ((D.system_err != 0) || (D.stop_err != 0) || ((D.action_err != 0) && (D.action_err < ERR_ACTION_LIMIT))) {
+        run_seq_init();
+    }
+    if ((D.action_err == ERR_OBSTACLE) && (D.speed_cmd == P.target_speed)) {
+        D.speed_cmd = P.low_speed;
+        D.step = DRIVE_CHANGE_SPEED;
+    }
+    acs_error_tick();
+    if (s_run.standby_auto) {
+        if (++s_run.standby_cnt > STANDBY_TICKS) {
+            acs_report_slot(ACS_SLOT_STANDBY, s_run.standby);
+            s_run.standby_cnt = 0;
+        }
+    }
+    else {
+        s_run.standby_cnt = 0;
+    }
+    if (s_run.status_cnt <= STATUS_TICKS) { s_run.status_cnt++; }
+    if ((s_run.status_cnt > STATUS_TICKS) && ((D.system_err != 0) || (D.stop_err != 0))) {
+        acs_report_slot(ACS_SLOT_PROCESSING, 0);
+        s_run.status_cnt = 0;
+    }
+}

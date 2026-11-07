@@ -105,4 +105,9 @@ int16_t  guide_source_led(void);                                  /* 위치를 '
 uint16_t guide_curve_span(void);
 int16_t  guide_want_h(int16_t branch_start, int16_t branch_step); /* 다음 요청이 'H' 인가 */
 
+/* SCI-B 입출력과 오류 판정. 10 ms (src/sys/guide_poll.c) */
+void     guide_poll(void);
+void     guide_poll_reset(void);
+void     guide_poll_start(void);      /* 주행 시작 */
+
 #endif /* AGV_GUIDE_H */
