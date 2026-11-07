@@ -299,6 +299,36 @@ int main(void)
     assert(D.p_err == -5);
     (void)param_set(P_OPT_FLAGS, 0);
 
+    /* 선택 비트: 휠 간격 비례. 60 cm 면 그대로, 120 cm 면 비례 출력이 두 배 */
+    { float out60;
+      setup();
+      (void)param_set(P_WHEEL_BASE_MM, 60);
+      D.guide_pos = 3;
+      steer_run(0);
+      out60 = D.p_pi_out;
+      setup();
+      (void)param_set(P_WHEEL_BASE_MM, 60);
+      (void)param_set(P_OPT_FLAGS, OPT_STEER_WB);
+      D.guide_pos = 3;
+      steer_run(0);
+      assert(near0(D.p_pi_out - out60) < 1e-3f);
+      setup();
+      (void)param_set(P_WHEEL_BASE_MM, 120);
+      (void)param_set(P_OPT_FLAGS, OPT_STEER_WB);
+      D.guide_pos = 3;
+      steer_run(0);
+      assert(near0(D.p_pi_out - 2.0f * out60) < 1e-2f);
+      (void)param_set(P_OPT_FLAGS, 0);
+      (void)param_set(P_WHEEL_BASE_MM, 60); }
+
+    /* 식별 시험 옆 계단: p_test 만큼 지령이 옮겨 간다 */
+    setup();
+    D.guide_pos = 0;
+    D.p_test = 4;
+    steer_run(0);
+    assert(D.p_err == 4);
+    D.p_test = 0;
+
     puts("test_steer ok");
     return 0;
 }

@@ -6,11 +6,13 @@
  *     감지 뒤 미끄러진 거리를 더해 GD 를 저장한다.
  * 직진 구간에서 'a' 와 'h' 를 번갈아 받아 가이드 부호·배율, 조향 편차, LED 점등 수, 좌우 펄스 비도 잰다.
  * 결과 키는 파라미터 편집과 같다: UP·DOWN 쪽 선택, SET 수정 시작, SHIFT 자리, UP·DOWN 값,
- * SET 확정·저장, RESET 취소. 수정 중이 아니면 RESET 은 다시 시험 */
+ * SET 확정·저장, RESET 취소. 수정 중이 아니면 RESET 은 다시 시험.
+ * 대기(TUNE) 중 SHIFT 를 누르면 식별 시험(IDEN)으로 바뀐다. ident.c 참고 */
 #include <math.h>
 #include "agv/tune.h"
 #include "agv/drive.h"
 #include "agv/guide.h"
+#include "agv/ident.h"
 #include "agv/param.h"
 #include "agv/run.h"
 #include "agv/stop.h"
@@ -32,7 +34,7 @@
 #define GUIDE_MARK        0x7E57
 
 static struct {
-    uint16_t state, turn_seen, page, toggle;
+    uint16_t state, turn_seen, page, toggle, ident;
     uint32_t start, l0, r0, dl, dr;
     int16_t  wheel_base, dia_before, failed;
     int16_t  editing, place, edit_value;
@@ -68,12 +70,14 @@ void tune_reset(void)
     s_tune.state = TUNE_OFF;
     s_tune.turn_seen = 0;
     s_tune.failed = 0;
+    s_tune.ident = 0;
     clear_measure();
 }
 
 void     tune_arm(void)        { s_tune.state = TUNE_WAIT; clear_measure(); }
 int      tune_active(void)     { return s_tune.state != TUNE_OFF; }
 int      tune_failed(void)     { return s_tune.failed; }
+int      tune_ident_mode(void) { return (int)s_tune.ident; }
 int      tune_editing(void)    { return s_tune.editing; }
 int16_t  tune_edit_place(void) { return s_tune.place; }
 uint16_t tune_state(void)      { return s_tune.state; }
@@ -215,7 +219,12 @@ void tune_run(void)
     }
     switch (s_tune.state) {
     case TUNE_WAIT:
-        if (D.flag_run) {
+        if (D.flag_run && s_tune.ident) {
+            s_tune.failed = 0;
+            ident_start();
+            s_tune.state = TUNE_IDENT;
+        }
+        else if (D.flag_run) {
             clear_measure();
             s_tune.failed = 0;
             s_tune.dia_before = param_get(P_WHEEL_DIA_MM);
@@ -238,6 +247,9 @@ void tune_run(void)
         else if (leg_mm() > SEEK_LIMIT_MM) {
             fail();
         }
+        break;
+    case TUNE_IDENT:
+        if (ident_run() != 0) { s_tune.state = TUNE_IDENT_DONE; }
         break;
     case TUNE_TURN:
         if (D.flag_turn) { s_tune.turn_seen = 1; }
@@ -414,6 +426,15 @@ static int commit(void)
 int tune_key(uint16_t key)
 {
     if (D.flag_run || D.flag_stopping) { return 0; }
+    if ((s_tune.state == TUNE_WAIT) && (key == KEY_SHIFT)) {
+        s_tune.ident ^= 1u;
+        s_tune.failed = 0;
+        return 1;
+    }
+    if ((s_tune.state == TUNE_IDENT_DONE) && (key == KEY_RESET)) {
+        s_tune.state = TUNE_WAIT;
+        return 1;
+    }
     if (s_tune.state != TUNE_DONE) { return 0; }
     if (s_tune.editing) {
         if (edit_key(key, s_tune.page)) { return 1; }

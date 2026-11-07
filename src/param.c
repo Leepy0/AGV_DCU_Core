@@ -65,7 +65,7 @@ void param_default_types(int16_t kind1, int16_t kind2, int16_t kind3)
 typedef struct { uint16_t idx, addr; int16_t low, up, def; } extra_t;
 static const extra_t s_extra[] = {
     { P_GUIDE_DIST_MM,   PARAM_GUIDE_DIST_ADDR, PARAM_GUIDE_DIST_LOW, PARAM_GUIDE_DIST_UP, PARAM_GUIDE_DIST_DEFAULT },
-    { P_OPT_FLAGS,       116, 0, 15,  0 },
+    { P_OPT_FLAGS,       116, 0, 31,  0 },
     { P_SPEED_FF,        117, 0, 999, 0 },
     { P_ENC_STALL_TICKS, 118, 0, 99,  0 }
 };

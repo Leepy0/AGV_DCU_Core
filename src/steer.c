@@ -31,6 +31,7 @@
 #define GUIDE_DEADBAND_CURVE_SCALE  0.3f
 #define GUIDE_KD_RATE               0.08f
 #define STEER_GUIDE_REF_MM          250.0f    /* 이득을 맞춘 센서 거리 */
+#define STEER_WB_REF_MM             600.0f    /* 이득을 맞춘 휠 간격 */
 #define STEER_LIMIT_RPM             1500
 
 static struct {
@@ -209,13 +210,15 @@ void steer_run(int16_t tuning_type)
         float p_out, i_candidate, rate_ff, unsat, out;
         /* 센서가 회전 중심에서 멀수록 같은 방향 오차에 위치가 크게 변한다. 기준 거리 250 mm 로 맞춘다 */
         float geom = (P.guide_dist_mm > 0.0f) ? (STEER_GUIDE_REF_MM / P.guide_dist_mm) : 1.0f;
+        /* 같은 바퀴 차에 차체가 도는 속도는 휠 간격에 반비례한다. 간격이 넓으면 그만큼 크게 준다 */
+        if (param_opt(OPT_STEER_WB)) { geom *= ((float)param_get(P_WHEEL_BASE_MM) * 10.0f) / STEER_WB_REF_MM; }
 
         D.p_err_1 = D.p_err;
         if (D.branch_start != 0) {        /* 분기 중에는 센서 대신 고정 편이 지령을 쓴다 */
             D.p_err = !D.backward ? D.p_cmd : (int16_t)(-D.p_cmd);
         }
         else {
-            D.p_err = (int16_t)((float)D.p_cmd - (!D.backward ? sen : -sen));
+            D.p_err = (int16_t)((float)(D.p_cmd + D.p_test) - (!D.backward ? sen : -sen));
         }
 
         limit = (int16_t)(((D.v_cmd >= 0) ? D.v_cmd : (int16_t)(-D.v_cmd)) * 2);

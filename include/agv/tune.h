@@ -4,7 +4,8 @@
 #include "agv/types.h"
 #include "agv/guide.h"
 
-enum { TUNE_OFF = 0, TUNE_WAIT, TUNE_GO_1, TUNE_TURN, TUNE_RESTART, TUNE_GO_2, TUNE_STOPPING, TUNE_DONE };
+enum { TUNE_OFF = 0, TUNE_WAIT, TUNE_GO_1, TUNE_TURN, TUNE_RESTART, TUNE_GO_2, TUNE_STOPPING, TUNE_DONE,
+       TUNE_IDENT, TUNE_IDENT_DONE };
 
 /* 결과 쪽. UP·DOWN 으로 넘긴다 */
 enum { TUNE_PAGE_WHEEL_BASE = 0,   /* WW 계산한 휠 간격 (24번). 수정 가능 */
@@ -26,6 +27,7 @@ void     tune_arm(void);          /* 전원 투입 때 켠다. 끝내려면 전�
 void     tune_load(void);         /* 부팅 때 저장한 가이드 부호·배율을 되살린다 */
 int      tune_active(void);
 int      tune_failed(void);       /* 1 = 실패로 TUNE 로 돌아옴 */
+int      tune_ident_mode(void);   /* 1 = START 가 식별 시험을 한다. 대기 중 SHIFT 로 바꾼다 */
 int      tune_editing(void);      /* 값을 고치는 중 */
 int16_t  tune_edit_place(void);   /* 1 일, 2 십, 3 백의 자리 */
 uint16_t tune_state(void);

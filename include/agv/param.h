@@ -52,6 +52,7 @@ enum {
 #define OPT_STEER_D_SIGN   0x02u   /* 변화율 항 부호를 뒤집어 감쇠로 쓴다 */
 #define OPT_RESUME_CRUISE  0x04u   /* 일시정지 재개 때 남은 거리가 길면 최대 속도까지 가속한다 */
 #define OPT_KF_POSITION    0x08u   /* 조향 입력을 칼만 추정 위치로 쓴다 (기존 원시값) */
+#define OPT_STEER_WB       0x10u   /* 조향 이득을 휠 간격에 비례시킨다. 60 cm 기준. 크기가 다른 차량을 같은 이득으로 쓴다 */
 
 /* 저장 계층. 부팅 경로의 write 는 끝난 뒤 돌아와야 한다.
  * 운전 중에는 저장 큐에 넣는 구현으로 바꿔 끼워도 된다 */

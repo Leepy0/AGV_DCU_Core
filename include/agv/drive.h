@@ -127,6 +127,7 @@ typedef struct {
     volatile int16_t cnt_branch_l, cnt_branch_r;   /* 엔코더 ISR 이 센다 */
     volatile int32_t straight_cnt;   /* gStraight_Cnt */
     int16_t p_cmd;
+    int16_t p_test;                  /* 식별 시험의 옆 계단 지령(칸). 분기가 지우지 않는다 */
 
     /* 조향 출력 */
     int16_t add_speed_l, add_speed_r;

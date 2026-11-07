@@ -14,6 +14,7 @@
 #include "agv/stop.h"
 #include "agv/storage.h"
 #include "agv/tagact.h"
+#include "agv/tune.h"
 #include "agv/ui.h"
 
 #define D agv_drive
@@ -234,6 +235,7 @@ static void start_run(void)
     D.run_restart = 0;
     D.turn_motion = 0;
     D.p_cmd = 0;
+    D.p_test = 0;
     D.straight_cnt = 0;
     s_rail_cut = 0;
     s_curve_cnt = 0;
@@ -774,6 +776,7 @@ static void auto_speed_change(void)
 static void drive_pre(void)
 {
     start_low_speed();
+    if (tune_active()) { return; }      /* 튜닝·식별 시험은 속도를 스스로 정한다 */
     start_switch_high();
     if (D.obs_use) { auto_speed_change(); }
 }
