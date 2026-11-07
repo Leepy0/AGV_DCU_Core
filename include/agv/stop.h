@@ -93,6 +93,8 @@ int16_t stop_run(void);                       /* 반환 0 = 정지 제어가 쉬
 void    stop_begin_runtime(int16_t reason);
 int16_t stop_blocking_reason(void);
 int16_t stop_alignment_speed(int16_t target_rpm);
+int16_t stop_turn_dcc(void);                   /* 회전 감속. 일반·정렬 회전이 같은 값을 쓴다 */
+int16_t stop_turn_speed(int16_t target_rpm);   /* 정렬 회전 속도 경사 */
 void    stop_now(void);                       /* RFID 재시도 보상으로 이미 지나친 경우 즉시 0 지령 */
 
 int16_t stop_is_braking(void);

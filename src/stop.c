@@ -36,6 +36,11 @@ int16_t stop_clamp(int16_t value, int16_t lower, int16_t upper)
     return value;
 }
 
+static int16_t turn_dcc(int16_t dcc)
+{
+    return stop_clamp((int16_t)(dcc / STOP_TURN_DCC_DIV), 1, STOP_TURN_DCC_MAX);
+}
+
 void stop_ctrl_reset(stop_ctrl_t *c)
 {
     c->reason = STOP_REASON_NONE;
@@ -100,7 +105,7 @@ void stop_ctrl_begin(stop_ctrl_t *c, int16_t reason, int16_t entry_rpm, int16_t 
     }
     if (stop_is_position(reason)) {
         limit = (reason == STOP_REASON_TURN_ANGLE)
-              ? stop_clamp((int16_t)(dcc / STOP_TURN_DCC_DIV), 1, STOP_TURN_DCC_MAX)
+              ? turn_dcc(dcc)
               : stop_clamp(dcc, 1, STOP_RAPID_DCC_MAX);
         c->phase = (reason == STOP_REASON_TURN_ANGLE) ? STOP_PHASE_CRUISE : STOP_PHASE_DECELERATE;
         c->decel_limit = limit;
@@ -549,6 +554,18 @@ int16_t stop_alignment_speed(int16_t target_rpm)
     if (target_rpm <= 0) { return 0; }
     if (target_rpm < STOP_MIN_RPM) { target_rpm = STOP_MIN_RPM; }
     return motor_scv_speed(target_rpm, P.acc, P.dcc);
+}
+
+int16_t stop_turn_dcc(void) { return turn_dcc(P.dcc); }
+
+int16_t stop_turn_speed(int16_t target_rpm)
+{
+    int16_t dcc = stop_turn_dcc();
+    int16_t acc = (P.acc < dcc) ? P.acc : dcc;
+
+    if (target_rpm <= 0) { return 0; }
+    if (target_rpm < STOP_MIN_RPM) { target_rpm = STOP_MIN_RPM; }
+    return motor_scv_core(target_rpm, &D.vin_out, acc, dcc, P.llow_speed, P.min_speed, P.min_speed, 0, &D.scv_accel);
 }
 
 void stop_now(void)

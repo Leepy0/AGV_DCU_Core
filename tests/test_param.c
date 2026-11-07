@@ -33,6 +33,15 @@ int main(void)
     fake_reset();
     fake_params();
 
+    assert(param_get(P_ACC) == 5 && param_get(P_DCC) == 40);
+    /* 옛 턴 속도 30 은 15 로 줄이고 나머지 값을 지우지 않는다 */
+    { int16_t id = param_get(P_WHEEL_BASE_MM);
+      fake_ee[P_SPEED_TURN] = 30;
+      fake_ee[0] = ee_sum();
+      assert(param_boot(&fake_store, 2611) == 0);
+      assert(param_get(P_SPEED_TURN) == 15 && fake_ee[P_SPEED_TURN] == 15 && fake_ee[0] == ee_sum());
+      assert(param_get(P_WHEEL_BASE_MM) == id); }
+    assert(param_set(P_SPEED_TURN, 13) == 0);
     /* 빈 EEPROM → 한계 위반 → 기본값 1 세트 저장 */
     assert(param_get(P_SPEED_HIGH) == 30 && param_get(P_SPEED_LOW) == 25 && param_get(P_SPEED_TURN) == 13);
     assert(param_get(P_ACS_VERSION) == 11 && param_get(P_VERSION) == 2611);
@@ -85,8 +94,9 @@ int main(void)
 
     /* 저장: 체크섬과 값 두 번. 런타임 번호는 저장하지 않는다 */
     fake_ee_writes = 0;
-    assert(param_set(P_SPEED_TURN, 20) == 0);
-    assert(fake_ee_writes == 2 && fake_ee[P_SPEED_TURN] == 20 && fake_ee[0] == ee_sum());
+    assert(param_set(P_SPEED_TURN, 12) == 0);
+    assert(fake_ee_writes == 2 && fake_ee[P_SPEED_TURN] == 12 && fake_ee[0] == ee_sum());
+    assert(param_set(P_SPEED_TURN, 16) == -1);
     fake_ee_writes = 0;
     assert(param_set(P_BAT_DV, 240) == 0);
     assert(fake_ee_writes == 0 && param_get(P_BAT_DV) == 240);

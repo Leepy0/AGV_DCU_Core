@@ -17,7 +17,7 @@ typedef struct { int16_t low, up; } limit_t;
  * 31·38·39·44 는 새 파라미터이고 36 하한은 0 이다 */
 static const limit_t s_limit[P_PARA_INIT + 1] = {
     {0, 0},
-    {7, 60}, {3, 60}, {3, 40}, {0, 3}, {0, 99}, {0, 1},
+    {7, 60}, {3, 60}, {3, 15}, {0, 3}, {0, 99}, {0, 1},
     {10000, 10055}, {10000, 10022}, {1, 10}, {-9, 9}, {7, 60}, {5, 60},
     {20, 60}, {0, 999}, {0, 99}, {0, 9}, {10000, 10022}, {5, 9},
     {0, 300}, {0, 99}, {0, 20}, {10, 500}, {1, 250}, {30, 300},
@@ -29,11 +29,11 @@ static const limit_t s_limit[P_PARA_INIT + 1] = {
 
 /* 1~45 세 벌. 26(P_AGV_TYPE)은 param_default_types 로 받는다. 38 은 새 파라미터라 전부 0 */
 static const int16_t s_defaults[3][P_SAVED_LAST] = {
-    { 30, 25, 13, 0, 0, 1, 11, 11, 10, 0, 50, 10, 20, 0, 0, 0, 22, 5, 35, 0, 0, 202, 40, 60, 0, 0,
+    { 30, 25, 13, 0, 0, 1, 11, 11, 10, 0, 50, 5, 40, 0, 0, 0, 22, 5, 35, 0, 0, 202, 40, 60, 0, 0,
       0, 0, 1, 0, 0, 0, 0, 54, 5, 5, 0, 0, 0, 5, 0, 0, 0, 0, 11 },
-    { 25, 20, 7, 0, 0, 1, 11, 11, 4, -9, 40, 10, 20, 0, 0, 0, 22, 5, 35, 0, 0, 202, 60, 60, 0, 0,
+    { 25, 20, 7, 0, 0, 1, 11, 11, 4, -9, 40, 5, 40, 0, 0, 0, 22, 5, 35, 0, 0, 202, 60, 60, 0, 0,
       0, 0, 1, 0, 0, 0, 0, 54, 5, 5, 1, 0, 0, 10, 0, 1, 0, 0, 11 },
-    { 30, 25, 7, 0, 0, 1, 11, 11, 4, -9, 40, 10, 20, 0, 0, 0, 22, 5, 0, 0, 0, 202, 40, 130, 3, 0,
+    { 30, 25, 7, 0, 0, 1, 11, 11, 4, -9, 40, 5, 40, 0, 0, 0, 22, 5, 0, 0, 0, 202, 40, 130, 3, 0,
       0, 7, 1, 0, 0, 0, 0, 54, 5, 5, 0, 0, 0, 10, 0, 0, 0, 0, 11 }
 };
 
@@ -299,6 +299,19 @@ static int16_t migrate_new_params(void)
     return (s_store->read(PARAM_MIGRATE_ADDR) == PARAM_MIGRATE_MARK) ? 0 : 1;
 }
 
+/* 턴 속도 상한을 낮췄다. 옛 값이 한계 위반이 되면 파라미터 전체가 기본값으로 지워진다.
+ * 그 값만 상한으로 줄여 다시 저장한다 */
+static void clamp_turn_speed(void)
+{
+    uint16_t i, sum = 0;
+    int16_t up = s_limit[P_SPEED_TURN].up;
+
+    if ((int16_t)s_store->read(P_SPEED_TURN) <= up) { return; }
+    s_store->write(P_SPEED_TURN, (uint16_t)up);
+    for (i = 1; i <= P_SAVED_LAST; i++) { sum = (uint16_t)(sum + s_store->read(i)); }
+    s_store->write(0, sum);
+}
+
 /* 반환 1 정상, 0 체크섬 불일치, -1 한계 위반 */
 static int16_t read_all(void)
 {
@@ -331,6 +344,7 @@ int16_t param_boot(const param_store_t *store, int16_t version)
     s_set[P_BAT_PERCENT] = 0;
 
     if (migrate_new_params() != 0) { status = ERR_PARAM_CHECKSUM; }
+    clamp_turn_speed();
     for (attempt = 0; attempt < 3; attempt++) {
         result = read_all();
         if (result == 1) { break; }

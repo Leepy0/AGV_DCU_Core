@@ -349,6 +349,16 @@ static void tape_end(void)
 
 static int32_t abs32(int32_t v) { return (v < 0) ? -v : v; }
 
+/* 지금 속도에서 최저 속도까지 줄이는 데 드는 두 바퀴 합 펄스 */
+static float tape_brake_pulses(void)
+{
+    float v = (float)D.vin_out;
+    float low = (float)P.turn_min;
+
+    if (v <= low) { return 0.0f; }
+    return ((v * v - low * low) / (2.0f * (float)stop_turn_dcc())) * ((float)STOP_ENCODER_PPR / 6000.0f) * 2.0f;
+}
+
 /* 정렬 회전 한 틱. 가이드는 회전 중 'h' 로만 받는다. 위치 부호는 보지 않아 실측 전에도 쓴다 */
 static int16_t tape_adjust(void)
 {
@@ -357,6 +367,7 @@ static int16_t tape_adjust(void)
     float   late = (float)turned - (D.tape_target_cnt + (float)D.tape_max);
     int32_t pos = abs32(D.guide_pos);
     int16_t seen = (int16_t)(!D.guide_all_off && !D.guide_all_on);
+    float   brake = tape_brake_pulses();
 
     switch (D.tape_step) {
     case 0:     /* 출발 라인에서 멀어지는 동안 슬립비를 잰다 */
@@ -391,6 +402,9 @@ static int16_t tape_adjust(void)
             speed = P.turn_min;
             D.tape_step = 2;
         }
+        else if ((float)turned >= (D.tape_target_cnt - brake)) {
+            speed = P.turn_min;      /* 감속이 느리니 라인을 보기 전에 줄인다 */
+        }
         break;
     case 2:     /* 최저 속도로 중앙까지 */
         speed = P.turn_min;
@@ -404,13 +418,14 @@ static int16_t tape_adjust(void)
 
 int16_t motor_turn_adjust(void)
 {
-    int16_t speed = D.tape_align ? tape_adjust() : P.turn_speed;
+    int16_t aligning = D.tape_align;
+    int16_t speed = aligning ? tape_adjust() : P.turn_speed;
 
     if ((D.turn_obs_use == 1)
         && (((P.for_obs == 1) && !D.backward && D.obs_f) || ((P.back_obs == 1) && (D.backward == 1) && D.obs_b))) {
         return stop_alignment_speed(0);
     }
-    return stop_alignment_speed(speed);
+    return aligning ? stop_turn_speed(speed) : stop_alignment_speed(speed);
 }
 
 /* ---- 10 ms 본체 ---- */

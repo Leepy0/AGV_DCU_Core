@@ -242,6 +242,31 @@ int main(void)
     D.guide_pos = 1;
     (void)motor_turn_adjust();
     assert(D.tape_align == 0 && D.turn_pulses == 0);
+    /* 정렬 회전 감속은 일반 회전과 같다. 라인을 보기 전에 미리 줄인다 */
+    setup();
+    (void)param_set(P_DCC, 40);
+    D.control = RUN_TURN;
+    D.tape_step = 1;
+    D.tape_align = 1;
+    D.turn_pulses = 2000;
+    D.tape_target_cnt = 2000.0f;
+    D.tape_max = 100;
+    D.guide_all_off = 1;
+    D.tape_turned = 0;
+    D.vin_out = P.turn_speed;
+    (void)motor_turn_adjust();
+    assert(D.vin_out == P.turn_speed);
+    D.tape_turned = 1990;
+    { int16_t v0 = D.vin_out;
+      for (int i = 0; i < 40; i++) {
+          int16_t v1;
+          (void)motor_turn_adjust();
+          v1 = D.vin_out;
+          assert((v0 - v1) <= stop_turn_dcc());
+          v0 = v1;
+      }
+      assert(D.vin_out < P.turn_speed); }
+    assert(stop_turn_dcc() == 10);
     /* 일반 회전은 가이드를 보지 않는다 */
     setup();
     D.control = RUN_TURN;
