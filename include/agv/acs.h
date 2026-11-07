@@ -1,7 +1,8 @@
 /*
  * acs.h - ACS 세션: 슬롯 40칸, 슬롯별 재전송, 교차로, 스테이션 큐. 설계: docs/04_통신_계층.md 3절
  *
- * P_ACS_RETRY_LEGACY 가 0 이면 ACS 를 쓰지 않는 장비다. 슬롯을 만들지 않고 송신하지 않는다.
+ * P_ACS_RETRY_LEGACY 가 0 이면 ACS 를 쓰지 않는 장비다. ACS 슬롯과 응답을 만들지 않는다.
+ * 태그 리더 보드로 가는 'E' 프레임 ACK 는 계속 보낸다.
  */
 #ifndef AGV_ACS_H
 #define AGV_ACS_H
@@ -32,7 +33,8 @@ void     acs_report(uint16_t info, int16_t num);        /* 'L' 'U' 'N' 'A' 'F' '
 void     acs_report_slot(uint16_t slot, int16_t num);   /* 같은 Info 가 여럿인 슬롯용 */
 void     acs_call_ack(uint16_t rx_msgid);               /* 'N' 수신 응답. 1회 송신 */
 void     acs_slot_clear(uint16_t slot);
-int      acs_send_ack(uint16_t rx_msgid, uint16_t c6, uint16_t c7, uint16_t c9);   /* 즉시 1회 */
+int      acs_send_ack(uint16_t rx_msgid, uint16_t c6, uint16_t c7, uint16_t c9);   /* ACS 로 즉시 1회 */
+int      acs_send_tag_ack(uint16_t rx_msgid, uint16_t c6, uint16_t c7, uint16_t c9);   /* 태그 리더 보드로. ACS 사용 여부와 무관 */
 
 void     acs_on_ack(uint16_t info);            /* ACS 의 'A' 프레임. 같은 Info 중 가장 오래된 슬롯 해제 */
 uint16_t acs_pending(void);                    /* 미확인 슬롯 수 */

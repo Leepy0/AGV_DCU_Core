@@ -687,6 +687,9 @@ static void test_acs_off(void)
     acs_report('L', 3);
     ticks(50);
     assert(host.sci[HAL_SCI_A].tx_len == 0);
+    tag_frame(2, '1', 0);                 /* 태그 ACK 는 계속 나가고 태그 동작도 한다 */
+    run_scan(1);
+    assert(tx_has('A', 'E'));
     printf("  acs off ok\n");
 }
 

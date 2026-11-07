@@ -195,6 +195,13 @@ int acs_send_ack(uint16_t rx_msgid, uint16_t c6, uint16_t c7, uint16_t c9)
     return link_send(buf, FRAME_LEN_LONG);
 }
 
+int acs_send_tag_ack(uint16_t rx_msgid, uint16_t c6, uint16_t c7, uint16_t c9)
+{
+    uint16_t buf[FRAME_LEN_LONG];
+    frame_build_ack(buf, s_pan, rx_msgid, c6, c7, c9);
+    return link_send(buf, FRAME_LEN_LONG);
+}
+
 uint16_t acs_pending(void)
 {
     uint16_t i, n = 0;

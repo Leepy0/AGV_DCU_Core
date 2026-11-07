@@ -135,9 +135,11 @@ int main(void)
     setup(1, 0, 1);
     acs_report('L', 1);
     acs_cross_in(3);
-    assert(acs_send_ack('1', 'E', 'T', 'W') == 0);
+    assert(acs_send_ack('1', 'W', 'C', 'P') == 0);
     ticks(10);
     assert(fake_tx_count == 0 && acs_pending() == 0 && !D.cross_in_flag);
+    assert(acs_send_tag_ack('1', 'E', 'T', 'W') == 1);     /* 태그 ACK 는 ACS 미사용과 무관 */
+    assert(fake_tx_count == 1);
 
     /* ACK: 같은 Info 중 가장 오래된 슬롯. 'C' 는 9·16·21 공유 */
     setup(1, 5, 0);

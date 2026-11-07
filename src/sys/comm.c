@@ -226,7 +226,7 @@ static void on_event(const rx_item_t *it)
         s_rfid.valid = 0;                               /* 회전 중 태그는 ACK 없이 무시 */
         return;
     }
-    (void)acs_send_ack(b[3], b[1], kind, 'W');
+    (void)acs_send_tag_ack(b[3], b[1], kind, 'W');
     s_recent_index = kind;
     s_recent_num = num;
     if ((s_overlap_index == s_recent_index) && (s_overlap_num == s_recent_num)) {
