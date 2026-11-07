@@ -4,11 +4,12 @@
 #include "agv/types.h"
 #include "agv/guide.h"
 
-enum { TUNE_OFF = 0, TUNE_WAIT, TUNE_GO_1, TUNE_TURN, TUNE_RESTART, TUNE_GO_2, TUNE_DONE };
+enum { TUNE_OFF = 0, TUNE_WAIT, TUNE_GO_1, TUNE_PAUSE, TUNE_TURN, TUNE_RESTART, TUNE_GO_2, TUNE_DONE };
 
 /* 결과 쪽 */
 enum { TUNE_PAGE_WHEEL_BASE = 0,   /* 계산한 휠 간격 (24번) */
-       TUNE_PAGE_DISTANCE,         /* 1 m 직진의 실측 거리 입력 cm → 휠 지름 (22번) */
+       TUNE_PAGE_DISTANCE,         /* 1 m 지점의 실측 오차 mm (+ 더 감) → 휠 지름 (22번) */
+       TUNE_PAGE_RETURN,           /* 출발점으로 돌아온 오차 mm. 기록만 한다 */
        TUNE_PAGE_GUIDE,            /* 'a' = k × 'h' 의 k × 100. 음수면 'h' 부호가 반대 */
        TUNE_PAGE_STEER_RMS,        /* 직진 중 'a' 편차 RMS × 10 */
        TUNE_PAGE_STEER_MAX,        /* 직진 중 'a' 편차 최대 */
@@ -22,6 +23,7 @@ void     tune_reset(void);
 void     tune_arm(void);          /* 전원 투입 때 켠다. 끝내려면 전원을 다시 켠다 */
 void     tune_load(void);         /* 부팅 때 저장한 가이드 부호·배율을 되살린다 */
 int      tune_active(void);
+int      tune_failed(void);       /* 1 = 회전 실패로 TUNE 로 돌아옴 */
 uint16_t tune_state(void);
 uint16_t tune_page(void);
 int16_t  tune_result(void);       /* 계산한 휠 간격 값 */

@@ -60,10 +60,12 @@ void tagact_forback(dir_t d)
     }
 }
 
+static int16_t s_turn_from_stop;   /* 1 = 멈춘 상태에서도 회전을 건다 (튜닝 모드) */
+
 void tagact_turn(turn_dir_t d, uint16_t deg, dir_t fb, uint16_t autostart, uint16_t obs)
 {
     if ((P.turn_mode <= 0) || (D.turn_pulses != 0) || (D.stop_pulses != 0)
-        || (!seq_is_active() && (D.vin_out <= TURN_STOP_MIN_VIN))) {
+        || (!seq_is_active() && !s_turn_from_stop && (D.vin_out <= TURN_STOP_MIN_VIN))) {
         return;
     }
     if (D.vin_out >= TURN_STOP_MIN_VIN) {
@@ -106,6 +108,13 @@ void tagact_turn_align(turn_dir_t d, uint16_t deg, uint16_t next)
     /* 방향이 바뀌면 센서 전원도 바뀌어 출발 라인을 볼 수 없다. 슬립 측정을 건너뛴다 */
     D.tape_step = (fb != 0u) ? 1 : 0;
     D.tape_align = 1;
+}
+
+void tagact_turn_align_stopped(turn_dir_t d, uint16_t deg, uint16_t next)
+{
+    s_turn_from_stop = 1;
+    tagact_turn_align(d, deg, next);
+    s_turn_from_stop = 0;
 }
 
 void tagact_branch(branch_dir_t d)

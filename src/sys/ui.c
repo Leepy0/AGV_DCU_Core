@@ -127,7 +127,21 @@ void ui_digits(uint16_t *out)
 
 /* ---- 2 ms ISR ---- */
 
-static uint16_t any_error(void) { return (D.system_err != 0) || (D.stop_err != 0) || (D.action_err != 0); }
+/* 튜닝 중에는 비상정지·범퍼·앰프·장애물만 오류로 보인다 */
+static int16_t safety_error(void)
+{
+    if ((D.system_err == ERR_ESTOP) || (D.system_err == ERR_BUMPER)
+        || (D.system_err == ERR_AMP_L_OVERLOAD) || (D.system_err == ERR_AMP_R_OVERLOAD)) {
+        return D.system_err;
+    }
+    return (D.action_err == ERR_OBSTACLE) ? D.action_err : 0;
+}
+
+static uint16_t any_error(void)
+{
+    if (tune_active()) { return (uint16_t)(safety_error() != 0); }
+    return (D.system_err != 0) || (D.stop_err != 0) || (D.action_err != 0);
+}
 
 static void blink_step(void)
 {
@@ -560,6 +574,7 @@ static void show_cross(void)
 
 static int16_t error_code(void)
 {
+    if (tune_active()) { return safety_error(); }
     if (D.system_err != 0) { return D.system_err; }
     if (D.stop_err != 0)   { return D.stop_err; }
     return D.action_err;
@@ -740,11 +755,18 @@ static void show_history(void)
     s_ui.flick = 0;
 }
 
+/* 글자 1개 + 부호 + 값 3자리 */
+static void show_tune_value(uint16_t c, int16_t v)
+{
+    int16_t m = (v < 0) ? (int16_t)-v : v;
+    show(c, (v < 0) ? DIGIT_MINUS : DIGIT_NONE, digit_of(m, 100), digit_of(m, 10), digit_of(m, 1));
+}
+
 /* 결과 쪽: 글자 2개 + 값 3자리 */
 static void show_tune_page(void)
 {
     static const char name[TUNE_PAGE_COUNT][2] = {
-        {'W', 'W'}, {'D', ' '}, {'G', ' '}, {'S', 'E'}, {'S', 'P'}, {'F', 'L'}, {'L', 'E'}, {'L', 'R'}
+        {'W', 'W'}, {'D', ' '}, {'R', ' '}, {'G', ' '}, {'S', 'E'}, {'S', 'P'}, {'F', 'L'}, {'L', 'E'}, {'L', 'R'}
     };
     uint16_t page = tune_page();
     int16_t v = tune_value(page);
@@ -760,14 +782,19 @@ static void show_tune_page(void)
     s_ui.digit[2] = digit_of(m, 100);
     s_ui.digit[3] = digit_of(m, 10);
     s_ui.digit[4] = digit_of(m, 1);
-    if (page == TUNE_PAGE_DISTANCE) { s_ui.flick = 0x1Cu; }   /* 입력하는 값이라 깜박인다 */
+    if ((page == TUNE_PAGE_DISTANCE) || (page == TUNE_PAGE_RETURN)) { s_ui.flick = 0x1Cu; }   /* 입력하는 값 */
 }
 
 static void show_tune(void)
 {
     switch (tune_state()) {
     case TUNE_WAIT:
-        show(letter('T'), letter('U'), letter('N'), letter('E'), DIGIT_NONE);
+        if (tune_failed()) { show(letter('F'), letter('A'), letter('I'), letter('L'), DIGIT_NONE); }
+        else               { show(letter('T'), letter('U'), letter('N'), letter('E'), DIGIT_NONE); }
+        break;
+    case TUNE_PAUSE:
+        show_tune_value(letter('D'), tune_value(TUNE_PAGE_DISTANCE));
+        s_ui.flick = 0x1Cu;
         break;
     case TUNE_GO_1:
         show(letter('G'), letter('O'), DIGIT_NONE, DIGIT_NONE, 1);
@@ -858,11 +885,17 @@ static void lamp_update(void)
     else {
         y = 1;
     }
+    if (tune_active()) {
+        r = (uint16_t)(safety_error() != 0);
+        g = (uint16_t)!r;
+        y = 0;
+    }
     io_out(OUT_LAMP_R, r);
     io_out(OUT_LAMP_G, g);
     io_out(OUT_LAMP_Y, y);
     buzz = (D.system_err != 0) || (D.stop_err != 0)
         || ((D.action_err != 0) && (D.action_err != ERR_CROSS_WAIT) && (D.action_err != ERR_CROSS_NO_ACK));
+    if (tune_active()) { buzz = (uint16_t)(safety_error() != 0); }
     io_out(OUT_BUZZER, (uint16_t)(buzz && s_ui.pulse_flag));
 }
 

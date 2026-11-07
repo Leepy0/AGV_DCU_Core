@@ -910,6 +910,17 @@ static void test_tune_guide(void)
     tune_load();
     guide_cfg_get(&cfg);
     assert((cfg.invert_fwd == 1) && (cfg.invert_back == 0) && (cfg.h_scale == 1.25f));
+    {   /* 튜닝 중 저전압 280 은 표시·부저에 나오지 않는다 */
+        uint16_t d[5];
+        tune_arm();
+        host.key = 0;
+        host.adc = 100u << 4;
+        ticks(1100);
+        assert(D.action_err == ERR_BAT_LOW);
+        ui_digits(d);
+        assert(d[0] != 15u);                      /* 'E' 가 아니다 */
+        assert(host.bus_out[BUS_LAMP] & 0x40u);   /* 부저 꺼짐 (저활성) */
+    }
     printf("  tune guide ok\n");
 }
 
