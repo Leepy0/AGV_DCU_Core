@@ -319,6 +319,12 @@ int tune_key(uint16_t key)
             err_step(&s_tune.err_turn, sign);
             return 1;
         case KEY_SET:
+            /* 지름을 먼저 고쳐 저장한다. 회전 펄스와 돌아오는 1 m 가 새 값으로 계산되어
+             * 이번 회전의 휠 간격과 복귀 오차가 바로 맞는다 */
+            if (s_tune.err_turn != 0) {
+                (void)param_set(P_WHEEL_DIA_MM, clamp_param(P_WHEEL_DIA_MM, (float)param_get(P_WHEEL_DIA_MM)
+                                                * (TUNE_DIST_MM + (float)s_tune.err_turn) / TUNE_DIST_MM));
+            }
             D.tape_slow = 1;
             s_tune.turn_seen = 0;
             tagact_turn_align_stopped(TURN_CW, 180u, 0u);
@@ -339,17 +345,12 @@ int tune_key(uint16_t key)
         return 1;
     case KEY_UP:
     case KEY_DOWN:
-        if (s_tune.page == TUNE_PAGE_DISTANCE) { err_step(&s_tune.err_turn, sign); }
         if (s_tune.page == TUNE_PAGE_RETURN)   { err_step(&s_tune.err_back, sign); }
         return 1;
     case KEY_SET:
         switch (s_tune.page) {
         case TUNE_PAGE_WHEEL_BASE:
             return (param_set(P_WHEEL_BASE_MM, s_tune.wheel_base) == 0) ? 2 : 1;
-        case TUNE_PAGE_DISTANCE:
-            /* 엔코더로 1 m 간 자리의 실측 오차로 휠 지름을 비례해 고친다 */
-            return (param_set(P_WHEEL_DIA_MM, clamp_param(P_WHEEL_DIA_MM, (float)param_get(P_WHEEL_DIA_MM)
-                                                * (TUNE_DIST_MM + (float)s_tune.err_turn) / TUNE_DIST_MM)) == 0) ? 2 : 1;
         case TUNE_PAGE_GUIDE:
             return save_guide() ? 2 : 1;
         default:

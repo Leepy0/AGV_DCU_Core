@@ -782,7 +782,7 @@ static void show_tune_page(void)
     s_ui.digit[2] = digit_of(m, 100);
     s_ui.digit[3] = digit_of(m, 10);
     s_ui.digit[4] = digit_of(m, 1);
-    if ((page == TUNE_PAGE_DISTANCE) || (page == TUNE_PAGE_RETURN)) { s_ui.flick = 0x1Cu; }   /* 입력하는 값 */
+    if (page == TUNE_PAGE_RETURN) { s_ui.flick = 0x1Cu; }   /* 입력하는 값 */
 }
 
 static void show_tune(void)
