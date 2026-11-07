@@ -26,7 +26,7 @@ typedef struct {
 } frame_t;
 
 typedef struct {
-    uint16_t ok, len_err, bcc_err, type_err, pan_err, msgid_err, id_mismatch, field_err, aborted;
+    uint16_t ok, len_err, bcc_err, type_err, pan_err, msgid_err, id_mismatch, field_err, aborted, closed;
 } frame_stat_t;
 
 void            frame_reset(void);

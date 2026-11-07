@@ -30,8 +30,10 @@
 #define SCREEN_LIST      10     /* 이 값을 더하면 번호 목록 화면 */
 #define SEG_BRAKE2       0x80u  /* ioport.h 참조 */
 #define KEY_OUT_MASK     0x60u
-#define KEY_OUT_ROW0     0x20u
-#define KEY_OUT_ROW1     0x40u
+/* 원본은 행 출력 직후에 읽어 한 박자 앞 행 값을 받았다(실차 키 배치로 확인).
+ * 여기서는 다음 틱에 읽으므로 row[0](MODE 쪽 값 << 3)에 맞게 출력을 바꿔 둔다 */
+#define KEY_OUT_ROW0     0x40u
+#define KEY_OUT_ROW1     0x20u
 #define DISP_DIGITS      5
 #define TAG_SEG_OFFSET   54     /* 'T' 같은 글자를 세그먼트 색인으로 */
 #define DIGIT_NONE       39

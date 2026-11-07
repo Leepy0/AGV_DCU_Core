@@ -86,14 +86,15 @@ void comm_rx_byte(uint16_t byte)
 {
     frame_ev_t ev;
     uint16_t next;
+    uint16_t closed = frame_stat()->closed;
 
     if (D.ui_mode == UI_PARAM) {
         (void)hal_sci_send(HAL_SCI_B, &byte, 1);
         return;
     }
     ev = frame_feed(byte);
+    if (frame_stat()->closed != closed) { s_flash = RX_FLASH_TICKS; }   /* 버린 프레임도 표시한다 (원본 동작) */
     if (ev == FRAME_EV_NONE) { return; }
-    s_flash = RX_FLASH_TICKS;
     next = (uint16_t)((s_head + 1u) & (COMM_QUEUE_LEN - 1u));
     if (next == s_tail) { return; }          /* 넘친 프레임은 ACS 재전송에 맡긴다 */
     s_q[s_head].f = *frame_rx();

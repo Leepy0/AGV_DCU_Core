@@ -27,11 +27,12 @@ void hal_delay_us(uint16_t us)    { (void)us; }
 uint16_t hal_irq_save(void)       { return 0; }
 void hal_irq_restore(uint16_t s)  { (void)s; }
 
-/* 키는 세그먼트 바이트 b5·b6 로 고른 행의 3비트가 입력 C 하위에 나온다 */
+/* 키는 세그먼트 바이트 b5·b6 로 고른 행의 3비트가 입력 C 하위에 나온다.
+ * 실차 확인: b5 는 MODE·SHIFT·UP 행, b6 는 RESET·SET·DOWN 행 */
 uint16_t hal_bus_read(uint16_t addr)
 {
     if (addr == BUS_IN_C) {
-        uint16_t row = (host.bus_out[BUS_SEG] & 0x40u) ? (host.key & 7u) : ((host.key >> 3) & 7u);
+        uint16_t row = (host.bus_out[BUS_SEG] & 0x20u) ? (host.key & 7u) : ((host.key >> 3) & 7u);
         return (uint16_t)((host.bus_in[addr] & 0xF8u) | row);
     }
     return host.bus_in[addr];

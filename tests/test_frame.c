@@ -110,13 +110,13 @@ int main(void)
     assert(send("E3107T01210000000", 1) == FRAME_EV_NONE);     /* [10] != '0' */
     assert(frame_stat()->bcc_err == before.bcc_err + 3);
 
-    /* AGV ID 불일치. BCC 불량 T 도 내 ID 가 아니면 후보가 아니다 */
+    /* AGV ID 불일치. E 를 뺀 종류는 버린다. BCC 불량 T 도 내 ID 가 아니면 후보가 아니다 */
     before = *frame_stat();
-    assert(send("E3108T01200000000", 0) == FRAME_EV_NONE);
+    assert(send("E3108T01200000000", 0) == FRAME_EV_OK);       /* E 는 세기만 하고 받는다 */
     assert(send("C3108C001", 0) == FRAME_EV_NONE);
     assert(frame_stat()->id_mismatch == before.id_mismatch + 2);
     assert(send("E3108T01200000000", 1) == FRAME_EV_NONE);
-    assert(send("E31A7T01200000000", 0) == FRAME_EV_NONE);     /* ID 자리에 문자 */
+    assert(send("W31A7C00000000000", 0) == FRAME_EV_NONE);     /* ID 자리에 문자 */
 
     /* 종류 */
     before = *frame_stat();

@@ -477,6 +477,25 @@ static void test_stop_switch_aborts(void)
     printf("  stop aborts seq+act ok\n");
 }
 
+/* 원본처럼 ETX 로 끝난 프레임이면 버려져도 수신 점을 켠다. E 는 ID 가 달라도 받는다 */
+static void test_rx_tag_id(void)
+{
+    boot();
+    while (comm_rx_flash()) { }
+    send_frame("W1199C00000000000", 0);
+    assert(comm_rx_flash());
+    while (comm_rx_flash()) { }
+    tag_frame(2, '1', 1);
+    assert(comm_rx_flash());
+    while (comm_rx_flash()) { }
+    drive_up();
+    run_scan(30);
+    send_frame("E0199T00200000000", 0);
+    run_scan(1);
+    assert(tx_has('A', 'E'));
+    assert(D.speed_cmd == P.llow_speed);
+}
+
 static void test_tag(void)
 {
     boot();
@@ -492,10 +511,10 @@ static void test_tag(void)
     run_scan(1);
     assert(D.speed_cmd == P.low_speed);
 
-    /* 다른 호기 */
-    send_frame("E1199T00200000000", 0);
+    /* 다른 호기의 ACS 명령은 버린다 */
+    send_frame("W1199C00000000000", 0);
     run_scan(1);
-    assert(comm_recent_num() == 2);
+    assert(!D.flag_stopping);
 
     /* 회전 중 무시: ACK 없음 */
     D.turn_pulses = 10;
@@ -763,6 +782,7 @@ int main(void)
     test_amp_alarm();
     test_stop_switch_aborts();
     test_tag();
+    test_rx_tag_id();
     test_compensate();
     test_rfid_retry();
     test_cross();
