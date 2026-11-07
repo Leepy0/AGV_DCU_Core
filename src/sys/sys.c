@@ -77,6 +77,7 @@ void sys_boot(void)
     err = param_boot(&storage_blocking, SYS_VERSION);
     param_store_set(&storage_queued);
     storage_load();
+    tune_load();
     seq_pick_profile();
     run_reset();
     run_boot_restore();

@@ -498,10 +498,14 @@ static void key_process(void)
             return;
         }
     }
-    if (tune_active() && tune_key(s_ui.data)) {
-        s_ui.data_old = s_ui.data;
-        s_ui.long_press = 0;
-        return;
+    if (tune_active()) {
+        int r = tune_key(s_ui.data);
+        if (r != 0) {
+            if (r == 2) { s_ui.msg_save = 1; }
+            s_ui.data_old = s_ui.data;
+            s_ui.long_press = 0;
+            return;
+        }
     }
     switch (s_ui.data) {
     case KEY_MODE:  key_mode(); break;
@@ -736,10 +740,31 @@ static void show_history(void)
     s_ui.flick = 0;
 }
 
+/* 결과 쪽: 글자 2개 + 값 3자리 */
+static void show_tune_page(void)
+{
+    static const char name[TUNE_PAGE_COUNT][2] = {
+        {'W', 'W'}, {'D', ' '}, {'G', ' '}, {'S', 'E'}, {'S', 'P'}, {'F', 'L'}, {'L', 'E'}, {'L', 'R'}
+    };
+    uint16_t page = tune_page();
+    int16_t v = tune_value(page);
+    int16_t m = (v < 0) ? (int16_t)-v : v;
+
+    s_ui.digit[0] = letter(name[page][0]);
+    s_ui.digit[1] = letter(name[page][1]);
+    if (v == TUNE_NO_DATA) {
+        s_ui.digit[2] = s_ui.digit[3] = s_ui.digit[4] = DIGIT_MINUS;
+        return;
+    }
+    if (v < 0) { s_ui.digit[1] = DIGIT_MINUS; }
+    s_ui.digit[2] = digit_of(m, 100);
+    s_ui.digit[3] = digit_of(m, 10);
+    s_ui.digit[4] = digit_of(m, 1);
+    if (page == TUNE_PAGE_DISTANCE) { s_ui.flick = 0x1Cu; }   /* 입력하는 값이라 깜박인다 */
+}
+
 static void show_tune(void)
 {
-    int16_t v = tune_result();
-
     switch (tune_state()) {
     case TUNE_WAIT:
         show(letter('T'), letter('U'), letter('N'), letter('E'), DIGIT_NONE);
@@ -751,10 +776,12 @@ static void show_tune(void)
         show(letter('G'), letter('O'), DIGIT_NONE, DIGIT_NONE, 2);
         break;
     case TUNE_DONE:
-        show(letter('W'), letter('W'), digit_of(v, 100), digit_of(v, 10), digit_of(v, 1));
-        break;
-    case TUNE_SAVED:
-        show(letter('S'), letter('A'), letter('V'), letter('E'), DIGIT_NONE);
+        if (s_ui.msg_save) {
+            show(letter('S'), letter('A'), letter('V'), letter('E'), DIGIT_NONE);
+        }
+        else {
+            show_tune_page();
+        }
         break;
     default:
         break;

@@ -1,4 +1,5 @@
 /* test_sys.c - 2·3단계 통합 시험. hal/host 위에서 부팅부터 10 ms 스캔까지 돌린다 */
+#include "agv/tune.h"
 #include <assert.h>
 #include <signal.h>
 #include <unistd.h>
@@ -879,6 +880,39 @@ static void test_align_turn(void)
     printf("  align turn ok\n");
 }
 
+/* 튜닝 측정: 'h' 부호가 반대이고 배율이 2 이면 저장 뒤 되살아난다 */
+static void test_tune_guide(void)
+{
+    guide_rx_t rx;
+    guide_cfg_t cfg;
+    int i;
+
+    boot();
+    tune_arm();
+    drive_up();
+    run_scan(5);
+    assert(tune_state() == TUNE_GO_1);
+    memset(&rx, 0, sizeof(rx));
+    rx.kind = GUIDE_RX_LED;
+    for (i = 0; i < 40; i++) {
+        int pos = (i % 7) - 3;                    /* 'a' 위치 */
+        int cell = 8 - pos;                       /* 'h' 두 칸 c, c+1: 위치 = 2c - 16 = -2pos */
+        tune_on_a(GUIDE_NORMAL, (int16_t)(2 * pos));
+        rx.led_lo = 3UL << (cell - 1);            /* 부호 반대, 배율 1 */
+        tune_on_h(&rx);
+    }
+    assert(tune_value(TUNE_PAGE_LED) == 2);
+    assert(tune_value(TUNE_PAGE_GUIDE) == -100);
+    /* 저장값을 부팅 때 되살린다 */
+    keep_set(KEEP_GUIDE_INV, 1);
+    keep_set(KEEP_GUIDE_SCALE, 1250);
+    keep_set(KEEP_GUIDE_MARK, 0x7E57);
+    tune_load();
+    guide_cfg_get(&cfg);
+    assert((cfg.invert_fwd == 1) && (cfg.invert_back == 0) && (cfg.h_scale == 1.25f));
+    printf("  tune guide ok\n");
+}
+
 /* 교차 테이프를 두 번 보면 정렬 회전을 건다 */
 static void test_tape_turn(void)
 {
@@ -1007,6 +1041,7 @@ int main(void)
     test_para_init();
     test_lamp();
     test_align_turn();
+    test_tune_guide();
     test_tape_turn();
     test_io_test();
     test_acs_off();

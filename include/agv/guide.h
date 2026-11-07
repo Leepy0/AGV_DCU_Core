@@ -59,6 +59,7 @@ typedef struct {
     uint16_t min_width;                  /* 이보다 좁은 덩어리를 버린다. 기본 1 */
     uint16_t max_width;                  /* 이보다 넓은 덩어리를 버린다. 기본 전체 */
     uint16_t max_step;                   /* 추적 중 스캔당 최대 위치 변화. 0 = 무제한 */
+    float    h_scale;                    /* 'h' 위치를 'a' 단위로 바꾸는 배율. 튜닝 모드가 잰다. 기본 1 */
     uint16_t curve_span;                 /* 'h' 소스의 커브 판정: 덩어리 폭이 이 칸 수 이상이면 커브.
                                             테이프 폭 10~25 mm 가 약 1~4칸이라 현장별로 맞춘다. 기본 4 */
 } guide_cfg_t;
@@ -76,6 +77,8 @@ typedef struct {
 void     guide_reset(void);
 void     guide_cfg_default(guide_cfg_t *cfg);
 void     guide_configure(const guide_cfg_t *cfg);
+void     guide_cfg_get(guide_cfg_t *cfg);
+float    guide_h_scale(void);
 
 /* 전진·후진 센서 전환 뒤 호출. 수신 파서, 이전 위치, 덩어리 상태, 오류 카운터를 지운다 */
 void     guide_on_sensor_switch(void);

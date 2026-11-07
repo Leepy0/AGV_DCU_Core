@@ -1,4 +1,5 @@
 /* guide_poll.c - SCI-B 응답 처리, 요청 송신, 가이드 오류 판정. 10 ms */
+#include "agv/tune.h"
 #include "agv/guide.h"
 #include "agv/drive.h"
 #include "agv/frame.h"
@@ -121,9 +122,11 @@ static void on_rx(const guide_rx_t *rx)
     switch (rx->kind) {
     case GUIDE_RX_POSITION:
         apply_status(rx->status, rx->pos);
+        if (tune_active()) { tune_on_a(rx->status, rx->pos); }
         break;
     case GUIDE_RX_LED:
         on_led(rx);
+        if (tune_active()) { tune_on_h(rx); }
         break;
     case GUIDE_RX_SENSOR_ERR:
         range_error(ERR_GUIDE_SENSOR, 0);
@@ -148,7 +151,7 @@ static void send_request(void)
     uint16_t tape = (uint16_t)((D.tape_stop_id != 0) || (D.tape_turn_dir != 0) || D.tape_align);
 
     buf[0] = FRAME_STX;
-    buf[1] = (tape || guide_want_h(D.branch_start, D.branch_step)) ? 'H' : 'A';
+    buf[1] = (tape || guide_want_h(D.branch_start, D.branch_step) || (tune_active() && tune_want_h())) ? 'H' : 'A';
     buf[2] = frame_checksum(&buf[1], 1);
     buf[3] = FRAME_ETX;
     (void)hal_sci_send(HAL_SCI_B, buf, 4);

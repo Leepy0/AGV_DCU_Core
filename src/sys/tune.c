@@ -1,30 +1,122 @@
-/* tune.c - 회전 튜닝 모드. 전원을 켤 때 MODE + DOWN.
- * 직진 1 m, 태그 없이 180도 정렬 회전, 직진 1 m 뒤 멈춰 휠 간격 값을 계산한다.
- * 라인 중앙에서 다시 중앙까지 돈 펄스가 실제 180도다. SET 저장, RESET 다시 시험 */
+/* tune.c - 튜닝 모드. 전원을 켤 때 MODE + DOWN.
+ * 직진 1 m, 태그 없이 180도 정렬 회전, 직진 1 m 뒤 멈춘다. 직진 구간에서 'a' 와 'h' 를 번갈아 받아
+ * 가이드 부호·배율, 조향 편차, LED 점등 수, 좌우 펄스 비를 재고, 회전에서 휠 간격을 계산한다.
+ * 결과는 쪽(page)으로 본다. SHIFT 다음 쪽, UP·DOWN 값 입력, SET 저장, RESET 다시 시험 */
+#include <math.h>
 #include "agv/tune.h"
 #include "agv/drive.h"
+#include "agv/guide.h"
 #include "agv/param.h"
 #include "agv/run.h"
+#include "agv/stop.h"
+#include "agv/storage.h"
 #include "agv/tagact.h"
 #include "agv/ui.h"
 
 #define D agv_drive
 #define P param_dv
 
-#define TUNE_DIST_MM 1000.0f
+#define TUNE_DIST_MM      1000.0f
+#define DIST_CM_MIN       50
+#define DIST_CM_MAX       150
+#define GUIDE_PAIRS_MIN   20       /* 'a'·'h' 짝이 이만큼 모여야 부호·배율을 믿는다 */
+#define GUIDE_SCALE_MIN   0.5f
+#define GUIDE_SCALE_MAX   2.0f
+#define GUIDE_MARK        0x7E57
 
 static struct {
-    uint16_t state;
-    uint16_t turn_seen;
-    uint32_t start;
-    int16_t  wheel_base;
+    uint16_t state, turn_seen, page, toggle;
+    uint32_t start, l0, r0, dl, dr;
+    int16_t  wheel_base, dist_cm;
+    /* 측정 */
+    int16_t  a_last, a_fresh;
+    float    ah, hh, se;
+    uint32_t pairs, se_n;
+    int16_t  se_max, floor_max;
+    uint16_t led_max;
 } s_tune;
 
-void     tune_reset(void)  { s_tune.state = TUNE_OFF; s_tune.turn_seen = 0; }
-void     tune_arm(void)    { s_tune.state = TUNE_WAIT; }
+static void clear_measure(void)
+{
+    s_tune.dl = s_tune.dr = 0;
+    s_tune.ah = s_tune.hh = s_tune.se = 0.0f;
+    s_tune.pairs = s_tune.se_n = 0;
+    s_tune.se_max = s_tune.floor_max = 0;
+    s_tune.led_max = 0;
+    s_tune.a_fresh = 0;
+    s_tune.page = 0;
+}
+
+void tune_reset(void)
+{
+    s_tune.state = TUNE_OFF;
+    s_tune.turn_seen = 0;
+    s_tune.dist_cm = 100;
+    clear_measure();
+}
+
+void     tune_arm(void)    { s_tune.state = TUNE_WAIT; clear_measure(); }
 int      tune_active(void) { return s_tune.state != TUNE_OFF; }
 uint16_t tune_state(void)  { return s_tune.state; }
 int16_t  tune_result(void) { return s_tune.wheel_base; }
+uint16_t tune_page(void)   { return s_tune.page; }
+
+static int measuring(void)
+{
+    return ((s_tune.state == TUNE_GO_1) || (s_tune.state == TUNE_GO_2)) && D.flag_run && !D.flag_stopping;
+}
+
+/* ---- 가이드 측정 (guide_poll 이 부른다) ---- */
+
+int tune_want_h(void)
+{
+    if (!measuring()) { return 0; }
+    s_tune.toggle ^= 1u;
+    return (int)s_tune.toggle;
+}
+
+void tune_on_a(int16_t status, int16_t pos)
+{
+    int16_t m = (pos < 0) ? (int16_t)-pos : pos;
+
+    if (!measuring() || (status != GUIDE_NORMAL)) { return; }
+    s_tune.se += (float)pos * (float)pos;
+    s_tune.se_n++;
+    if (m > s_tune.se_max) { s_tune.se_max = m; }
+    s_tune.a_last = pos;
+    s_tune.a_fresh = 1;
+}
+
+void tune_on_h(const guide_rx_t *rx)
+{
+    guide_out_t out;
+    uint32_t lat;
+    uint16_t n = 0;
+
+    if (!measuring()) { return; }
+    lat = guide_lateral(rx);
+    while (lat != 0UL) { n = (uint16_t)(n + (uint16_t)(lat & 1UL)); lat >>= 1; }
+    if (n > s_tune.led_max) { s_tune.led_max = n; }
+    guide_track(rx, 0, D.backward, &out);
+    if ((out.status == GUIDE_NORMAL) && s_tune.a_fresh) {
+        s_tune.ah += (float)s_tune.a_last * (float)out.pos;
+        s_tune.hh += (float)out.pos * (float)out.pos;
+        s_tune.pairs++;
+    }
+    s_tune.a_fresh = 0;
+}
+
+/* 'a' = k × 'h'. 부호가 음수면 'h' 위치 부호가 반대다. 0 = 측정 부족 */
+static float guide_ratio(void)
+{
+    float k;
+    if ((s_tune.pairs < GUIDE_PAIRS_MIN) || (s_tune.hh <= 0.0f)) { return 0.0f; }
+    k = s_tune.ah / s_tune.hh;
+    if ((fabsf(k) < GUIDE_SCALE_MIN) || (fabsf(k) > GUIDE_SCALE_MAX)) { return 0.0f; }
+    return k;
+}
+
+/* ---- 주행 순서 ---- */
 
 static uint32_t travel(void) { return run_pulses(D.backward ? 1u : 0u); }
 
@@ -44,33 +136,47 @@ static void go_slow(void)
 static void begin_leg(uint16_t next)
 {
     s_tune.start = travel();
+    s_tune.l0 = run_pulses(0);
+    s_tune.r0 = run_pulses(1);
     s_tune.state = next;
 }
 
-static int16_t compute_wheel_base(void)
+static void end_leg(void)
+{
+    s_tune.dl += run_pulses(0) - s_tune.l0;
+    s_tune.dr += run_pulses(1) - s_tune.r0;
+}
+
+static int16_t clamp_param(uint16_t idx, float value)
 {
     int16_t low, up;
-    float value = (float)param_get(P_WHEEL_BASE_MM) * (float)D.tape_turned / (float)D.tape_total_pulse;
-    int16_t rounded = (int16_t)(value + 0.5f);
+    int16_t v = (int16_t)(value + 0.5f);
 
-    param_limit(P_WHEEL_BASE_MM, &low, &up);
-    if (rounded < low) { rounded = low; }
-    if (rounded > up)  { rounded = up; }
-    return rounded;
+    param_limit(idx, &low, &up);
+    if (v < low) { v = low; }
+    if (v > up)  { v = up; }
+    return v;
 }
 
 void tune_run(void)
 {
     int stopped = !D.flag_run && !D.flag_ready;
 
+    if ((stop_phase() != STOP_PHASE_IDLE) && (stop_floor_rpm() > s_tune.floor_max)) {
+        s_tune.floor_max = stop_floor_rpm();
+    }
     switch (s_tune.state) {
     case TUNE_WAIT:
-        if (D.flag_run) { begin_leg(TUNE_GO_1); }
+        if (D.flag_run) {
+            clear_measure();
+            begin_leg(TUNE_GO_1);
+        }
         break;
     case TUNE_GO_1:
         if (stopped) { s_tune.state = TUNE_WAIT; break; }
         go_slow();
         if (reached()) {
+            end_leg();
             D.tape_slow = 1;
             s_tune.turn_seen = 0;
             tagact_turn_align(TURN_CW, 180u, 0u);
@@ -86,7 +192,8 @@ void tune_run(void)
                 s_tune.state = TUNE_WAIT;
             }
             else {
-                s_tune.wheel_base = compute_wheel_base();
+                s_tune.wheel_base = clamp_param(P_WHEEL_BASE_MM, (float)param_get(P_WHEEL_BASE_MM)
+                                                * (float)D.tape_turned / (float)D.tape_total_pulse);
                 run_restart_now();
                 s_tune.state = TUNE_RESTART;
             }
@@ -99,8 +206,10 @@ void tune_run(void)
         if (stopped) { s_tune.state = TUNE_WAIT; break; }
         go_slow();
         if (reached()) {
+            end_leg();
             tagact_stop();
             s_tune.state = TUNE_DONE;
+            s_tune.page = 0;
         }
         break;
     default:
@@ -108,18 +217,105 @@ void tune_run(void)
     }
 }
 
+/* ---- 결과 ---- */
+
+int16_t tune_value(uint16_t page)
+{
+    float k;
+
+    switch (page) {
+    case TUNE_PAGE_WHEEL_BASE: return s_tune.wheel_base;
+    case TUNE_PAGE_DISTANCE:   return s_tune.dist_cm;
+    case TUNE_PAGE_GUIDE:
+        k = guide_ratio();
+        return (k == 0.0f) ? TUNE_NO_DATA : (int16_t)(k * 100.0f + ((k < 0.0f) ? -0.5f : 0.5f));
+    case TUNE_PAGE_STEER_RMS:
+        return (s_tune.se_n == 0) ? TUNE_NO_DATA : (int16_t)(sqrtf(s_tune.se / (float)s_tune.se_n) * 10.0f + 0.5f);
+    case TUNE_PAGE_STEER_MAX:  return s_tune.se_max;
+    case TUNE_PAGE_FLOOR:      return s_tune.floor_max;
+    case TUNE_PAGE_LED:        return (int16_t)s_tune.led_max;
+    case TUNE_PAGE_LR:
+        if (s_tune.dl == 0UL) { return TUNE_NO_DATA; }
+        return (int16_t)(((float)s_tune.dr / (float)s_tune.dl - 1.0f) * 1000.0f);
+    default: return TUNE_NO_DATA;
+    }
+}
+
+/* 저장한 가이드 부호·배율을 부팅 때 되살린다 */
+void tune_load(void)
+{
+    guide_cfg_t cfg;
+    int16_t inv, scale;
+
+    if (keep_get(KEEP_GUIDE_MARK) != GUIDE_MARK) { return; }
+    inv = keep_get(KEEP_GUIDE_INV);
+    scale = keep_get(KEEP_GUIDE_SCALE);
+    guide_cfg_get(&cfg);
+    cfg.invert_fwd = inv & 1;
+    cfg.invert_back = (inv >> 1) & 1;
+    if ((scale >= (int16_t)(GUIDE_SCALE_MIN * 1000.0f)) && (scale <= (int16_t)(GUIDE_SCALE_MAX * 1000.0f))) {
+        cfg.h_scale = (float)scale / 1000.0f;
+    }
+    guide_configure(&cfg);
+}
+
+static int save_guide(void)
+{
+    guide_cfg_t cfg;
+    float k = guide_ratio();
+    int16_t inv;
+
+    if (k == 0.0f) { return 0; }
+    guide_cfg_get(&cfg);
+    if (k < 0.0f) {
+        if (D.backward) { cfg.invert_back ^= 1; }
+        else            { cfg.invert_fwd ^= 1; }
+    }
+    cfg.h_scale = cfg.h_scale * fabsf(k);
+    if (cfg.h_scale < GUIDE_SCALE_MIN) { cfg.h_scale = GUIDE_SCALE_MIN; }
+    if (cfg.h_scale > GUIDE_SCALE_MAX) { cfg.h_scale = GUIDE_SCALE_MAX; }
+    guide_configure(&cfg);
+    inv = (int16_t)((cfg.invert_fwd & 1) | ((cfg.invert_back & 1) << 1));
+    keep_set(KEEP_GUIDE_INV, inv);
+    keep_set(KEEP_GUIDE_SCALE, (int16_t)(cfg.h_scale * 1000.0f + 0.5f));
+    keep_set(KEEP_GUIDE_MARK, GUIDE_MARK);
+    keep_flush_if_changed();
+    return 1;
+}
+
 int tune_key(uint16_t key)
 {
-    if ((s_tune.state != TUNE_DONE) && (s_tune.state != TUNE_SAVED)) { return 0; }
+    if (s_tune.state != TUNE_DONE) { return 0; }
     if (D.flag_run || D.flag_stopping) { return 0; }
-    if (key == KEY_SET) {
-        (void)param_set(P_WHEEL_BASE_MM, s_tune.wheel_base);
-        s_tune.state = TUNE_SAVED;
+    switch (key) {
+    case KEY_SHIFT:
+        s_tune.page = (uint16_t)((s_tune.page + 1u) % TUNE_PAGE_COUNT);
         return 1;
-    }
-    if (key == KEY_RESET) {
+    case KEY_UP:
+    case KEY_DOWN:
+        if (s_tune.page == TUNE_PAGE_DISTANCE) {
+            s_tune.dist_cm = (int16_t)(s_tune.dist_cm + ((key == KEY_UP) ? 1 : -1));
+            if (s_tune.dist_cm < DIST_CM_MIN) { s_tune.dist_cm = DIST_CM_MIN; }
+            if (s_tune.dist_cm > DIST_CM_MAX) { s_tune.dist_cm = DIST_CM_MAX; }
+        }
+        return 1;
+    case KEY_SET:
+        switch (s_tune.page) {
+        case TUNE_PAGE_WHEEL_BASE:
+            return (param_set(P_WHEEL_BASE_MM, s_tune.wheel_base) == 0) ? 2 : 1;
+        case TUNE_PAGE_DISTANCE:
+            /* 엔코더로 1 m 간 거리의 실측값으로 휠 지름을 비례해 고친다 */
+            return (param_set(P_WHEEL_DIA_MM, clamp_param(P_WHEEL_DIA_MM, (float)param_get(P_WHEEL_DIA_MM)
+                                                * (float)s_tune.dist_cm / 100.0f)) == 0) ? 2 : 1;
+        case TUNE_PAGE_GUIDE:
+            return save_guide() ? 2 : 1;
+        default:
+            return 1;
+        }
+    case KEY_RESET:
         s_tune.state = TUNE_WAIT;
         return 1;
+    default:
+        return 0;
     }
-    return 0;
 }

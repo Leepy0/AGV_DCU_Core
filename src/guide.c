@@ -39,6 +39,7 @@ void guide_cfg_default(guide_cfg_t *cfg)
 {
     uint16_t i;
     cfg->invert_fwd = 0;
+    cfg->h_scale = 1.0f;
     cfg->invert_back = 0;
     for (i = 0; i < GUIDE_VERT_COUNT; i++) { cfg->vert_bit[i] = (uint16_t)(GUIDE_LED_WIDE + i); }
     cfg->min_width = 1;
@@ -48,6 +49,8 @@ void guide_cfg_default(guide_cfg_t *cfg)
 }
 
 void guide_configure(const guide_cfg_t *cfg) { s_cfg = *cfg; }
+void guide_cfg_get(guide_cfg_t *cfg)         { *cfg = s_cfg; }
+float guide_h_scale(void)                     { return s_cfg.h_scale; }
 
 static void comm_clear(void)
 {

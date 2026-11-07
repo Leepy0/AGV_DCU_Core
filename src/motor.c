@@ -2,6 +2,7 @@
 #include "agv/motor.h"
 #include "agv/branch.h"
 #include "agv/drive.h"
+#include "agv/guide.h"
 #include "agv/param.h"
 #include "agv/steer.h"
 #include "agv/stop.h"
@@ -339,7 +340,7 @@ void motor_drive_step(void)
 
 static int32_t guide_offset_to_pulse(int16_t guide)
 {
-    float offset_mm = (float)guide * GUIDE_BIT_PITCH_MM;
+    float offset_mm = (float)guide * guide_h_scale() * GUIDE_BIT_PITCH_MM;
     float angle_deg = (offset_mm / GUIDE_TO_CENTER_MM) * (180.0f / PI_F);
     return (int32_t)(angle_deg * ((float)P.turn_90 / 90.0f));
 }

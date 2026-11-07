@@ -11,7 +11,7 @@
 #include "agv/param.h"
 
 #define KEEP_FIRST          51
-#define KEEP_LAST           106
+#define KEEP_LAST           109
 #define KEEP_BACKWARD       51
 #define KEEP_STATION0       57    /* 스테이션 큐 10칸 */
 #define KEEP_STATION_SLOTS  10
@@ -20,6 +20,9 @@
 #define KEEP_STATION_CNT    92
 #define KEEP_PAN            93
 #define KEEP_LAMP_EXT0      104   /* 램프 외부 출력 3칸 */
+#define KEEP_GUIDE_MARK     107   /* 튜닝 모드가 저장한 가이드 'h' 부호·배율 */
+#define KEEP_GUIDE_INV      108   /* b0 전진 센서, b1 후진 센서 */
+#define KEEP_GUIDE_SCALE    109   /* 배율 × 1000 */
 
 #define STORAGE_RETRY       3     /* 읽기 검증 실패 뒤 다시 쓰는 횟수 */
 
