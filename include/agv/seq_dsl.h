@@ -183,6 +183,10 @@ typedef unsigned long long dsl_cond_t;
 #define A_FORBACK(dir)         (TA_FORBACK | DIR_##dir)
 #define A_TURN(dir, deg, fb, autostart, obs) \
     (TA_TURN | TURN_##dir | (((deg) / 90) << 2)), ((fb) | ((autostart) << 4) | ((obs) << 8))
+#define A_TURN_ALIGN(dir, deg, fb, autostart, obs) \
+    (TA_TURN_ALIGN | TURN_##dir | (((deg) / 90) << 2)), ((fb) | ((autostart) << 4) | ((obs) << 8))
+#define A_TURN_TAPE(dir, deg, fb, autostart, obs) \
+    (TA_TURN_TAPE | TURN_##dir | (((deg) / 90) << 2)), ((fb) | ((autostart) << 4) | ((obs) << 8))
 #define A_BRANCH(dir)          (TA_BRANCH | BRANCH_##dir)
 #define A_SEQ(id)              (TA_SEQ | (id))
 #define A_TAPE_STOP(id)        (TA_TAPE_STOP | (id))

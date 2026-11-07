@@ -33,7 +33,6 @@ enum {
 #define QUIRK_RISK_FLAG    0x01u   /* b0 정지 완료 때 nGuide_Risk_Stop_Flag 를 내리지 않는다 */
 #define QUIRK_H_POSITION   0x02u   /* b1 'h' 응답이 위치값을 자리표 10 으로 덮는다 */
 #define QUIRK_CURVE_NOW    0x04u   /* b2 위험 감속 중 curve_now 를 켠다 */
-#define QUIRK_TURN_STEP2   0x08u   /* b3 테이프 회전 Step 2 가 G < 0 으로 끝나고 최저속이 아니다 */
 
 /* 주소 50 표시. 31·38·39·44 의 1회 초기화가 끝나면 쓴다 */
 #define PARAM_MIGRATE_ADDR 50

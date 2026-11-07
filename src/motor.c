@@ -18,7 +18,10 @@
 #define GUIDE_RISK_THRESHOLD 10
 #define GUIDE_REALIGN_RANGE  3
 #define GUIDE_REALIGN_TICKS  10
-#define TAPE_ORIGIN_OFFSET   10000
+#define TAPE_SLIP_MIN_DEG    3.0f    /* 이만큼 돈 뒤에 슬립비를 잰다. 초반 잡음을 뺀다 */
+#define TAPE_LOST_TICKS      5       /* 라인이 이 틱을 넘게 안 보이면 출발 라인을 벗어난 것 */
+#define TAPE_SLOW_POS        12      /* 새 라인이 이 안에 들면 최저 속도 */
+#define TAPE_CENTER_POS      1       /* 이 안이면 회전을 끝낸다 */
 #define GUIDE_BIT_PITCH_MM   6.89f
 #define GUIDE_TO_CENTER_MM   250.0f
 #define PI_F                 3.14159265f
@@ -344,23 +347,25 @@ static void tape_end(void)
     D.tape_align = 0;
 }
 
-int16_t motor_turn_adjust(void)
+static int32_t abs32(int32_t v) { return (v < 0) ? -v : v; }
+
+/* 정렬 회전 한 틱. 가이드는 회전 중 'h' 로만 받는다. 위치 부호는 보지 않아 실측 전에도 쓴다 */
+static int16_t tape_adjust(void)
 {
     int16_t speed = P.turn_speed;
-    int32_t delta_encoder, delta_measured;
-    float   cnt = (float)D.turn_pulses;
+    int32_t turned = D.tape_turned;
+    float   late = (float)turned - (D.tape_target_cnt + (float)D.tape_max);
+    int32_t pos = abs32(D.guide_pos);
+    int16_t seen = (int16_t)(!D.guide_all_off && !D.guide_all_on);
 
     switch (D.tape_step) {
-    case 0:
+    case 0:     /* 출발 라인에서 멀어지는 동안 슬립비를 잰다 */
         if (!D.guide_all_off) {
             D.tape_lost_cnt = 0;
-            delta_encoder = ((int32_t)D.tape_total_pulse + TAPE_ORIGIN_OFFSET) - D.turn_pulses;
-            /* 3도 이상 돈 뒤에만 슬립비를 잰다. 초반 잡음을 뺀다 */
-            if (delta_encoder > (int32_t)(((float)P.turn_90 / 90.0f) * 3.0f)) {
-                delta_measured = guide_offset_to_pulse(D.guide_pos);
-                if (delta_measured < 0) { delta_measured = -delta_measured; }
-                if (delta_measured > 0) {
-                    D.tape_slip_ratio = (float)delta_measured / (float)delta_encoder;
+            if (turned > (int32_t)(((float)P.turn_90 / 90.0f) * TAPE_SLIP_MIN_DEG)) {
+                int32_t measured = abs32(guide_offset_to_pulse(D.guide_pos));
+                if (measured > 0) {
+                    D.tape_slip_ratio = (float)measured / (float)turned;
                     if (D.tape_slip_ratio < 0.5f) { D.tape_slip_ratio = 0.5f; }
                     if (D.tape_slip_ratio > 1.5f) { D.tape_slip_ratio = 1.5f; }
                 }
@@ -368,40 +373,38 @@ int16_t motor_turn_adjust(void)
         }
         else {
             D.tape_lost_cnt++;
-            if (D.tape_lost_cnt > 5) {
-                D.tape_target_cnt = (float)TAPE_ORIGIN_OFFSET + (float)D.tape_total_pulse * (1.0f - 1.0f / D.tape_slip_ratio);
-                D.tape_step = 1;
-            }
+        }
+        /* 라인이 끝내 안 사라져도 목표각 앞에서는 찾기로 넘어간다 */
+        if ((D.tape_lost_cnt > TAPE_LOST_TICKS)
+            || ((float)turned >= ((float)D.tape_total_pulse - (float)D.tape_max))) {
+            D.tape_target_cnt = (float)D.tape_total_pulse / D.tape_slip_ratio;
+            D.tape_step = 1;
         }
         break;
-    case 1:
-        if (!D.guide_all_off
-            && (cnt < (D.tape_target_cnt + (float)D.tape_max))
-            && (cnt > (D.tape_target_cnt - (float)D.tape_max))
-            && (((D.turn_motion == MOTION_CW) && (D.guide_pos > 0) && (D.guide_pos < 5))
-             || ((D.turn_motion == MOTION_CCW) && (D.guide_pos > -5) && (D.guide_pos < 0)))) {
+    case 1:     /* 목표각 근방에서만 새 라인을 찾는다 */
+        if (late > 0.0f) {
+            D.system_err = ERR_GUIDE_SENSOR;
+            tape_end();
+        }
+        else if (seen && (pos <= TAPE_SLOW_POS)
+                 && ((float)turned >= (D.tape_target_cnt - (float)D.tape_max))) {
             speed = P.turn_min;
             D.tape_step = 2;
         }
-        else if (cnt < (D.tape_target_cnt - (float)D.tape_max)) {
-            tape_end();       /* 목표각 부근에서 못 찾으면 오류 없이 회전을 끝낸다 */
-        }
         break;
-    case 2:
-        if (param_quirk(QUIRK_TURN_STEP2)) {
-            /* 구동작: 조건이 G < 0 과 같고 호출마다 속도가 회전 속도로 돌아간다 */
-            if ((D.guide_pos <= 1) && (D.guide_pos <= -1)) { tape_end(); }
-            else if (cnt < (D.tape_target_cnt - (float)D.tape_max)) { tape_end(); }
-        }
-        else {
-            speed = P.turn_min;
-            if ((D.guide_pos <= 1) && (D.guide_pos >= -1)) { tape_end(); }
-            else if (cnt < (D.tape_target_cnt - (float)D.tape_max)) { tape_end(); }
-        }
+    case 2:     /* 최저 속도로 중앙까지 */
+        speed = P.turn_min;
+        if ((seen && (pos <= TAPE_CENTER_POS)) || (late > 0.0f)) { tape_end(); }
         break;
     default:
         break;
     }
+    return speed;
+}
+
+int16_t motor_turn_adjust(void)
+{
+    int16_t speed = D.tape_align ? tape_adjust() : P.turn_speed;
 
     if ((D.turn_obs_use == 1)
         && (((P.for_obs == 1) && !D.backward && D.obs_f) || ((P.back_obs == 1) && (D.backward == 1) && D.obs_b))) {

@@ -762,6 +762,149 @@ static void test_acs_off(void)
     printf("  acs off ok\n");
 }
 
+/* 'h' 응답 하나 */
+static void guide_led_reply(uint16_t leds)
+{
+    static const char hex[] = "0123456789abcdef";
+    host_sci_t *b = &host.sci[HAL_SCI_B];
+    uint16_t f[8], sum = 0;
+    int i;
+
+    f[0] = 2;
+    f[1] = 'h';
+    for (i = 0; i < 4; i++) { f[2 + i] = (uint16_t)hex[(leds >> (i * 4)) & 0xFu]; }
+    for (i = 1; i <= 5; i++) { sum = (uint16_t)(sum + f[i]); }
+    f[6] = (uint16_t)hex[sum & 0xFu];
+    f[7] = 3;
+    for (i = 0; i < 8; i++) { b->rx[b->rx_len++] = f[i]; }
+}
+
+static int guide_tx_has(uint16_t c)
+{
+    host_sci_t *b = &host.sci[HAL_SCI_B];
+    int i;
+    for (i = 0; i + 3 < b->tx_len; i++) {
+        if ((b->tx[i] == 2) && (b->tx[i + 1] == c)) { return 1; }
+    }
+    return 0;
+}
+
+static void turn_scan(uint16_t leds, int32_t pulses)
+{
+    int32_t i;
+    for (i = 0; i < pulses; i++) { run_encoder(0, 20000); }
+    guide_led_reply(leds);
+    tick();
+}
+
+#define LED_CENTER 0x0180u     /* 8·9번 칸: 위치 0 */
+#define LED_EDGE   0x0003u     /* 1·2번 칸: 위치 -14 */
+#define LED_NEAR   0x0030u     /* 5·6번 칸: 위치 -6 */
+
+static void align_start(uint16_t next)
+{
+    boot();
+    (void)param_set(P_TURN_FORBACK, 10);
+    D.vin_out = 50;
+    D.flag_run = 0;
+    tagact_turn_align(TURN_CW, 90, next);
+    assert(D.tape_align == 1);
+    stop_reset();                   /* 회전 전 정지는 끝난 것으로 본다 */
+    D.flag_stopping = 0;
+    D.stop_pulses = 0;
+    D.vin_out = 0;
+    D.flag_turn = 1;
+    D.control = RUN_TURN;
+    D.guide_all_off = 1;
+}
+
+/* 정렬 회전: 'h' 로 슬립을 재고, 목표각 근방에서 라인을 찾아 중앙에서 끝낸다 */
+static void test_align_turn(void)
+{
+    int32_t w;
+    int i, total;
+
+    align_start(0x10);
+    total = D.tape_total_pulse;
+    w = D.tape_max;
+    assert(total > 0);
+    host.sci[HAL_SCI_B].tx_len = 0;
+    turn_scan(LED_CENTER, 0);
+    assert(guide_tx_has('H'));
+    assert(D.guide_all_off == 0);
+    assert(D.turn_pulses == total);                    /* 펄스는 따로 센다 */
+    turn_scan(LED_EDGE, total / 4);
+    assert(D.tape_turned == total / 4);
+    assert(D.turn_pulses == total);
+    assert(D.tape_step == 0);
+    for (i = 0; i < 7; i++) { turn_scan(0, 0); }       /* 출발 라인 벗어남 */
+    assert(D.tape_step == 1);
+    assert(D.stop_err == 0);                           /* 사라져도 오류가 아니다 */
+
+    /* 목표각 밖의 라인은 무시한다 */
+    D.tape_target_cnt = (float)total;
+    turn_scan(LED_CENTER, 0);
+    assert(D.tape_step == 1);
+    turn_scan(0, total - D.tape_turned - w + 1);
+    turn_scan(LED_EDGE, 0);
+    assert(D.tape_step == 1);                          /* 위치 14 는 아직 멀다 */
+    turn_scan(LED_NEAR, 0);
+    assert(D.tape_step == 2);
+    turn_scan(LED_NEAR, 0);
+    assert(D.tape_align == 1);
+    turn_scan(LED_CENTER, 0);
+    assert((D.tape_align == 0) && (D.turn_pulses == 0));
+    assert(D.system_err == 0);
+
+    /* 라인을 못 찾으면 오류로 끝낸다 */
+    align_start(0x10);
+    total = D.tape_total_pulse;
+    w = D.tape_max;
+    D.tape_step = 1;
+    turn_scan(0, total + w + 1);
+    assert((D.tape_align == 0) && (D.turn_pulses == 0));
+    assert(D.system_err == ERR_GUIDE_SENSOR);
+
+    /* 라인이 안 사라져도 찾기로 넘어간다 */
+    align_start(0x10);
+    total = D.tape_total_pulse;
+    w = D.tape_max;
+    turn_scan(LED_EDGE, 0);
+    turn_scan(LED_EDGE, total - w);
+    assert(D.tape_step == 1);
+
+    /* 방향이 바뀌는 회전은 슬립 측정을 건너뛴다 */
+    align_start(0x13);
+    assert(D.tape_step == 1);
+    printf("  align turn ok\n");
+}
+
+/* 교차 테이프를 두 번 보면 정렬 회전을 건다 */
+static void test_tape_turn(void)
+{
+    boot();
+    (void)param_set(P_TURN_FORBACK, 10);
+    drive_up();
+    run_scan(30);
+    D.tape_turn_dir = TURN_CW;
+    D.tape_turn_deg = 90;
+    D.tape_turn_next = 0x10;
+    host.sci[HAL_SCI_B].tx_len = 0;
+    guide_led_reply(0x00FFu);
+    tick();
+    assert(guide_tx_has('H'));
+    assert(D.speed_cmd == P.min_speed);
+    assert(D.tape_align == 0);
+    guide_led_reply(0x00FFu);
+    tick();
+    assert(D.tape_turn_dir == 0);
+    assert(D.tape_align == 1);
+    assert(D.turn_pulses == P.turn_90);
+    assert(D.flag_stopping == 1);
+    assert(D.stop_pulses > 0);
+    printf("  tape turn ok\n");
+}
+
 /* 전원을 켤 때 MODE + UP: 입력 번호 표시, 출력 번호 선택, SET 켬, RESET 끔 */
 static void test_io_test(void)
 {
@@ -863,6 +1006,8 @@ int main(void)
     test_ui();
     test_para_init();
     test_lamp();
+    test_align_turn();
+    test_tape_turn();
     test_io_test();
     test_acs_off();
     printf("test_sys ok\n");

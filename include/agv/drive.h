@@ -90,7 +90,10 @@ typedef struct {
     float   tape_slip_ratio;         /* DA_Tape_Turn_Slip_Ratio */
     float   tape_target_cnt;         /* DA_Tape_Turn_Target_Cnt */
     int16_t tape_stop_id;            /* DA_Guide_Stop_Action. 0 = 없음 */
-    int16_t tape_turn_dir;           /* DA_Tape_Turn_Dir */
+    int16_t tape_turn_dir;           /* DA_Tape_Turn_Dir. 교차 테이프를 찾으면 회전한다 */
+    int16_t tape_turn_deg;           /* DA_Tape_Turn_Degree */
+    uint16_t tape_turn_next;         /* 회전 인자 둘째 칸: fb | auto<<4 | obs<<8 */
+    volatile int32_t tape_turned;    /* 정렬 회전에서 지금까지 돈 펄스. 엔코더 ISR 이 센다 */
 
     /* 일시정지 조건 */
     int16_t cross_in_flag, cross_in_on;     /* Flag_Cross_In_Flag/On */

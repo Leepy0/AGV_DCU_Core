@@ -141,7 +141,10 @@ void run_encoder(uint16_t wheel, uint32_t period)
     if ((D.backward != 0) == (wheel == 1u)) {
         if (D.stop_pulses > 0) { D.stop_pulses--; }
     }
-    if (D.flag_turn && (D.turn_pulses > 0)) { D.turn_pulses--; }
+    if (D.flag_turn && (D.turn_pulses > 0)) {
+        if (D.tape_align) { D.tape_turned++; }   /* 끝은 가이드가 정한다. turn_pulses 는 회전 중 표시로 둔다 */
+        else              { D.turn_pulses--; }
+    }
 }
 
 /* ---- ACS 보고 ---- */
@@ -197,6 +200,8 @@ void run_seq_init(void)
     acs_cross_clear();
     D.tape_stop_id = 0;
     D.tape_turn_dir = 0;
+    D.tape_turn_deg = 0;
+    D.tape_turn_next = 0;
     D.stopping_process = 0;
 }
 
@@ -209,6 +214,7 @@ static void tape_clear(void)
     D.tape_slip_ratio = 1.0f;
     D.tape_target_cnt = 0.0f;
     D.tape_lost_cnt = 0;
+    D.tape_turned = 0;
 }
 
 /* Initial_Start */
@@ -422,6 +428,10 @@ static void auto_run(void)
         else if (D.turn_motion != 0) {
             s_run.seq_go = (int16_t)seq_is_active();
             if (D.turn_pulses > 0) {
+                if (D.tape_align && !D.flag_turn) {
+                    guide_poll_start();
+                    D.guide_all_off = 1;     /* 첫 응답 전에는 라인이 있다고 보지 않는다 */
+                }
                 D.flag_turn = 1;
                 D.control = RUN_TURN;
             }
@@ -776,14 +786,13 @@ static uint16_t led_total(void)
 }
 
 #define TAPE_LED_MIN 6      /* 교차 테이프로 볼 점등 수 */
+#define TAPE_ID_TURN (-1)   /* 시퀀스 번호와 겹치지 않는 회전 탐색 표시 */
 
 static struct { int16_t prev_id; uint32_t start_len; int16_t hits; } s_tape;
 
-static void tape_stop(void)
+/* 최저 속도로 달리며 교차 테이프를 찾는다. 1 찾음, -1 정지 거리 2배를 넘김, 0 계속 */
+static int16_t tape_seek(int16_t id)
 {
-    int16_t id = D.tape_stop_id;
-
-    if (id == 0) { s_tape.prev_id = 0; s_tape.hits = 0; return; }
     if (id != s_tape.prev_id) {
         s_tape.prev_id = id;
         s_tape.start_len = s_pulses[0];
@@ -792,17 +801,41 @@ static void tape_stop(void)
     D.step = DRIVE_CHANGE_SPEED;
     if (led_total() >= TAPE_LED_MIN) {
         if (++s_tape.hits > 1) {
-            D.flag_stopping = 1;
-            seq_request((uint16_t)id);
-            D.stop_pulses = 0;
-            D.tape_stop_id = 0;
             s_tape.hits = 0;
-            stop_request_tag();
+            return 1;
         }
     }
     else if ((int32_t)(s_pulses[0] - s_tape.start_len) > 2L * P.stop_len) {
         D.system_err = ERR_GUIDE_SENSOR;
-        D.tape_stop_id = 0;
+        return -1;
+    }
+    return 0;
+}
+
+static void tape_stop(void)
+{
+    int16_t id = D.tape_stop_id;
+
+    if (id != 0) {
+        int16_t r = tape_seek(id);
+        if (r == 1) {
+            D.flag_stopping = 1;
+            seq_request((uint16_t)id);
+            D.stop_pulses = 0;
+            stop_request_tag();
+        }
+        if (r != 0) { D.tape_stop_id = 0; }
+    }
+    else if (D.tape_turn_dir != 0) {
+        int16_t r = tape_seek(TAPE_ID_TURN);
+        if (r == 1) {
+            tagact_turn_align((turn_dir_t)D.tape_turn_dir, (uint16_t)D.tape_turn_deg, D.tape_turn_next);
+        }
+        if (r != 0) { D.tape_turn_dir = 0; }
+    }
+    else {
+        s_tape.prev_id = 0;
+        s_tape.hits = 0;
     }
 }
 

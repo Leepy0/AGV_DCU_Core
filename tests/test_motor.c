@@ -227,33 +227,32 @@ int main(void)
     motor_drive_step();
     assert(D.action_err == ERR_PAUSE);
 
-    /* 테이프 회전 Step 2 */
+    /* 정렬 회전 Step 2 */
     setup();
     D.control = RUN_TURN;
     D.tape_step = 2;
     D.tape_align = 1;
-    D.turn_pulses = 12000;
-    D.tape_target_cnt = 10000.0f;
+    D.turn_pulses = 2000;
+    D.tape_turned = 1900;
+    D.tape_target_cnt = 2000.0f;
     D.tape_max = 100;
     D.guide_pos = -3;
     (void)motor_turn_adjust();
-    assert(D.tape_align == 1);                    /* 고친 동작: -3 은 중앙이 아니다 */
+    assert(D.tape_align == 1);                    /* -3 은 중앙이 아니다 */
     D.guide_pos = 1;
     (void)motor_turn_adjust();
     assert(D.tape_align == 0 && D.turn_pulses == 0);
-    D.tape_step = 2; D.tape_align = 1; D.turn_pulses = 12000;
-    (void)param_set(P_LEGACY_QUIRKS, QUIRK_TURN_STEP2);
-    D.guide_pos = 1;
-    (void)motor_turn_adjust();
-    assert(D.tape_align == 1);                    /* 구동작: G < 0 일 때만 끝난다 */
-    D.guide_pos = -3;
-    (void)motor_turn_adjust();
-    assert(D.tape_align == 0);
-    /* 최저 속도: 고친 동작은 Step 2 동안 최저속 쪽으로 감속 */
-    (void)param_set(P_LEGACY_QUIRKS, 0);
+    /* 일반 회전은 가이드를 보지 않는다 */
     setup();
-    D.tape_step = 2; D.tape_align = 1; D.turn_pulses = 12000;
-    D.tape_target_cnt = 10000.0f; D.tape_max = 100;
+    D.control = RUN_TURN;
+    D.turn_pulses = 500;
+    D.guide_all_off = 1;
+    for (int i = 0; i < 20; i++) { (void)motor_turn_adjust(); }
+    assert(D.turn_pulses == 500 && D.tape_step == 0);
+    /* Step 2 동안 최저 속도 쪽으로 감속한다 */
+    setup();
+    D.tape_step = 2; D.tape_align = 1; D.turn_pulses = 2000; D.tape_turned = 1900;
+    D.tape_target_cnt = 2000.0f; D.tape_max = 100;
     D.guide_pos = 5;
     D.vin_out = P.turn_speed;
     for (int i = 0; i < 2000; i++) { (void)motor_turn_adjust(); }

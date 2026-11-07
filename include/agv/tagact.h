@@ -39,6 +39,8 @@ enum { TAG_COND_NONE = 0, TAG_COND_FORBACK_MODE, TAG_COND_LOW_BATTERY, TAG_COND_
 #define TA_STATION_RESET  0x0E00
 #define TA_ACT            0x0F00   /* 인자: ACT ID. 주행을 멈추지 않고 병렬 동작 시작 */
 #define TA_CALL           0x0D00   /* 인자: 사용자 함수 표 인덱스 */
+#define TA_TURN_ALIGN     0x1000   /* TA_TURN 과 같은 인자. 목표각 근방에서 주행로에 정렬 */
+#define TA_TURN_TAPE      0x1100   /* TA_TURN_ALIGN 과 같다. 교차 테이프를 찾은 뒤 시작 */
 
 void     tagact_bind(const tag_rule_t *rules, uint16_t n, uint16_t profile);
 uint16_t tagact_display_tag(void);
@@ -51,6 +53,7 @@ void tagact_stop_length(void);   /* 방향별 정지 거리 뒤 멈춘다 */
 void tagact_speed(uint16_t level);
 void tagact_forback(dir_t d);
 void tagact_turn(turn_dir_t d, uint16_t deg, dir_t fb, uint16_t autostart, uint16_t obs);
+void tagact_turn_align(turn_dir_t d, uint16_t deg, uint16_t next);   /* next: fb | auto<<4 | obs<<8 */
 void tagact_branch(branch_dir_t d);
 void tagact_compensate(int32_t pulses);   /* 태그 처리 지연·RFID 재시도 거리 보정 */
 #endif

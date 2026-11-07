@@ -98,9 +98,25 @@ static void on_led(const guide_rx_t *rx)
     }
 }
 
+/* 정렬 회전은 라인이 사라지는 것이 정상이다. 오류로 치지 않고 위치와 상태만 고친다 */
+static void on_turn_led(const guide_rx_t *rx)
+{
+    guide_out_t out;
+
+    store_led(rx);
+    guide_track(rx, 0, D.backward, &out);
+    D.guide_all_off = (int16_t)(out.status == GUIDE_LOST);
+    D.guide_all_on = (int16_t)(out.status == GUIDE_ALL_ON);
+    if (out.status == GUIDE_NORMAL) { D.guide_pos = out.pos; }
+}
+
 static void on_rx(const guide_rx_t *rx)
 {
     D.guide_wide = rx->wide;
+    if (D.tape_align && D.flag_turn && (rx->kind == GUIDE_RX_LED)) {
+        on_turn_led(rx);
+        return;
+    }
     switch (rx->kind) {
     case GUIDE_RX_POSITION:
         apply_status(rx->status, rx->pos);
@@ -128,7 +144,7 @@ static void on_rx(const guide_rx_t *rx)
 static void send_request(void)
 {
     uint16_t buf[4];
-    uint16_t tape = (uint16_t)((D.tape_stop_id != 0) || (D.tape_turn_dir != 0));
+    uint16_t tape = (uint16_t)((D.tape_stop_id != 0) || (D.tape_turn_dir != 0) || D.tape_align);
 
     buf[0] = FRAME_STX;
     buf[1] = (tape || guide_want_h(D.branch_start, D.branch_step)) ? 'H' : 'A';
@@ -160,5 +176,5 @@ void guide_poll(void)
         s_ready_cnt++;
         if (s_ready_cnt >= RUN_READY_TIMEOUT) { D.stop_err = ERR_GUIDE_RANGE; }
     }
-    if (D.flag_ready || D.flag_run) { send_request(); }
+    if (D.flag_ready || D.flag_run || (D.flag_turn && D.tape_align)) { send_request(); }
 }

@@ -16,6 +16,7 @@
 #define COND_SLOT(c)      ((c) >> 8)
 #define COND_KIND(c)      ((c) & 0xFFu)
 #define LOW_BATTERY_DV    230   /* 저전압 판정과 같은 값 */
+#define TAPE_WINDOW_DEG   20.0f /* 정렬 회전이 새 라인을 찾는 목표각 앞뒤 범위 */
 
 static const tag_rule_t *s_rules;
 static uint16_t s_nrules, s_profile, s_display_tag;
@@ -87,6 +88,24 @@ void tagact_turn(turn_dir_t d, uint16_t deg, dir_t fb, uint16_t autostart, uint1
     if (D.flag_stopping) { stop_request_tag(); }
 }
 
+void tagact_turn_align(turn_dir_t d, uint16_t deg, uint16_t next)
+{
+    int16_t before = D.turn_pulses;
+    uint16_t fb = next & 0xFu;
+
+    tagact_turn(d, deg, (dir_t)fb, (uint16_t)((next >> 4) & 0xFu), (uint16_t)((next >> 8) & 0xFu));
+    if ((before != 0) || (D.turn_pulses <= 0)) { return; }
+    D.tape_total_pulse = D.turn_pulses;
+    D.tape_target_cnt = (float)D.turn_pulses;
+    D.tape_max = (int16_t)(((float)P.turn_90 / 90.0f) * TAPE_WINDOW_DEG);
+    D.tape_slip_ratio = 1.0f;
+    D.tape_lost_cnt = 0;
+    D.tape_turned = 0;
+    /* 방향이 바뀌면 센서 전원도 바뀌어 출발 라인을 볼 수 없다. 슬립 측정을 건너뛴다 */
+    D.tape_step = (fb != 0u) ? 1 : 0;
+    D.tape_align = 1;
+}
+
 void tagact_branch(branch_dir_t d)
 {
     if (D.speed_cmd > P.low_speed) {
@@ -154,7 +173,8 @@ static const tag_rule_t *rule_find(uint16_t tag)
 static uint16_t has_second_word(uint16_t code)
 {
     uint16_t kind = (uint16_t)(TA_KIND(code) << 8);
-    return (uint16_t)((kind == TA_TURN) || (kind == TA_ACS_NUM) || (kind == TA_STATE));
+    return (uint16_t)((kind == TA_TURN) || (kind == TA_TURN_ALIGN) || (kind == TA_TURN_TAPE)
+                      || (kind == TA_ACS_NUM) || (kind == TA_STATE));
 }
 
 static void autostart(uint16_t sec)
@@ -176,6 +196,14 @@ static void act_exec(uint16_t code, uint16_t next)
     case TA_TURN:
         tagact_turn((turn_dir_t)(arg & 3u), (uint16_t)((arg >> 2) * 90u), (dir_t)(next & 0xFu),
                     (uint16_t)((next >> 4) & 0xFu), (uint16_t)((next >> 8) & 0xFu));
+        break;
+    case TA_TURN_ALIGN:
+        tagact_turn_align((turn_dir_t)(arg & 3u), (uint16_t)((arg >> 2) * 90u), next);
+        break;
+    case TA_TURN_TAPE:
+        D.tape_turn_dir = (int16_t)(arg & 3u);
+        D.tape_turn_deg = (int16_t)((arg >> 2) * 90u);
+        D.tape_turn_next = next;
         break;
     case TA_BRANCH:         tagact_branch((branch_dir_t)arg); break;
     case TA_SEQ:            tagact_stop(); seq_request(arg); break;
