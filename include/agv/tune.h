@@ -33,6 +33,8 @@ int16_t  tune_edit_place(void);   /* 1 일, 2 십, 3 백의 자리 */
 uint16_t tune_state(void);
 uint16_t tune_page(void);
 uint16_t tune_lines(void);        /* 이번 구간에서 본 교차선 수 */
+uint32_t tune_line_at(uint16_t i); /* i 번째 교차선을 본 때의 주행 펄스 */
+void     tune_cross_clear(void);  /* 교차선 수를 0 으로. 식별 시험이 선 찾기 전에 부른다 */
 int16_t  tune_result(void);       /* 계산한 휠 간격 값 */
 int16_t  tune_value(uint16_t page);
 void     tune_run(void);          /* 10 ms */

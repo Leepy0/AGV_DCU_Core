@@ -84,11 +84,14 @@ uint16_t tune_state(void)      { return s_tune.state; }
 int16_t  tune_result(void)     { return s_tune.wheel_base; }
 uint16_t tune_page(void)       { return s_tune.page; }
 uint16_t tune_lines(void)      { return s_tune.lines; }
+uint32_t tune_line_at(uint16_t i) { return s_tune.line_at[(i < 2u) ? i : 1u]; }
+void     tune_cross_clear(void)  { s_tune.lines = 0; s_tune.led_prev = 0; }
 
 static uint32_t travel(void) { return run_pulses(D.backward ? 1u : 0u); }
 
 static int measuring(void)
 {
+    if (s_tune.state == TUNE_IDENT) { return ident_want_h(); }   /* 식별 시험은 선 찾기에서만 */
     return ((s_tune.state == TUNE_GO_1) || (s_tune.state == TUNE_GO_2)) && D.flag_run && !D.flag_stopping;
 }
 
@@ -429,7 +432,6 @@ int tune_key(uint16_t key)
     if ((s_tune.state == TUNE_WAIT) && (key == KEY_SHIFT)) {
         s_tune.ident ^= 1u;
         s_tune.failed = 0;
-        if (s_tune.ident) { ident_clear(); }   /* SHIFT 두 번 = 1단계부터 다시 */
         return 1;
     }
     if ((s_tune.state == TUNE_IDENT_DONE) && (key == KEY_RESET)) {
