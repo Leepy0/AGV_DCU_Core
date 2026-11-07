@@ -935,12 +935,12 @@ static void test_tape_turn(void)
     D.tape_turn_deg = 90;
     D.tape_turn_next = 0x10;
     host.sci[HAL_SCI_B].tx_len = 0;
-    guide_led_reply(0x00FFu);
+    guide_led_reply(0x03FFu);
     tick();
     assert(guide_tx_has('H'));
     assert(D.speed_cmd == P.min_speed);
     assert(D.tape_align == 0);
-    guide_led_reply(0x00FFu);
+    guide_led_reply(0x03FFu);
     tick();
     assert(D.tape_turn_dir == 0);
     assert(D.tape_align == 1);

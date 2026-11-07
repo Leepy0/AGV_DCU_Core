@@ -42,6 +42,12 @@ int main(void)
       assert(param_get(P_SPEED_TURN) == 15 && fake_ee[P_SPEED_TURN] == 15 && fake_ee[0] == ee_sum());
       assert(param_get(P_WHEEL_BASE_MM) == id); }
     assert(param_set(P_SPEED_TURN, 13) == 0);
+    /* 가이드센서 거리: 빈 EEPROM 이면 250, 체크섬 밖 115 에 저장, 범위 100~999 */
+    assert(param_get(P_GUIDE_DIST_MM) == 250 && P.guide_dist_mm == 250.0f);
+    assert(param_set(P_GUIDE_DIST_MM, 300) == 0 && fake_ee[PARAM_GUIDE_DIST_ADDR] == 300 && P.guide_dist_mm == 300.0f);
+    assert(param_set(P_GUIDE_DIST_MM, 50) == -1);
+    assert(param_boot(&fake_store, 2611) == 0 && param_get(P_GUIDE_DIST_MM) == 300);
+    assert(param_set(P_GUIDE_DIST_MM, 250) == 0);
     /* 빈 EEPROM → 한계 위반 → 기본값 1 세트 저장 */
     assert(param_get(P_SPEED_HIGH) == 30 && param_get(P_SPEED_LOW) == 25 && param_get(P_SPEED_TURN) == 13);
     assert(param_get(P_ACS_VERSION) == 11 && param_get(P_VERSION) == 2611);

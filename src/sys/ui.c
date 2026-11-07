@@ -26,7 +26,7 @@
 #define HISTORY_TICKS    500
 #define GROUP_USE_LAST   14     /* 메뉴 순서표의 그룹 경계 */
 #define GROUP_OTHER_FIRST 15
-#define GROUP_OTHER_LAST 48
+#define GROUP_OTHER_LAST 49
 #define PARA_EDIT_LAST   46     /* 이 번호까지 편집한다 */
 #define EDIT_OFF_FLAG    0
 #define SCREEN_LIST      10     /* 이 값을 더하면 번호 목록 화면 */
@@ -60,7 +60,7 @@ static const uint16_t s_menu[] = {
     P_STATION_NO, P_BRANCH_MODE, P_TAG_DIGITS, P_STEER_KP, P_STEER_KI, P_SWITCH_START_NUM, P_TAG_TYPE,
     P_COMM_LINK, P_ACS_STANDBY, P_BRANCH_OFFSET, P_CROSS_IN_TIME, P_ACS_RETRY_LEGACY, P_ACS_RETRY_SEC,
     P_GUIDE_CURVE_DETECT, P_LEGACY_QUIRKS, P_ERR_REPORT_MIN, P_CROSS_RETRY_100MS, P_CROSS_MODE,
-    P_STEER_RPM_OFFSET, P_GUIDE_TIMEOUT, P_ACS_VERSION, P_LAMP_EXT_USE, P_PARA_INIT, P_VERSION, P_BAT_DV,
+    P_STEER_RPM_OFFSET, P_GUIDE_TIMEOUT, P_GUIDE_DIST_MM, P_ACS_VERSION, P_LAMP_EXT_USE, P_PARA_INIT, P_VERSION, P_BAT_DV,
     P_BAT_PERCENT
 };
 
@@ -73,7 +73,8 @@ static const para_view_t s_view[P_COUNT] = {
     {"SL ", 3}, {"K_P", 2}, {"K_I", 2}, {"WS ", 3}, {"RG ", 3}, {"WW ", 3}, {"ID_", 2}, {"AT ", 3}, {"LO ", 3},
     {"ACD", 2}, {"SSN", 2}, {"TTY", 1}, {"MPU", 2}, {"FL ", 3}, {"ASS", 2}, {"BGO", 2}, {"CIT", 2}, {"WRT", 2},
     {"CT ", 3}, {"SO-", 2}, {"SU ", 3}, {"EST", 2}, {"RCI", 2}, {"LUS", 2}, {"C- ", 3}, {"CO-", 2}, {"AV-", 2},
-    {"INT", 2}, {"V_ ", 3}, {"VT ", 3}, {"CR ", 3}
+    {"INT", 2}, {"V_ ", 3}, {"VT ", 3}, {"CR ", 3},
+    {"GD ", 3}
 };
 static const char s_lamp_name[UI_LAMP_EXT_COUNT] = { 'G', 'R', 'Y' };
 
@@ -145,7 +146,7 @@ static uint16_t any_error(void)
 
 static void blink_step(void)
 {
-    uint16_t blink = (D.ui_mode == UI_PARAM) || (D.ui_mode == UI_IO_OUT)
+    uint16_t blink = (D.ui_mode == UI_PARAM) || (D.ui_mode == UI_IO_OUT) || tune_editing()
                   || ((D.ui_mode == UI_AUTO) && any_error())
                   || ((D.ui_mode == UI_JOG) && ((D.rpm_avg[0] > BLINK_RPM) || (D.rpm_avg[1] > BLINK_RPM)));
 
@@ -198,7 +199,7 @@ void ui_isr(uint16_t key_input)
     s_ui.cursor = (uint16_t)((s_ui.cursor + 1u) % DISP_DIGITS);
     order = s_ui.cursor;
     value = s_ui.digit[order];
-    if ((D.ui_mode == UI_PARAM) || (D.ui_mode == UI_IO_OUT)) {
+    if ((D.ui_mode == UI_PARAM) || (D.ui_mode == UI_IO_OUT) || tune_editing()) {
         if (!s_ui.blink_on && ((s_ui.flick >> order) & 1u)) { value = DIGIT_NONE; }
     }
     else if (!s_ui.blink_on) {
@@ -448,7 +449,7 @@ static void key_set(void)
         commit();
     }
     else {
-        s_ui.edit = (s_ui.para <= PARA_EDIT_LAST) || (s_ui.para >= UI_PARA_LAMP_FIRST);
+        s_ui.edit = (s_ui.para <= PARA_EDIT_LAST) || (s_ui.para == P_GUIDE_DIST_MM) || (s_ui.para >= UI_PARA_LAMP_FIRST);
         if ((int16_t)para_digits(s_ui.para) < s_ui.place) { s_ui.place = 1; }
     }
 }
@@ -607,6 +608,11 @@ static void show_idle(void)
     else if (D.flag_turn) {
         int16_t angle = turn_left_deg();
         show(letter('T'), letter('N'), digit_of(angle, 100), digit_of(angle, 10), digit_of(angle, 1));
+    }
+    else if ((run_wait_left() >= 0) && !D.flag_run) {
+        s_ui.digit[0] = letter('A');
+        s_ui.digit[1] = letter('T');
+        show_number_tail(run_wait_left(), 1);
     }
     else {
         show(letter('A'), letter('U'), letter('T'), letter('O'), DIGIT_NONE);
@@ -782,7 +788,7 @@ static void show_tune_page(void)
     s_ui.digit[2] = digit_of(m, 100);
     s_ui.digit[3] = digit_of(m, 10);
     s_ui.digit[4] = digit_of(m, 1);
-    if (page == TUNE_PAGE_RETURN) { s_ui.flick = 0x1Cu; }   /* 입력하는 값 */
+    if (tune_editing()) { s_ui.flick = (uint16_t)(1u << (5 - tune_edit_place())); }   /* 고치는 자리 */
 }
 
 static void show_tune(void)
@@ -794,7 +800,7 @@ static void show_tune(void)
         break;
     case TUNE_PAUSE:
         show_tune_value(letter('D'), tune_value(TUNE_PAGE_DISTANCE));
-        s_ui.flick = 0x1Cu;
+        if (tune_editing()) { s_ui.flick = (uint16_t)(1u << (5 - tune_edit_place())); }
         break;
     case TUNE_GO_1:
         show(letter('G'), letter('O'), DIGIT_NONE, DIGIT_NONE, 1);

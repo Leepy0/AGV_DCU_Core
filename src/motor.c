@@ -28,7 +28,6 @@
 #define TAPE_SLOW_POS        12      /* 새 라인이 이 안에 들면 최저 속도 */
 #define TAPE_CENTER_POS      1       /* 이 안이면 회전을 끝낸다 */
 #define GUIDE_BIT_PITCH_MM   6.89f
-#define GUIDE_TO_CENTER_MM   250.0f
 #define PI_F                 3.14159265f
 
 agv_drive_t agv_drive;
@@ -341,7 +340,7 @@ void motor_drive_step(void)
 static int32_t guide_offset_to_pulse(int16_t guide)
 {
     float offset_mm = (float)guide * guide_h_scale() * GUIDE_BIT_PITCH_MM;
-    float angle_deg = (offset_mm / GUIDE_TO_CENTER_MM) * (180.0f / PI_F);
+    float angle_deg = (offset_mm / P.guide_dist_mm) * (180.0f / PI_F);
     return (int32_t)(angle_deg * ((float)P.turn_90 / 90.0f));
 }
 

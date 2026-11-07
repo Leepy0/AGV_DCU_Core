@@ -118,6 +118,8 @@ int16_t  run_standby_num(void)      { return s_run.standby; }
 void     run_standby_auto_off(void) { s_run.standby = 0; s_run.standby_auto = 0; }
 
 /* 0 이면 P_AUTO_START_SEC */
+int16_t run_wait_left(void) { return D.wait_start ? s_run.wait_sec : -1; }
+
 void run_request_restart(uint16_t sec)
 {
     D.wait_start = 1;
@@ -786,7 +788,7 @@ static uint16_t led_total(void)
     return n;
 }
 
-#define TAPE_LED_MIN 6      /* 교차 테이프로 볼 점등 수 */
+#define TAPE_LED_MIN 10     /* 교차 테이프로 볼 점등 수 */
 #define TAPE_ID_TURN (-1)   /* 시퀀스 번호와 겹치지 않는 회전 탐색 표시 */
 
 static struct { int16_t prev_id; uint32_t start_len; int16_t hits; } s_tape;

@@ -2,7 +2,8 @@
  * 출발점에서 1 m 지점에 정확히 멈춘다(1 m - 정지 거리에서 정지 시작). 그 자리에서 실측 오차를 넣고 SET 하면
  * 태그 없이 180도 정렬 회전, 다시 1 m 돌아와 출발점에 멈춘다. 직진 구간에서 'a' 와 'h' 를 번갈아 받아
  * 가이드 부호·배율, 조향 편차, LED 점등 수, 좌우 펄스 비를 재고, 회전에서 휠 간격을 계산한다.
- * 결과는 쪽(page)으로 본다. SHIFT 다음 쪽, UP·DOWN 값 입력, SET 저장, RESET 다시 시험 */
+ * 결과는 쪽(page)으로 본다. 키는 파라미터 편집과 같다: UP·DOWN 쪽 선택, SET 수정 시작,
+ * SHIFT 자리, UP·DOWN 값, SET 확정·저장, RESET 취소. 수정 중이 아니면 RESET 은 다시 시험 */
 #include <math.h>
 #include "agv/tune.h"
 #include "agv/drive.h"
@@ -28,6 +29,7 @@ static struct {
     uint16_t state, turn_seen, page, toggle;
     uint32_t start, l0, r0, dl, dr;
     int16_t  wheel_base, err_turn, err_back, failed;
+    int16_t  editing, place, edit_value;
     /* 측정 */
     int16_t  a_last, a_fresh;
     float    ah, hh, se;
@@ -52,6 +54,7 @@ void tune_reset(void)
     s_tune.state = TUNE_OFF;
     s_tune.turn_seen = 0;
     s_tune.err_turn = s_tune.err_back = 0;
+    s_tune.editing = 0;
     s_tune.failed = 0;
     clear_measure();
 }
@@ -59,6 +62,8 @@ void tune_reset(void)
 void     tune_arm(void)    { s_tune.state = TUNE_WAIT; clear_measure(); }
 int      tune_active(void) { return s_tune.state != TUNE_OFF; }
 int      tune_failed(void) { return s_tune.failed; }
+int      tune_editing(void) { return s_tune.editing; }
+int16_t  tune_edit_place(void) { return s_tune.place; }
 uint16_t tune_state(void)  { return s_tune.state; }
 int16_t  tune_result(void) { return s_tune.wheel_base; }
 uint16_t tune_page(void)   { return s_tune.page; }
@@ -239,6 +244,9 @@ int16_t tune_value(uint16_t page)
 {
     float k;
 
+    if (s_tune.editing && ((page == s_tune.page) || ((s_tune.state == TUNE_PAUSE) && (page == TUNE_PAGE_DISTANCE)))) {
+        return s_tune.edit_value;
+    }
     switch (page) {
     case TUNE_PAGE_WHEEL_BASE: return s_tune.wheel_base;
     case TUNE_PAGE_DISTANCE:   return s_tune.err_turn;
@@ -300,62 +308,104 @@ static int save_guide(void)
     return 1;
 }
 
-static void err_step(int16_t *e, int16_t sign)
+static void edit_limits(uint16_t page, int16_t *low, int16_t *up)
 {
-    *e = (int16_t)(*e + sign);
-    if (*e < -ERR_MM_LIMIT) { *e = -ERR_MM_LIMIT; }
-    if (*e > ERR_MM_LIMIT)  { *e = ERR_MM_LIMIT; }
+    if (page == TUNE_PAGE_WHEEL_BASE) { param_limit(P_WHEEL_BASE_MM, low, up); return; }
+    *low = -ERR_MM_LIMIT;
+    *up = ERR_MM_LIMIT;
+}
+
+static void edit_begin(uint16_t page, int16_t value)
+{
+    s_tune.editing = 1;
+    s_tune.place = 1;
+    s_tune.edit_value = value;
+    (void)page;
+}
+
+/* SHIFT·UP·DOWN. 처리했으면 1 */
+static int edit_key(uint16_t key, uint16_t page)
+{
+    int16_t low, up, step;
+
+    if (key == KEY_SHIFT) {
+        s_tune.place = (int16_t)((s_tune.place >= 3) ? 1 : s_tune.place + 1);
+        return 1;
+    }
+    if ((key != KEY_UP) && (key != KEY_DOWN)) { return 0; }
+    step = (s_tune.place == 3) ? 100 : ((s_tune.place == 2) ? 10 : 1);
+    edit_limits(page, &low, &up);
+    s_tune.edit_value = (int16_t)(s_tune.edit_value + ((key == KEY_UP) ? step : -step));
+    if (s_tune.edit_value < low) { s_tune.edit_value = low; }
+    if (s_tune.edit_value > up)  { s_tune.edit_value = up; }
+    return 1;
+}
+
+static int editable(uint16_t page)
+{
+    return (page == TUNE_PAGE_WHEEL_BASE) || (page == TUNE_PAGE_RETURN);
+}
+
+static int start_turn(void)
+{
+    /* 지름을 먼저 고쳐 저장한다. 회전 펄스와 돌아오는 1 m 가 새 값으로 계산되어
+     * 이번 회전의 휠 간격과 복귀 오차가 바로 맞는다 */
+    if (s_tune.err_turn != 0) {
+        (void)param_set(P_WHEEL_DIA_MM, clamp_param(P_WHEEL_DIA_MM, (float)param_get(P_WHEEL_DIA_MM)
+                                        * (TUNE_DIST_MM + (float)s_tune.err_turn) / TUNE_DIST_MM));
+    }
+    D.tape_slow = 1;
+    s_tune.turn_seen = 0;
+    tagact_turn_align_stopped(TURN_CW, 180u, 0u);
+    if (D.tape_align) { s_tune.state = TUNE_TURN; }
+    else              { D.tape_slow = 0; s_tune.failed = 1; s_tune.state = TUNE_WAIT; }
+    return 1;
 }
 
 int tune_key(uint16_t key)
 {
-    int16_t sign = (key == KEY_UP) ? 1 : -1;
-
     if (D.flag_run || D.flag_stopping) { return 0; }
     if (s_tune.state == TUNE_PAUSE) {
-        switch (key) {
-        case KEY_UP:
-        case KEY_DOWN:
-            err_step(&s_tune.err_turn, sign);
-            return 1;
-        case KEY_SET:
-            /* 지름을 먼저 고쳐 저장한다. 회전 펄스와 돌아오는 1 m 가 새 값으로 계산되어
-             * 이번 회전의 휠 간격과 복귀 오차가 바로 맞는다 */
-            if (s_tune.err_turn != 0) {
-                (void)param_set(P_WHEEL_DIA_MM, clamp_param(P_WHEEL_DIA_MM, (float)param_get(P_WHEEL_DIA_MM)
-                                                * (TUNE_DIST_MM + (float)s_tune.err_turn) / TUNE_DIST_MM));
+        if (s_tune.editing) {
+            if (edit_key(key, TUNE_PAGE_DISTANCE)) { return 1; }
+            if (key == KEY_RESET) { s_tune.editing = 0; return 1; }
+            if (key == KEY_SET) {
+                s_tune.err_turn = s_tune.edit_value;
+                s_tune.editing = 0;
+                return start_turn();
             }
-            D.tape_slow = 1;
-            s_tune.turn_seen = 0;
-            tagact_turn_align_stopped(TURN_CW, 180u, 0u);
-            if (D.tape_align) { s_tune.state = TUNE_TURN; }
-            else              { D.tape_slow = 0; s_tune.failed = 1; s_tune.state = TUNE_WAIT; }
-            return 1;
-        case KEY_RESET:
-            s_tune.state = TUNE_WAIT;
-            return 1;
-        default:
             return 0;
         }
+        if (key == KEY_SET)   { edit_begin(TUNE_PAGE_DISTANCE, s_tune.err_turn); return 1; }
+        if (key == KEY_RESET) { s_tune.state = TUNE_WAIT; return 1; }
+        return 0;
     }
     if (s_tune.state != TUNE_DONE) { return 0; }
+    if (s_tune.editing) {
+        if (edit_key(key, s_tune.page)) { return 1; }
+        if (key == KEY_RESET) { s_tune.editing = 0; return 1; }
+        if (key == KEY_SET) {
+            s_tune.editing = 0;
+            if (s_tune.page == TUNE_PAGE_WHEEL_BASE) {
+                s_tune.wheel_base = s_tune.edit_value;
+                return (param_set(P_WHEEL_BASE_MM, s_tune.wheel_base) == 0) ? 2 : 1;
+            }
+            s_tune.err_back = s_tune.edit_value;
+            return 2;
+        }
+        return 0;
+    }
     switch (key) {
-    case KEY_SHIFT:
+    case KEY_UP:
         s_tune.page = (uint16_t)((s_tune.page + 1u) % TUNE_PAGE_COUNT);
         return 1;
-    case KEY_UP:
     case KEY_DOWN:
-        if (s_tune.page == TUNE_PAGE_RETURN)   { err_step(&s_tune.err_back, sign); }
+        s_tune.page = (uint16_t)((s_tune.page + TUNE_PAGE_COUNT - 1u) % TUNE_PAGE_COUNT);
         return 1;
     case KEY_SET:
-        switch (s_tune.page) {
-        case TUNE_PAGE_WHEEL_BASE:
-            return (param_set(P_WHEEL_BASE_MM, s_tune.wheel_base) == 0) ? 2 : 1;
-        case TUNE_PAGE_GUIDE:
-            return save_guide() ? 2 : 1;
-        default:
-            return 1;
-        }
+        if (editable(s_tune.page)) { edit_begin(s_tune.page, tune_value(s_tune.page)); return 1; }
+        if (s_tune.page == TUNE_PAGE_GUIDE) { return save_guide() ? 2 : 1; }
+        return 1;
     case KEY_RESET:
         s_tune.state = TUNE_WAIT;
         return 1;

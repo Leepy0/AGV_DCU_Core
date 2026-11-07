@@ -30,6 +30,7 @@
 #define GUIDE_KP_CURVE_MAX          (GUIDE_KP_MAX * 1.3f)
 #define GUIDE_DEADBAND_CURVE_SCALE  0.3f
 #define GUIDE_KD_RATE               0.08f
+#define STEER_GUIDE_REF_MM          250.0f    /* 이득을 맞춘 센서 거리 */
 #define STEER_LIMIT_RPM             1500
 
 static struct {
@@ -200,6 +201,8 @@ void steer_run(int16_t tuning_type)
     if (D.control == RUN_DRIVE) {
         int16_t limit;
         float p_out, i_candidate, rate_ff, unsat, out;
+        /* 센서가 회전 중심에서 멀수록 같은 방향 오차에 위치가 크게 변한다. 기준 거리 250 mm 로 맞춘다 */
+        float geom = (P.guide_dist_mm > 0.0f) ? (STEER_GUIDE_REF_MM / P.guide_dist_mm) : 1.0f;
 
         D.p_err_1 = D.p_err;
         if (D.branch_start != 0) {        /* 분기 중에는 센서 대신 고정 편이 지령을 쓴다 */
@@ -212,11 +215,11 @@ void steer_run(int16_t tuning_type)
         limit = (int16_t)(((D.v_cmd >= 0) ? D.v_cmd : (int16_t)(-D.v_cmd)) * 2);
         if (limit > STEER_LIMIT_RPM) { limit = STEER_LIMIT_RPM; }
 
-        p_out = D.p_kp * (float)D.p_err;
-        rate_ff = GUIDE_KD_RATE * (!D.backward ? D.kf_rate : -D.kf_rate);
+        p_out = D.p_kp * (float)D.p_err * geom;
+        rate_ff = GUIDE_KD_RATE * (!D.backward ? D.kf_rate : -D.kf_rate) * geom;
 
         if (!clear_integral && !D.flag_stopping && !stop_is_braking()) {
-            i_candidate = s_steer.i_out + (D.p_ki * (float)D.p_err);
+            i_candidate = s_steer.i_out + (D.p_ki * (float)D.p_err * geom);
             unsat = p_out + i_candidate + rate_ff;
             /* 이미 포화된 출력을 더 미는 방향일 때만 적분을 멈춘다 */
             if (!(((unsat > (float)limit) && (D.p_err > 0)) || ((unsat < (float)-limit) && (D.p_err < 0)))) {

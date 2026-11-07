@@ -24,6 +24,8 @@ void     tune_arm(void);          /* 전원 투입 때 켠다. 끝내려면 전�
 void     tune_load(void);         /* 부팅 때 저장한 가이드 부호·배율을 되살린다 */
 int      tune_active(void);
 int      tune_failed(void);       /* 1 = 회전 실패로 TUNE 로 돌아옴 */
+int      tune_editing(void);      /* 값을 고치는 중 */
+int16_t  tune_edit_place(void);   /* 1 일, 2 십, 3 백의 자리 */
 uint16_t tune_state(void);
 uint16_t tune_page(void);
 int16_t  tune_result(void);       /* 계산한 휠 간격 값 */

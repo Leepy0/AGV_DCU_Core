@@ -63,6 +63,7 @@ void param_default_types(int16_t kind1, int16_t kind2, int16_t kind3)
 static int16_t limit_ok(uint16_t i, int16_t v)
 {
     int16_t p;
+    if (i == P_GUIDE_DIST_MM) { return (v >= PARAM_GUIDE_DIST_LOW) && (v <= PARAM_GUIDE_DIST_UP); }
     if (i > P_PARA_INIT) { return 1; }
     if ((s_limit[i].low > 10000) || (s_limit[i].up > 10000)) {
         for (p = 1; p <= 1000; p = (int16_t)(p * 10)) {
@@ -133,6 +134,7 @@ static void recalc_all(void)
 
     param_dv.llow_min = param_rpm(s_limit[P_SPEED_HIGH].low);
     param_dv.turn_min = param_dv.llow_min;
+    param_dv.guide_dist_mm = (float)s_set[P_GUIDE_DIST_MM];
     param_dv.turn_speed = param_rpm(s_set[P_SPEED_TURN]);
     if (param_dv.turn_speed < param_dv.turn_min) { param_dv.turn_speed = param_dv.turn_min; }
     recalc_turn_pulses();
@@ -214,6 +216,7 @@ static void recalc_one(uint16_t i)
     case P_WHEEL_DIA_MM:
     case P_GEAR_RATIO:
     case P_WHEEL_BASE_MM: recalc_all(); break;
+    case P_GUIDE_DIST_MM: param_dv.guide_dist_mm = (float)s_set[P_GUIDE_DIST_MM]; break;
     case P_AGV_TYPE:
         param_dv.agv_type_mode = (int16_t)(10 * param_digit(s_set[P_AGV_TYPE], 100) + param_digit(s_set[P_AGV_TYPE], 10));
         break;
@@ -254,6 +257,7 @@ int16_t param_set(uint16_t idx, int16_t value)
     s_set[idx] = value;
     recalc_one(idx);
     if (idx <= P_SAVED_LAST) { store_one(idx); }
+    if (idx == P_GUIDE_DIST_MM) { s_store->write(PARAM_GUIDE_DIST_ADDR, (uint16_t)value); }
     return 0;
 }
 
@@ -329,6 +333,7 @@ void param_limit(uint16_t idx, int16_t *low, int16_t *up)
 {
     *low = (idx <= P_PARA_INIT) ? s_limit[idx].low : 0;
     *up = (idx <= P_PARA_INIT) ? s_limit[idx].up : 0;
+    if (idx == P_GUIDE_DIST_MM) { *low = PARAM_GUIDE_DIST_LOW; *up = PARAM_GUIDE_DIST_UP; }
 }
 
 int16_t param_boot(const param_store_t *store, int16_t version)
@@ -345,6 +350,10 @@ int16_t param_boot(const param_store_t *store, int16_t version)
 
     if (migrate_new_params() != 0) { status = ERR_PARAM_CHECKSUM; }
     clamp_turn_speed();
+    {   /* 새 파라미터는 체크섬 밖에 둔다. 빈 EEPROM 이나 범위 밖이면 250 */
+        int16_t g = (int16_t)s_store->read(PARAM_GUIDE_DIST_ADDR);
+        s_set[P_GUIDE_DIST_MM] = limit_ok(P_GUIDE_DIST_MM, g) ? g : PARAM_GUIDE_DIST_DEFAULT;
+    }
     for (attempt = 0; attempt < 3; attempt++) {
         result = read_all();
         if (result == 1) { break; }

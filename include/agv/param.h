@@ -25,6 +25,7 @@ enum {
     P_GUIDE_TIMEOUT,        /* 44 */
     P_ACS_VERSION,
     P_PARA_INIT, P_VERSION, P_BAT_DV, P_BAT_PERCENT,
+    P_GUIDE_DIST_MM,        /* 50: 회전 중심에서 가이드센서까지 mm. 체크섬 밖 EEPROM 115 에 따로 둔다 */
     P_COUNT
 };
 #define P_SAVED_LAST 45   /* 이 번호까지 EEPROM 에 저장한다 */
@@ -38,6 +39,10 @@ enum {
 /* 주소 50 표시. 31·38·39·44 의 1회 초기화가 끝나면 쓴다 */
 #define PARAM_MIGRATE_ADDR 50
 #define PARAM_MIGRATE_MARK 0xA55Au
+#define PARAM_GUIDE_DIST_ADDR    115
+#define PARAM_GUIDE_DIST_DEFAULT 250
+#define PARAM_GUIDE_DIST_LOW     100
+#define PARAM_GUIDE_DIST_UP      999
 
 /* 저장 계층. 부팅 경로의 write 는 끝난 뒤 돌아와야 한다.
  * 운전 중에는 저장 큐에 넣는 구현으로 바꿔 끼워도 된다 */
@@ -54,6 +59,7 @@ typedef struct {
     float one_length_pulse;  /* gOne_Length_Pulse: 펄스/mm */
     int16_t target_speed, low_speed, llow_speed, min_speed, turn_speed, jog_speed;
     int16_t llow_min, turn_min;                     /* gLLow_Minimum_Speed, gTurn_Minimum_Speed */
+    float   guide_dist_mm;                          /* P_GUIDE_DIST_MM */
     int16_t turn_16, turn_32, turn_90, turn_180;
     int16_t tag_pulse[12];                          /* const_Tag_Num_Pulse */
     int16_t tag_number, tag_total_pulse;            /* gTag_Number, Tag_Total_Pulse. Tag_nea 는 tag_pulse[n] */

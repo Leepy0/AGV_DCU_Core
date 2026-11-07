@@ -18,6 +18,7 @@ void     run_encoder(uint16_t wheel, uint32_t period);   /* eCAP ISR */
 uint32_t run_pulses(uint16_t wheel);       /* 좌 Total_length, 우 누적 펄스 */
 int      run_is_idle(void);                /* gFlag_AGV_None_Action */
 int      run_auto_started(void);           /* Flag_Auto_Start */
+int16_t  run_wait_left(void);              /* 재출발 대기 남은 초. 대기 아니면 -1 */
 int32_t  run_rail_cut(void);               /* 마지막 정상 응답 뒤 이동 펄스 */
 void     run_rail_cut_clear(void);
 
