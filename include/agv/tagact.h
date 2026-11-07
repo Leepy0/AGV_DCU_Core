@@ -18,7 +18,8 @@ typedef struct {
 } tag_rule_t;
 
 enum { TAG_COND_NONE = 0, TAG_COND_FORBACK_MODE, TAG_COND_LOW_BATTERY, TAG_COND_FORWARD, TAG_COND_BACKWARD,
-       TAG_COND_STATION_RANGE /* cond_a <= 큐[칸] <= cond_b */ };
+       TAG_COND_STATION_RANGE, /* cond_a <= 큐[칸] <= cond_b */
+       TAG_COND_STATION_RUNNING /* 위 조건 + 아직 정지가 걸리지 않음 */ };
 
 /* 액션 코드: 상위 8비트 종류, 하위 8비트 인자 */
 #define TA_KIND(code)     ((code) >> 8)

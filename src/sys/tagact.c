@@ -128,6 +128,9 @@ static uint16_t cond_ok(const tag_rule_t *r)
     case TAG_COND_LOW_BATTERY:  return (uint16_t)(param_get(P_BAT_DV) < LOW_BATTERY_DV);
     case TAG_COND_FORWARD:      return (uint16_t)(D.backward == 0);
     case TAG_COND_BACKWARD:     return (uint16_t)(D.backward != 0);
+    case TAG_COND_STATION_RUNNING:
+        if (D.flag_stopping) { return 0; }
+        /* fall through */
     case TAG_COND_STATION_RANGE:
         station = acs_station_get(COND_SLOT(r->cond));
         return (uint16_t)((station >= (int16_t)r->cond_a) && (station <= (int16_t)r->cond_b));

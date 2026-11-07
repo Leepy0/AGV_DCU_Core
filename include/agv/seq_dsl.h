@@ -171,6 +171,7 @@ typedef unsigned long long dsl_cond_t;
 #define IF_FORWARD             TAG_COND_FORWARD, 0, 0
 #define IF_BACKWARD            TAG_COND_BACKWARD, 0, 0
 #define IF_STATION(idx, lo, hi)  (uint16_t)(TAG_COND_STATION_RANGE | ((idx) << 8)), (uint16_t)(lo), (uint16_t)(hi)
+#define IF_STATION_RUNNING(idx, lo, hi)  (uint16_t)(TAG_COND_STATION_RUNNING | ((idx) << 8)), (uint16_t)(lo), (uint16_t)(hi)
 
 #define A_STOP                 TA_STOP
 #define A_AUTOSTART(sec)       (TA_STOP_AUTOSTART | (sec))

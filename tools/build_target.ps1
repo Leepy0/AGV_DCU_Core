@@ -6,7 +6,7 @@ Set-Location (Split-Path -Parent $PSScriptRoot)
 $cgt = 'C:\ti\ti-cgt-c2000_18.12.2.LTS\ti-cgt-c2000_18.12.2.LTS'
 $cl = "$cgt\bin\cl2000.exe"
 $flags = '-v28', '-ml', '-mt', '--c99', '--float_support=softlib', '-O2', '--opt_for_speed=2', '-g',
-         '--diag_warning=225', '--display_error_number', "-I$cgt\include", '-Iinclude', '-Ihal/f2808'
+         '--diag_warning=225', '--display_error_number', "-I$cgt\include", '-Iinclude', '-Ihal/f2808', "-I$Site"
 $objdir = 'build/c28'
 New-Item -ItemType Directory -Force $objdir | Out-Null
 
