@@ -2,6 +2,7 @@
 
 ## 미릴리스 (2026-11-07)
 - 식별 시험: 튜닝 대기 중 SHIFT 로 고르는 자동 직진 시험. 결과 구조체 `agv_ident`. 조향 옆 계단 지령 `p_test`.
+  START 한 번에 속도 한 단계씩 나눠 돌고 SL 정지한다(5 m 직선). 단계별 거리·정지 거리를 남긴다.
 - `P_OPT_FLAGS` b4: 조향 이득을 휠 간격에 비례 (600 mm 기준). 범위 0~31.
 - 2단계 HAL: `hal/f2808` (PLL, 워치독, 플래시 대기, PIE, Timer0, GPIO, 버스, SPI DAC, eCAP, SCI, Microwire EEPROM, ADC, codestart), `hal/host`. TI 헤더 없음.
 - 3단계 조립: `src/sys` (메인 스케줄러, `run`, `comm`, `guide_poll`, `tagact`, `ui`, `storage`, `io`, `link`, `log`), 빈 예제 사이트, `tools/build_target.ps1`, `tests/test_sys.c`.

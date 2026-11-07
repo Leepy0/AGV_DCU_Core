@@ -429,6 +429,7 @@ int tune_key(uint16_t key)
     if ((s_tune.state == TUNE_WAIT) && (key == KEY_SHIFT)) {
         s_tune.ident ^= 1u;
         s_tune.failed = 0;
+        if (s_tune.ident) { ident_clear(); }   /* SHIFT 두 번 = 1단계부터 다시 */
         return 1;
     }
     if ((s_tune.state == TUNE_IDENT_DONE) && (key == KEY_RESET)) {

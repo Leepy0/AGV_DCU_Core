@@ -1,6 +1,7 @@
 /* ident.h - 식별 시험. 튜닝 모드에서 SHIFT 로 고르고 START.
- * 긴 직선에서 속도 세 단계로 직진하며 조향·구동 응답을 재고, 마지막에 SL 정지를 잰다.
- * 결과는 agv_ident 에 남는다. CCS Expressions 에 agv_ident 를 넣고 펼쳐 읽는다.
+ * START 한 번에 속도 한 단계(최고 속도의 1/3, 2/3, 1)만 직진하며 조향·구동 응답을 재고 SL 정지한다.
+ * 짧은 직선(5 m)에서 세 번 나눠 돌린다. 결과는 agv_ident 에 쌓인다.
+ * CCS Expressions 에 agv_ident 를 넣고 펼쳐 읽는다.
  * 값이 -1 이면 그 응답이 창 안에 목표에 닿지 않은 것이다 */
 #ifndef AGV_IDENT_H
 #define AGV_IDENT_H
@@ -26,31 +27,33 @@ typedef struct {
     float   lat_settle_ms;   /* ±10% 안에 든 뒤 안 나간 시각 */
     float   lat_err_mm;      /* 창 끝 0.5 s 평균 - 목표 */
     int16_t risk;            /* 위험 감속 횟수 */
+    float   run_m;           /* 이 단계 시험에 쓴 거리 */
+    float   stop_mm;         /* SL 정지 명령부터 멈출 때까지 거리 */
+    float   stop_ms;
 } ident_level_t;
 
 typedef struct {
-    int16_t state;           /* 1 진행, 2 끝, 3 실패 */
+    int16_t state;           /* 1 진행, 2 이번 단계 끝, 3 실패 */
     int16_t fail;            /* 실패한 곳: 단계 × 10 + 순서. 0 = 없음 */
-    int16_t cfg_high, cfg_kp, cfg_ki, cfg_opt, cfg_ff;   /* 시험 때 파라미터 */
-    float   total_m;         /* 시험에 쓴 거리 */
+    int16_t done;            /* 끝난 단계 수. 3 이면 전체 끝 */
+    int16_t cfg_high, cfg_kp, cfg_ki, cfg_opt, cfg_ff;   /* 1단계 때 파라미터 */
     ident_level_t lv[IDENT_LEVELS];
     float   spd_delay_ms[2]; /* 1단계에서 속도 계단(+3 m/min). [0] 좌, [1] 우 */
     float   spd_t63_ms[2];
     float   spd_over_pct[2];
     float   spd_down_t63_ms[2];   /* 계단 내림 63%. 제동 토크가 없어 마찰로 준다 */
-    float   ff_suggest;      /* 정속 토크로 맞춘 FF(52번) 추천값 */
+    float   ff_suggest;      /* 정속 토크로 맞춘 FF(52번) 추천값. 세 단계가 끝나야 나온다 */
     float   tq_offset;       /* 0 rpm 으로 늘인 토크. 마찰 몫 */
-    float   stop_mm;         /* SL 정지 명령부터 멈출 때까지 거리 */
-    float   stop_sl_mm;      /* 그때 SL */
-    float   stop_ms;
+    float   stop_sl_mm;      /* 마지막 정지 때 SL */
     int16_t stop_floor_rpm;
 } ident_result_t;
 
 extern ident_result_t agv_ident;
 
-void     ident_start(void);
+void     ident_clear(void);        /* 결과를 지우고 1단계부터 */
+void     ident_start(void);        /* 다음 단계를 시작한다. 세 단계가 다 끝났으면 1단계부터 */
 int      ident_run(void);          /* 10 ms. 0 진행, 1 끝, -1 실패 */
 void     ident_abort(void);
-uint16_t ident_level(void);        /* 1 부터 */
+uint16_t ident_level(void);        /* 진행 중이거나 다음에 할 단계. 1 부터 */
 uint16_t ident_phase(void);
 #endif

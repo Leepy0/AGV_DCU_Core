@@ -1,7 +1,7 @@
-/* ident.c - 식별 시험. 속도 세 단계(최고 속도의 1/3, 2/3, 1)마다
- *  가속 → 안정 1 s → 정속 3 s 측정 → 옆 계단 2.5 s → 복귀 2.5 s
- * 1단계에서는 속도 계단을 더 재고, 마지막 단계 뒤 SL 정지를 잰다.
- * 옆 계단은 조향 지령(p_test)을 4칸 옮겨 폐루프 응답을 본다. 속도 계단은 램프 없이 지령을 바꾼다 */
+/* ident.c - 식별 시험. START 한 번에 한 단계(최고 속도의 1/3, 2/3, 1):
+ *  가속 → 안정 0.5 s → 정속 2 s 측정 → (1단계만 속도 계단 +2 s, -2 s) → 옆 계단 2 s → SL 정지
+ * 옆 계단은 조향 지령(p_test)을 4칸 옮겨 폐루프 응답을 본다. 속도 계단은 램프 없이 지령을 바꾼다.
+ * 한 번에 5 m 안에 들도록 창을 짧게 잡았다 */
 #include <math.h>
 #include <string.h>
 #include "agv/ident.h"
@@ -15,9 +15,9 @@
 #define P param_dv
 
 #define TICK_MS          10.0f
-#define SETTLE_TICKS     100
-#define HOLD_TICKS       300
-#define LAT_TICKS        250
+#define SETTLE_TICKS     50
+#define HOLD_TICKS       200
+#define LAT_TICKS        200
 #define SPD_TICKS        200
 #define END_TICKS        50       /* 창 끝 평균 */
 #define RAMP_LIMIT       2000     /* 가속이 20 s 안에 안 끝나면 실패 */
@@ -27,7 +27,7 @@
 #define GUIDE_MM         6.89f
 #define BAND             0.1f     /* 정착 판정 ±10% */
 
-enum { PH_RAMP = 1, PH_SETTLE, PH_HOLD, PH_LAT, PH_LAT_BACK, PH_SPD_UP, PH_SPD_DOWN, PH_STOP };
+enum { PH_RAMP = 1, PH_SETTLE, PH_HOLD, PH_SPD_UP, PH_SPD_DOWN, PH_LAT, PH_STOP };
 
 ident_result_t agv_ident;
 
@@ -101,16 +101,23 @@ static void enter(uint16_t phase)
     s_id.t = 0;
 }
 
+void ident_clear(void) { memset(&agv_ident, 0, sizeof(agv_ident)); }
+
 void ident_start(void)
 {
-    memset(&agv_ident, 0, sizeof(agv_ident));
+    if (agv_ident.done >= IDENT_LEVELS) { agv_ident.done = 0; }
+    if (agv_ident.done == 0) {
+        ident_clear();
+        agv_ident.cfg_high = param_get(P_SPEED_HIGH);
+        agv_ident.cfg_kp = param_get(P_STEER_KP);
+        agv_ident.cfg_ki = param_get(P_STEER_KI);
+        agv_ident.cfg_opt = param_get(P_OPT_FLAGS);
+        agv_ident.cfg_ff = param_get(P_SPEED_FF);
+    }
     agv_ident.state = 1;
-    agv_ident.cfg_high = param_get(P_SPEED_HIGH);
-    agv_ident.cfg_kp = param_get(P_STEER_KP);
-    agv_ident.cfg_ki = param_get(P_STEER_KI);
-    agv_ident.cfg_opt = param_get(P_OPT_FLAGS);
-    agv_ident.cfg_ff = param_get(P_SPEED_FF);
-    s_id.level = 0;
+    agv_ident.fail = 0;
+    s_id.level = (uint16_t)agv_ident.done;
+    memset(&agv_ident.lv[s_id.level], 0, sizeof(ident_level_t));
     s_id.risk_prev = D.risk_stop;
     s_id.begin = travel();
     D.p_test = 0;
@@ -126,7 +133,7 @@ void ident_abort(void)
     }
 }
 
-uint16_t ident_level(void) { return (uint16_t)(s_id.level + 1u); }
+uint16_t ident_level(void) { return (uint16_t)((agv_ident.done % IDENT_LEVELS) + 1); }
 uint16_t ident_phase(void) { return s_id.phase; }
 
 static void hold_clear(void)
@@ -225,6 +232,14 @@ static void fit_ff(void)
     agv_ident.tq_offset = (sy - (agv_ident.ff_suggest / 1000.0f) * sx) / n;
 }
 
+static void lat_begin(const ident_level_t *lv)
+{
+    D.p_test = LAT_STEP_BITS;
+    step_begin(&s_id.lat, lv->dev_mean_mm / GUIDE_MM,
+               (float)LAT_STEP_BITS - lv->dev_mean_mm / GUIDE_MM, LAT_TICKS);
+    enter(PH_LAT);
+}
+
 static int fail_now(void)
 {
     ident_abort();
@@ -244,10 +259,12 @@ int ident_run(void)
 
     if (s_id.phase == PH_STOP) {
         if (stopped) {
-            agv_ident.stop_mm = (float)(travel() - s_id.start) / P.one_length_pulse;
-            agv_ident.stop_ms = ms(s_id.t);
+            lv->stop_mm = (float)(travel() - s_id.start) / P.one_length_pulse;
+            lv->stop_ms = ms(s_id.t);
+            lv->run_m = (float)(travel() - s_id.begin) / P.one_length_pulse / 1000.0f;
             agv_ident.stop_floor_rpm = stop_floor_rpm();
-            agv_ident.total_m = (float)(travel() - s_id.begin) / P.one_length_pulse / 1000.0f;
+            agv_ident.done = (int16_t)(s_id.level + 1u);
+            if (agv_ident.done == IDENT_LEVELS) { fit_ff(); }
             agv_ident.state = 2;
             return 1;
         }
@@ -276,10 +293,13 @@ int ident_run(void)
         hold_sample();
         if (++s_id.t >= HOLD_TICKS) {
             hold_finish(lv);
-            D.p_test = LAT_STEP_BITS;
-            step_begin(&s_id.lat, lv->dev_mean_mm / GUIDE_MM,
-                       (float)LAT_STEP_BITS - lv->dev_mean_mm / GUIDE_MM, LAT_TICKS);
-            enter(PH_LAT);
+            if (s_id.level == 0u) {
+                float d = SPD_STEP_MPM * P.one_meter_rpm;
+                for (i = 0; i < 2u; i++) { step_begin(&s_id.spd[i], (float)D.rpm_flt[i], d, SPD_TICKS); }
+                set_speed((int16_t)(s_id.want + (int16_t)d), 0);
+                enter(PH_SPD_UP);
+            }
+            else { lat_begin(lv); }
         }
         break;
     case PH_LAT:
@@ -287,23 +307,6 @@ int ident_run(void)
         if (++s_id.t >= LAT_TICKS) {
             lat_finish(lv);
             D.p_test = 0;
-            enter(PH_LAT_BACK);
-        }
-        break;
-    case PH_LAT_BACK:
-        if (++s_id.t < LAT_TICKS) { break; }
-        if (s_id.level == 0u) {
-            float d = SPD_STEP_MPM * P.one_meter_rpm;
-            for (i = 0; i < 2u; i++) { step_begin(&s_id.spd[i], (float)D.rpm_flt[i], d, SPD_TICKS); }
-            set_speed((int16_t)(s_id.want + (int16_t)d), 0);
-            enter(PH_SPD_UP);
-        }
-        else if (s_id.level + 1u < IDENT_LEVELS) {
-            s_id.level++;
-            enter(PH_RAMP);
-        }
-        else {
-            fit_ff();
             agv_ident.stop_sl_mm = (float)(D.backward ? P.stop_len : P.fwd_stop_len) / P.one_length_pulse;
             s_id.start = travel();
             tagact_stop_length();
@@ -326,8 +329,7 @@ int ident_run(void)
         }
         else {
             for (i = 0; i < 2u; i++) { agv_ident.spd_down_t63_ms[i] = ms(s_id.spd[i].t63); }
-            s_id.level++;
-            enter(PH_RAMP);
+            lat_begin(lv);
         }
         break;
     default:

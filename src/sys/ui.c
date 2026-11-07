@@ -793,14 +793,14 @@ static void show_tune(void)
     switch (tune_state()) {
     case TUNE_WAIT:
         if (tune_failed())          { show(letter('F'), letter('A'), letter('I'), letter('L'), DIGIT_NONE); }
-        else if (tune_ident_mode()) { show(letter('I'), letter('D'), letter('E'), letter('N'), DIGIT_NONE); }
+        else if (tune_ident_mode()) { show(letter('I'), letter('D'), letter('E'), letter('N'), ident_level()); }   /* 다음 단계 */
         else                        { show(letter('T'), letter('U'), letter('N'), letter('E'), DIGIT_NONE); }
         break;
     case TUNE_IDENT:    /* 단계, 순서 */
         show(letter('I'), letter('D'), DIGIT_NONE, ident_level(), ident_phase());
         break;
     case TUNE_IDENT_DONE:
-        if (agv_ident.state == 2) { show(letter('I'), letter('D'), letter('O'), letter('K'), DIGIT_NONE); }
+        if (agv_ident.state == 2) { show(letter('I'), letter('D'), letter('O'), letter('K'), (uint16_t)agv_ident.done); }
         else { show(letter('I'), letter('D'), letter('F'), (uint16_t)(agv_ident.fail / 10), (uint16_t)(agv_ident.fail % 10)); }
         break;
     case TUNE_GO_1:     /* 본 교차선 수 */
