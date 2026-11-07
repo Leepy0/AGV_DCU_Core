@@ -61,6 +61,7 @@ void tagact_forback(dir_t d)
 }
 
 static int16_t s_turn_from_stop;   /* 1 = 멈춘 상태에서도 회전을 건다 (튜닝 모드) */
+static int16_t s_turn_stop_len;    /* 0 = 정지 거리(SL). 교차선 기준이면 센서 거리(GD) */
 
 void tagact_turn(turn_dir_t d, uint16_t deg, dir_t fb, uint16_t autostart, uint16_t obs)
 {
@@ -70,7 +71,7 @@ void tagact_turn(turn_dir_t d, uint16_t deg, dir_t fb, uint16_t autostart, uint1
     }
     if (D.vin_out >= TURN_STOP_MIN_VIN) {
         D.flag_stopping = 1;
-        D.stop_pulses = P.stop_len;
+        D.stop_pulses = (s_turn_stop_len > 0) ? s_turn_stop_len : P.stop_len;
     }
     /* 회전 뒤 방향 지정: 지금 방향과 다르면 반대로 돌아 같은 곳을 본다 */
     if ((int16_t)fb > DIR_TOGGLE) {
@@ -108,6 +109,14 @@ void tagact_turn_align(turn_dir_t d, uint16_t deg, uint16_t next)
     /* 방향이 바뀌면 센서 전원도 바뀌어 출발 라인을 볼 수 없다. 슬립 측정을 건너뛴다 */
     D.tape_step = (fb != 0u) ? 1 : 0;
     D.tape_align = 1;
+}
+
+/* 교차선을 앞 센서가 본 순간에 부른다. 센서 거리만큼 가야 회전 중심이 선 위에 온다 */
+void tagact_turn_align_cross(turn_dir_t d, uint16_t deg, uint16_t next)
+{
+    s_turn_stop_len = (int16_t)(P.guide_dist_mm * P.one_length_pulse + 0.5f);
+    tagact_turn_align(d, deg, next);
+    s_turn_stop_len = 0;
 }
 
 void tagact_turn_align_stopped(turn_dir_t d, uint16_t deg, uint16_t next)

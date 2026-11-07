@@ -55,6 +55,7 @@ void tagact_forback(dir_t d);
 void tagact_turn(turn_dir_t d, uint16_t deg, dir_t fb, uint16_t autostart, uint16_t obs);
 void tagact_turn_align(turn_dir_t d, uint16_t deg, uint16_t next);   /* next: fb | auto<<4 | obs<<8 */
 void tagact_turn_align_stopped(turn_dir_t d, uint16_t deg, uint16_t next);   /* 멈춘 자리에서 바로 */
+void tagact_turn_align_cross(turn_dir_t d, uint16_t deg, uint16_t next);     /* 교차선 기준: GD 뒤 정지 */
 void tagact_branch(branch_dir_t d);
 void tagact_compensate(int32_t pulses);   /* 태그 처리 지연·RFID 재시도 거리 보정 */
 #endif

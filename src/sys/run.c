@@ -788,7 +788,7 @@ static uint16_t led_total(void)
     return n;
 }
 
-#define TAPE_LED_MIN 10     /* 교차 테이프로 볼 점등 수 */
+#define TAPE_LED_MIN GUIDE_CROSS_LED_MIN
 #define TAPE_ID_TURN (-1)   /* 시퀀스 번호와 겹치지 않는 회전 탐색 표시 */
 
 static struct { int16_t prev_id; uint32_t start_len; int16_t hits; } s_tape;
@@ -832,7 +832,7 @@ static void tape_stop(void)
     else if (D.tape_turn_dir != 0) {
         int16_t r = tape_seek(TAPE_ID_TURN);
         if (r == 1) {
-            tagact_turn_align((turn_dir_t)D.tape_turn_dir, (uint16_t)D.tape_turn_deg, D.tape_turn_next);
+            tagact_turn_align_cross((turn_dir_t)D.tape_turn_dir, (uint16_t)D.tape_turn_deg, D.tape_turn_next);
         }
         if (r != 0) { D.tape_turn_dir = 0; }
     }

@@ -25,6 +25,7 @@
 #define GUIDE_BITS_WIDE    36
 #define GUIDE_VERT_COUNT   4
 #define GUIDE_BLOB_MAX     16      /* 32칸에 번갈아 켜진 경우 */
+#define GUIDE_CROSS_LED_MIN 10     /* 이만큼 켜지면 교차선 */
 
 #define GUIDE_CURVE_SPAN_DEFAULT 4     /* 레거시 판정 (점등 4칸 이상) */
 #define GUIDE_MISS_LIMIT    3          /* 무응답 연속 3회 = 30 ms. P_GUIDE_TIMEOUT 이 0 일 때 */

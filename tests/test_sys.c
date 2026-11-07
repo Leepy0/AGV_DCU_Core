@@ -946,7 +946,7 @@ static void test_tape_turn(void)
     assert(D.tape_align == 1);
     assert(D.turn_pulses == P.turn_90);
     assert(D.flag_stopping == 1);
-    assert(D.stop_pulses > 0);
+    assert(D.stop_pulses == (int16_t)(P.guide_dist_mm * P.one_length_pulse + 0.5f));   /* 교차선은 GD */
     printf("  tape turn ok\n");
 }
 

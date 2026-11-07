@@ -24,8 +24,8 @@
 #define BACKUP_MSG_TICKS 500
 #define PULSE_TICKS      50     /* 500 ms 마다 램프 처리 */
 #define HISTORY_TICKS    500
-#define GROUP_USE_LAST   14     /* 메뉴 순서표의 그룹 경계 */
-#define GROUP_OTHER_FIRST 15
+#define GROUP_USE_LAST   15     /* 메뉴 순서표의 그룹 경계 */
+#define GROUP_OTHER_FIRST 16
 #define GROUP_OTHER_LAST 49
 #define PARA_EDIT_LAST   46     /* 이 번호까지 편집한다 */
 #define EDIT_OFF_FLAG    0
@@ -54,13 +54,13 @@ static const uint16_t s_seg[] = {
 /* 메뉴 순서 → 파라미터 번호 */
 static const uint16_t s_menu[] = {
     P_SPEED_HIGH, P_SPEED_LOW, P_SPEED_TURN, P_BUMPER_USE, P_OBS_USE, P_AUTO_START_SEC, P_TURN_FORBACK,
-    P_STOP_LEN_MM, P_WHEEL_DIA_MM, P_GEAR_RATIO, P_WHEEL_BASE_MM, P_AGV_ID, P_AGV_TYPE, P_SPEED_MIN,
+    P_STOP_LEN_MM, P_GUIDE_DIST_MM, P_WHEEL_DIA_MM, P_GEAR_RATIO, P_WHEEL_BASE_MM, P_AGV_ID, P_AGV_TYPE, P_SPEED_MIN,
     P_STOP_LEN_FWD_MM,
     P_AUTO_DRIVE_MODE, P_INTERFACE_MODE, P_SOUND, P_DISPLAY_MODE, P_BAT_OFFSET_DV, P_SPEED_JOG, P_ACC, P_DCC,
     P_STATION_NO, P_BRANCH_MODE, P_TAG_DIGITS, P_STEER_KP, P_STEER_KI, P_SWITCH_START_NUM, P_TAG_TYPE,
     P_COMM_LINK, P_ACS_STANDBY, P_BRANCH_OFFSET, P_CROSS_IN_TIME, P_ACS_RETRY_LEGACY, P_ACS_RETRY_SEC,
     P_GUIDE_CURVE_DETECT, P_LEGACY_QUIRKS, P_ERR_REPORT_MIN, P_CROSS_RETRY_100MS, P_CROSS_MODE,
-    P_STEER_RPM_OFFSET, P_GUIDE_TIMEOUT, P_GUIDE_DIST_MM, P_ACS_VERSION, P_LAMP_EXT_USE, P_PARA_INIT, P_VERSION, P_BAT_DV,
+    P_STEER_RPM_OFFSET, P_GUIDE_TIMEOUT, P_ACS_VERSION, P_LAMP_EXT_USE, P_PARA_INIT, P_VERSION, P_BAT_DV,
     P_BAT_PERCENT
 };
 
@@ -761,18 +761,12 @@ static void show_history(void)
     s_ui.flick = 0;
 }
 
-/* 글자 1개 + 부호 + 값 3자리 */
-static void show_tune_value(uint16_t c, int16_t v)
-{
-    int16_t m = (v < 0) ? (int16_t)-v : v;
-    show(c, (v < 0) ? DIGIT_MINUS : DIGIT_NONE, digit_of(m, 100), digit_of(m, 10), digit_of(m, 1));
-}
-
 /* 결과 쪽: 글자 2개 + 값 3자리 */
 static void show_tune_page(void)
 {
     static const char name[TUNE_PAGE_COUNT][2] = {
-        {'W', 'W'}, {'D', ' '}, {'R', ' '}, {'G', ' '}, {'S', 'E'}, {'S', 'P'}, {'F', 'L'}, {'L', 'E'}, {'L', 'R'}
+        {'W', 'W'}, {'D', 'I'}, {'G', 'A'}, {'O', 'V'}, {'G', 'D'}, {'G', ' '}, {'S', 'E'}, {'S', 'P'},
+        {'F', 'L'}, {'L', 'E'}, {'L', 'R'}
     };
     uint16_t page = tune_page();
     int16_t v = tune_value(page);
@@ -798,15 +792,12 @@ static void show_tune(void)
         if (tune_failed()) { show(letter('F'), letter('A'), letter('I'), letter('L'), DIGIT_NONE); }
         else               { show(letter('T'), letter('U'), letter('N'), letter('E'), DIGIT_NONE); }
         break;
-    case TUNE_PAUSE:
-        show_tune_value(letter('D'), tune_value(TUNE_PAGE_DISTANCE));
-        if (tune_editing()) { s_ui.flick = (uint16_t)(1u << (5 - tune_edit_place())); }
-        break;
-    case TUNE_GO_1:
-        show(letter('G'), letter('O'), DIGIT_NONE, DIGIT_NONE, 1);
+    case TUNE_GO_1:     /* 본 교차선 수 */
+        show(letter('G'), letter('O'), DIGIT_NONE, 1, (uint16_t)tune_lines());
         break;
     case TUNE_GO_2:
-        show(letter('G'), letter('O'), DIGIT_NONE, DIGIT_NONE, 2);
+    case TUNE_STOPPING:
+        show(letter('G'), letter('O'), DIGIT_NONE, 2, (uint16_t)tune_lines());
         break;
     case TUNE_DONE:
         if (s_ui.msg_save) {
