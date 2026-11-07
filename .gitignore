@@ -1,0 +1,8 @@
+*.obj
+*.out
+*.map
+*.lib
+build/
+Debug/
+Release/
+__pycache__/
