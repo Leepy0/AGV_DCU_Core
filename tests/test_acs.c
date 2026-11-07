@@ -180,7 +180,14 @@ int main(void)
     acs_report('D', 5);
     assert(acs_pending() == 1);
 
-    /* 교차로 간격 clamp: 0 → 50틱, 큰 값 → 500틱 */
+    /* 교차로 간격: CT=1 → 10틱 */
+    setup(1, 5, 1);
+    (void)param_set(P_CROSS_IN_TIME, 99);
+    acs_cross_in(12);
+    ticks(1);
+    { int c = gap(100); assert(c >= 10 && c < 14); }
+
+    /* 교차로 간격: 0 → 50틱, 큰 값 → 500틱 */
     setup(0, 5, 1);
     (void)param_set(P_CROSS_IN_TIME, 99);
     acs_cross_in(12);

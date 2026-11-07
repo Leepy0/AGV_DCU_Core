@@ -9,7 +9,7 @@
 
 #define ACS_RETRY_REISSUE     10    /* 재전송 몇 회마다 MsgID 재발급 */
 #define ACS_JITTER_MIN_TICKS  3
-#define CROSS_INTERVAL_MIN    50
+#define CROSS_INTERVAL_ZERO   50    /* 설정값이 0일 때만 쓴다. CT=1 은 10틱(0.1 s)이 의도다 */
 #define CROSS_INTERVAL_MAX    500
 #define CROSS_KEEPALIVE       500   /* ACK 뒤 간격. 더하지 않고 교체한다 */
 #define CROSS_MSGID_REISSUE   30
@@ -334,7 +334,7 @@ static int32_t cross_interval(void)
 {
     int16_t v = param_get(P_CROSS_RETRY_100MS);
     int32_t iv = (int32_t)((v > 0) ? v : param_get(P_ACS_RETRY_SEC)) * 10L;
-    if (iv < CROSS_INTERVAL_MIN) { iv = CROSS_INTERVAL_MIN; }
+    if (iv == 0) { iv = CROSS_INTERVAL_ZERO; }
     if (iv > CROSS_INTERVAL_MAX) { iv = CROSS_INTERVAL_MAX; }
     return iv;
 }
