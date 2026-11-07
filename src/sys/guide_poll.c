@@ -113,8 +113,9 @@ static void on_turn_led(const guide_rx_t *rx)
 static void on_rx(const guide_rx_t *rx)
 {
     D.guide_wide = rx->wide;
-    if (D.tape_align && D.flag_turn && (rx->kind == GUIDE_RX_LED)) {
-        on_turn_led(rx);
+    /* 정렬 회전 중 'S' 같은 응답은 오류로 세지 않는다. 라인이 없으면 회전이 258 로 끝난다 */
+    if (D.tape_align && D.flag_turn) {
+        if (rx->kind == GUIDE_RX_LED) { on_turn_led(rx); }
         return;
     }
     switch (rx->kind) {

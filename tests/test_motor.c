@@ -267,6 +267,27 @@ int main(void)
       }
       assert(D.vin_out < P.turn_speed); }
     assert(stop_turn_dcc() == 10);
+    /* 슬립: 시작 위치와의 차로 재고 범위를 넘지 않는다. 틀어지면 라인이 탐색 범위 밖으로 나간다 */
+    setup();
+    D.control = RUN_TURN;
+    D.tape_step = 0;
+    D.tape_align = 1;
+    D.turn_pulses = 2000;
+    D.tape_total_pulse = 2000;
+    D.tape_max = 200;
+    D.tape_slip_ratio = 1.0f;
+    D.guide_pos = 5;
+    (void)motor_turn_adjust();
+    assert(D.tape_origin_ok == 1 && D.tape_origin == 5);
+    D.tape_turned = 100;
+    D.guide_pos = 15;
+    (void)motor_turn_adjust();
+    assert(D.tape_slip_ratio >= 0.9f && D.tape_slip_ratio <= 1.1f);
+    D.tape_lost_cnt = 6;
+    D.guide_all_off = 1;
+    (void)motor_turn_adjust();
+    assert(D.tape_step == 1);
+    assert(D.tape_target_cnt >= 1818.0f && D.tape_target_cnt <= 2223.0f);
     /* 일반 회전은 가이드를 보지 않는다 */
     setup();
     D.control = RUN_TURN;

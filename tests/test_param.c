@@ -33,7 +33,7 @@ int main(void)
     fake_reset();
     fake_params();
 
-    assert(param_get(P_ACC) == 5 && param_get(P_DCC) == 40);
+    assert(param_get(P_ACC) == 8 && param_get(P_DCC) == 40);
     /* 옛 턴 속도 30 은 15 로 줄이고 나머지 값을 지우지 않는다 */
     { int16_t id = param_get(P_WHEEL_BASE_MM);
       fake_ee[P_SPEED_TURN] = 30;

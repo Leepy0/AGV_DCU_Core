@@ -12,6 +12,7 @@
 #include "agv/seq.h"
 #include "agv/stop.h"
 #include "agv/tagact.h"
+#include "agv/tune.h"
 
 #define D agv_drive
 #define P param_dv
@@ -497,6 +498,11 @@ static void key_process(void)
             return;
         }
     }
+    if (tune_active() && tune_key(s_ui.data)) {
+        s_ui.data_old = s_ui.data;
+        s_ui.long_press = 0;
+        return;
+    }
     switch (s_ui.data) {
     case KEY_MODE:  key_mode(); break;
     case KEY_SHIFT: key_shift(); break;
@@ -555,9 +561,23 @@ static int16_t error_code(void)
     return D.action_err;
 }
 
+/* 남은 회전각. 정렬 회전은 펄스를 따로 세므로 목표까지 남은 양으로 본다 */
+static int16_t turn_left_deg(void)
+{
+    int32_t left = D.tape_align ? ((int32_t)D.tape_target_cnt - D.tape_turned) : (int32_t)D.turn_pulses;
+
+    if ((left <= 0) || (P.turn_90 <= 0)) { return 0; }
+    return (int16_t)((left * 90L) / (int32_t)P.turn_90);
+}
+
 static void show_idle(void)
 {
-    if (acs_station_count() > 0u) {
+    if ((run_standby_num() == 0) && seq_is_active()) {
+        int16_t step = (int16_t)seq_active_step();
+        show(letter('R'), letter('U'), (step > 99) ? digit_of(step, 100) : letter('N'),
+             digit_of(step, 10), digit_of(step, 1));
+    }
+    else if (acs_station_count() > 0u) {
         s_ui.digit[0] = letter('S');
         s_ui.digit[1] = 1;
         show_number_tail(acs_station_get(0), 1);
@@ -566,7 +586,7 @@ static void show_idle(void)
         show(letter('S'), letter('T'), letter('B'), digit_of(run_standby_num(), 10), digit_of(run_standby_num(), 1));
     }
     else if (D.flag_turn) {
-        int16_t angle = D.turn_pulses;
+        int16_t angle = turn_left_deg();
         show(letter('T'), letter('N'), digit_of(angle, 100), digit_of(angle, 10), digit_of(angle, 1));
     }
     else {
@@ -716,12 +736,40 @@ static void show_history(void)
     s_ui.flick = 0;
 }
 
+static void show_tune(void)
+{
+    int16_t v = tune_result();
+
+    switch (tune_state()) {
+    case TUNE_WAIT:
+        show(letter('T'), letter('U'), letter('N'), letter('E'), DIGIT_NONE);
+        break;
+    case TUNE_GO_1:
+        show(letter('G'), letter('O'), DIGIT_NONE, DIGIT_NONE, 1);
+        break;
+    case TUNE_GO_2:
+        show(letter('G'), letter('O'), DIGIT_NONE, DIGIT_NONE, 2);
+        break;
+    case TUNE_DONE:
+        show(letter('W'), letter('W'), digit_of(v, 100), digit_of(v, 10), digit_of(v, 1));
+        break;
+    case TUNE_SAVED:
+        show(letter('S'), letter('A'), letter('V'), letter('E'), DIGIT_NONE);
+        break;
+    default:
+        break;
+    }
+}
+
 static void display_update(void)
 {
     show(DIGIT_NONE, DIGIT_NONE, DIGIT_NONE, DIGIT_NONE, DIGIT_NONE);
     s_ui.dot = any_error() ? 1u : 0u;
     s_ui.flick = 0;
-    if (D.ui_mode == UI_AUTO)     { show_auto(); }
+    if (D.ui_mode == UI_AUTO)     {
+        show_auto();
+        if (tune_active() && !any_error() && !D.flag_turn) { show_tune(); }
+    }
     else if (D.ui_mode == UI_JOG) {
         show(letter('J'), letter('O'), letter('G'),
              D.flag_jog_on ? letter('O') : DIGIT_NONE, D.flag_jog_on ? letter('N') : DIGIT_NONE);

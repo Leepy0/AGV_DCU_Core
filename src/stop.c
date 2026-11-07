@@ -387,6 +387,10 @@ void stop_begin_runtime(int16_t reason)
     int16_t maximum = (reason == STOP_REASON_TURN_ANGLE) ? P.turn_speed : D.speed_cmd;
 
     if ((reason != STOP_REASON_TURN_ANGLE) && (maximum < entry)) { maximum = entry; }
+    /* 바닥 속도 아래는 바퀴가 안 돈다. 그 구간을 건너뛰어 회전 시작 지연을 줄인다 */
+    if ((reason == STOP_REASON_TURN_ANGLE) && (entry < STOP_MIN_RPM) && !param_quirk(QUIRK_TURN_START)) {
+        entry = STOP_MIN_RPM;
+    }
     s_command_sign = (D.last_input < 0) ? -1 : 1;
     get_feedback(&fb, reason);
     stop_ctrl_begin(&s_ctrl, reason, entry, maximum, P.acc, P.dcc, fb.remaining_pulses, fb.pulses_per_rpm_tick);

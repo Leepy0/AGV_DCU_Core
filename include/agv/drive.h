@@ -83,6 +83,8 @@ typedef struct {
     int16_t turn_motion;             /* Turn_Direction: 0 없음, MOTION_CCW, MOTION_CW */
     int16_t turn_obs_use;            /* Turn_OBS_Use */
     int16_t tape_align;              /* DA_Tape_Turn_Angle_Align */
+    int16_t tape_slow;               /* 1 = 정렬 회전을 처음부터 최저 속도로 돈다 */
+    int16_t tape_origin, tape_origin_ok;   /* 회전 시작 때의 가이드 위치. 슬립은 이 값과의 차로 잰다 */
     int16_t tape_step;               /* DA_Tape_Turn_Step */
     int16_t tape_max;                /* DA_Tape_Turn_Max */
     int16_t tape_total_pulse;        /* DA_Tape_Turn_Total_Pulse */

@@ -19,6 +19,7 @@
 #include "agv/steer.h"
 #include "agv/stop.h"
 #include "agv/storage.h"
+#include "agv/tune.h"
 #include "agv/ui.h"
 
 #define D agv_drive
@@ -27,6 +28,7 @@
 #define ADC_START_TICK   3u     /* 10 ms 작업 한 틱 전에 변환을 시작한다 */
 #define POWER_ON_SCANS   50u    /* 전원 안정 500 ms */
 #define IO_TEST_KEYS     (KEY_MODE + KEY_UP)   /* 전원을 켤 때 누르면 IO 시험 */
+#define TUNE_KEYS        (KEY_MODE + KEY_DOWN) /* 전원을 켤 때 누르면 회전 튜닝 */
 enum { IO_TEST_NONE = 0, IO_TEST_WAIT, IO_TEST_ON };
 
 static volatile uint16_t s_ticks, s_tick10;
@@ -69,6 +71,7 @@ void sys_boot(void)
     ui_reset();
     storage_reset();
     guide_poll_reset();
+    tune_reset();
     site_register();
 
     err = param_boot(&storage_blocking, SYS_VERSION);
@@ -97,6 +100,7 @@ static void scan_10ms(void)
     if (s_power_on) {
         guide_poll();
         run_coordinate();
+        if (tune_active()) { tune_run(); }
         motor_run();
         run_seq();
         site_manual();
@@ -113,7 +117,10 @@ static void scan_10ms(void)
     else if (++s_scans >= POWER_ON_SCANS) {
         io_probe_ext_board();
         if (ui_key() == IO_TEST_KEYS) { s_io_test = IO_TEST_WAIT; }
-        else                          { s_power_on = 1; }
+        else {
+            if (ui_key() == TUNE_KEYS) { tune_arm(); }
+            s_power_on = 1;
+        }
     }
     acs_schedule();
     io_write();

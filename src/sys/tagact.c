@@ -8,6 +8,7 @@
 #include "agv/run.h"
 #include "agv/seq.h"
 #include "agv/stop.h"
+#include "agv/tune.h"
 
 #define D agv_drive
 #define P param_dv
@@ -101,6 +102,7 @@ void tagact_turn_align(turn_dir_t d, uint16_t deg, uint16_t next)
     D.tape_slip_ratio = 1.0f;
     D.tape_lost_cnt = 0;
     D.tape_turned = 0;
+    D.tape_origin_ok = 0;
     /* 방향이 바뀌면 센서 전원도 바뀌어 출발 라인을 볼 수 없다. 슬립 측정을 건너뛴다 */
     D.tape_step = (fb != 0u) ? 1 : 0;
     D.tape_align = 1;
@@ -225,10 +227,12 @@ int tagact_run(uint16_t tag)
 {
     int16_t was_stopping = D.flag_stopping;
     int16_t prev_len = D.stop_pulses;
-    const tag_rule_t *r = rule_find(tag);
+    const tag_rule_t *r;
     uint16_t i, irq;
     int started;
 
+    if (tune_active()) { return 0; }         /* 튜닝 주행은 태그를 쓰지 않는다 */
+    r = rule_find(tag);
     if (r != 0) {
         for (i = 0; (i < 4u) && (r->act[i] != 0u); i++) {
             uint16_t second = has_second_word(r->act[i]);
