@@ -41,6 +41,8 @@ static struct {
     int16_t  hist[2][5];       /* w_rpm_flt_add1~5 */
     int16_t  steer_gate;       /* CntTimer50ms */
     int16_t  stall_cnt[2];     /* 지령이 바닥 속도 이상인 연속 틱 */
+    int16_t  raw[2];           /* 스파이크 컷 전 rpm */
+    int16_t  force[2], forcing;
 } s_motor;
 
 void motor_reset(void)
@@ -56,7 +58,21 @@ void motor_reset(void)
     }
     s_motor.steer_gate = 0;
     s_motor.stall_cnt[0] = s_motor.stall_cnt[1] = 0;
+    s_motor.raw[0] = s_motor.raw[1] = 0;
+    s_motor.forcing = 0;
 }
+
+static int16_t dac_clamp(int16_t v) { return (v < 0) ? 0 : ((v > MOTOR_DAC_MAX) ? MOTOR_DAC_MAX : v); }
+
+void motor_dac_force(int16_t left, int16_t right)
+{
+    s_motor.force[0] = dac_clamp(left);
+    s_motor.force[1] = dac_clamp(right);
+    s_motor.forcing = 1;
+}
+
+void    motor_dac_release(void)             { s_motor.forcing = 0; }
+int16_t motor_raw_rpm(uint16_t wheel)       { return s_motor.raw[wheel]; }
 
 void    motor_encoder_pulse(uint16_t wheel) { s_motor.pulse_seq[wheel]++; }
 int16_t motor_idle_ticks(uint16_t wheel)    { return s_motor.idle[wheel]; }
@@ -87,6 +103,7 @@ void motor_feedback_update(void)
             }
         }
 
+        s_motor.raw[i] = (int16_t)((cur > 32767L) ? 32767L : cur);
         if (cur > MOTOR_RPM_SPIKE) { D.rpm[i] = s_motor.pre_rpm[i]; }
         else                       { s_motor.pre_rpm[i] = D.rpm[i] = (int16_t)cur; }
 
@@ -510,6 +527,19 @@ void motor_run(void)
     if (!D.flag_stopping && (stop_phase() == STOP_PHASE_IDLE)) { D.immediate_stop = 0; }
     motor_feedback_update();
     motor_stall_check();
+
+    if (s_motor.forcing) {      /* 최대 rpm 시험: 주행·조향·정지 제어를 모두 건너뛴다 */
+        uint16_t i;
+        int16_t ok = (int16_t)(!D.system_err && !D.estop);
+        D.amp_run = ok;
+        D.motion = D.amp_dir = MOTION_FWD;
+        D.vin_out = 0;
+        for (i = 0; i < 2; i++) {
+            D.w_cmd[i] = 0;
+            D.tq_cmd[i] = ok ? s_motor.force[i] : 0;
+        }
+        return;
+    }
 
     s_motor.steer_gate++;
     if (param_opt(OPT_STEER_10MS) || (s_motor.steer_gate > 1)) {

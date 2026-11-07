@@ -14,6 +14,7 @@
 #include "agv/tagact.h"
 #include "agv/tune.h"
 #include "agv/ident.h"
+#include "agv/rpmtest.h"
 
 #define D agv_drive
 #define P param_dv
@@ -794,6 +795,7 @@ static void show_tune(void)
     case TUNE_WAIT:
         if (tune_failed())          { show(letter('F'), letter('A'), letter('I'), letter('L'), DIGIT_NONE); }
         else if (tune_ident_mode()) { show(letter('I'), letter('D'), letter('E'), letter('N'), DIGIT_NONE); }
+        else if (tune_rpm_mode())   { show(letter('R'), letter('P'), letter('M'), DIGIT_NONE, DIGIT_NONE); }
         else                        { show(letter('T'), letter('U'), letter('N'), letter('E'), DIGIT_NONE); }
         break;
     case TUNE_IDENT:    /* 회, 순서 */
@@ -802,6 +804,19 @@ static void show_tune(void)
     case TUNE_IDENT_DONE:
         if (agv_ident.state == 2) { show(letter('I'), letter('D'), letter('O'), letter('K'), DIGIT_NONE); }
         else { show(letter('I'), letter('D'), letter('F'), (uint16_t)(agv_ident.fail / 10), (uint16_t)(agv_ident.fail % 10)); }
+        break;
+    case TUNE_RPM:      /* 단계 */
+        show(letter('R'), letter('P'), DIGIT_NONE, DIGIT_NONE, rpmt_level());
+        break;
+    case TUNE_RPM_DONE:
+        if (tune_page() == 0u) {
+            if (agv_rpmt.state == 2) { show(letter('R'), letter('P'), letter('O'), letter('K'), DIGIT_NONE); }
+            else { show(letter('R'), letter('P'), letter('F'), (uint16_t)(agv_rpmt.fail / 10), (uint16_t)(agv_rpmt.fail % 10)); }
+        }
+        else {          /* L·R + 최대 rpm 4자리 */
+            int16_t v = agv_rpmt.max_rpm[tune_page() - 1u];
+            show(letter((tune_page() == 1u) ? 'L' : 'R'), digit_of(v, 1000), digit_of(v, 100), digit_of(v, 10), digit_of(v, 1));
+        }
         break;
     case TUNE_GO_1:     /* 본 교차선 수 */
         show(letter('G'), letter('O'), DIGIT_NONE, 1, (uint16_t)tune_lines());
