@@ -1,0 +1,572 @@
+/* test_seq.c - 시퀀스·ACT 인터프리터 */
+#include <assert.h>
+#include <stdio.h>
+#include <string.h>
+#include "agv/seq_dsl.h"
+#include "agv/acs.h"
+#include "fakes.h"
+
+#define D agv_drive
+
+#define SEN_A   IN_EXT_1
+#define SEN_B   IN_EXT_2
+#define SEN_C   IN_EXT_3
+#define O_A     OUT_EXT_1
+#define O_B     OUT_EXT_2
+#define O_C     OUT_EXT_3
+#define BIT(x)  (1UL << (x))
+
+#define BELT1_CW   OUTS(O_A)
+#define BELT1_CCW  OUTS(O_A, O_B)
+
+enum { PF_ONE = 1, PF_TWO = 2 };
+enum { ACT_PULSE = 1, ACT_HOLD, ACT_FAIL, ACT_BAD_FN, ACT_SPARE1, ACT_SPARE2, ACT_SPARE3 };
+enum { ST_0 = 0, ST_1 };
+
+SEQ_LABELS( L_RETRY, L_OK, L_ERR, L_A, L_B, L_C, L_LOOP, L_MISSING )
+
+/* 분기, 안정 대기, 오류 유지, 재시도 */
+SEQ_BEGIN( s_branch )
+    SELECT_BEGIN
+        WHEN( IN( ON(SEN_A), OFF(SEN_B) ), L_A )
+        WHEN( IN( ON(SEN_B) ),             L_B )
+    SELECT_END_TO( 100, L_C )
+    L( L_A )
+    OUT_ON( O_A )
+    WAIT_STABLE( IN( ON(SEN_C) ), 3 )
+    OUT_OFF( O_A )
+    END_RESTART
+    L( L_B )
+    OUT_ON( O_B )
+    END_STOP
+    L( L_C )
+    END_ERROR( 123 )
+SEQ_END
+
+/* 안정 + 불일치 누적 타임아웃, 재진입 때 타이머 0 */
+SEQ_BEGIN( s_unmatched )
+    L( L_RETRY )
+    WAIT_STABLE_TO( IN( OFF(SEN_A) ), 5, UNMATCHED(10), L_ERR )
+    END_STOP
+    L( L_ERR )
+    ERROR_HOLD( 290, IN( ON(IN_START_SW) ), L_RETRY )
+SEQ_END
+
+SEQ_BEGIN( s_timing )
+    DELAY( 2 )
+    OUT_ON( O_A )
+    WAIT_TO( IN( ON(SEN_A) ), 3, L_ERR )
+    GOTO( L_OK )
+    L( L_ERR )
+    OUT_ON( O_C )
+    L( L_OK )
+    END_STOP
+SEQ_END
+
+SEQ_BEGIN( s_acs )
+    ACS( L, STATION0 )
+    ACS( U, STATION0_PLUS1 )
+    ACS( A, AGV_ID )
+    ACS_N( F, 87 )
+    ACS_WAIT_ACK( 5, L_ERR )
+    OUT_ON( O_A )
+    STATION_RESET
+    ACS_STATION( 1, 42, 2 )
+    END_STOP
+    L( L_ERR )
+    OUT_ON( O_B )
+    END_STOP
+SEQ_END
+
+SEQ_BEGIN( s_drive )
+    SPEED( LOW )
+    SPEED_MMIN( 20 )
+    FORBACK( BACK )
+    OBS_OFF
+    TURN( CW, 90, 1, 1, 0 )
+    OBS_ON
+    SET_STATE( ST_0, 7 )
+    WAIT_STATE( ST_1, 3 )
+    WHEN_STATE( ST_0, 9, L_ERR )
+    WHEN_STATE( ST_0, 7, L_OK )
+    L( L_ERR )
+    OUT_ON( O_C )
+    L( L_OK )
+    END_RESTART
+SEQ_END
+
+/* 한 스캔 8스텝 상한 */
+SEQ_BEGIN( s_budget )
+    OUT_ON( OUT_EXT_1 ) OUT_ON( OUT_EXT_2 ) OUT_ON( OUT_EXT_3 ) OUT_ON( OUT_EXT_4 )
+    L( L_LOOP )
+    OUT_ON( OUT_EXT_5 ) OUT_ON( OUT_EXT_6 ) OUT_ON( OUT_EXT_7 ) OUT_ON( OUT_EXT_8 )
+    OUT_ON( OUT_EXT_9 )
+    END_STOP
+SEQ_END
+
+SEQ_BEGIN( s_outs )
+    OUT_PULSE( O_A, 2, 1, 2 )
+    OUT_ON( O_C )
+SEQ_END
+
+SEQ_BEGIN( s_flicker )
+    OUT_FLICKER_UNTIL_IN_TO( O_A, 2, IN( ON(SEN_A) ), 20, L_ERR )
+    OUT_ON( O_B )
+    END_STOP
+    L( L_ERR )
+    OUT_ON( O_C )
+SEQ_END
+
+SEQ_BEGIN( s_handshake )
+    HANDSHAKE( O_A, SEN_A, 5, L_ERR )
+    OUT_ON( O_B )
+    END_STOP
+    L( L_ERR )
+    OUT_ON( O_C )
+SEQ_END
+
+SEQ_BEGIN( s_wait_out )
+    WAIT_OUT( IN( ON(O_A), OFF(O_B) ) )
+    END_STOP
+SEQ_END
+
+static int call_count, call_ret;
+static int custom_fn(seq_ctx_t *c)
+{
+    call_count++;
+    c->scratch[0]++;
+    if (c->sub == 0) { c->sub = 1; return 0; }
+    return call_ret;
+}
+static const seq_call_fn s_calls[] = { custom_fn };
+
+SEQ_BEGIN( s_call )
+    CALL( 0 )
+    OUT_ON( O_A )
+    END_STOP
+SEQ_END
+
+SEQ_BEGIN( s_bad_label )
+    GOTO( L_MISSING )
+SEQ_END
+
+SEQ_BEGIN( s_act_start )
+    ACT_START( ACT_PULSE )
+    WAIT_ACT( ACT_PULSE )
+    OUT_ON( O_C )
+    END_STOP
+SEQ_END
+
+SEQ_BEGIN( s_prof1 )
+    OUT_ON( O_A )
+SEQ_END
+SEQ_BEGIN( s_prof_any )
+    OUT_ON( O_B )
+SEQ_END
+
+ACT_BEGIN( a_pulse )
+    OUT_PULSE( O_A, 2, 2, 2 )
+ACT_END
+ACT_BEGIN( a_hold )
+    OUT_ON( O_B )
+    WAIT( IN( ON(SEN_A) ) )
+    OUT_OFF( O_B )
+ACT_END
+ACT_BEGIN( a_fail )
+    END_ERROR( 290 )
+ACT_END
+ACT_BEGIN( a_bad_turn )
+    TURN( CW, 90, 0, 0, 0 )
+ACT_END
+ACT_BEGIN( a_bad_restart )
+    END_RESTART
+ACT_END
+ACT_BEGIN( a_bad_speed )
+    SPEED( LOW )
+ACT_END
+ACT_BEGIN( a_bad_forback )
+    FORBACK( FWD )
+ACT_END
+ACT_BEGIN( a_bad_hold )
+    ERROR_HOLD( 290, IN( ON(SEN_A) ), L_OK )
+ACT_END
+
+enum {
+    S_BRANCH = SEQ_SITE_BASE, S_UNMATCHED, S_TIMING, S_ACS, S_DRIVE, S_BUDGET, S_OUTS, S_FLICKER,
+    S_HANDSHAKE, S_WAIT_OUT, S_CALL, S_BAD_LABEL, S_ACT_START, S_PROF, S_NO_TABLE
+};
+
+SEQ_MAP_BEGIN( site_seqs )
+    SEQ_MAP( 0, S_BRANCH, s_branch )
+    SEQ_MAP( 0, S_UNMATCHED, s_unmatched )
+    SEQ_MAP( 0, S_TIMING, s_timing )
+    SEQ_MAP( 0, S_ACS, s_acs )
+    SEQ_MAP( 0, S_DRIVE, s_drive )
+    SEQ_MAP( 0, S_BUDGET, s_budget )
+    SEQ_MAP( 0, S_OUTS, s_outs )
+    SEQ_MAP( 0, S_FLICKER, s_flicker )
+    SEQ_MAP( 0, S_HANDSHAKE, s_handshake )
+    SEQ_MAP( 0, S_WAIT_OUT, s_wait_out )
+    SEQ_MAP( 0, S_CALL, s_call )
+    SEQ_MAP( 0, S_BAD_LABEL, s_bad_label )
+    SEQ_MAP( 0, S_ACT_START, s_act_start )
+    SEQ_MAP( PF_TWO, S_PROF, s_prof_any )
+    SEQ_MAP( PF_ONE, S_PROF, s_prof1 )
+    SEQ_MAP( 0, S_PROF, s_prof_any )
+SEQ_MAP_END
+
+ACT_MAP_BEGIN( site_acts )
+    ACT_MAP( 0, ACT_PULSE, a_pulse )
+    ACT_MAP( 0, ACT_HOLD, a_hold )
+    ACT_MAP( 0, ACT_FAIL, a_fail )
+    ACT_MAP( 0, ACT_SPARE1, a_hold )
+    ACT_MAP( 0, ACT_SPARE2, a_hold )
+    ACT_MAP( 0, ACT_SPARE3, a_hold )
+ACT_MAP_END
+
+PROFILE_TABLE_BEGIN( site_profiles )
+    PROFILE( PF_ONE, 100, 1, 5 )
+    PROFILE( PF_TWO, 100, 6, 9 )
+PROFILE_TABLE_END
+
+#define NSEQS  (sizeof(site_seqs) / sizeof(site_seqs[0]))
+#define NACTS  (sizeof(site_acts) / sizeof(site_acts[0]))
+#define NPROFS (sizeof(site_profiles) / sizeof(site_profiles[0]))
+
+static const seq_site_t s_site_ok = { site_seqs, NSEQS, site_acts, NACTS, s_calls, 1, site_profiles, NPROFS };
+
+static void start(uint16_t id)
+{
+    seq_abort_all();
+    act_abort_all();
+    fake_in = fake_out = 0;
+    fake_restart_count = 0;
+    D.action_err = D.stop_err = 0;
+    seq_request(id);
+}
+
+static void bad_act_rejected(const seq_step_t *steps, uint16_t n)
+{
+    seq_def_t bad[2];
+    seq_site_t site = s_site_ok;
+    bad[0] = site_acts[0];
+    bad[1].profile = 0;
+    bad[1].id = 77;
+    bad[1].steps = steps;
+    bad[1].nsteps = n;
+    site.acts = bad;
+    site.nacts = 2;
+    assert(seq_bind(&site) == 77);
+    assert(act_start(ACT_PULSE) == 2);   /* 거부된 표의 ACT 는 하나도 시작하지 않는다 */
+}
+
+#define BAD(t) bad_act_rejected(t##_steps, (uint16_t)(sizeof(t##_steps) / sizeof(seq_step_t)))
+
+int main(void)
+{
+    fake_reset();
+    fake_params();
+    memset(&D, 0, sizeof(D));
+    D.ui_mode = UI_AUTO;
+    (void)param_set(P_AGV_ID, 7);
+    (void)param_set(P_ACS_RETRY_LEGACY, 5);
+    acs_reset();
+
+    /* ACT 금지 스텝 부팅 검사 */
+    BAD(a_bad_turn);
+    BAD(a_bad_restart);
+    BAD(a_bad_speed);
+    BAD(a_bad_forback);
+    BAD(a_bad_hold);
+
+    assert(seq_bind(&s_site_ok) == 0);
+    assert(seq_profile() == 0);
+
+    /* WHEN: 대기 → 첫 참의 가지 → 안정 초과 → 재출발 */
+    start(S_BRANCH);
+    seq_run();
+    assert(seq_is_active() && seq_active_id() == S_BRANCH && seq_active_step() == 0);
+    fake_in = BIT(SEN_A);
+    seq_run();
+    assert(fake_out == BIT(O_A));
+    fake_in |= BIT(SEN_C);
+    seq_run(); seq_run(); seq_run();
+    assert(seq_is_active());
+    fake_in &= ~BIT(SEN_C);        /* 끊기면 처음부터 */
+    seq_run();
+    fake_in |= BIT(SEN_C);
+    seq_run(); seq_run(); seq_run();
+    assert(seq_is_active());
+    seq_run();                     /* 4 틱째 = 3 초과 */
+    assert(!seq_is_active() && fake_out == 0 && fake_restart_count == 1);
+    assert(seq_request_flag[S_BRANCH] == 0);
+
+    /* WHEN 묶음 시간 제한 */
+    start(S_BRANCH);
+    for (int i = 0; i < 100; i++) { seq_run(); assert(seq_is_active()); }
+    seq_run();
+    assert(!seq_is_active() && D.action_err == 123);
+
+    /* 우선순위: 낮은 ID 먼저 */
+    start(S_TIMING);
+    seq_request(S_BRANCH);
+    seq_run();
+    assert(seq_active_id() == S_BRANCH);
+    seq_abort_all();
+    assert(fake_seq_off_count > 0 && !seq_is_active() && seq_request_flag[S_TIMING] == 0);
+
+    /* 표 없는 요청은 버린다 */
+    start(S_NO_TABLE);
+    seq_run();
+    assert(!seq_is_active() && seq_request_flag[S_NO_TABLE] == 0);
+
+    /* 불일치 누적: 거짓 틱만 세고, 오류에서 복귀하면 다시 0 */
+    start(S_UNMATCHED);
+    fake_in = BIT(SEN_A);
+    for (int i = 0; i < 10; i++) { seq_run(); assert(D.action_err == 0); }
+    fake_in = 0;
+    seq_run(); seq_run(); seq_run();                     /* 참 틱은 누적에 안 든다 */
+    fake_in = BIT(SEN_A);
+    seq_run();
+    assert(D.action_err == 290);
+    D.action_err = 0;
+    seq_run();
+    assert(D.action_err == 290);                         /* 유지 */
+    D.action_err = 0;
+    fake_in = BIT(IN_START_SW);                          /* 복귀, SEN_A 꺼짐 = 조건 참 */
+    seq_run();
+    D.action_err = 0;                                    /* 복귀한 스캔에는 아직 오류가 서 있다 */
+    fake_in = BIT(SEN_A);
+    for (int i = 0; i < 10; i++) { seq_run(); assert(D.action_err == 0); }  /* 두 번째 시도도 전체 시간 */
+    seq_run();
+    assert(D.action_err == 290);
+
+    /* DELAY(N) 은 N+1 틱, WAIT_TO 는 N 초과에서 라벨 */
+    start(S_TIMING);
+    seq_run(); seq_run();
+    assert(fake_out == 0);
+    seq_run();
+    assert(fake_out == BIT(O_A));
+    seq_run(); seq_run();
+    assert(fake_out == BIT(O_A));
+    seq_run();
+    assert(fake_out == (BIT(O_A) | BIT(O_C)) && !seq_is_active());
+
+    /* WAIT_TO 조건 통과 */
+    start(S_TIMING);
+    fake_in = BIT(SEN_A);
+    seq_run(); seq_run(); seq_run();
+    assert(fake_out == BIT(O_A) && !seq_is_active());
+
+    /* ACS: 번호 출처 4종, ACK 대기, 스테이션 */
+    acs_station_reset();
+    (void)acs_station_push(10);
+    start(S_ACS);
+    seq_run();
+    assert(acs_pending() == 4);
+    seq_run();
+    assert(fake_out == 0);
+    acs_on_ack('L'); acs_on_ack('U'); acs_on_ack('A'); acs_on_ack('F');
+    seq_run();
+    assert(fake_out == BIT(O_A) && acs_station_get(1) == 42 && acs_station_count() == 2 && acs_station_get(0) == 0);
+    /* ACK 시간 제한 */
+    acs_report('L', 1);
+    start(S_ACS);
+    for (int i = 0; i < 5; i++) { seq_run(); }
+    assert(fake_out == 0);
+    seq_run();
+    assert(fake_out == BIT(O_B));
+    acs_reset();
+
+    /* 주행 스텝 */
+    start(S_DRIVE);
+    D.turn_pulses = 100;
+    D.obs_use = 1;
+    seq_run();
+    assert(fake_speed_arg == 20 && fake_forback_arg == DIR_BACK && D.obs_use == 0 && fake_turn_count == 1);
+    seq_run();
+    assert(seq_active_step() == 4 && fake_turn_count == 1);      /* 완료 대기, 다시 요청하지 않음 */
+    D.turn_pulses = 0;
+    seq_run();
+    assert(D.obs_use == 1 && seq_state_get(ST_0) == 7);
+    seq_run();
+    assert(seq_is_active());
+    seq_state_set(ST_1, 3);
+    seq_run();
+    assert(!seq_is_active() && fake_out == 0 && fake_restart_count == 1);
+
+    /* 한 스캔 8스텝, 라벨은 세지 않는다 */
+    start(S_BUDGET);
+    seq_run();
+    assert(fake_out == 0xFFUL && seq_is_active());
+    seq_run();
+    assert(fake_out == 0x1FFUL && !seq_is_active());
+
+    /* 펄스: 2 켜고 1 끄기 2회. END 없이 끝나면 비활성 */
+    start(S_OUTS);
+    { static const int want[] = { 1, 1, 0, 1, 1 };
+      for (int i = 0; i < 5; i++) { seq_run(); assert(((fake_out & BIT(O_A)) != 0) == want[i]); } }
+    seq_run();
+    assert(fake_out == BIT(O_C) && !seq_is_active());
+
+    /* 점멸: 조건 참이면 끄고 다음 */
+    start(S_FLICKER);
+    { int on = 0, off = 0;
+      for (int i = 0; i < 8; i++) { seq_run(); if (fake_out & BIT(O_A)) { on++; } else { off++; } }
+      assert(on > 0 && off > 0); }
+    fake_in = BIT(SEN_A);
+    seq_run();
+    assert(fake_out == BIT(O_B));
+    start(S_FLICKER);
+    for (int i = 0; i < 20; i++) { seq_run(); }
+    assert(fake_out != BIT(O_C));
+    seq_run();
+    assert((fake_out & BIT(O_A)) == 0 && fake_out == BIT(O_C));
+
+    /* 핸드셰이크 */
+    start(S_HANDSHAKE);
+    seq_run();
+    assert(fake_out == BIT(O_A));
+    fake_in = BIT(SEN_A);
+    seq_run();
+    assert(fake_out == 0);
+    seq_run();
+    assert(seq_is_active());
+    fake_in = 0;
+    seq_run();
+    assert(fake_out == BIT(O_B));
+    start(S_HANDSHAKE);
+    for (int i = 0; i < 6; i++) { seq_run(); }
+    assert(fake_out == BIT(O_C));
+
+    /* 출력 대기 */
+    start(S_WAIT_OUT);
+    fake_out = BIT(O_A) | BIT(O_B);
+    seq_run();
+    assert(seq_is_active());
+    fake_out = BIT(O_A);
+    seq_run();
+    assert(!seq_is_active());
+
+    /* 사용자 함수: 0 대기, 1 다음, 2 오류 */
+    call_ret = 0; call_count = 0;
+    start(S_CALL);
+    seq_run(); seq_run(); seq_run();
+    assert(call_count == 3 && seq_is_active() && fake_out == 0);
+    call_ret = 1;
+    seq_run();
+    assert(fake_out == BIT(O_A));
+    call_ret = 2;
+    start(S_CALL);
+    seq_run(); seq_run();
+    assert(!seq_is_active() && D.action_err == SEQ_ERR_CALL);
+
+    /* 없는 라벨 */
+    start(S_BAD_LABEL);
+    seq_run();
+    assert(!seq_is_active() && D.action_err == SEQ_ERR_TABLE);
+
+    /* seq_cancel */
+    start(S_BRANCH);
+    seq_run();
+    seq_cancel(S_BRANCH);
+    assert(!seq_is_active() && seq_request_flag[S_BRANCH] == 0);
+
+    /* 프로파일: 표 순서대로 첫 일치 */
+    (void)param_set(P_AGV_TYPE, 100);
+    (void)param_set(P_AGV_ID, 3);
+    assert(seq_bind(&s_site_ok) == 0 && seq_profile() == PF_ONE);
+    start(S_PROF);
+    seq_run();
+    assert(fake_out == BIT(O_A));
+    (void)param_set(P_AGV_ID, 7);
+    assert(seq_bind(&s_site_ok) == 0 && seq_profile() == PF_TWO);
+    start(S_PROF);
+    seq_run();
+    assert(fake_out == BIT(O_B));
+    (void)param_set(P_AGV_ID, 50);
+    assert(seq_bind(&s_site_ok) == 0 && seq_profile() == 0);
+    (void)param_set(P_AGV_ID, 7);
+    assert(seq_bind(&s_site_ok) == 0);
+
+    /* ACT: 펄스, 재요청 무시, 슬롯 4개, 미정의 */
+    start(0);
+    assert(act_start(ACT_PULSE) == 0);
+    assert(act_start(ACT_PULSE) == 1);
+    assert(act_is_busy(ACT_PULSE));
+    act_run();
+    assert(fake_out == BIT(O_A));
+    act_abort_all();
+    assert(fake_out == 0 && !act_is_busy(ACT_PULSE));
+    assert(act_start(ACT_HOLD) == 0 && act_start(ACT_SPARE1) == 0 && act_start(ACT_SPARE2) == 0 && act_start(ACT_SPARE3) == 0);
+    assert(act_start(ACT_PULSE) == 2);
+    assert(act_start(99) == 2);
+    act_abort_all();
+
+    /* ACT 는 시퀀스와 동시에 돈다. 끝나면 슬롯이 빈다 */
+    start(S_ACT_START);
+    seq_run();
+    act_run();
+    assert(act_is_busy(ACT_PULSE) && seq_is_active());
+    for (int i = 0; i < 7; i++) { seq_run(); act_run(); assert((fake_out & BIT(O_C)) == 0); }
+    seq_run();
+    assert(!act_is_busy(ACT_PULSE) && (fake_out & BIT(O_C)) != 0);
+
+    /* abort: 그 ACT 가 켠 출력만 끈다 */
+    start(0);
+    fake_out = BIT(O_C);                 /* 다른 쪽이 켠 출력 */
+    assert(act_start(ACT_HOLD) == 0);
+    act_run();
+    assert(fake_out == (BIT(O_B) | BIT(O_C)));
+    act_abort_all();
+    assert(fake_out == BIT(O_C));
+
+    /* 스스로 끈 출력은 owned 에서 빠진다: abort 해도 안 건드린다 */
+    start(0);
+    fake_in = BIT(SEN_A);
+    assert(act_start(ACT_HOLD) == 0);
+    act_run();
+    assert(!act_is_busy(ACT_HOLD) && fake_out == 0);
+
+    /* 오류에서 중단 */
+    start(0);
+    assert(act_start(ACT_HOLD) == 0);
+    act_run();
+    D.stop_err = 257;
+    act_run();
+    assert(!act_is_busy(ACT_HOLD) && fake_out == 0);
+    D.stop_err = 0;
+    assert(act_start(ACT_HOLD) == 0);
+    act_run();
+    D.system_err = 200;
+    act_run();
+    assert(!act_is_busy(ACT_HOLD));
+    D.system_err = 0;
+
+    /* ACT END_ERROR 는 stop_err, 시퀀스 END_ERROR 는 action_err */
+    start(0);
+    assert(act_start(ACT_FAIL) == 0);
+    act_run();
+    assert(D.stop_err == 290 && D.action_err == 0 && !act_is_busy(ACT_FAIL));
+    D.stop_err = 0;
+
+    /* 일시정지(action_err)로는 멈추지 않는다 */
+    start(0);
+    assert(act_start(ACT_PULSE) == 0);
+    D.action_err = 281;
+    act_run();
+    assert(act_is_busy(ACT_PULSE));
+    act_abort_all();
+
+    /* seq_abort_all 은 위험 감속 표시도 내린다. 비트를 켜면 남는다 */
+    D.risk_stop = 1;
+    seq_abort_all();
+    assert(D.risk_stop == 0);
+    (void)param_set(P_LEGACY_QUIRKS, QUIRK_RISK_FLAG);
+    D.risk_stop = 1;
+    seq_abort_all();
+    assert(D.risk_stop == 1);
+
+    puts("test_seq ok");
+    return 0;
+}

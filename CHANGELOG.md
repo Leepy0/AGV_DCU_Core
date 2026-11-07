@@ -1,6 +1,9 @@
 # 변경 이력
 
 ## 미릴리스 (2026-11-07)
+- 1단계 코어 구현: `motor`(rpm 피드백, 속도 PI, S커브, 주행 단계, 테이프 회전 정렬), `stop`(MotorStop), `steer`, `branch`, `guide`, `frame`, `acs`, `seq`, `param`과 호스트 단위 시험.
+- `guide`: `'a'`·`'h'` 해석, 바이트 파서, LED 덩어리 추적, 필터(기본 꺼짐), 센서 전환 초기화, 두절(255) 판정. `P_GUIDE_CURVE_DETECT` = 2 로 위치 소스 선택.
+- 고친 결함: `curve_now` 반전, 테이프 회전 Step 2, `nGuide_Risk_Stop_Flag` 잔류, `'h'` 자리표 (`P_LEGACY_QUIRKS` b0~b3 으로 구동작 재현), 재전송 CT²·선두 대기, `set[40]` 곱 넘침, `DA_EST_cnt` 잔류, 스테이션 큐 상한, 부팅 직후 교차로 판정.
 - 설계 문서 초안.
 - 공개 헤더 초안: `types.h`, `seq.h`, `tagact.h`, `io.h`, `mgmt.h`.
 - 시퀀스 표를 YAML에서 C 매크로(`seq_dsl.h`)로 변경. 생성기 제거. 시간 단위는 1/100초.

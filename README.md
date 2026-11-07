@@ -2,7 +2,7 @@
 
 AGV 주행 제어기 DCU(TI TMS320F2808) 펌웨어의 **코어 라이브러리**. 주행·조향·정지 제어, 가이드센서, ACS 통신, 파라미터·EEPROM, I/O, 시퀀스 인터프리터, 관리 프로토콜, FOTA 연계를 담는다. 사이트별 동작(시퀀스·태그·I/O 배선)은 담지 않는다. 그것은 앱 저장소(사내)에서 이 라이브러리를 벤더링해 작성한다.
 
-현재 상태: **설계 문서, 공개 헤더 초안, 표 작성 매크로**. 인터프리터와 제어 구현은 아직 없다.
+현재 상태: **하드웨어 무관 순수 로직과 호스트 단위 시험**. HAL, 런 조정, 태그 액션, 키·표시, 메인 스케줄러는 아직 없다.
 
 ## 문서
 
@@ -21,13 +21,13 @@ AGV 주행 제어기 DCU(TI TMS320F2808) 펌웨어의 **코어 라이브러리**
 ## 디렉터리
 
 ```
-include/agv/   공개 헤더 (types.h, seq.h, seq_dsl.h, tagact.h, io.h, mgmt.h …)
-src/           모듈 구현 (예정)
+include/agv/   공개 헤더 (types.h, drive.h, param.h, motor.h, stop.h, steer.h, branch.h, guide.h, frame.h, acs.h, seq.h, seq_dsl.h, tagact.h, io.h, mgmt.h)
+src/           모듈 구현
 hal/f2808/     레지스터 HAL (예정)
 hal/host/      PC 시뮬레이션 HAL (예정)
 cmd/           OTA 앱 영역 링커 명령 파일 (브릿지 레포 예제 기준, 실기 검증 전 잠정)
 tools/         라이브러리 빌드 스크립트, 표 출력 도구 (예정)
-tests/         test_dsl.c (표 매크로 검사), 호스트 단위 시험 (예정)
+tests/         test_dsl.c (표 매크로 검사), 호스트 단위 시험. 실행: powershell -File tests/run_host.ps1
 docs/          설계 문서
 ```
 

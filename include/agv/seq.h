@@ -79,6 +79,10 @@ enum { SEQ_SPD_HIGH = 0xFFF0, SEQ_SPD_LOW = 0xFFF1, SEQ_SPD_LLOW = 0xFFF2, SEQ_S
 #define SEQ_NO_LABEL     0u       /* target 없음. 라벨 값은 1부터 */
 #define SEQ_TO_UNMATCHED 0x8000u  /* timeout 최상위 비트: 조건이 거짓인 틱만 누적 (최대 32767 = 327초) */
 
+#define SEQ_ERR_CALL     290u     /* 사용자 정의 함수가 실패(2)를 돌려준 경우 */
+#define SEQ_ERR_TABLE    290u     /* 없는 라벨·함수 인덱스 */
+#define SEQ_STATE_COUNT  16       /* 사이트 상태 변수 칸 수 */
+
 typedef struct {
     uint16_t kind;      /* seq_kind_t */
     uint16_t target;    /* 분기·타임아웃 라벨 */
@@ -130,6 +134,10 @@ uint16_t seq_active_id(void);
 uint16_t seq_active_step(void);
 void     seq_run(void);          /* 10 ms */
 void     seq_abort_all(void);    /* STOP·E-STOP·W 리셋 */
+
+/* 사이트 상태 변수 (SET_STATE, WAIT_STATE, WHEN_STATE) */
+uint16_t seq_state_get(uint16_t id);
+void     seq_state_set(uint16_t id, uint16_t value);
 
 /* ACT: 주행·정지와 무관하게 10 ms 마다 돈다. 슬롯 4개 */
 #define ACT_SLOTS 4
