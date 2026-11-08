@@ -532,11 +532,11 @@ void motor_run(void)
     motor_feedback_update();
     motor_stall_check();
 
-    if (s_motor.forcing) {      /* 최대 rpm 시험: 주행·조향·정지 제어를 모두 건너뛴다 */
+    if (s_motor.forcing) {      /* 최대 rpm·타력 시험: 주행·조향·정지 제어를 모두 건너뛴다 */
         uint16_t i;
         int16_t ok = (int16_t)(!D.system_err && !D.estop);
         D.amp_run = ok;
-        D.motion = D.amp_dir = MOTION_FWD;
+        D.motion = D.amp_dir = (D.control == RUN_DRIVE) ? D.backward : MOTION_FWD;   /* 주행 중 타력은 방향을 둔다 */
         D.vin_out = 0;
         for (i = 0; i < 2; i++) {
             D.w_cmd[i] = 0;

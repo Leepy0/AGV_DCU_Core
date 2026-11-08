@@ -483,6 +483,7 @@ int tune_key(uint16_t key)
         rpmt_abort(1);
         return 1;
     }
+    if ((s_tune.state == TUNE_TEMP) && (key != 0u) && ident_coast_key()) { return 1; }   /* 타력 중 아무 키 */
     if (D.flag_run || D.flag_stopping) { return 0; }
     if ((s_tune.state == TUNE_WAIT) && (key == KEY_SHIFT)) {
         s_tune.ident = (uint16_t)((s_tune.ident + 1u) % TUNE_MODE_COUNT);

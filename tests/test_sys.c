@@ -757,18 +757,24 @@ static void test_keep_results(void)
     test_keep_mark = 0;
     agv_ident.state = 2;
     agv_ident.track_mm = 5000.0f;
+    agv_coast.state = 2;
+    agv_coast.p[3].dist_mm = 700;
     boot();
     assert(agv_ident.state == 0 && agv_ident.track_mm == 0.0f && test_keep_mark != 0);
+    assert(agv_coast.state == 0 && agv_coast.p[3].dist_mm == 0);
     agv_ident.state = 2;
     agv_ident.track_mm = 5000.0f;
     agv_top.state = 1;
     agv_all.state = 1;
     agv_all.fail = 2034;
+    agv_coast.state = 1;
+    agv_coast.p[3].dist_mm = 700;
     agv_rpmt.state = 1;
     boot();
     assert(agv_ident.state == 2 && agv_ident.track_mm == 5000.0f && agv_ident.fail == 0);
     assert(agv_top.state == 3 && agv_top.fail == -1);
     assert(agv_all.state == 3 && agv_all.fail == 2034);
+    assert(agv_coast.state == 3 && agv_coast.fail == -1 && agv_coast.p[3].dist_mm == 700);
     assert(agv_rpmt.state == 3 && agv_rpmt.fail == -1);
     printf("  keep results ok\n");
 }

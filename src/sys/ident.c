@@ -12,7 +12,8 @@
  * 결과는 agv_top 에 쌓는다.
  * 통합 시험(ALL)은 단계마다 s_r 을 그 단계 결과로 돌린다. 단계 2 는 agv_all 칸을 쓴다.
  * 단계 2 는 식별 시험의 홀수 회와 같은 길(속도 단계 2, SL 정지·속도 계단 없음)이고 결과만 스윕 칸으로 간다.
- * 지정 시험(TEMP)은 통합 시험에 s_temp 를 켠 것이다. 0회 뒤 바로 단계 2(TEMP 목록), 단계 2 끝에서 멈춘다 */
+ * 지정 시험(TEMP)은 통합 시험에 s_temp 를 켠 것이다. 0회 뒤 바로 단계 2(TEMP 목록), 단계 3 은 타력 시험이다.
+ * 타력은 1 가속, 2 안정, 7 타력(DAC 0 고정), 8, 9. 7 은 지정 시험에 SL 정지가 없어 다시 쓴다. 결과는 agv_coast */
 #include <math.h>
 #include <string.h>
 #include "agv/ident.h"
@@ -59,20 +60,28 @@
 #define TOP_DEC_EVERY    4        /* 감속 거리는 4 틱마다 4 틱 뒤 지령 상한으로 미리 잰다. CPU 를 아낀다 */
 
 #define SWEEP_LEVEL      1u       /* 단계 2 속도 = 식별 3·4회 단계 */
-#define KEEP_MARK        ((uint16_t)(0x7E57u ^ (uint16_t)(sizeof(agv_ident) + sizeof(agv_top) + sizeof(agv_all) + sizeof(agv_rpmt))))
+#define COAST_V0_TICKS   10       /* 타력: 고정 직전 평균 */
+#define COAST_TICKS      300      /* 3 s 안에 최저 속도가 안 되면 풀고 다음으로 */
+#define COAST_EST_RPM_T  10.0f    /* 타력 거리 어림 감속도 1000 rpm/s 를 틱으로 */
+#define COAST_GUIDE_OFF  10       /* 조향이 꺼져 있으니 가이드가 이만큼 벗어나면 푼다(위험 감속 문턱) */
+#define KEEP_MARK        ((uint16_t)(0x7E57u ^ (uint16_t)(sizeof(agv_ident) + sizeof(agv_top) + sizeof(agv_all) \
+                                                           + sizeof(agv_coast) + sizeof(agv_rpmt))))
 
 enum { PH_RAMP = 1, PH_SETTLE, PH_HOLD, PH_SPD_UP, PH_SPD_DOWN, PH_LAT, PH_STOP, PH_SEEK, PH_TURN };
+#define PH_COAST PH_STOP          /* 지정 시험 단계 3 */
 
 /* codestart 가 지우지 않는 RAM. 초기화식을 두면 .cinit 이 덮으니 두지 않는다 */
 #ifdef __TMS320C2000__
 #pragma DATA_SECTION(agv_ident, "test_keep")
 #pragma DATA_SECTION(agv_top, "test_keep")
 #pragma DATA_SECTION(agv_all, "test_keep")
+#pragma DATA_SECTION(agv_coast, "test_keep")
 #pragma DATA_SECTION(test_keep_mark, "test_keep")
 #endif
 ident_result_t agv_ident;
 top_result_t   agv_top;
 all_result_t   agv_all;
+coast_result_t agv_coast;
 uint16_t       test_keep_mark;
 
 static const int16_t s_sweep_def[SWEEP_MAX] = { 0, 1, 2, 3, 8, 9, 10, 11, 16, 17, 18, 19, 24, 25, 26, 27 };
@@ -92,6 +101,13 @@ static struct {
     int16_t ri, rn, last[2], n_tq, n_lag;
     float   dec;
 } s_tp;
+
+static struct {                  /* 타력 한 회 */
+    int16_t  last[2];
+    int32_t  v0[2];
+    uint32_t start;
+    float    prev, tc[3];        /* tc: 90·60·30% 에 닿은 틱(보간). -1 = 아직 */
+} s_cs;
 
 typedef struct {
     float   y0, step, peak, end_sum;
@@ -113,8 +129,15 @@ static struct {
 /* 통합 시험 단계 2 (OPT 스윕) 중 */
 static int sweep(void) { return s_all && (agv_all.stage == 2); }
 
-/* 속도 단계 0~2. 1, 2회 → 0, 3, 4회 → 1, 5, 6회 → 2. 스윕은 1 */
-static uint16_t lvl(void) { return sweep() ? SWEEP_LEVEL : (PASS - 1u) / 2u; }
+/* 지정 시험 단계 3 (타력) 중 */
+static int coast(void) { return s_temp && (agv_all.stage == 3); }
+
+/* 속도 단계 0~2. 1, 2회 → 0, 3, 4회 → 1, 5, 6회 → 2. 스윕은 1, 타력은 1, 1, 2, 2 */
+static uint16_t lvl(void)
+{
+    if (coast()) { return (PASS + 1u) / 2u; }
+    return sweep() ? SWEEP_LEVEL : (PASS - 1u) / 2u;
+}
 
 /* 이번 회의 결과 칸 */
 static ident_level_t *cur_lv(void)
@@ -191,6 +214,10 @@ static void enter(uint16_t phase)
 {
     *s_r.phase = (int16_t)phase;
     s_id.t = 0;
+    if (coast()) {               /* 단계 3 은 agv_all 에도 회·순서를 보인다 */
+        agv_all.pass = *s_r.pass;
+        agv_all.phase = *s_r.phase;
+    }
 }
 
 static void seek_begin(void)
@@ -295,6 +322,7 @@ void ident_start_temp(void)
 {
     if (s_temp_n == 0xFFFFu) { all_begin(s_temp_def, 8u); }
     else                     { all_begin(s_temp_l, s_temp_n); }
+    memset(&agv_coast, 0, sizeof(agv_coast));
     s_temp = 1;
 }
 
@@ -321,11 +349,23 @@ static void all_next(void)
     agv_top.state = 1;
 }
 
+/* 지정 시험 단계 2 끝. 타력은 사용자 OPT 로 한다. 차는 선 위에 서 있다 */
+static void coast_next(void)
+{
+    s_id.retry = 0;
+    (void)param_set_ram(P_OPT_FLAGS, agv_all.opt_saved);
+    steer_reset();
+    agv_all.stage = 3;
+    point(&agv_coast.state, &agv_coast.fail, &agv_coast.pass, &agv_coast.phase, &agv_all.track_mm);
+    agv_coast.state = 1;
+}
+
 void ident_abort(void)
 {
     int16_t code = (int16_t)(*s_r.pass * 10 + *s_r.phase);
     int all_run = s_all && (agv_all.state == 1);
 
+    motor_dac_release();         /* 타력 고정. 아니면 아무 일 없다 */
     D.p_test = 0;
     motor_spike_set(0);
     if (*s_r.state == 1) {
@@ -355,6 +395,7 @@ void ident_keep_boot(void)
         memset(&agv_ident, 0, sizeof(agv_ident));
         memset(&agv_top, 0, sizeof(agv_top));
         memset(&agv_all, 0, sizeof(agv_all));
+        memset(&agv_coast, 0, sizeof(agv_coast));
         memset(&agv_rpmt, 0, sizeof(agv_rpmt));
         test_keep_mark = KEEP_MARK;
         return;
@@ -363,6 +404,7 @@ void ident_keep_boot(void)
     keep_cut(&agv_ident.state, &agv_ident.fail);
     keep_cut(&agv_top.state, &agv_top.fail);
     keep_cut(&agv_all.state, &agv_all.fail);
+    keep_cut(&agv_coast.state, &agv_coast.fail);
     keep_cut(&agv_rpmt.state, &agv_rpmt.fail);
 }
 
@@ -576,7 +618,11 @@ static int slow_down(void)
     if ((PASS == 0u) || (s_id.want <= P.min_speed)) { return fail_now(); }
     s_id.cap[lvl()] = (c < P.min_speed) ? P.min_speed : c;
     s_id.retry = 1;
-    sl_stop();
+    if (coast()) {
+        set_speed(P.min_speed, 1);
+        seek_begin();
+    }
+    else { sl_stop(); }
     return 0;
 }
 
@@ -735,12 +781,137 @@ static void top_finish(void)
     agv_top.max_mpm = ((float)agv_top.max_rpm[0] + (float)agv_top.max_rpm[1]) * 0.5f / P.one_meter_rpm;
 }
 
+/* ---- 지정 시험 단계 3: 타력 ---- */
+
+/* 회전 중심이 선 위에서 출발한다. 타력은 늦어도 budget 에서 시작해야 감속 끝점 전에 최저 속도가 된다 */
+static void coast_begin(void)
+{
+    const float k = 1000.0f / 6000.0f / P.one_meter_rpm;                  /* rpm·틱 → mm */
+    coast_pass_t *cp;
+    float v, lo = (float)P.min_speed;
+
+    if (s_id.retry) { s_id.retry = 0; }
+    else            { agv_coast.pass++; }
+    cp = &agv_coast.p[PASS - 1u];
+    memset(cp, 0, sizeof(*cp));
+    memset(&s_cs, 0, sizeof(s_cs));
+    if (pass_rpm() < level_rpm()) { cp->cut = 2; }   /* 낮춘 속도로 잰다 */
+    v = (float)pass_rpm();
+    s_id.budget = *s_r.track - P.guide_dist_mm - DEC_MARGIN_MM - (v * v - lo * lo) / (2.0f * COAST_EST_RPM_T) * k;
+    D.p_test = 0;
+    enter(PH_RAMP);
+}
+
+/* tc[a] → tc[b] 구간 감속도 rpm/s. 닿지 않았으면 -1 */
+static int16_t coast_dec(float v0, float frac, uint16_t a, uint16_t b)
+{
+    float dt = s_cs.tc[b] - s_cs.tc[a];
+    if ((s_cs.tc[a] < 0.0f) || (s_cs.tc[b] < 0.0f) || (dt <= 0.0f)) { return -1; }
+    return (int16_t)(v0 * frac / (dt * (TICK_MS / 1000.0f)));
+}
+
+/* 고정을 풀고 제어를 잇는다. 지령은 실제 속도(최저 속도 상한)에서 최저 속도로 간다 */
+static int coast_end(coast_pass_t *cp, int16_t act, int reached)
+{
+    float v0 = ((float)cp->v0_rpm[0] + (float)cp->v0_rpm[1]) * 0.5f;
+    uint16_t i;
+
+    motor_dac_release();
+    cp->t_min_ms = reached ? (int16_t)ms(s_id.t) : -1;
+    cp->dist_mm = (int16_t)mm_since(s_cs.start);
+    cp->dec_rpm_s = coast_dec(v0, 0.6f, 0u, 2u);
+    cp->dec_hi_rpm_s = coast_dec(v0, 0.3f, 0u, 1u);
+    cp->dec_lo_rpm_s = coast_dec(v0, 0.3f, 1u, 2u);
+    cp->v0_mpm = v0 / P.one_meter_rpm;
+    cp->dec_mps2 = (cp->dec_rpm_s < 0) ? -1.0f : (float)cp->dec_rpm_s / P.one_meter_rpm / 60.0f;
+    for (i = 0; i < 2u; i++) { D.w_pi_out[i] = D.iref_it[i] = D.iref_fb[i] = 0.0f; }   /* 타력 전 정속 적분은 버린다 */
+    steer_reset();
+    D.vin_out = (act < P.min_speed) ? act : P.min_speed;
+    D.scv_accel = 0;
+    set_speed(P.min_speed, 1);
+    D.step = DRIVE_CHANGE_SPEED;
+    seek_begin();
+    return 0;
+}
+
+static int coast_run(int stopped)
+{
+    static const float frac[3] = { 0.9f, 0.6f, 0.3f };
+    coast_pass_t *cp = &agv_coast.p[PASS - 1u];
+    uint16_t ph = (uint16_t)*s_r.phase;
+    int16_t spike = motor_spike(), act;
+    uint16_t i;
+    float m, v0;
+
+    if (stopped || D.flag_stopping || D.stop_sw || D.estop || (D.system_err != 0)) { return fail_now(); }
+    for (i = 0; i < 2u; i++) {      /* 튄 값은 앞 값으로 둔다 */
+        int16_t r = motor_raw_rpm(i);
+        if (r <= spike) { s_cs.last[i] = r; }
+    }
+    act = (int16_t)(((int32_t)s_cs.last[0] + s_cs.last[1]) / 2);
+
+    if (ph == PH_RAMP) {
+        set_speed(pass_rpm(), 1);
+        if (mm_since(s_id.begin) > s_id.budget) { return slow_down(); }
+        if ((D.step == DRIVE_CRUISE) && (D.vin_out == s_id.want)) {
+            float v = (float)s_id.want / P.one_meter_rpm * (1000.0f / 6000.0f);   /* mm/틱 */
+            if (mm_since(s_id.begin) + v * (float)SETTLE_TICKS > s_id.budget) { return slow_down(); }
+            enter(PH_SETTLE);
+        }
+        else if (++s_id.t > RAMP_LIMIT) { return fail_now(); }
+        return 0;
+    }
+    if (ph == PH_SETTLE) {
+        if (s_id.t >= SETTLE_TICKS - COAST_V0_TICKS) {
+            for (i = 0; i < 2u; i++) { s_cs.v0[i] += s_cs.last[i]; }
+        }
+        if (++s_id.t < SETTLE_TICKS) { return 0; }
+        for (i = 0; i < 2u; i++) { cp->v0_rpm[i] = (int16_t)(s_cs.v0[i] / COAST_V0_TICKS); }
+        s_cs.prev = ((float)cp->v0_rpm[0] + (float)cp->v0_rpm[1]) * 0.5f;
+        for (i = 0; i < 3u; i++) { s_cs.tc[i] = -1.0f; }
+        s_cs.start = travel();
+        motor_dac_force(0, 0);
+        enter(PH_COAST);
+        return 0;
+    }
+
+    /* PH_COAST. s_id.t = 고정부터 틱 */
+    m = ((float)s_cs.last[0] + (float)s_cs.last[1]) * 0.5f;
+    v0 = ((float)cp->v0_rpm[0] + (float)cp->v0_rpm[1]) * 0.5f;
+    s_id.t++;
+    if (((s_id.t & 1) == 0) && (cp->n < COAST_CURVE)) { cp->curve[cp->n++] = (int16_t)m; }
+    for (i = 0; i < 3u; i++) {      /* 앞 틱은 문턱 위였다. 두 틱 사이를 잇는다 */
+        float th = v0 * frac[i];
+        if ((s_cs.tc[i] < 0.0f) && (m <= th)) { s_cs.tc[i] = (float)(s_id.t - 1) + (s_cs.prev - th) / (s_cs.prev - m); }
+    }
+    s_cs.prev = m;
+    if (m <= (float)P.min_speed) { return coast_end(cp, act, 1); }
+    if ((D.guide_pos >= COAST_GUIDE_OFF) || (D.guide_pos <= -COAST_GUIDE_OFF)) {
+        cp->cut |= 4;
+        return coast_end(cp, act, 0);
+    }
+    if (mm_since(s_id.begin) >= *s_r.track - P.guide_dist_mm - DEC_MARGIN_MM) {
+        cp->cut |= 1;
+        return coast_end(cp, act, 0);
+    }
+    if (s_id.t >= COAST_TICKS) { return coast_end(cp, act, 0); }   /* 실패가 아니다. 기록하고 다음 회 */
+    return 0;
+}
+
+/* 패널 키. 타력 중이면 바로 고정을 푼다 */
+int ident_coast_key(void)
+{
+    if (!coast() || (*s_r.state != 1) || (*s_r.phase != PH_COAST)) { return 0; }
+    (void)fail_now();
+    return 1;
+}
+
 /* 선을 봤다. 회전 중심이 선 위에 오도록 GD 만큼 더 가서 돈다 */
 static int cross_seen(void)
 {
     float leg = (float)(tune_line_at(0) - s_id.begin) / P.one_length_pulse + P.guide_dist_mm;
 
-    if (!s_top && !sweep()) { agv_ident.total_m += leg / 1000.0f; }
+    if (!s_top && !sweep() && !coast()) { agv_ident.total_m += leg / 1000.0f; }
     if (s_all) { agv_all.total_m += leg / 1000.0f; }
     if ((PASS == 0u) && (s_id.legs == 1)) {
         *s_r.track = leg;
@@ -765,7 +936,7 @@ static int all_end(void)
 
 /* 회전이 끝났다. 6회(최고 속도 시험은 2회) 뒤에는 선 위에서 기다린다.
  * 통합 시험은 단계 1·2 끝에서 다음 단계로 가고 단계 3 끝에서 기다린다.
- * 지정 시험은 0회 두 번째 회전 뒤 단계 2 로 가고 단계 2 끝에서 기다린다 */
+ * 지정 시험은 0회 두 번째 회전 뒤 단계 2, 단계 2 끝에서 단계 3(타력)으로 가고 단계 3 끝에서 기다린다 */
 static int turn_done(void)
 {
     D.tape_slow = 0;
@@ -774,16 +945,22 @@ static int turn_done(void)
         if (!s_id.retry) {
             agv_all.sw[agv_all.sweep_k].done++;
             if (PASS >= (uint16_t)(agv_all.sweep_n * SWEEP_PASSES)) {
-                if (s_temp) { return all_end(); }
-                all_next();
+                if (s_temp) { coast_next(); }
+                else        { all_next(); }
             }
+        }
+    }
+    else if (coast()) {
+        if (!s_id.retry && (PASS >= COAST_PASSES)) {
+            *s_r.state = 2;
+            return all_end();
         }
     }
     else if (s_temp) {
         if (s_id.legs >= 2) {      /* 0회 끝. L 을 쟀다 */
             agv_ident.state = 2;
             all_next();
-            if (agv_all.sweep_n == 0) { return all_end(); }
+            if (agv_all.sweep_n == 0) { coast_next(); }
         }
     }
     else if (PASS >= (s_top ? TOP_PASSES : IDENT_PASSES)) {
@@ -810,7 +987,7 @@ int ident_run(void)
 
     if (*s_r.state != 1) { return (*s_r.state == 2) ? 1 : -1; }
     if (s_all) { agv_all.elapsed_s = (float)(++s_id.ticks) * (TICK_MS / 1000.0f); }
-    if ((PASS > 0u) && !s_top) {
+    if ((PASS > 0u) && !s_top && !coast()) {
         if (D.risk_stop && !s_id.risk_prev) { lv->risk++; }
     }
     s_id.risk_prev = D.risk_stop;
@@ -823,6 +1000,7 @@ int ident_run(void)
         s_id.begin = travel();
         if ((PASS == 0u) && (s_id.legs == 1)) { seek_begin(); }   /* L 을 잰다 */
         else if (s_top)                       { top_begin(); }
+        else if (coast())                     { coast_begin(); }
         else                                  { pass_begin(); }
         return 0;
     }
@@ -832,6 +1010,7 @@ int ident_run(void)
         return 0;
     }
     if ((ph <= PH_STOP) && D.guide_all_on) { return fail_now(); }   /* 측정 중 교차선 */
+    if (coast() && (ph <= PH_COAST)) { return coast_run(stopped); }
     if (ph == PH_STOP) {
         if (stopped) {
             lv->stop_mm = mm_since(s_id.start);
@@ -846,7 +1025,7 @@ int ident_run(void)
     }
     if (stopped || D.flag_stopping) { return fail_now(); }
     if (ph == PH_SEEK) {
-        if ((PASS > 0u) && (D.step == DRIVE_CHANGE_SPEED)) {   /* 감속 중 실제 - 지령 */
+        if ((PASS > 0u) && !coast() && (D.step == DRIVE_CHANGE_SPEED)) {   /* 감속 중 실제 - 지령 */
             float lag = ((float)(D.rpm_avg[0] + D.rpm_avg[1]) * 0.5f - (float)D.vin_out) / P.one_meter_rpm;
             float *dl = s_top ? &agv_top.p[PASS - 1u].dec_lag_mpm : &lv->dec_lag_mpm;
             if (lag > *dl) { *dl = lag; }

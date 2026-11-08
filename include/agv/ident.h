@@ -151,20 +151,53 @@ int  ident_all_mode(void);   /* 1 = 지금 돌고 있는(또는 마지막) 시�
 uint16_t ident_stage(void);  /* 통합(지정) 시험 단계 1~3. 통합 시험이 아니면 0 */
 
 /* ---- 지정 시험 (튜닝 모드 TEMP) ----
- * 통합 시험을 줄인 것. 단계 1 은 0회만(선 찾기, L 측정, 회전 두 번). 식별 1~6회와 단계 3(최고 속도)은 없다.
+ * 통합 시험을 줄인 것. 단계 1 은 0회만(선 찾기, L 측정, 회전 두 번). 식별 1~6회와 최고 속도 시험은 없다.
  * 0회 두 번째 회전이 끝나면 바로 단계 2. 통합 시험 단계 2 와 같이 선에서 출발해 TEMP 목록의 OPT 마다 2회 잰다
  * (속도 단계 2, 같은 회 순서, OPT 는 RAM 에만, 회마다 조향 상태를 지움, 창이 안 들어가면 4/5 로 다시).
- * 결과는 agv_all (stage 는 2 에서 끝난다). agv_ident 에는 0회 값(L 등)만 남는다(state 2, pass 0).
- * 마지막 스윕 회전 뒤 agv_all.state = 2. 끝, 실패, 끊김 모두 OPT 를 되돌린다. 실패 코드는 통합 시험과 같다 */
+ * 마지막 스윕 회전 뒤 단계 3 타력 시험. OPT 를 시험 전 값으로 돌린 뒤 COAST_PASSES 회(방향 번갈아), 선에서 출발한다.
+ *  1·2회는 속도 단계 2(스윕에서 낮춘 상한 그대로), 3·4회는 최고 속도. 1 가속 → 2 안정 0.5 s(조향 켬)
+ *  → 7 타력: 두 DAC 를 0 으로 고정(조향 꺼짐)하고 매 틱 원시 rpm 을 잰다. 좌우 평균이 최저 속도 이하가 되거나
+ *  3 s 가 지나거나 감속 끝점(L - GD - 100 mm)에 닿거나 가이드가 크게 벗어나면 풀고, 지령을 실제 속도(최저 속도 상한)에서
+ *  최저 속도로 이어 8 선 찾기 → 9 회전. 순서 7(SL 정지)은 지정 시험에 없어 타력에 쓴다.
+ *  타력 시작은 늦어도 L - GD - 100 mm - (v² - 최저²) / (2 × 1000 rpm/s). 안정 창이 안 들어가면 4/5 로 다시(cut 2).
+ * 결과는 agv_all(stage 3 에서 끝난다)과 agv_coast. agv_ident 에는 0회 값(L 등)만 남는다(state 2, pass 0).
+ * 단계 3 의 agv_all.pass·phase 는 타력 회(1~4)와 순서. 마지막 타력 회전 뒤 agv_all.state = 2.
+ * 끝, 실패, 끊김 모두 OPT 를 되돌린다. STOP·E-STOP·오류·패널 키는 타력 중이면 바로 고정을 푼다. 실패 코드는 통합 시험과 같다 */
 /* TEMP 목록. 기본 {0,3,19,26,0,3,19,26}. n 은 SWEEP_MAX 에서 자른다. 0..31 밖의 값은 건너뛴다 */
 void ident_temp_set(const int16_t *opts, uint16_t n);
 void ident_start_temp(void); /* 이후 ident_run, ident_pass, ident_phase, ident_abort, ident_want_h 를 같이 쓴다 */
 int  ident_temp_mode(void);  /* 1 = 지금 돌고 있는(또는 마지막) 시험이 지정 시험 */
+int  ident_coast_key(void);  /* 패널 키. 타력 중이면 고정을 풀고 실패시켜 1 */
+
+#define COAST_PASSES 4
+#define COAST_CURVE  64            /* 20 ms 간격 평균 rpm */
+
+typedef struct {
+    int16_t v0_rpm[2];             /* 고정 직전 0.1 s 평균 rpm. 좌, 우 */
+    int16_t dec_rpm_s;             /* v0 의 90% → 30% 구간 평균 감속도. 좌우 평균 rpm/s. 닿지 않으면 -1 */
+    int16_t dec_hi_rpm_s;          /* 90% → 60% */
+    int16_t dec_lo_rpm_s;          /* 60% → 30% */
+    int16_t t_min_ms;              /* 고정부터 최저 속도까지. 못 닿고 풀었으면 -1 */
+    int16_t dist_mm;               /* 고정부터 풀 때까지 거리 (엔코더) */
+    int16_t n;                     /* curve 칸 수 */
+    int16_t curve[COAST_CURVE];    /* 고정부터 20 ms 마다 좌우 평균 원시 rpm */
+    float   v0_mpm, dec_mps2;      /* dec_rpm_s 를 m/s². 닿지 않으면 -1 */
+    int16_t cut;                   /* 비트 합. 1 감속 끝점에서 풀었다, 2 속도를 낮췄다, 4 가이드가 벗어나 풀었다 */
+} coast_pass_t;                    /* float 는 짝수 칸(72)에 온다 */
+
+typedef struct {
+    int16_t state;                 /* 1 진행, 2 끝, 3 실패 */
+    int16_t fail;                  /* 회 × 10 + 순서 */
+    int16_t pass, phase;
+    coast_pass_t p[COAST_PASSES];
+} coast_result_t;
+
+extern coast_result_t agv_coast;
 
 /* ---- 리셋에 남는 결과 ----
- * agv_ident·agv_top·agv_all·agv_rpmt 는 codestart 가 지우지 않는 RAM 구역 test_keep 에 둔다.
+ * agv_ident·agv_top·agv_all·agv_coast·agv_rpmt 는 codestart 가 지우지 않는 RAM 구역 test_keep 에 둔다.
  * CCS 연결로 워치독 리셋이 나도 남는다. 부팅 때 ident_keep_boot 를 한 번 부른다.
- * 표시가 틀리면(전원 투입) 넷을 지우고 표시를 쓴다. 진행 중(state 1)이던 결과는 state 3, fail 이 0 이면 -1 */
+ * 표시가 틀리면(전원 투입) 모두 지우고 표시를 쓴다. 진행 중(state 1)이던 결과는 state 3, fail 이 0 이면 -1 */
 extern uint16_t test_keep_mark;
 void ident_keep_boot(void);
 #endif
