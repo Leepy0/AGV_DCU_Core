@@ -66,4 +66,45 @@ void     ident_abort(void);
 uint16_t ident_pass(void);
 uint16_t ident_phase(void);
 int      ident_want_h(void);       /* 1 = 선 찾기 중. 'h' 로 교차선을 본다 */
+/* ---- 바닥 최고 속도 시험 (튜닝 모드 TOP) ----
+ * 식별 시험과 같은 주행로·0회(L 측정)를 쓴다. 1·2회는 방향을 바꿔 가며 선에서 출발해
+ * 지령을 TOP_CMD_RPM 까지 P.acc 램프로 올린다. 조향은 그대로 켠다.
+ * 지령이 실제보다 300 rpm 넘게 앞서면 지령을 실제 속도로 끌어내려 다시 올린다(조향 권한 유지).
+ * 포화(토크 지령이 상한 근처이거나 지령보다 늦음) 중에 0.3 s 실제 가속도가 100 rpm/s 아래면 최고 속도로 본다.
+ * 그때 지령을 실제 속도에 고정해 0.5 s 정속으로 rpm 을 잰 뒤 감속해 최저 속도로 선에 들어가 돈다.
+ * 감속 지점은 남은 거리 = L - GD - 100 mm - 감속 거리. 포화 전에 닿으면 sat = 0 (직선 부족).
+ * 시험 중에는 측정 rpm 스파이크 컷을 TOP_SPIKE_RPM 으로 올린다. 2회 회전 뒤 선 위에서 기다린다.
+ * 실패 코드는 식별 시험과 같은 회 × 10 + 순서 */
+#define TOP_PASSES     2
+#define TOP_CMD_RPM    4095
+#define TOP_SPIKE_RPM  6000
+
+typedef struct {
+    int16_t top_rpm[2];      /* 포화 뒤 0.5 s 평균 rpm. 좌, 우. sat = 0 이면 감속 직전 0.3 s 평균 */
+    int16_t peak_rpm[2];     /* 그 회 원시 rpm 최대 (튄 값 제외) */
+    int16_t tq[2];           /* 포화 뒤 평균 토크 지령 */
+    int16_t sat;             /* 1 = 포화까지 감, 0 = 직선이 모자라 가속 중에 감속 */
+    int16_t sat_why;         /* 1 토크 상한, 2 지령 대비 지연, 3 지령 상한 TOP_CMD_RPM 에 닿음 */
+    float   reach_mm;        /* 선에서 포화까지 거리. sat = 0 이면 0 */
+    float   acc_end_rpm_s;   /* 포화(또는 감속) 직전 0.3 s 실제 가속도 */
+    float   top_mpm;         /* top_rpm 좌우 평균을 m/min */
+    float   run_m;           /* 선에서 감속 시작까지 */
+    float   dec_lag_mpm;     /* 감속 중 실제 - 지령 최대 */
+} top_pass_t;
+
+typedef struct {
+    int16_t state;           /* 1 진행, 2 끝, 3 실패 */
+    int16_t fail;
+    int16_t pass, phase;
+    int16_t cfg_acc, cfg_dcc;
+    float   track_mm;
+    int16_t max_rpm[2];      /* sat = 1 인 회의 top_rpm 최대. 없으면 peak 최대 */
+    float   max_mpm;
+    top_pass_t p[TOP_PASSES];
+} top_result_t;
+
+extern top_result_t agv_top;
+
+void ident_start_top(void);  /* 이후 ident_run, ident_pass, ident_phase, ident_abort, ident_want_h 를 같이 쓴다 */
+int  ident_top_mode(void);   /* 1 = 지금 돌고 있는(또는 마지막) 시험이 최고 속도 시험 */
 #endif

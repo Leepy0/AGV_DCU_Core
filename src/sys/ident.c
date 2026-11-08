@@ -6,7 +6,9 @@
  *  홀수 회(1, 3, 5): 1 → 8. 서지 않고 감속하며 선을 찾는다. 선 100 mm 앞에서 최저 속도가 되게 감속을 건다.
  * 정속·옆 계단 창은 남은 거리로 정한다.
  * 옆 계단은 조향 지령(p_test)을 4칸 옮겨 폐루프 응답을 본다. 속도 계단은 램프 없이 지령을 바꾼다.
- * 실패 코드 = 회 × 10 + 순서. 08 은 0회에 선을 못 찾았거나 L < 2 m (track_mm 가 0 이 아니면 후자) */
+ * 실패 코드 = 회 × 10 + 순서. 08 은 0회에 선을 못 찾았거나 L < 2 m (track_mm 가 0 이 아니면 후자)
+ * 최고 속도 시험(TOP)은 같은 0회·선 찾기·회전을 쓰고 1·2회만 다르다: 1 가속, 3 최고 속도 정속, 8, 9.
+ * 결과는 agv_top 에 쌓는다 */
 #include <math.h>
 #include <string.h>
 #include "agv/ident.h"
@@ -40,10 +42,31 @@
 #define DEC_MARGIN_MM    100.0f   /* 감속 회: 최저 속도가 된 뒤 선까지 남길 거리 */
 #define DEC_LAG_TICKS    15       /* 감속 회: 실제 속도가 지령을 늦게 따라가는 몫 */
 #define PLAN_SLACK       0.95f    /* 창 계획 여유. 창이 끝나기 전에 budget 에 닿지 않게 */
+#define TOP_RING         30       /* 최고 속도 시험: 0.3 s 원시 rpm 고리 */
+#define TOP_AVG          10       /* 가속도는 고리 앞뒤 10 틱 평균 차 / 0.2 s */
+#define TOP_HOLD_TICKS   50
+#define TOP_SAT_TICKS    5
+#define TOP_TQ_SAT       ((int16_t)(MOTOR_TORQUE_LIMIT * 0.97f))
+#define TOP_LAG_SAT      200      /* 지령 - 실제 rpm 이 이보다 크면 지연 포화 */
+#define TOP_LAG_PULL     300      /* 이보다 크면 지령을 실제 속도로 끌어내린다 */
+#define TOP_FLAT_RPM_S   100.0f
+#define TOP_DEC_EVERY    4        /* 감속 거리는 4 틱마다 4 틱 뒤 지령 상한으로 미리 잰다. CPU 를 아낀다 */
 
 enum { PH_RAMP = 1, PH_SETTLE, PH_HOLD, PH_SPD_UP, PH_SPD_DOWN, PH_LAT, PH_STOP, PH_SEEK, PH_TURN };
 
 ident_result_t agv_ident;
+top_result_t   agv_top;
+
+/* 지금 시험의 진행 칸. 식별 시험이면 agv_ident, 최고 속도 시험이면 agv_top */
+static struct { int16_t *state, *fail, *pass, *phase; float *track; } s_r = {
+    &agv_ident.state, &agv_ident.fail, &agv_ident.pass, &agv_ident.phase, &agv_ident.track_mm
+};
+static int16_t s_top;
+
+static struct {
+    int16_t ri, rn, last[2], n_tq, n_lag;
+    float   dec;
+} s_tp;
 
 typedef struct {
     float   y0, step, peak, end_sum;
@@ -56,11 +79,11 @@ static struct {
     uint32_t start, begin;
     float    budget;
     step_t   lat, spd[2];
-    float    y[WIN_TICKS];
+    union { float y[WIN_TICKS]; int16_t ring[2][TOP_RING]; } u;   /* ring: 최고 속도 시험 0.3 s 원시 rpm */
     float    steer_ss, rpm_s[2], rpm_ss[2], tq_s[2];
 } s_id;
 
-#define PASS ((uint16_t)agv_ident.pass)
+#define PASS ((uint16_t)*s_r.pass)
 
 static uint32_t travel(void) { return run_pulses(D.backward ? 1u : 0u); }
 static float mm_since(uint32_t from) { return (float)(travel() - from) / P.one_length_pulse; }
@@ -124,7 +147,7 @@ static int16_t pass_rpm(void)
 
 static void enter(uint16_t phase)
 {
-    agv_ident.phase = (int16_t)phase;
+    *s_r.phase = (int16_t)phase;
     s_id.t = 0;
 }
 
@@ -134,17 +157,11 @@ static void seek_begin(void)
     enter(PH_SEEK);
 }
 
-void ident_start(void)
+static void start_common(void)
 {
     uint16_t i;
 
-    memset(&agv_ident, 0, sizeof(agv_ident));
-    agv_ident.cfg_high = param_get(P_SPEED_HIGH);
-    agv_ident.cfg_kp = param_get(P_STEER_KP);
-    agv_ident.cfg_ki = param_get(P_STEER_KI);
-    agv_ident.cfg_opt = param_get(P_OPT_FLAGS);
-    agv_ident.cfg_ff = param_get(P_SPEED_FF);
-    agv_ident.state = 1;
+    *s_r.state = 1;
     s_id.restart = 0;
     s_id.legs = 0;
     s_id.retry = 0;
@@ -155,21 +172,55 @@ void ident_start(void)
     seek_begin();
 }
 
+void ident_start(void)
+{
+    s_top = 0;
+    s_r.state = &agv_ident.state;
+    s_r.fail = &agv_ident.fail;
+    s_r.pass = &agv_ident.pass;
+    s_r.phase = &agv_ident.phase;
+    s_r.track = &agv_ident.track_mm;
+    memset(&agv_ident, 0, sizeof(agv_ident));
+    agv_ident.cfg_high = param_get(P_SPEED_HIGH);
+    agv_ident.cfg_kp = param_get(P_STEER_KP);
+    agv_ident.cfg_ki = param_get(P_STEER_KI);
+    agv_ident.cfg_opt = param_get(P_OPT_FLAGS);
+    agv_ident.cfg_ff = param_get(P_SPEED_FF);
+    start_common();
+}
+
+void ident_start_top(void)
+{
+    s_top = 1;
+    s_r.state = &agv_top.state;
+    s_r.fail = &agv_top.fail;
+    s_r.pass = &agv_top.pass;
+    s_r.phase = &agv_top.phase;
+    s_r.track = &agv_top.track_mm;
+    memset(&agv_top, 0, sizeof(agv_top));
+    agv_top.cfg_acc = P.acc;
+    agv_top.cfg_dcc = P.dcc;
+    start_common();
+}
+
+int ident_top_mode(void) { return s_top; }
+
 void ident_abort(void)
 {
     D.p_test = 0;
-    if (agv_ident.state == 1) {
-        agv_ident.fail = (int16_t)(agv_ident.pass * 10 + agv_ident.phase);
-        agv_ident.state = 3;
+    motor_spike_set(0);
+    if (*s_r.state == 1) {
+        *s_r.fail = (int16_t)(*s_r.pass * 10 + *s_r.phase);
+        *s_r.state = 3;
     }
 }
 
-uint16_t ident_pass(void)  { return (uint16_t)agv_ident.pass; }
-uint16_t ident_phase(void) { return (uint16_t)agv_ident.phase; }
+uint16_t ident_pass(void)  { return (uint16_t)*s_r.pass; }
+uint16_t ident_phase(void) { return (uint16_t)*s_r.phase; }
 
 int ident_want_h(void)
 {
-    return (agv_ident.state == 1) && (agv_ident.phase == PH_SEEK) && D.flag_run && !D.flag_stopping;
+    return (*s_r.state == 1) && (*s_r.phase == PH_SEEK) && D.flag_run && !D.flag_stopping;
 }
 
 static void hold_clear(void)
@@ -182,7 +233,7 @@ static void hold_clear(void)
 static void hold_sample(void)
 {
     uint16_t i;
-    s_id.y[s_id.t] = lateral();
+    s_id.u.y[s_id.t] = lateral();
     s_id.steer_ss += D.p_pi_out * D.p_pi_out;
     for (i = 0; i < 2u; i++) {
         float r = (float)D.rpm[i];
@@ -206,19 +257,19 @@ static void hold_finish(ident_level_t *lv)
     float sum = 0.0f, ss = 0.0f, lo, hi, mean, rms, hys;
     int16_t i, side = 0, cross = 0, first = -1, last = -1;
 
-    lo = hi = s_id.y[0];
+    lo = hi = s_id.u.y[0];
     for (i = 0; i < len; i++) {
-        float y = s_id.y[i];
+        float y = s_id.u.y[i];
         sum += y;
         if (y < lo) { lo = y; }
         if (y > hi) { hi = y; }
     }
     mean = sum / n;
-    for (i = 0; i < len; i++) { ss += (s_id.y[i] - mean) * (s_id.y[i] - mean); }
+    for (i = 0; i < len; i++) { ss += (s_id.u.y[i] - mean) * (s_id.u.y[i] - mean); }
     rms = sqrtf(ss / n);
     hys = (rms * 0.5f > 0.3f) ? rms * 0.5f : 0.3f;
     for (i = 0; i < len; i++) {
-        float d = s_id.y[i] - mean;
+        float d = s_id.u.y[i] - mean;
         int16_t now = (d > hys) ? 1 : ((d < -hys) ? -1 : side);
         if ((side != 0) && (now != side)) {
             cross++;
@@ -374,14 +425,169 @@ static int slow_down(void)
     return 0;
 }
 
+/* ---- 최고 속도 시험 1·2회 ---- */
+
+/* 회전 중심이 선 위에서 출발한다. 감속 거리를 뺀 남은 거리가 0 이 되면 감속한다 */
+static void top_begin(void)
+{
+    agv_top.pass++;
+    memset(&s_tp, 0, sizeof(s_tp));
+    s_id.budget = agv_top.track_mm - P.guide_dist_mm - DEC_MARGIN_MM;
+    motor_spike_set(TOP_SPIKE_RPM);
+    D.p_test = 0;
+    enter(PH_RAMP);
+}
+
+static int16_t ring_at(uint16_t i, int16_t k)    /* k = 0 가장 오래된 값 */
+{
+    int16_t j = (int16_t)(s_tp.ri + k);
+    return s_id.u.ring[i][(j >= TOP_RING) ? j - TOP_RING : j];
+}
+
+/* 고리 앞뒤 10 틱 평균 차로 본 실제 가속도 rpm/s. 고리가 덜 찼으면 0 */
+static float ring_acc(void)
+{
+    int32_t d = 0;
+    int16_t k;
+
+    if (s_tp.rn < TOP_RING) { return 0.0f; }
+    for (k = 0; k < TOP_AVG; k++) {
+        d += (int32_t)ring_at(0, (int16_t)(TOP_RING - TOP_AVG + k)) + ring_at(1, (int16_t)(TOP_RING - TOP_AVG + k))
+           - ring_at(0, k) - ring_at(1, k);
+    }
+    return (float)d * (1000.0f / (2.0f * (float)TOP_AVG * (float)(TOP_RING - TOP_AVG) * TICK_MS));   /* 좌우 합 → 평균, 20 틱 → s */
+}
+
+static void top_hold_end(top_pass_t *tp)
+{
+    uint16_t i;
+    float n = (float)s_id.t;
+
+    if (s_id.t <= 0) { return; }     /* 정속 창 첫 틱에 감속. 포화 때 값을 남긴다 */
+    for (i = 0; i < 2u; i++) {
+        tp->top_rpm[i] = (int16_t)(s_id.rpm_s[i] / n);
+        tp->tq[i] = (int16_t)(s_id.tq_s[i] / n);
+    }
+}
+
+/* 감속해 최저 속도로 선을 찾는다. 지령이 실제보다 앞서 있으면 실제 속도에서 내린다 */
+static int top_decel(top_pass_t *tp, int16_t act)
+{
+    uint16_t i, k;
+
+    if (*s_r.phase == PH_HOLD) { top_hold_end(tp); }
+    else {                          /* 포화 전에 직선이 끝났다 */
+        tp->sat = 0;
+        tp->acc_end_rpm_s = ring_acc();
+        for (i = 0; i < 2u; i++) {
+            int32_t sum = 0;
+            for (k = 0; k < (uint16_t)s_tp.rn; k++) { sum += s_id.u.ring[i][k]; }
+            tp->top_rpm[i] = (s_tp.rn > 0) ? (int16_t)(sum / s_tp.rn) : 0;
+        }
+    }
+    tp->top_mpm = ((float)tp->top_rpm[0] + (float)tp->top_rpm[1]) * 0.5f / P.one_meter_rpm;
+    if (D.vin_out > act) { D.vin_out = act; }
+    D.scv_accel = 0;                /* decel_mm 처럼 가속도 0 에서 내린다 */
+    tp->run_m = mm_since(s_id.begin) / 1000.0f;
+    set_speed(P.min_speed, 1);
+    tune_cross_clear();
+    enter(PH_SEEK);
+    return 0;
+}
+
+static int top_run(void)
+{
+    top_pass_t *tp = &agv_top.p[PASS - 1u];
+    int16_t spike = motor_spike(), act, lag, why;
+    uint16_t i;
+    float acc;
+
+    for (i = 0; i < 2u; i++) {      /* 튄 값은 앞 값으로 둔다 */
+        int16_t r = motor_raw_rpm(i);
+        if (r <= spike) { s_tp.last[i] = r; }
+        if (s_tp.last[i] > tp->peak_rpm[i]) { tp->peak_rpm[i] = s_tp.last[i]; }
+        s_id.u.ring[i][s_tp.ri] = s_tp.last[i];
+    }
+    s_tp.ri = (int16_t)((s_tp.ri + 1 >= TOP_RING) ? 0 : s_tp.ri + 1);
+    if (s_tp.rn < TOP_RING) { s_tp.rn++; }
+    act = (int16_t)((s_tp.last[0] + s_tp.last[1]) / 2);
+
+    if ((s_id.t & (TOP_DEC_EVERY - 1)) == 0) {
+        s_tp.dec = decel_mm((int16_t)(D.vin_out + ((*s_r.phase == PH_RAMP) ? TOP_DEC_EVERY * P.acc : 0)));
+    }
+    if (mm_since(s_id.begin) + s_tp.dec >= s_id.budget) { return top_decel(tp, act); }
+
+    if (*s_r.phase == PH_HOLD) {
+        for (i = 0; i < 2u; i++) {
+            s_id.rpm_s[i] += (float)s_tp.last[i];
+            s_id.tq_s[i] += (float)D.tq_cmd[i];
+        }
+        if (++s_id.t >= TOP_HOLD_TICKS) { return top_decel(tp, act); }
+        return 0;
+    }
+
+    /* PH_RAMP. 지령이 너무 앞서면 실제 속도로 끌어내려 조향 몫을 남긴다 */
+    set_speed(TOP_CMD_RPM, 1);
+    lag = (int16_t)(D.vin_out - act);
+    if (((D.step == DRIVE_CHANGE_SPEED) || (D.step == DRIVE_CRUISE)) && (lag > TOP_LAG_PULL)) {
+        D.vin_out = act;
+        D.scv_accel = 0;
+        D.step = DRIVE_CHANGE_SPEED;
+        lag = 0;
+    }
+    s_tp.n_tq = (int16_t)(((D.tq_cmd[0] >= TOP_TQ_SAT) || (D.tq_cmd[1] >= TOP_TQ_SAT)) ? s_tp.n_tq + 1 : 0);
+    s_tp.n_lag = (int16_t)((lag > TOP_LAG_SAT) ? s_tp.n_lag + 1 : 0);
+    if (s_tp.n_tq > TOP_SAT_TICKS)  { s_tp.n_tq = TOP_SAT_TICKS; }
+    if (s_tp.n_lag > TOP_SAT_TICKS) { s_tp.n_lag = TOP_SAT_TICKS; }
+    why = (s_tp.n_tq >= TOP_SAT_TICKS) ? 1 : ((s_tp.n_lag >= TOP_SAT_TICKS) ? 2 : 0);
+    acc = ring_acc();
+    if ((D.vin_out >= TOP_CMD_RPM) && ((int32_t)act * 100L >= (int32_t)TOP_CMD_RPM * 97L)) { why = 3; }
+    else if ((why == 0) || (s_tp.rn < TOP_RING) || (acc >= TOP_FLAT_RPM_S)) {
+        if (++s_id.t > RAMP_LIMIT) { return fail_now(); }
+        return 0;
+    }
+    /* 최고 속도. 지령을 실제 속도에 고정하고 정속으로 잰다 */
+    tp->sat = 1;
+    tp->sat_why = why;
+    tp->reach_mm = mm_since(s_id.begin);
+    tp->acc_end_rpm_s = acc;
+    for (i = 0; i < 2u; i++) { tp->top_rpm[i] = s_tp.last[i]; }
+    D.vin_out = act;
+    D.scv_accel = 0;
+    set_speed(act, 0);
+    hold_clear();
+    enter(PH_HOLD);
+    return 0;
+}
+
+/* sat = 1 인 회의 top_rpm 최대. 없으면 peak 최대 */
+static void top_finish(void)
+{
+    int16_t any = 0;
+    uint16_t i, k;
+
+    motor_spike_set(0);
+    for (k = 0; k < TOP_PASSES; k++) { any |= agv_top.p[k].sat; }
+    for (i = 0; i < 2u; i++) {
+        int16_t m = 0;
+        for (k = 0; k < TOP_PASSES; k++) {
+            const top_pass_t *tp = &agv_top.p[k];
+            int16_t v = any ? (tp->sat ? tp->top_rpm[i] : 0) : tp->peak_rpm[i];
+            if (v > m) { m = v; }
+        }
+        agv_top.max_rpm[i] = m;
+    }
+    agv_top.max_mpm = ((float)agv_top.max_rpm[0] + (float)agv_top.max_rpm[1]) * 0.5f / P.one_meter_rpm;
+}
+
 /* 선을 봤다. 회전 중심이 선 위에 오도록 GD 만큼 더 가서 돈다 */
 static int cross_seen(void)
 {
     float leg = (float)(tune_line_at(0) - s_id.begin) / P.one_length_pulse + P.guide_dist_mm;
 
-    agv_ident.total_m += leg / 1000.0f;
+    if (!s_top) { agv_ident.total_m += leg / 1000.0f; }
     if ((PASS == 0u) && (s_id.legs == 1)) {
-        agv_ident.track_mm = leg;
+        *s_r.track = leg;
         if (leg < TRACK_MIN_MM) { return fail_now(); }
     }
     s_id.legs++;
@@ -393,14 +599,15 @@ static int cross_seen(void)
     return 0;
 }
 
-/* 회전이 끝났다. 6회 뒤에는 선 위에서 기다린다 */
+/* 회전이 끝났다. 6회(최고 속도 시험은 2회) 뒤에는 선 위에서 기다린다 */
 static int turn_done(void)
 {
     D.tape_slow = 0;
     if ((D.system_err != 0) || (D.stop_err != 0)) { return fail_now(); }
-    if (PASS >= IDENT_PASSES) {
-        fit_ff();
-        agv_ident.state = 2;
+    if (PASS >= (s_top ? TOP_PASSES : IDENT_PASSES)) {
+        if (s_top) { top_finish(); }
+        else       { fit_ff(); }
+        *s_r.state = 2;
         return 1;
     }
     run_restart_now();
@@ -412,11 +619,11 @@ int ident_run(void)
 {
     ident_level_t *lv = &agv_ident.lv[(PASS > 0u) ? PASS - 1u : 0u];
     int stopped = !D.flag_run && !D.flag_ready && !D.flag_stopping;
-    uint16_t ph = (uint16_t)agv_ident.phase;
+    uint16_t ph = (uint16_t)*s_r.phase;
     uint16_t i;
 
-    if (agv_ident.state != 1) { return (agv_ident.state == 2) ? 1 : -1; }
-    if (PASS > 0u) {
+    if (*s_r.state != 1) { return (*s_r.state == 2) ? 1 : -1; }
+    if ((PASS > 0u) && !s_top) {
         if (D.risk_stop && !s_id.risk_prev) { lv->risk++; }
     }
     s_id.risk_prev = D.risk_stop;
@@ -428,6 +635,7 @@ int ident_run(void)
         if (ph == PH_STOP) { seek_begin(); return 0; }
         s_id.begin = travel();
         if ((PASS == 0u) && (s_id.legs == 1)) { seek_begin(); }   /* L 을 잰다 */
+        else if (s_top)                       { top_begin(); }
         else                                  { pass_begin(); }
         return 0;
     }
@@ -453,15 +661,17 @@ int ident_run(void)
     if (ph == PH_SEEK) {
         if ((PASS > 0u) && (D.step == DRIVE_CHANGE_SPEED)) {   /* 감속 중 실제 - 지령 */
             float lag = ((float)(D.rpm_avg[0] + D.rpm_avg[1]) * 0.5f - (float)D.vin_out) / P.one_meter_rpm;
-            if (lag > lv->dec_lag_mpm) { lv->dec_lag_mpm = lag; }
+            float *dl = s_top ? &agv_top.p[PASS - 1u].dec_lag_mpm : &lv->dec_lag_mpm;
+            if (lag > *dl) { *dl = lag; }
         }
         set_speed(P.min_speed, 1);
         if (tune_lines() >= 1u) { return cross_seen(); }
-        if (mm_since(s_id.begin) > ((PASS == 0u) ? FIND_LIMIT_MM : agv_ident.track_mm + SEEK_OVER_MM)) {
+        if (mm_since(s_id.begin) > ((PASS == 0u) ? FIND_LIMIT_MM : *s_r.track + SEEK_OVER_MM)) {
             return fail_now();
         }
         return 0;
     }
+    if (s_top) { return top_run(); }
     if (mm_since(s_id.begin) > s_id.budget) {
         if (ph == PH_RAMP) { return slow_down(); }
         lv->cut |= 1;

@@ -31,6 +31,8 @@ void    motor_run(void);                        /* Motor_Run_Process. 오류 판
 void    motor_dac_force(int16_t left, int16_t right);
 void    motor_dac_release(void);
 int16_t motor_raw_rpm(uint16_t wheel);          /* 스파이크 컷 전 rpm. 32767 에서 자른다 */
+void    motor_spike_set(int16_t rpm);           /* 측정 rpm 스파이크 컷. 0 = 기본 MOTOR_RPM_SPIKE */
+int16_t motor_spike(void);
 
 /* DA_SCV_Speed_Core. 상태를 인자로 받는 순수 함수 */
 int16_t motor_scv_core(int16_t vin, int16_t *vout, int16_t acc, int16_t dcc, int16_t llow,

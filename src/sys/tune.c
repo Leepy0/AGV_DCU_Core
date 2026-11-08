@@ -7,9 +7,11 @@
  * 직진 구간에서 'a' 와 'h' 를 번갈아 받아 가이드 부호·배율, 조향 편차, LED 점등 수, 좌우 펄스 비도 잰다.
  * 결과 키는 파라미터 편집과 같다: UP·DOWN 쪽 선택, SET 수정 시작, SHIFT 자리, UP·DOWN 값,
  * SET 확정·저장, RESET 취소. 수정 중이 아니면 RESET 은 다시 시험.
- * 대기(TUNE) 중 SHIFT 를 누를 때마다 식별 시험(IDEN, ident.c), 최대 rpm 시험(RPM, rpmtest.c), 튜닝 순으로 바뀐다.
+ * 대기(TUNE) 중 SHIFT 를 누를 때마다 식별 시험(IDEN, ident.c), 최대 rpm 시험(RPM, rpmtest.c),
+ * 바닥 최고 속도 시험(TOP, ident.c), 튜닝 순으로 바뀐다.
  * 최대 rpm 시험은 바퀴를 띄우고 한다. START 를 받으면 주행을 시작하지 않고 DAC 를 직접 낸다.
- * 시험 중 아무 키나 누르면 끊는다. 끝나면 UP·DOWN 으로 RPOK, 좌 rpm, 우 rpm 을 본다 */
+ * 시험 중 아무 키나 누르면 끊는다. 끝나면 UP·DOWN 으로 RPOK, 좌 rpm, 우 rpm 을 본다.
+ * 최고 속도 시험은 식별 시험 주행로에서 한다. 끝나면 UP·DOWN 으로 TPOK, 좌 rpm, 우 rpm 을 본다 */
 #include <math.h>
 #include "agv/tune.h"
 #include "agv/drive.h"
@@ -82,6 +84,7 @@ int      tune_active(void)     { return s_tune.state != TUNE_OFF; }
 int      tune_failed(void)     { return s_tune.failed; }
 int      tune_ident_mode(void) { return s_tune.ident == TUNE_MODE_IDENT; }
 int      tune_rpm_mode(void)   { return s_tune.ident == TUNE_MODE_RPM; }
+int      tune_top_mode(void)   { return s_tune.ident == TUNE_MODE_TOP; }
 int      tune_editing(void)    { return s_tune.editing; }
 int16_t  tune_edit_place(void) { return s_tune.place; }
 uint16_t tune_state(void)      { return s_tune.state; }
@@ -95,7 +98,7 @@ static uint32_t travel(void) { return run_pulses(D.backward ? 1u : 0u); }
 
 static int measuring(void)
 {
-    if (s_tune.state == TUNE_IDENT) { return ident_want_h(); }   /* 식별 시험은 선 찾기에서만 */
+    if ((s_tune.state == TUNE_IDENT) || (s_tune.state == TUNE_TOP)) { return ident_want_h(); }   /* 식별 시험은 선 찾기에서만 */
     return ((s_tune.state == TUNE_GO_1) || (s_tune.state == TUNE_GO_2)) && D.flag_run && !D.flag_stopping;
 }
 
@@ -240,6 +243,12 @@ void tune_run(void)
             ident_start();
             s_tune.state = TUNE_IDENT;
         }
+        else if (D.flag_run && (s_tune.ident == TUNE_MODE_TOP)) {
+            s_tune.failed = 0;
+            s_tune.page = 0;
+            ident_start_top();
+            s_tune.state = TUNE_TOP;
+        }
         else if (D.flag_run && (s_tune.ident == TUNE_MODE_TUNE)) {
             clear_measure();
             s_tune.failed = 0;
@@ -266,6 +275,9 @@ void tune_run(void)
         break;
     case TUNE_IDENT:
         if (ident_run() != 0) { s_tune.state = TUNE_IDENT_DONE; }
+        break;
+    case TUNE_TOP:
+        if (ident_run() != 0) { s_tune.state = TUNE_TOP_DONE; }
         break;
     case TUNE_RPM:
         D.flag_ready = D.flag_run = 0;      /* 시험 중 START 는 무시한다 */
@@ -455,7 +467,7 @@ int tune_key(uint16_t key)
         s_tune.failed = 0;
         return 1;
     }
-    if (s_tune.state == TUNE_RPM_DONE) {
+    if ((s_tune.state == TUNE_RPM_DONE) || (s_tune.state == TUNE_TOP_DONE)) {
         switch (key) {
         case KEY_UP:    s_tune.page = (uint16_t)((s_tune.page + 1u) % TUNE_RPM_PAGES); return 1;
         case KEY_DOWN:  s_tune.page = (uint16_t)((s_tune.page + TUNE_RPM_PAGES - 1u) % TUNE_RPM_PAGES); return 1;

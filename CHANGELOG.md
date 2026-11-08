@@ -1,6 +1,10 @@
 # 변경 이력
 
 ## 미릴리스 (2026-11-08)
+- 바닥 최고 속도 시험: 튜닝 대기 중 SHIFT 로 고른다(TUNE → IDEN → RPM → TOP). 식별 시험 주행로에서 0회로 L 을 잰 뒤
+  1·2회(방향 번갈아)에 지령을 `TOP_CMD_RPM` 까지 P.acc 램프로 올린다. 지령이 실제보다 많이 앞서면 실제 속도로 끌어내려 조향 몫을 남긴다.
+  토크 상한·지령 지연 포화 중 0.3 s 가속도가 100 rpm/s 아래면 0.5 s 정속으로 최고 rpm 을 재고, 남은 거리로 감속해 선에서 돈다.
+  결과 `agv_top`. FND `TPOK`, UP·DOWN 으로 좌·우 최고 rpm. 시험 중 스파이크 컷을 `TOP_SPIKE_RPM` 으로 올린다(`motor_spike_set`).
 - 최대 rpm 시험: 튜닝 대기 중 SHIFT 로 고른다(TUNE → IDEN → RPM). 바퀴를 띄우고 START 하면 주행하지 않고
   두 바퀴에 DAC 1000·2000·3000·4000·4095 를 3 s 씩 고정해 낸다. `MOTOR_RPM_SPIKE` 컷 전 원시 rpm 으로 단계별 rpm,
   리플, 90% 오름 시간을 `agv_rpmt` 에 남긴다. STOP·E-STOP·오류·패널 키는 바로 DAC 0. FND `RPOK`, UP·DOWN 으로 좌·우 최대 rpm.

@@ -796,6 +796,7 @@ static void show_tune(void)
         if (tune_failed())          { show(letter('F'), letter('A'), letter('I'), letter('L'), DIGIT_NONE); }
         else if (tune_ident_mode()) { show(letter('I'), letter('D'), letter('E'), letter('N'), DIGIT_NONE); }
         else if (tune_rpm_mode())   { show(letter('R'), letter('P'), letter('M'), DIGIT_NONE, DIGIT_NONE); }
+        else if (tune_top_mode())   { show(letter('T'), letter('O'), letter('P'), DIGIT_NONE, DIGIT_NONE); }
         else                        { show(letter('T'), letter('U'), letter('N'), letter('E'), DIGIT_NONE); }
         break;
     case TUNE_IDENT:    /* 회, 순서 */
@@ -804,6 +805,19 @@ static void show_tune(void)
     case TUNE_IDENT_DONE:
         if (agv_ident.state == 2) { show(letter('I'), letter('D'), letter('O'), letter('K'), DIGIT_NONE); }
         else { show(letter('I'), letter('D'), letter('F'), (uint16_t)(agv_ident.fail / 10), (uint16_t)(agv_ident.fail % 10)); }
+        break;
+    case TUNE_TOP:      /* 회, 순서 */
+        show(letter('T'), letter('P'), DIGIT_NONE, ident_pass(), ident_phase());
+        break;
+    case TUNE_TOP_DONE:
+        if (tune_page() == 0u) {
+            if (agv_top.state == 2) { show(letter('T'), letter('P'), letter('O'), letter('K'), DIGIT_NONE); }
+            else { show(letter('T'), letter('P'), letter('F'), (uint16_t)(agv_top.fail / 10), (uint16_t)(agv_top.fail % 10)); }
+        }
+        else {          /* L·R + 최고 rpm 4자리 */
+            int16_t v = agv_top.max_rpm[tune_page() - 1u];
+            show(letter((tune_page() == 1u) ? 'L' : 'R'), digit_of(v, 1000), digit_of(v, 100), digit_of(v, 10), digit_of(v, 1));
+        }
         break;
     case TUNE_RPM:      /* 단계 */
         show(letter('R'), letter('P'), DIGIT_NONE, DIGIT_NONE, rpmt_level());

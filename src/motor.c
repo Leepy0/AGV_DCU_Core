@@ -43,6 +43,7 @@ static struct {
     int16_t  stall_cnt[2];     /* 지령이 바닥 속도 이상인 연속 틱 */
     int16_t  raw[2];           /* 스파이크 컷 전 rpm */
     int16_t  force[2], forcing;
+    int16_t  spike;            /* 스파이크 컷. 0 = MOTOR_RPM_SPIKE */
 } s_motor;
 
 void motor_reset(void)
@@ -60,6 +61,7 @@ void motor_reset(void)
     s_motor.stall_cnt[0] = s_motor.stall_cnt[1] = 0;
     s_motor.raw[0] = s_motor.raw[1] = 0;
     s_motor.forcing = 0;
+    s_motor.spike = 0;
 }
 
 static int16_t dac_clamp(int16_t v) { return (v < 0) ? 0 : ((v > MOTOR_DAC_MAX) ? MOTOR_DAC_MAX : v); }
@@ -73,6 +75,8 @@ void motor_dac_force(int16_t left, int16_t right)
 
 void    motor_dac_release(void)             { s_motor.forcing = 0; }
 int16_t motor_raw_rpm(uint16_t wheel)       { return s_motor.raw[wheel]; }
+void    motor_spike_set(int16_t rpm)        { s_motor.spike = (rpm > 0) ? rpm : 0; }
+int16_t motor_spike(void)                   { return (s_motor.spike > 0) ? s_motor.spike : MOTOR_RPM_SPIKE; }
 
 void    motor_encoder_pulse(uint16_t wheel) { s_motor.pulse_seq[wheel]++; }
 int16_t motor_idle_ticks(uint16_t wheel)    { return s_motor.idle[wheel]; }
@@ -104,7 +108,7 @@ void motor_feedback_update(void)
         }
 
         s_motor.raw[i] = (int16_t)((cur > 32767L) ? 32767L : cur);
-        if (cur > MOTOR_RPM_SPIKE) { D.rpm[i] = s_motor.pre_rpm[i]; }
+        if (cur > motor_spike()) { D.rpm[i] = s_motor.pre_rpm[i]; }
         else                       { s_motor.pre_rpm[i] = D.rpm[i] = (int16_t)cur; }
 
         D.rpm_avg[i] = (int16_t)((D.rpm[i] + s_motor.hist[i][0] + s_motor.hist[i][1] + s_motor.hist[i][2]
