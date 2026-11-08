@@ -1,6 +1,15 @@
 # 변경 이력
 
 ## 미릴리스 (2026-11-08)
+- 통합 시험: 튜닝 대기 중 SHIFT 로 고른다(TUNE → IDEN → RPM → TOP → ALL). START 한 번으로 식별 시험 0~6회,
+  OPT 스윕(목록의 OPT 마다 왕복 2회, 식별 3·4회 속도, SL 정지·속도 계단 없음), 최고 속도 시험 1·2회(단계 1 의 L)를 잇는다.
+  스윕 OPT 는 `param_set_ram` 으로 RAM 에만 넣고 회마다 조향 상태를 지운다. 끝·실패·끊김 모두 OPT 를 시험 전 값으로 돌린다.
+  결과 `agv_all`(스윕 칸 `sw[]`)·`agv_ident`·`agv_top`. 실패 코드 = 단계 × 1000 + 회 × 10 + 순서. FND `A`+단계·회·순서, `ALOK`/`F`+코드.
+  스윕 목록은 `ident_sweep_set` 으로 바꾼다.
+- `param_set_ram`: `param_set` 과 같고 EEPROM 에 쓰지 않는다.
+- 시험 결과(`agv_ident`·`agv_top`·`agv_all`·`agv_rpmt`)를 codestart 가 지우지 않는 RAMH0 구역 `test_keep` 에 둔다.
+  CCS 연결 때 워치독 리셋이 나도 남는다. 부팅 때 `ident_keep_boot` 가 표시 워드로 전원 투입을 가려 지우고, 진행 중이던 결과는 state 3, fail -1.
+- OTA 링커 파일 RAMH0 시작을 0x3FA000 으로 고쳤다(0x3F8000 은 L0·L1 거울).
 - 바닥 최고 속도 시험: 튜닝 대기 중 SHIFT 로 고른다(TUNE → IDEN → RPM → TOP). 식별 시험 주행로에서 0회로 L 을 잰 뒤
   1·2회(방향 번갈아)에 지령을 `TOP_CMD_RPM` 까지 P.acc 램프로 올린다. 지령이 실제보다 많이 앞서면 실제 속도로 끌어내려 조향 몫을 남긴다.
   토크 상한·지령 지연 포화 중 0.3 s 가속도가 100 rpm/s 아래면 0.5 s 정속으로 최고 rpm 을 재고, 남은 거리로 감속해 선에서 돈다.

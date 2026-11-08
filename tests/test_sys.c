@@ -15,7 +15,9 @@
 #include "agv/link.h"
 #include "agv/log.h"
 #include "agv/motor.h"
+#include "agv/ident.h"
 #include "agv/param.h"
+#include "agv/rpmtest.h"
 #include "agv/run.h"
 #include "agv/seq_dsl.h"
 #include "agv/site.h"
@@ -749,6 +751,28 @@ static void test_boot_garbage(void)
     printf("  boot garbage ok\n");
 }
 
+/* 시험 결과는 리셋에 남는다. 표시가 틀리면(전원 투입) 지운다. 진행 중이던 결과는 끊김으로 둔다 */
+static void test_keep_results(void)
+{
+    test_keep_mark = 0;
+    agv_ident.state = 2;
+    agv_ident.track_mm = 5000.0f;
+    boot();
+    assert(agv_ident.state == 0 && agv_ident.track_mm == 0.0f && test_keep_mark != 0);
+    agv_ident.state = 2;
+    agv_ident.track_mm = 5000.0f;
+    agv_top.state = 1;
+    agv_all.state = 1;
+    agv_all.fail = 2034;
+    agv_rpmt.state = 1;
+    boot();
+    assert(agv_ident.state == 2 && agv_ident.track_mm == 5000.0f && agv_ident.fail == 0);
+    assert(agv_top.state == 3 && agv_top.fail == -1);
+    assert(agv_all.state == 3 && agv_all.fail == 2034);
+    assert(agv_rpmt.state == 3 && agv_rpmt.fail == -1);
+    printf("  keep results ok\n");
+}
+
 static void test_acs_off(void)
 {
     boot();
@@ -1056,6 +1080,7 @@ int main(void)
     test_tape_turn();
     test_io_test();
     test_acs_off();
+    test_keep_results();
     printf("test_sys ok\n");
     return 0;
 }

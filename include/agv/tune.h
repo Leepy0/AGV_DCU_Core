@@ -5,11 +5,11 @@
 #include "agv/guide.h"
 
 enum { TUNE_OFF = 0, TUNE_WAIT, TUNE_GO_1, TUNE_TURN, TUNE_RESTART, TUNE_GO_2, TUNE_STOPPING, TUNE_DONE,
-       TUNE_IDENT, TUNE_IDENT_DONE, TUNE_RPM, TUNE_RPM_DONE, TUNE_TOP, TUNE_TOP_DONE };
+       TUNE_IDENT, TUNE_IDENT_DONE, TUNE_RPM, TUNE_RPM_DONE, TUNE_TOP, TUNE_TOP_DONE, TUNE_ALL, TUNE_ALL_DONE };
 
-/* 대기 중 SHIFT 로 고르는 시험. TUNE → IDEN → RPM → TOP → TUNE */
-enum { TUNE_MODE_TUNE = 0, TUNE_MODE_IDENT, TUNE_MODE_RPM, TUNE_MODE_TOP, TUNE_MODE_COUNT };
-#define TUNE_RPM_PAGES 3          /* 최대 rpm·최고 속도 결과 쪽: 0 OK/F, 1 좌 rpm, 2 우 rpm */
+/* 대기 중 SHIFT 로 고르는 시험. TUNE → IDEN → RPM → TOP → ALL → TUNE */
+enum { TUNE_MODE_TUNE = 0, TUNE_MODE_IDENT, TUNE_MODE_RPM, TUNE_MODE_TOP, TUNE_MODE_ALL, TUNE_MODE_COUNT };
+#define TUNE_RPM_PAGES 3          /* 최대 rpm·최고 속도·통합 결과 쪽: 0 OK/F, 1 좌 rpm, 2 우 rpm */
 
 /* 결과 쪽. UP·DOWN 으로 넘긴다 */
 enum { TUNE_PAGE_WHEEL_BASE = 0,   /* WW 계산한 휠 간격 (24번). 수정 가능 */
@@ -34,6 +34,7 @@ int      tune_failed(void);       /* 1 = 실패로 TUNE 로 돌아옴 */
 int      tune_ident_mode(void);   /* 1 = START 가 식별 시험을 한다. 대기 중 SHIFT 로 바꾼다 */
 int      tune_rpm_mode(void);     /* 1 = START 가 최대 rpm 시험(바퀴 띄움)을 한다 */
 int      tune_top_mode(void);     /* 1 = START 가 바닥 최고 속도 시험을 한다 */
+int      tune_all_mode(void);     /* 1 = START 가 통합 시험(식별 → OPT 스윕 → 최고 속도)을 한다 */
 int      tune_editing(void);      /* 값을 고치는 중 */
 int16_t  tune_edit_place(void);   /* 1 일, 2 십, 3 백의 자리 */
 uint16_t tune_state(void);

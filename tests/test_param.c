@@ -55,6 +55,13 @@ int main(void)
     assert(param_set(P_SPEED_FF, 120) == 0 && fake_ee[117] == 120 && P.speed_ff == 0.12f);
     assert(param_set(P_ENC_STALL_TICKS, 30) == 0 && fake_ee[118] == 30 && P.stall_ticks == 30);
     assert(param_boot(&fake_store, 2611) == 0 && param_get(P_OPT_FLAGS) == 5 && param_get(P_SPEED_FF) == 120);
+    /* RAM 에만: 값은 바뀌고 EEPROM 은 그대로 */
+    fake_ee_writes = 0;
+    assert(param_set_ram(P_OPT_FLAGS, 32) == -1 && param_set_ram(0, 1) == -1);
+    assert(param_set_ram(P_OPT_FLAGS, 2) == 0 && param_get(P_OPT_FLAGS) == 2 && !param_opt(OPT_STEER_10MS));
+    assert(param_set_ram(P_SPEED_TURN, 12) == 0 && param_get(P_SPEED_TURN) == 12);
+    assert(fake_ee_writes == 0 && fake_ee[116] == 5 && fake_ee[P_SPEED_TURN] == 13);
+    assert(param_boot(&fake_store, 2611) == 0 && param_get(P_OPT_FLAGS) == 5 && param_get(P_SPEED_TURN) == 13);
     assert(param_set(P_OPT_FLAGS, 0) == 0 && param_set(P_SPEED_FF, 0) == 0 && param_set(P_ENC_STALL_TICKS, 0) == 0);
     /* 빈 EEPROM → 한계 위반 → 기본값 1 세트 저장 */
     assert(param_get(P_SPEED_HIGH) == 30 && param_get(P_SPEED_LOW) == 25 && param_get(P_SPEED_TURN) == 13);

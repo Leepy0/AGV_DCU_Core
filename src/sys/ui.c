@@ -797,6 +797,7 @@ static void show_tune(void)
         else if (tune_ident_mode()) { show(letter('I'), letter('D'), letter('E'), letter('N'), DIGIT_NONE); }
         else if (tune_rpm_mode())   { show(letter('R'), letter('P'), letter('M'), DIGIT_NONE, DIGIT_NONE); }
         else if (tune_top_mode())   { show(letter('T'), letter('O'), letter('P'), DIGIT_NONE, DIGIT_NONE); }
+        else if (tune_all_mode())   { show(letter('A'), letter('L'), letter('L'), DIGIT_NONE, DIGIT_NONE); }
         else                        { show(letter('T'), letter('U'), letter('N'), letter('E'), DIGIT_NONE); }
         break;
     case TUNE_IDENT:    /* 회, 순서 */
@@ -809,8 +810,17 @@ static void show_tune(void)
     case TUNE_TOP:      /* 회, 순서 */
         show(letter('T'), letter('P'), DIGIT_NONE, ident_pass(), ident_phase());
         break;
+    case TUNE_ALL:      /* 단계, 회 2자리, 순서 */
+        show(letter('A'), ident_stage(), digit_of((int16_t)ident_pass(), 10), digit_of((int16_t)ident_pass(), 1), ident_phase());
+        break;
     case TUNE_TOP_DONE:
-        if (tune_page() == 0u) {
+    case TUNE_ALL_DONE:
+        if ((tune_page() == 0u) && (tune_state() == TUNE_ALL_DONE)) {   /* F + 단계 + 회 2자리 + 순서 */
+            int16_t f = agv_all.fail;
+            if (agv_all.state == 2) { show(letter('A'), letter('L'), letter('O'), letter('K'), DIGIT_NONE); }
+            else { show(letter('F'), digit_of(f, 1000), digit_of(f, 100), digit_of(f, 10), digit_of(f, 1)); }
+        }
+        else if (tune_page() == 0u) {
             if (agv_top.state == 2) { show(letter('T'), letter('P'), letter('O'), letter('K'), DIGIT_NONE); }
             else { show(letter('T'), letter('P'), letter('F'), (uint16_t)(agv_top.fail / 10), (uint16_t)(agv_top.fail % 10)); }
         }

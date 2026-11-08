@@ -15,7 +15,7 @@ PAGE 1:
    RAMM0       : origin = 0x000000, length = 0x000400
    RAMM1       : origin = 0x000400, length = 0x0003FA     /* 0x7FA~0x7FB 부트 카운터, 0x7FC~0x7FF 부트플래그 */
    RAML1       : origin = 0x009000, length = 0x001000
-   RAMH0       : origin = 0x3F8000, length = 0x002000
+   RAMH0       : origin = 0x3FA000, length = 0x002000     /* 0x3F8000~0x3F9FFF 는 L0·L1 거울 */
 }
 
 SECTIONS
@@ -37,6 +37,7 @@ SECTIONS
    .bss        : > RAMM1,      PAGE = 1
    .const      : > FLASHAPP,   PAGE = 0
    .sysmem     : > RAMH0,      PAGE = 1
+   test_keep   : > RAMH0,      PAGE = 1      /* 시험 결과. codestart 가 지우지 않아 리셋에 남는다 */
 
    /* PIE 벡터 등 기존 DSP280x_Headers_nonBIOS.cmd 의 레지스터 섹션은 그대로 둔다 */
 }

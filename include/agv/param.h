@@ -95,6 +95,7 @@ void     param_limit(uint16_t idx, int16_t *low, int16_t *up);
 int16_t  param_get(uint16_t idx);
 /* 한계 검사 → 값 저장 → 파생값 갱신 → 저장 계층 쓰기. 반환 0 정상, -1 한계 벗어남 */
 int16_t  param_set(uint16_t idx, int16_t value);
+int16_t  param_set_ram(uint16_t idx, int16_t value);   /* param_set 과 같고 EEPROM 에 쓰지 않는다. 시험용 */
 /* 기본값 적용 후 전부 저장. kind 1~3 = 키패드 77·88·99 */
 void     param_default(uint16_t kind);
 /* 기본값 세트별 P_AGV_TYPE. 사이트 값이라 앱이 준다. 0 이 초기값 */

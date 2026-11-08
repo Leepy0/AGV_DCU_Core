@@ -20,6 +20,9 @@
 
 static const int16_t s_dac[RPMT_LEVELS] = { 1000, 2000, 3000, 4000, MOTOR_DAC_MAX };
 
+#ifdef __TMS320C2000__
+#pragma DATA_SECTION(agv_rpmt, "test_keep")   /* 리셋에 남는다. ident_keep_boot 가 부팅 때 본다 */
+#endif
 rpmt_result_t agv_rpmt;
 
 static struct {

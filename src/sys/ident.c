@@ -8,14 +8,18 @@
  * 옆 계단은 조향 지령(p_test)을 4칸 옮겨 폐루프 응답을 본다. 속도 계단은 램프 없이 지령을 바꾼다.
  * 실패 코드 = 회 × 10 + 순서. 08 은 0회에 선을 못 찾았거나 L < 2 m (track_mm 가 0 이 아니면 후자)
  * 최고 속도 시험(TOP)은 같은 0회·선 찾기·회전을 쓰고 1·2회만 다르다: 1 가속, 3 최고 속도 정속, 8, 9.
- * 결과는 agv_top 에 쌓는다 */
+ * 결과는 agv_top 에 쌓는다.
+ * 통합 시험(ALL)은 단계마다 s_r 을 그 단계 결과로 돌린다. 단계 2 는 agv_all 칸을 쓴다.
+ * 단계 2 는 식별 시험의 홀수 회와 같은 길(속도 단계 2, SL 정지·속도 계단 없음)이고 결과만 스윕 칸으로 간다 */
 #include <math.h>
 #include <string.h>
 #include "agv/ident.h"
 #include "agv/drive.h"
 #include "agv/motor.h"
 #include "agv/param.h"
+#include "agv/rpmtest.h"
 #include "agv/run.h"
+#include "agv/steer.h"
 #include "agv/stop.h"
 #include "agv/tagact.h"
 #include "agv/tune.h"
@@ -52,16 +56,32 @@
 #define TOP_FLAT_RPM_S   100.0f
 #define TOP_DEC_EVERY    4        /* 감속 거리는 4 틱마다 4 틱 뒤 지령 상한으로 미리 잰다. CPU 를 아낀다 */
 
+#define SWEEP_LEVEL      1u       /* 단계 2 속도 = 식별 3·4회 단계 */
+#define KEEP_MARK        ((uint16_t)(0x7E57u ^ (uint16_t)(sizeof(agv_ident) + sizeof(agv_top) + sizeof(agv_all) + sizeof(agv_rpmt))))
+
 enum { PH_RAMP = 1, PH_SETTLE, PH_HOLD, PH_SPD_UP, PH_SPD_DOWN, PH_LAT, PH_STOP, PH_SEEK, PH_TURN };
 
+/* codestart 가 지우지 않는 RAM. 초기화식을 두면 .cinit 이 덮으니 두지 않는다 */
+#ifdef __TMS320C2000__
+#pragma DATA_SECTION(agv_ident, "test_keep")
+#pragma DATA_SECTION(agv_top, "test_keep")
+#pragma DATA_SECTION(agv_all, "test_keep")
+#pragma DATA_SECTION(test_keep_mark, "test_keep")
+#endif
 ident_result_t agv_ident;
 top_result_t   agv_top;
+all_result_t   agv_all;
+uint16_t       test_keep_mark;
 
-/* 지금 시험의 진행 칸. 식별 시험이면 agv_ident, 최고 속도 시험이면 agv_top */
+static const int16_t s_sweep_def[SWEEP_MAX] = { 0, 1, 2, 3, 8, 9, 10, 11, 16, 17, 18, 19, 24, 25, 26, 27 };
+static int16_t  s_sweep[SWEEP_MAX];
+static uint16_t s_sweep_n = 0xFFFFu;   /* 0xFFFF = 기본 목록 */
+
+/* 지금 시험의 진행 칸. 식별 시험이면 agv_ident, 최고 속도 시험이면 agv_top, 통합 시험 단계 2 는 agv_all */
 static struct { int16_t *state, *fail, *pass, *phase; float *track; } s_r = {
     &agv_ident.state, &agv_ident.fail, &agv_ident.pass, &agv_ident.phase, &agv_ident.track_mm
 };
-static int16_t s_top;
+static int16_t s_top, s_all;
 
 static struct {
     int16_t ri, rn, last[2], n_tq, n_lag;
@@ -76,7 +96,7 @@ typedef struct {
 static struct {
     int16_t  t, want, risk_prev, hold_n, lat_n, restart, turn_seen, legs;
     int16_t  cap[IDENT_LEVELS], retry;   /* 직선이 짧으면 그 단계 속도를 낮춰 같은 회를 다시 한다 */
-    uint32_t start, begin;
+    uint32_t start, begin, ticks;     /* ticks: 통합 시험 경과 */
     float    budget;
     step_t   lat, spd[2];
     union { float y[WIN_TICKS]; int16_t ring[2][TOP_RING]; } u;   /* ring: 최고 속도 시험 0.3 s 원시 rpm */
@@ -84,6 +104,23 @@ static struct {
 } s_id;
 
 #define PASS ((uint16_t)*s_r.pass)
+
+/* 통합 시험 단계 2 (OPT 스윕) 중 */
+static int sweep(void) { return s_all && (agv_all.stage == 2); }
+
+/* 속도 단계 0~2. 1, 2회 → 0, 3, 4회 → 1, 5, 6회 → 2. 스윕은 1 */
+static uint16_t lvl(void) { return sweep() ? SWEEP_LEVEL : (PASS - 1u) / 2u; }
+
+/* 이번 회의 결과 칸 */
+static ident_level_t *cur_lv(void)
+{
+    uint16_t p = (PASS > 0u) ? PASS - 1u : 0u;
+    if (sweep()) { return &agv_all.sw[p / SWEEP_PASSES].lv[p % SWEEP_PASSES]; }
+    return &agv_ident.lv[p];
+}
+
+/* 속도 계단은 식별 1회만 */
+static int spd_pass(void) { return (PASS == 1u) && !sweep(); }
 
 static uint32_t travel(void) { return run_pulses(D.backward ? 1u : 0u); }
 static float mm_since(uint32_t from) { return (float)(travel() - from) / P.one_length_pulse; }
@@ -134,14 +171,14 @@ static void set_speed(int16_t v, int ramp)
 /* 1, 2회 → 1/3, 3, 4회 → 2/3, 5, 6회 → 최고 속도 */
 static int16_t level_rpm(void)
 {
-    int16_t v = (int16_t)(((int32_t)P.target_speed * (int32_t)((PASS - 1u) / 2u + 1u)) / IDENT_LEVELS);
+    int16_t v = (int16_t)(((int32_t)P.target_speed * (int32_t)(lvl() + 1u)) / IDENT_LEVELS);
     return (v < P.min_speed) ? P.min_speed : v;
 }
 
 static int16_t pass_rpm(void)
 {
     int16_t v = level_rpm();
-    int16_t c = s_id.cap[(PASS - 1u) / 2u];
+    int16_t c = s_id.cap[lvl()];
     return (v > c) ? c : v;
 }
 
@@ -172,14 +209,29 @@ static void start_common(void)
     seek_begin();
 }
 
+static void point(int16_t *state, int16_t *fail, int16_t *pass, int16_t *phase, float *track)
+{
+    s_r.state = state;
+    s_r.fail = fail;
+    s_r.pass = pass;
+    s_r.phase = phase;
+    s_r.track = track;
+}
+
+static void point_top(void)
+{
+    s_top = 1;
+    point(&agv_top.state, &agv_top.fail, &agv_top.pass, &agv_top.phase, &agv_top.track_mm);
+    memset(&agv_top, 0, sizeof(agv_top));
+    agv_top.cfg_acc = P.acc;
+    agv_top.cfg_dcc = P.dcc;
+}
+
 void ident_start(void)
 {
     s_top = 0;
-    s_r.state = &agv_ident.state;
-    s_r.fail = &agv_ident.fail;
-    s_r.pass = &agv_ident.pass;
-    s_r.phase = &agv_ident.phase;
-    s_r.track = &agv_ident.track_mm;
+    s_all = 0;
+    point(&agv_ident.state, &agv_ident.fail, &agv_ident.pass, &agv_ident.phase, &agv_ident.track_mm);
     memset(&agv_ident, 0, sizeof(agv_ident));
     agv_ident.cfg_high = param_get(P_SPEED_HIGH);
     agv_ident.cfg_kp = param_get(P_STEER_KP);
@@ -191,32 +243,105 @@ void ident_start(void)
 
 void ident_start_top(void)
 {
-    s_top = 1;
-    s_r.state = &agv_top.state;
-    s_r.fail = &agv_top.fail;
-    s_r.pass = &agv_top.pass;
-    s_r.phase = &agv_top.phase;
-    s_r.track = &agv_top.track_mm;
-    memset(&agv_top, 0, sizeof(agv_top));
-    agv_top.cfg_acc = P.acc;
-    agv_top.cfg_dcc = P.dcc;
+    s_all = 0;
+    point_top();
     start_common();
 }
 
 int ident_top_mode(void) { return s_top; }
 
+void ident_sweep_set(const int16_t *opts, uint16_t n)
+{
+    uint16_t i;
+
+    s_sweep_n = 0;
+    for (i = 0; (i < n) && (s_sweep_n < SWEEP_MAX); i++) {
+        if ((opts[i] >= 0) && (opts[i] <= 31)) { s_sweep[s_sweep_n++] = opts[i]; }
+    }
+}
+
+void ident_start_all(void)
+{
+    const int16_t *list = (s_sweep_n == 0xFFFFu) ? s_sweep_def : s_sweep;
+    uint16_t k, n = (s_sweep_n == 0xFFFFu) ? SWEEP_MAX : s_sweep_n;
+
+    memset(&agv_all, 0, sizeof(agv_all));
+    agv_all.state = 1;
+    agv_all.stage = 1;
+    agv_all.opt_saved = param_get(P_OPT_FLAGS);
+    agv_all.sweep_n = (int16_t)n;
+    for (k = 0; k < n; k++) { agv_all.sw[k].opt = list[k]; }
+    ident_start();
+    s_all = 1;
+    s_id.ticks = 0;
+}
+
+int      ident_all_mode(void) { return s_all; }
+uint16_t ident_stage(void)    { return s_all ? (uint16_t)agv_all.stage : 0u; }
+
+/* 단계 1 끝(식별)이나 단계 2 끝(스윕). 다음 단계로 s_r 을 돌린다. 차는 선 위에 서 있다 */
+static void all_next(void)
+{
+    s_id.retry = 0;
+    if (agv_all.stage == 1) {
+        agv_all.track_mm = agv_ident.track_mm;
+        agv_all.stage = 2;
+        point(&agv_all.state, &agv_all.fail, &agv_all.pass, &agv_all.phase, &agv_all.track_mm);
+        if (agv_all.sweep_n > 0) { return; }
+    }
+    /* 최고 속도 시험은 사용자 OPT 로 한다. 0회 없이 단계 1 의 L 로 1회부터 */
+    (void)param_set_ram(P_OPT_FLAGS, agv_all.opt_saved);
+    steer_reset();
+    agv_all.stage = 3;
+    point_top();
+    agv_top.track_mm = agv_all.track_mm;
+    agv_top.state = 1;
+}
+
 void ident_abort(void)
 {
+    int16_t code = (int16_t)(*s_r.pass * 10 + *s_r.phase);
+    int all_run = s_all && (agv_all.state == 1);
+
     D.p_test = 0;
     motor_spike_set(0);
     if (*s_r.state == 1) {
-        *s_r.fail = (int16_t)(*s_r.pass * 10 + *s_r.phase);
+        *s_r.fail = code;
         *s_r.state = 3;
+    }
+    if (all_run) {
+        agv_all.fail = (int16_t)(agv_all.stage * 1000 + code);
+        agv_all.state = 3;
+        (void)param_set_ram(P_OPT_FLAGS, agv_all.opt_saved);
     }
 }
 
 uint16_t ident_pass(void)  { return (uint16_t)*s_r.pass; }
 uint16_t ident_phase(void) { return (uint16_t)*s_r.phase; }
+
+static void keep_cut(int16_t *state, int16_t *fail)
+{
+    if (*state != 1) { return; }
+    *state = 3;
+    if (*fail == 0) { *fail = -1; }
+}
+
+void ident_keep_boot(void)
+{
+    if (test_keep_mark != KEEP_MARK) {
+        memset(&agv_ident, 0, sizeof(agv_ident));
+        memset(&agv_top, 0, sizeof(agv_top));
+        memset(&agv_all, 0, sizeof(agv_all));
+        memset(&agv_rpmt, 0, sizeof(agv_rpmt));
+        test_keep_mark = KEEP_MARK;
+        return;
+    }
+    /* 시험 도중 리셋 */
+    keep_cut(&agv_ident.state, &agv_ident.fail);
+    keep_cut(&agv_top.state, &agv_top.fail);
+    keep_cut(&agv_all.state, &agv_all.fail);
+    keep_cut(&agv_rpmt.state, &agv_rpmt.fail);
+}
 
 int ident_want_h(void)
 {
@@ -337,20 +462,28 @@ static float decel_mm(int16_t from)
     return sum * k;
 }
 
-static int sl_pass(void) { return (PASS & 1u) == 0u; }
+static int sl_pass(void) { return ((PASS & 1u) == 0u) && !sweep(); }
 
-/* 회전 중심이 선 위에서 출발한다. SL 정지나 감속은 늦어도 budget 에서 시작해야 센서가 먼 선 앞에 선다 */
+/* 회전 중심이 선 위에서 출발한다. SL 정지나 감속은 늦어도 budget 에서 시작해야 센서가 먼 선 앞에 선다.
+ * 스윕은 칸이 바뀔 때 OPT 를 RAM 에 넣고, 회마다 조향 상태를 지운다 */
 static void pass_begin(void)
 {
     float sl;
 
     if (s_id.retry) {
         s_id.retry = 0;
-        memset(&agv_ident.lv[PASS - 1u], 0, sizeof(ident_level_t));
-        agv_ident.lv[PASS - 1u].cut = 2;
+        memset(cur_lv(), 0, sizeof(ident_level_t));
+        cur_lv()->cut = 2;
     }
-    else { agv_ident.pass++; }
-    if (pass_rpm() < level_rpm()) { agv_ident.lv[PASS - 1u].cut |= 2; }   /* 낮춘 속도로 잰다 */
+    else {
+        (*s_r.pass)++;
+        if (sweep() && (((PASS - 1u) % SWEEP_PASSES) == 0u)) {
+            agv_all.sweep_k = (int16_t)((PASS - 1u) / SWEEP_PASSES);
+            (void)param_set_ram(P_OPT_FLAGS, agv_all.sw[agv_all.sweep_k].opt);
+        }
+    }
+    if (sweep()) { steer_reset(); }
+    if (pass_rpm() < level_rpm()) { cur_lv()->cut |= 2; }   /* 낮춘 속도로 잰다 */
     if (sl_pass()) {
         sl = (float)(D.backward ? P.stop_len : P.fwd_stop_len) / P.one_length_pulse;
         s_id.budget = agv_ident.track_mm - P.guide_dist_mm - MARGIN_MM - sl;
@@ -367,9 +500,9 @@ static int plan(ident_level_t *lv)
 {
     const float k = 1000.0f / 6000.0f;                                       /* m/min → mm/틱 */
     float v = (float)s_id.want / P.one_meter_rpm * k;
-    float extra = (PASS == 1u) ? SPD_STEP_MPM * k * (float)SPD_TICKS : 0.0f;  /* 속도 계단 동안 더 가는 거리 */
+    float extra = spd_pass() ? SPD_STEP_MPM * k * (float)SPD_TICKS : 0.0f;  /* 속도 계단 동안 더 가는 거리 */
     float rem = (s_id.budget - mm_since(s_id.begin) - extra) / v * PLAN_SLACK
-              - (float)(SETTLE_TICKS + ((PASS == 1u) ? 2 * SPD_TICKS : 0));
+              - (float)(SETTLE_TICKS + (spd_pass() ? 2 * SPD_TICKS : 0));
     float hold = (rem * 0.5f < (float)WIN_TICKS) ? rem * 0.5f : (float)WIN_TICKS;
     float lat = (rem - hold < (float)WIN_TICKS) ? rem - hold : (float)WIN_TICKS;
 
@@ -394,7 +527,7 @@ static void sl_stop(void)
 {
     D.p_test = 0;
     if (!sl_pass()) {
-        agv_ident.lv[PASS - 1u].run_m = mm_since(s_id.begin) / 1000.0f;
+        cur_lv()->run_m = mm_since(s_id.begin) / 1000.0f;
         set_speed(P.min_speed, 1);
         tune_cross_clear();
         enter(PH_SEEK);
@@ -419,7 +552,7 @@ static int slow_down(void)
 {
     int16_t c = (int16_t)(((int32_t)s_id.want * 4) / 5);
     if ((PASS == 0u) || (s_id.want <= P.min_speed)) { return fail_now(); }
-    s_id.cap[(PASS - 1u) / 2u] = (c < P.min_speed) ? P.min_speed : c;
+    s_id.cap[lvl()] = (c < P.min_speed) ? P.min_speed : c;
     s_id.retry = 1;
     sl_stop();
     return 0;
@@ -585,7 +718,8 @@ static int cross_seen(void)
 {
     float leg = (float)(tune_line_at(0) - s_id.begin) / P.one_length_pulse + P.guide_dist_mm;
 
-    if (!s_top) { agv_ident.total_m += leg / 1000.0f; }
+    if (!s_top && !sweep()) { agv_ident.total_m += leg / 1000.0f; }
+    if (s_all) { agv_all.total_m += leg / 1000.0f; }
     if ((PASS == 0u) && (s_id.legs == 1)) {
         *s_r.track = leg;
         if (leg < TRACK_MIN_MM) { return fail_now(); }
@@ -599,16 +733,30 @@ static int cross_seen(void)
     return 0;
 }
 
-/* 회전이 끝났다. 6회(최고 속도 시험은 2회) 뒤에는 선 위에서 기다린다 */
+/* 회전이 끝났다. 6회(최고 속도 시험은 2회) 뒤에는 선 위에서 기다린다.
+ * 통합 시험은 단계 1·2 끝에서 다음 단계로 가고 단계 3 끝에서 기다린다 */
 static int turn_done(void)
 {
     D.tape_slow = 0;
     if ((D.system_err != 0) || (D.stop_err != 0)) { return fail_now(); }
-    if (PASS >= (s_top ? TOP_PASSES : IDENT_PASSES)) {
+    if (sweep()) {
+        if (!s_id.retry) {
+            agv_all.sw[agv_all.sweep_k].done++;
+            if (PASS >= (uint16_t)(agv_all.sweep_n * SWEEP_PASSES)) { all_next(); }
+        }
+    }
+    else if (PASS >= (s_top ? TOP_PASSES : IDENT_PASSES)) {
         if (s_top) { top_finish(); }
         else       { fit_ff(); }
         *s_r.state = 2;
-        return 1;
+        if (s_all && !s_top) { all_next(); }
+        else {
+            if (s_all) {
+                agv_all.state = 2;
+                (void)param_set_ram(P_OPT_FLAGS, agv_all.opt_saved);
+            }
+            return 1;
+        }
     }
     run_restart_now();
     s_id.restart = 1;
@@ -617,12 +765,13 @@ static int turn_done(void)
 
 int ident_run(void)
 {
-    ident_level_t *lv = &agv_ident.lv[(PASS > 0u) ? PASS - 1u : 0u];
+    ident_level_t *lv = cur_lv();
     int stopped = !D.flag_run && !D.flag_ready && !D.flag_stopping;
     uint16_t ph = (uint16_t)*s_r.phase;
     uint16_t i;
 
     if (*s_r.state != 1) { return (*s_r.state == 2) ? 1 : -1; }
+    if (s_all) { agv_all.elapsed_s = (float)(++s_id.ticks) * (TICK_MS / 1000.0f); }
     if ((PASS > 0u) && !s_top) {
         if (D.risk_stop && !s_id.risk_prev) { lv->risk++; }
     }
@@ -702,7 +851,7 @@ int ident_run(void)
         hold_sample();
         if (++s_id.t >= s_id.hold_n) {
             hold_finish(lv);
-            if (PASS == 1u) {
+            if (spd_pass()) {
                 float d = SPD_STEP_MPM * P.one_meter_rpm;
                 for (i = 0; i < 2u; i++) { step_begin(&s_id.spd[i], (float)D.rpm_flt[i], d, SPD_TICKS); }
                 set_speed((int16_t)(s_id.want + (int16_t)d), 0);

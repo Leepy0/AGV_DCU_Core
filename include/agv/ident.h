@@ -107,4 +107,53 @@ extern top_result_t agv_top;
 
 void ident_start_top(void);  /* 이후 ident_run, ident_pass, ident_phase, ident_abort, ident_want_h 를 같이 쓴다 */
 int  ident_top_mode(void);   /* 1 = 지금 돌고 있는(또는 마지막) 시험이 최고 속도 시험 */
+
+/* ---- 통합 시험 (튜닝 모드 ALL) ----
+ * START 한 번으로 단계 1 → 2 → 3 을 잇는다. 사람 없이 끝까지 가서 선 위에서 기다린다.
+ *  단계 1: 식별 시험 0~6회 그대로 (지금 OPT). 결과는 agv_ident.
+ *  단계 2: OPT 스윕. 목록의 OPT 마다 2회(왕복 한 번). OPT 는 RAM 에만 바꾸고 회 시작 전에 조향 상태를 지운다.
+ *          속도는 식별 3·4회와 같은 단계(최고 속도의 2/3, 단계 1 에서 낮춘 상한 그대로).
+ *          회마다 가속 → 안정 → 정속 측정 → 옆 계단 → 감속하며 선 찾기 → 회전. SL 정지와 속도 계단은 없다.
+ *          창이 안 들어가면 식별 시험처럼 속도를 4/5 로 낮춰 같은 회를 다시 한다. 결과는 agv_all.sw[k].lv[0..1].
+ *  단계 3: 최고 속도 시험 1·2회. 0회는 다시 하지 않고 단계 1 의 L 을 쓴다. 결과는 agv_top.
+ * 끝, 실패, 끊김 어느 쪽이든 OPT 를 시험 전 값으로 되돌린다. EEPROM 은 쓰지 않는다.
+ * 실패 코드 = 단계 × 1000 + 회 × 10 + 순서. 회는 단계 1·3 은 0~6, 단계 2 는 스윕 칸 × 2 + (0 또는 1) + 1 */
+#define SWEEP_MAX     16
+#define SWEEP_PASSES  2
+
+typedef struct {
+    int16_t       opt;               /* 이 칸의 OPT(51번) 값 */
+    int16_t       done;              /* 끝낸 회 수 0~2 */
+    ident_level_t lv[SWEEP_PASSES];  /* 식별 시험과 같은 칸. 속도 계단·SL 정지 칸은 0 */
+} sweep_t;
+
+typedef struct {
+    int16_t state;           /* 1 진행, 2 끝, 3 실패 */
+    int16_t fail;            /* 단계 × 1000 + 회 × 10 + 순서. 0 = 없음 */
+    int16_t stage;           /* 1 식별, 2 OPT 스윕, 3 최고 속도 */
+    int16_t pass, phase;     /* 단계 2 의 회(스윕 칸 × 2 + 0·1 + 1)와 순서. 단계 1·3 은 agv_ident·agv_top 쪽을 본다 */
+    int16_t sweep_n;         /* 스윕 칸 수 */
+    int16_t sweep_k;         /* 지금(또는 마지막) 스윕 칸 */
+    int16_t opt_saved;       /* 시험 전 OPT. 끝나면 이 값으로 돌린다 */
+    float   track_mm;        /* 단계 1 의 L */
+    float   total_m;         /* 시험 전체 직진 거리 */
+    float   elapsed_s;       /* START 부터 끝까지 */
+    sweep_t sw[SWEEP_MAX];
+} all_result_t;
+
+extern all_result_t agv_all;
+
+/* 스윕 목록. 기본은 OPT 1·2·8·16 비트의 16 조합 {0,1,2,3,8,9,10,11,16,17,18,19,24,25,26,27}.
+ * 사이트가 바꿀 때 부팅 때 한 번 부른다. n 은 SWEEP_MAX 에서 자른다. 0..31 밖의 값은 건너뛴다 */
+void ident_sweep_set(const int16_t *opts, uint16_t n);
+void ident_start_all(void);  /* 이후 ident_run, ident_pass, ident_phase, ident_abort, ident_want_h 를 같이 쓴다 */
+int  ident_all_mode(void);   /* 1 = 지금 돌고 있는(또는 마지막) 시험이 통합 시험 */
+uint16_t ident_stage(void);  /* 통합 시험 단계 1~3. 통합 시험이 아니면 0 */
+
+/* ---- 리셋에 남는 결과 ----
+ * agv_ident·agv_top·agv_all·agv_rpmt 는 codestart 가 지우지 않는 RAM 구역 test_keep 에 둔다.
+ * CCS 연결로 워치독 리셋이 나도 남는다. 부팅 때 ident_keep_boot 를 한 번 부른다.
+ * 표시가 틀리면(전원 투입) 넷을 지우고 표시를 쓴다. 진행 중(state 1)이던 결과는 state 3, fail 이 0 이면 -1 */
+extern uint16_t test_keep_mark;
+void ident_keep_boot(void);
 #endif

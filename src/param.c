@@ -274,11 +274,17 @@ static void store_all(void)
     for (i = 1; i <= P_SAVED_LAST; i++) { s_store->write(i, (uint16_t)s_set[i]); }
 }
 
-int16_t param_set(uint16_t idx, int16_t value)
+int16_t param_set_ram(uint16_t idx, int16_t value)
 {
     if ((idx == 0) || (idx >= P_COUNT) || !limit_ok(idx, value)) { return -1; }
     s_set[idx] = value;
     recalc_one(idx);
+    return 0;
+}
+
+int16_t param_set(uint16_t idx, int16_t value)
+{
+    if (param_set_ram(idx, value) != 0) { return -1; }
     if (idx <= P_SAVED_LAST) { store_one(idx); }
     {
         const extra_t *e = extra_find(idx);

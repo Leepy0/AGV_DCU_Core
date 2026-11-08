@@ -7,6 +7,7 @@
 #include "agv/frame.h"
 #include "agv/guide.h"
 #include "agv/hal.h"
+#include "agv/ident.h"
 #include "agv/io.h"
 #include "agv/ioport.h"
 #include "agv/link.h"
@@ -72,6 +73,7 @@ void sys_boot(void)
     storage_reset();
     guide_poll_reset();
     tune_reset();
+    ident_keep_boot();             /* 시험 결과는 codestart 가 지우지 않는다. 전원 투입이면 여기서 지운다 */
     site_register();
 
     err = param_boot(&storage_blocking, SYS_VERSION);

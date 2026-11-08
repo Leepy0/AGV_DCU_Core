@@ -34,4 +34,5 @@ SECTIONS
    .ebss       : > RAML1,      PAGE = 1
    .sysmem     : > RAMH0,      PAGE = 1
    .esysmem    : > RAMH0,      PAGE = 1
+   test_keep   : > RAMH0,      PAGE = 1      /* 시험 결과. codestart 가 지우지 않아 리셋에 남는다 */
 }
