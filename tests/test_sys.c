@@ -945,6 +945,13 @@ static void test_tune_guide(void)
         assert(d[0] != 15u);                      /* 'E' 가 아니다 */
         assert(host.bus_out[BUS_LAMP] & 0x40u);   /* 부저 꺼짐 (저활성) */
     }
+    {   /* 튜닝 중 MODE 는 파라미터·조그 화면으로 가지 않는다 */
+        boot();
+        tune_arm();
+        key(KEY_MODE);
+        key(KEY_MODE);
+        assert(D.ui_mode == UI_AUTO && tune_active());
+    }
     printf("  tune guide ok\n");
 }
 

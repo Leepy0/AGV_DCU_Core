@@ -525,6 +525,10 @@ static void key_process(void)
             s_ui.long_press = 0;
             return;
         }
+        if (s_ui.data == KEY_MODE) {        /* 튜닝 모드에서는 파라미터·조그 화면으로 가지 않는다 */
+            s_ui.data_old = s_ui.data;
+            return;
+        }
     }
     switch (s_ui.data) {
     case KEY_MODE:  key_mode(); break;
