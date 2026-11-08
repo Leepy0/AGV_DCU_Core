@@ -87,6 +87,7 @@ int      tune_ident_mode(void) { return s_tune.ident == TUNE_MODE_IDENT; }
 int      tune_rpm_mode(void)   { return s_tune.ident == TUNE_MODE_RPM; }
 int      tune_top_mode(void)   { return s_tune.ident == TUNE_MODE_TOP; }
 int      tune_all_mode(void)   { return s_tune.ident == TUNE_MODE_ALL; }
+int      tune_temp_mode(void)  { return s_tune.ident == TUNE_MODE_TEMP; }
 int      tune_editing(void)    { return s_tune.editing; }
 int16_t  tune_edit_place(void) { return s_tune.place; }
 uint16_t tune_state(void)      { return s_tune.state; }
@@ -100,7 +101,8 @@ static uint32_t travel(void) { return run_pulses(D.backward ? 1u : 0u); }
 
 static int measuring(void)
 {
-    if ((s_tune.state == TUNE_IDENT) || (s_tune.state == TUNE_TOP) || (s_tune.state == TUNE_ALL)) { return ident_want_h(); }   /* 식별 시험은 선 찾기에서만 */
+    if ((s_tune.state == TUNE_IDENT) || (s_tune.state == TUNE_TOP) || (s_tune.state == TUNE_ALL)
+        || (s_tune.state == TUNE_TEMP)) { return ident_want_h(); }   /* 식별 시험은 선 찾기에서만 */
     return ((s_tune.state == TUNE_GO_1) || (s_tune.state == TUNE_GO_2)) && D.flag_run && !D.flag_stopping;
 }
 
@@ -257,6 +259,12 @@ void tune_run(void)
             ident_start_all();
             s_tune.state = TUNE_ALL;
         }
+        else if (D.flag_run && (s_tune.ident == TUNE_MODE_TEMP)) {
+            s_tune.failed = 0;
+            s_tune.page = 0;
+            ident_start_temp();
+            s_tune.state = TUNE_TEMP;
+        }
         else if (D.flag_run && (s_tune.ident == TUNE_MODE_TUNE)) {
             clear_measure();
             s_tune.failed = 0;
@@ -289,6 +297,9 @@ void tune_run(void)
         break;
     case TUNE_ALL:
         if (ident_run() != 0) { s_tune.state = TUNE_ALL_DONE; }
+        break;
+    case TUNE_TEMP:
+        if (ident_run() != 0) { s_tune.state = TUNE_TEMP_DONE; }
         break;
     case TUNE_RPM:
         D.flag_ready = D.flag_run = 0;      /* 시험 중 START 는 무시한다 */
@@ -486,7 +497,7 @@ int tune_key(uint16_t key)
         default:        return 0;
         }
     }
-    if ((s_tune.state == TUNE_IDENT_DONE) && (key == KEY_RESET)) {
+    if (((s_tune.state == TUNE_IDENT_DONE) || (s_tune.state == TUNE_TEMP_DONE)) && (key == KEY_RESET)) {
         s_tune.state = TUNE_WAIT;
         return 1;
     }

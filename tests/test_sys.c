@@ -952,6 +952,21 @@ static void test_tune_guide(void)
         key(KEY_MODE);
         assert(D.ui_mode == UI_AUTO && tune_active());
     }
+    {   /* SHIFT 다섯 번 = TEMP, 여섯 번 = TUNE */
+        uint16_t d[5];
+        int k;
+        boot();
+        tune_arm();
+        for (k = 0; k < 5; k++) { key(KEY_SHIFT); }
+        assert(tune_temp_mode() && !tune_all_mode());
+        ui_digits(d);
+        assert((d[0] == 11u + ('T' - 'A')) && (d[1] == 11u + ('E' - 'A')) && (d[2] == 11u + ('M' - 'A'))
+               && (d[3] == 11u + ('P' - 'A')));
+        key(KEY_SHIFT);
+        assert(!tune_temp_mode() && !tune_ident_mode());
+        ui_digits(d);
+        assert((d[0] == 11u + ('T' - 'A')) && (d[1] == 11u + ('U' - 'A')));
+    }
     printf("  tune guide ok\n");
 }
 

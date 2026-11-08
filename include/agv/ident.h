@@ -25,12 +25,12 @@ typedef struct {             /* 측정 한 회 */
     float   ripple_l, ripple_r;   /* rpm 표준편차 */
     float   ramp_lag_mpm;    /* 가속 중 지령 - 실제 속도 최대 */
     float   dec_lag_mpm;     /* 감속 중 실제 - 지령 속도 최대 (홀수 회) */
-    float   lat_delay_ms;    /* 옆 계단(4칸) 10% 도달 */
+    float   lat_delay_ms;    /* 옆 계단 10% 도달. 계단 = 정속 평균에서 4칸 (목표 = 평균 + 4칸) */
     float   lat_t63_ms;      /* 63% 도달 */
     float   lat_rise_ms;     /* 10 → 90% */
     float   lat_over_pct;    /* 넘침 */
     float   lat_settle_ms;   /* ±10% 안에 든 뒤 안 나간 시각 */
-    float   lat_err_mm;      /* 창 끝 평균 - 목표 */
+    float   lat_err_mm;      /* 창 끝 평균 - (정속 평균 + 4칸), mm */
     float   run_m;           /* 선에서 측정 끝(SL 정지·감속 시작)까지 거리 */
     float   stop_mm;         /* SL 정지 명령부터 멈출 때까지 거리 (짝수 회만) */
     float   stop_ms;
@@ -147,8 +147,19 @@ extern all_result_t agv_all;
  * 사이트가 바꿀 때 부팅 때 한 번 부른다. n 은 SWEEP_MAX 에서 자른다. 0..31 밖의 값은 건너뛴다 */
 void ident_sweep_set(const int16_t *opts, uint16_t n);
 void ident_start_all(void);  /* 이후 ident_run, ident_pass, ident_phase, ident_abort, ident_want_h 를 같이 쓴다 */
-int  ident_all_mode(void);   /* 1 = 지금 돌고 있는(또는 마지막) 시험이 통합 시험 */
-uint16_t ident_stage(void);  /* 통합 시험 단계 1~3. 통합 시험이 아니면 0 */
+int  ident_all_mode(void);   /* 1 = 지금 돌고 있는(또는 마지막) 시험이 통합 시험이나 지정 시험 */
+uint16_t ident_stage(void);  /* 통합(지정) 시험 단계 1~3. 통합 시험이 아니면 0 */
+
+/* ---- 지정 시험 (튜닝 모드 TEMP) ----
+ * 통합 시험을 줄인 것. 단계 1 은 0회만(선 찾기, L 측정, 회전 두 번). 식별 1~6회와 단계 3(최고 속도)은 없다.
+ * 0회 두 번째 회전이 끝나면 바로 단계 2. 통합 시험 단계 2 와 같이 선에서 출발해 TEMP 목록의 OPT 마다 2회 잰다
+ * (속도 단계 2, 같은 회 순서, OPT 는 RAM 에만, 회마다 조향 상태를 지움, 창이 안 들어가면 4/5 로 다시).
+ * 결과는 agv_all (stage 는 2 에서 끝난다). agv_ident 에는 0회 값(L 등)만 남는다(state 2, pass 0).
+ * 마지막 스윕 회전 뒤 agv_all.state = 2. 끝, 실패, 끊김 모두 OPT 를 되돌린다. 실패 코드는 통합 시험과 같다 */
+/* TEMP 목록. 기본 {0,3,19,26,0,3,19,26}. n 은 SWEEP_MAX 에서 자른다. 0..31 밖의 값은 건너뛴다 */
+void ident_temp_set(const int16_t *opts, uint16_t n);
+void ident_start_temp(void); /* 이후 ident_run, ident_pass, ident_phase, ident_abort, ident_want_h 를 같이 쓴다 */
+int  ident_temp_mode(void);  /* 1 = 지금 돌고 있는(또는 마지막) 시험이 지정 시험 */
 
 /* ---- 리셋에 남는 결과 ----
  * agv_ident·agv_top·agv_all·agv_rpmt 는 codestart 가 지우지 않는 RAM 구역 test_keep 에 둔다.

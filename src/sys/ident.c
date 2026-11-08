@@ -5,12 +5,14 @@
  *  짝수 회(2, 4, 6): 1 → 7 SL 정지 → 8 → 9. 센서가 먼 선 300 mm 앞에서 서도록 SL 정지 시작점을 둔다.
  *  홀수 회(1, 3, 5): 1 → 8. 서지 않고 감속하며 선을 찾는다. 선 100 mm 앞에서 최저 속도가 되게 감속을 건다.
  * 정속·옆 계단 창은 남은 거리로 정한다.
- * 옆 계단은 조향 지령(p_test)을 4칸 옮겨 폐루프 응답을 본다. 속도 계단은 램프 없이 지령을 바꾼다.
+ * 옆 계단은 조향 지령(p_test)을 4칸 옮겨 폐루프 응답을 본다. 치우침은 계단 뒤에도 남으니 정속 평균에서 4칸을 잰다.
+ * 속도 계단은 램프 없이 지령을 바꾼다.
  * 실패 코드 = 회 × 10 + 순서. 08 은 0회에 선을 못 찾았거나 L < 2 m (track_mm 가 0 이 아니면 후자)
  * 최고 속도 시험(TOP)은 같은 0회·선 찾기·회전을 쓰고 1·2회만 다르다: 1 가속, 3 최고 속도 정속, 8, 9.
  * 결과는 agv_top 에 쌓는다.
  * 통합 시험(ALL)은 단계마다 s_r 을 그 단계 결과로 돌린다. 단계 2 는 agv_all 칸을 쓴다.
- * 단계 2 는 식별 시험의 홀수 회와 같은 길(속도 단계 2, SL 정지·속도 계단 없음)이고 결과만 스윕 칸으로 간다 */
+ * 단계 2 는 식별 시험의 홀수 회와 같은 길(속도 단계 2, SL 정지·속도 계단 없음)이고 결과만 스윕 칸으로 간다.
+ * 지정 시험(TEMP)은 통합 시험에 s_temp 를 켠 것이다. 0회 뒤 바로 단계 2(TEMP 목록), 단계 2 끝에서 멈춘다 */
 #include <math.h>
 #include <string.h>
 #include "agv/ident.h"
@@ -76,12 +78,15 @@ uint16_t       test_keep_mark;
 static const int16_t s_sweep_def[SWEEP_MAX] = { 0, 1, 2, 3, 8, 9, 10, 11, 16, 17, 18, 19, 24, 25, 26, 27 };
 static int16_t  s_sweep[SWEEP_MAX];
 static uint16_t s_sweep_n = 0xFFFFu;   /* 0xFFFF = 기본 목록 */
+static const int16_t s_temp_def[8] = { 0, 3, 19, 26, 0, 3, 19, 26 };
+static int16_t  s_temp_l[SWEEP_MAX];
+static uint16_t s_temp_n = 0xFFFFu;
 
 /* 지금 시험의 진행 칸. 식별 시험이면 agv_ident, 최고 속도 시험이면 agv_top, 통합 시험 단계 2 는 agv_all */
 static struct { int16_t *state, *fail, *pass, *phase; float *track; } s_r = {
     &agv_ident.state, &agv_ident.fail, &agv_ident.pass, &agv_ident.phase, &agv_ident.track_mm
 };
-static int16_t s_top, s_all;
+static int16_t s_top, s_all, s_temp;
 
 static struct {
     int16_t ri, rn, last[2], n_tq, n_lag;
@@ -231,6 +236,7 @@ void ident_start(void)
 {
     s_top = 0;
     s_all = 0;
+    s_temp = 0;
     point(&agv_ident.state, &agv_ident.fail, &agv_ident.pass, &agv_ident.phase, &agv_ident.track_mm);
     memset(&agv_ident, 0, sizeof(agv_ident));
     agv_ident.cfg_high = param_get(P_SPEED_HIGH);
@@ -244,26 +250,29 @@ void ident_start(void)
 void ident_start_top(void)
 {
     s_all = 0;
+    s_temp = 0;
     point_top();
     start_common();
 }
 
 int ident_top_mode(void) { return s_top; }
 
-void ident_sweep_set(const int16_t *opts, uint16_t n)
+static void list_set(int16_t *dst, uint16_t *dn, const int16_t *opts, uint16_t n)
 {
     uint16_t i;
 
-    s_sweep_n = 0;
-    for (i = 0; (i < n) && (s_sweep_n < SWEEP_MAX); i++) {
-        if ((opts[i] >= 0) && (opts[i] <= 31)) { s_sweep[s_sweep_n++] = opts[i]; }
+    *dn = 0;
+    for (i = 0; (i < n) && (*dn < SWEEP_MAX); i++) {
+        if ((opts[i] >= 0) && (opts[i] <= 31)) { dst[(*dn)++] = opts[i]; }
     }
 }
 
-void ident_start_all(void)
+void ident_sweep_set(const int16_t *opts, uint16_t n) { list_set(s_sweep, &s_sweep_n, opts, n); }
+void ident_temp_set(const int16_t *opts, uint16_t n)  { list_set(s_temp_l, &s_temp_n, opts, n); }
+
+static void all_begin(const int16_t *list, uint16_t n)
 {
-    const int16_t *list = (s_sweep_n == 0xFFFFu) ? s_sweep_def : s_sweep;
-    uint16_t k, n = (s_sweep_n == 0xFFFFu) ? SWEEP_MAX : s_sweep_n;
+    uint16_t k;
 
     memset(&agv_all, 0, sizeof(agv_all));
     agv_all.state = 1;
@@ -276,6 +285,20 @@ void ident_start_all(void)
     s_id.ticks = 0;
 }
 
+void ident_start_all(void)
+{
+    if (s_sweep_n == 0xFFFFu) { all_begin(s_sweep_def, SWEEP_MAX); }
+    else                      { all_begin(s_sweep, s_sweep_n); }
+}
+
+void ident_start_temp(void)
+{
+    if (s_temp_n == 0xFFFFu) { all_begin(s_temp_def, 8u); }
+    else                     { all_begin(s_temp_l, s_temp_n); }
+    s_temp = 1;
+}
+
+int      ident_temp_mode(void) { return s_temp; }
 int      ident_all_mode(void) { return s_all; }
 uint16_t ident_stage(void)    { return s_all ? (uint16_t)agv_all.stage : 0u; }
 
@@ -287,7 +310,7 @@ static void all_next(void)
         agv_all.track_mm = agv_ident.track_mm;
         agv_all.stage = 2;
         point(&agv_all.state, &agv_all.fail, &agv_all.pass, &agv_all.phase, &agv_all.track_mm);
-        if (agv_all.sweep_n > 0) { return; }
+        if ((agv_all.sweep_n > 0) || s_temp) { return; }
     }
     /* 최고 속도 시험은 사용자 OPT 로 한다. 0회 없이 단계 1 의 L 로 1회부터 */
     (void)param_set_ram(P_OPT_FLAGS, agv_all.opt_saved);
@@ -517,8 +540,7 @@ static int plan(ident_level_t *lv)
 static void lat_begin(const ident_level_t *lv)
 {
     D.p_test = LAT_STEP_BITS;
-    step_begin(&s_id.lat, lv->dev_mean_mm / GUIDE_MM,
-               (float)LAT_STEP_BITS - lv->dev_mean_mm / GUIDE_MM, s_id.lat_n);
+    step_begin(&s_id.lat, lv->dev_mean_mm / GUIDE_MM, (float)LAT_STEP_BITS, s_id.lat_n);   /* 목표 = 평균 + 4칸 */
     enter(PH_LAT);
 }
 
@@ -733,8 +755,17 @@ static int cross_seen(void)
     return 0;
 }
 
+/* 통합(지정) 시험 끝. OPT 를 되돌리고 선 위에서 기다린다 */
+static int all_end(void)
+{
+    agv_all.state = 2;
+    (void)param_set_ram(P_OPT_FLAGS, agv_all.opt_saved);
+    return 1;
+}
+
 /* 회전이 끝났다. 6회(최고 속도 시험은 2회) 뒤에는 선 위에서 기다린다.
- * 통합 시험은 단계 1·2 끝에서 다음 단계로 가고 단계 3 끝에서 기다린다 */
+ * 통합 시험은 단계 1·2 끝에서 다음 단계로 가고 단계 3 끝에서 기다린다.
+ * 지정 시험은 0회 두 번째 회전 뒤 단계 2 로 가고 단계 2 끝에서 기다린다 */
 static int turn_done(void)
 {
     D.tape_slow = 0;
@@ -742,7 +773,17 @@ static int turn_done(void)
     if (sweep()) {
         if (!s_id.retry) {
             agv_all.sw[agv_all.sweep_k].done++;
-            if (PASS >= (uint16_t)(agv_all.sweep_n * SWEEP_PASSES)) { all_next(); }
+            if (PASS >= (uint16_t)(agv_all.sweep_n * SWEEP_PASSES)) {
+                if (s_temp) { return all_end(); }
+                all_next();
+            }
+        }
+    }
+    else if (s_temp) {
+        if (s_id.legs >= 2) {      /* 0회 끝. L 을 쟀다 */
+            agv_ident.state = 2;
+            all_next();
+            if (agv_all.sweep_n == 0) { return all_end(); }
         }
     }
     else if (PASS >= (s_top ? TOP_PASSES : IDENT_PASSES)) {
@@ -751,10 +792,7 @@ static int turn_done(void)
         *s_r.state = 2;
         if (s_all && !s_top) { all_next(); }
         else {
-            if (s_all) {
-                agv_all.state = 2;
-                (void)param_set_ram(P_OPT_FLAGS, agv_all.opt_saved);
-            }
+            if (s_all) { (void)all_end(); }
             return 1;
         }
     }
