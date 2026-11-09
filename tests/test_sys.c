@@ -703,6 +703,79 @@ static void test_cross(void)
     assert((D.cross_in_flag == 0) && (D.cross_in_on == 0));
     printf("  cross ok\n");
 }
+/* 마지막으로 보낸 (type, info) 프레임의 MsgID. 없으면 0 */
+static uint16_t tx_last_msgid(uint16_t type, uint16_t info)
+{
+    host_sci_t *a = &host.sci[HAL_SCI_A];
+    uint16_t id = 0;
+    int i;
+    for (i = 0; i + 19 < a->tx_len; i++) {
+        if ((a->tx[i] == 2) && (a->tx[i + 1] == type) && (a->tx[i + 6] == info)) { id = a->tx[i + 3]; }
+    }
+    return id;
+}
+
+/* OUT 태그: 서지 않고 보고만 한다. E-STOP·리셋 뒤에도 ACK 까지 보내고, 1 s 넘게 미확인이면 EEPROM 에 두어 부팅 뒤 잇는다 */
+static void test_cross_out(void)
+{
+    char b[32];
+    uint16_t id;
+
+    boot();
+    (void)param_set(P_CROSS_MODE, 1);
+    drive_up();
+    run_scan(5);
+    sprintf(b, "E1A%02dO00700000000", AGV_ID);
+    send_frame(b, 0);
+    run_scan(1);
+    assert(acs_cross_out_count() == 1 && acs_cross_num(ACS_CROSS_OUT) == 7);
+    run_scan(50);
+    assert(tx_has('E', 'O') && D.flag_run == 1 && !D.cross_out_flag && !D.cross_out_on && D.action_err == 0);
+    /* E-STOP 중에도, 풀고 STOP 리셋(run_seq_init) 뒤에도 보낸다 */
+    host.bus_in[BUS_IN_B] |= B_ESTOP;
+    tick();
+    assert(D.system_err == ERR_ESTOP && D.flag_run == 0);
+    host.sci[HAL_SCI_A].tx_len = 0;
+    ticks(30);
+    assert(tx_has('E', 'O') && acs_cross_out_count() == 1);
+    host.bus_in[BUS_IN_B] &= (uint16_t)~B_ESTOP;
+    tick();
+    raw_a(RAW_STOP, 0);
+    ticks(3);
+    raw_a(0, RAW_STOP);
+    ticks(3);
+    assert(D.system_err == 0);
+    host.sci[HAL_SCI_A].tx_len = 0;
+    ticks(30);
+    assert(tx_has('E', 'O') && acs_cross_out_count() == 1);
+    /* 1 s 를 넘겼다: EEPROM 기록 */
+    ticks(20);
+    assert(host.ee[ACS_OUT_EE_FIRST] == 7 && host.ee[ACS_OUT_EE_HEAD] == 0x4F01);
+    /* 전원 차단 뒤 부팅: 읽어서 다시 보낸다 */
+    {
+        host_hw_t saved = host;
+        host_reset();
+        memcpy(host.ee, saved.ee, sizeof(host.ee));
+    }
+    memset(&D, 0, sizeof(D));
+    sys_boot();
+    assert(acs_cross_out_count() == 1 && acs_cross_num(ACS_CROSS_OUT) == 7);
+    host.adc = 300u << 4;
+    ticks(60);
+    host.sci[HAL_SCI_A].tx_len = 0;
+    ticks(30);
+    id = tx_last_msgid('E', 'O');
+    assert(id != 0);
+    /* ACS ACK: MsgID 를 되돌린다. 기록을 지운다 */
+    sprintf(b, "A1%c%02dEOPA00000000", (char)id, AGV_ID);
+    send_frame(b, 0);
+    ticks(5);
+    assert(acs_cross_out_count() == 0 && host.ee[ACS_OUT_EE_HEAD] == 0xFFFF);
+    host.sci[HAL_SCI_A].tx_len = 0;
+    ticks(30);
+    assert(!tx_has('E', 'O'));
+    printf("  cross out ok\n");
+}
 static void test_status_report(void)
 {
     boot();
@@ -1157,6 +1230,7 @@ int main(void)
     test_compensate();
     test_rfid_retry();
     test_cross();
+    test_cross_out();
     test_status_report();
     test_ui();
     test_para_init();

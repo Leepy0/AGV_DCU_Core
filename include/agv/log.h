@@ -9,7 +9,8 @@ enum {
     LOG_ACS_GIVE_UP,     /* a = Info, b = 번호 */
     LOG_SCI_ERROR,       /* a = 포트, b = 횟수 */
     LOG_EE_FAIL,         /* a = 주소 */
-    LOG_FRAME_DROP       /* 프레임 큐가 찼다 */
+    LOG_FRAME_DROP,      /* 프레임 큐가 찼다 */
+    LOG_CROSS_OUT_FULL   /* OUT 큐가 찼다. a = 버린 구역, b = 큐 수 */
 };
 
 typedef struct { uint16_t code; int16_t a, b; uint16_t seq; } log_rec_t;

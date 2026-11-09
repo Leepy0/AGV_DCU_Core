@@ -55,7 +55,7 @@ static void plant(int16_t stiction)
             s_left_acc[i] -= 6000;
             motor_encoder_pulse(i);
             D.period[i] = 500000000L / (rpm ? rpm : 1);
-            if ((i == 0) && !D.backward) { s_travel++; if (D.cross_pulses > 0) { D.cross_pulses--; } }
+            if ((i == 0) && !D.backward) { s_travel++; D.travel_pulses++; if (D.cross_pulses > 0) { D.cross_pulses--; } }
             if ((i == 0) && !D.backward && (D.stop_pulses > 0)) { D.stop_pulses--; }
             if ((i == 1) && D.backward && (D.stop_pulses > 0))  { D.stop_pulses--; }
             if (D.turn_pulses > 0) { D.turn_pulses--; }
@@ -259,6 +259,70 @@ static void test_traffic(void)
 }
 
 /* 위치 정지 넘침 기록. 제동 토크가 없는 바퀴로 잰다 */
+/* OUT 태그는 서지 않는다. 미확인으로 CROSS_OUT_MAX_MM 를 달리면 그 자리 제동 거리로 서고, 확인되면 다시 간다 */
+static void test_traffic_out(void)
+{
+    const float m = (float)CROSS_OUT_MAX_MM;
+    int t, order;
+    long from;
+    float at;
+
+    for (order = 0; order < 2; order++) {        /* 2 m 정지가 끝나기 전·뒤에 확인 */
+        setup(2000);
+        (void)param_set(P_CROSS_MODE, 1);
+        from = s_travel;
+        acs_cross_out(1);
+        assert(acs_cross_out_count() == 1);
+        watch_reset();
+        while (travel_mm(from) < m - 20.0f) {
+            watch_tick();
+            assert(stop_phase() == STOP_PHASE_IDLE && D.last_input == 2000 && D.action_err == 0);
+        }
+        assert(!D.cross_out_flag && !D.cross_out_on);
+        for (t = 0; (t < 3000) && (stop_reason() != STOP_REASON_TRAFFIC_POSITION); t++) { watch_tick(); }
+        at = travel_mm(from);
+        assert(at >= m && at < m + 5.0f);                                  /* 2 m 에서 곧바로 제동 */
+        if (order == 1) {
+            for (t = 0; t < 5; t++) { watch_tick(); }
+            acs_on_ack('O', '0');                                          /* 서기 전에 확인: 0 으로 내리지 않는다 */
+            for (t = 0; t < 1000; t++) { watch_tick(); }
+            assert(s_zero == 0 && s_jump == 0 && s_flip == 0 && D.last_input == 2000);
+            continue;
+        }
+        assert(run_until_hold(3000) < 3000);
+        printf("  out %.0f mm: brake from %.1f mm, hold at %.1f mm\n", m, at, travel_mm(from));
+        assert(D.cross_out_on && !D.cross_out_flag && D.action_err == ERR_CROSS_WAIT);
+        assert(travel_mm(from) < m + 300.0f && s_jump == 0 && s_flip == 0);
+        for (t = 0; t < 200; t++) { tick(0); assert(D.last_input == 0); }   /* OUT 확인까지 선다 */
+        acs_on_ack('O', '0');
+        tick(0);
+        assert(!D.cross_out_on && D.action_err == 0 && !acs_cross_out_due());
+        for (t = 0; t < 1000; t++) { tick(0); }
+        assert(D.last_input == 2000 && D.flag_run == 1);
+    }
+
+    /* 'I' 때 OUT 이 남아 있으면 CID 에서 허가와 OUT 확인을 둘 다 기다린다 (어느 쪽이 먼저든) */
+    for (order = 0; order < 2; order++) {
+        setup(2000);
+        (void)param_set(P_CROSS_MODE, 1);
+        (void)param_set(P_CROSS_IN_CM, 60);
+        acs_cross_out(1);
+        from = s_travel;
+        acs_cross_in(2);
+        assert(D.cross_in_flag && D.cross_out_flag);
+        assert(run_until_hold(3000) < 3000);
+        { float err = travel_mm(from) - 600.0f; assert(err > -3.0f && err < 3.0f); }
+        assert(D.cross_in_on && D.cross_out_on);
+        if (order == 0) { acs_cross_release(ACS_CROSS_IN); }
+        else            { acs_on_ack('O', '0'); }
+        for (t = 0; t < 200; t++) { tick(0); assert(D.last_input == 0 && D.action_err == ERR_CROSS_WAIT); }
+        if (order == 0) { acs_on_ack('O', '0'); }
+        else            { acs_cross_release(ACS_CROSS_IN); }
+        for (t = 0; t < 1000; t++) { tick(0); }
+        assert(D.last_input == 2000 && D.flag_run == 1 && !D.cross_in_on && !D.cross_out_on);
+    }
+}
+
 static void test_stop_last(void)
 {
     long from;
@@ -627,6 +691,7 @@ int main(void)
 
     test_ramp_continuity();
     test_traffic();
+    test_traffic_out();
     test_smooth_resume();
     test_stop_last();
     puts("test_stop ok");

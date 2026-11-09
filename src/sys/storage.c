@@ -113,8 +113,7 @@ const param_store_t storage_queued   = { queue_read, storage_request };
 void storage_load(void)
 {
     uint16_t a;
-    for (a = 0; a < EE_WORDS; a++) { s_val[a] = 0xFFFFu; }
-    for (a = 0; a <= (uint16_t)KEEP_LAST; a++) { s_val[a] = hal_ee_read(a); }
+    for (a = 0; a < EE_WORDS; a++) { s_val[a] = hal_ee_read(a); }
     for (a = 0; a < (uint16_t)KEEP_COUNT; a++) { s_keep[a] = (int16_t)s_val[KEEP_FIRST + a]; }
 }
 

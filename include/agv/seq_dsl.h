@@ -87,7 +87,7 @@ typedef unsigned long long dsl_cond_t;
 #define X_FORBACK_MODE               XC_FORBACK_MODE, 0, 0
 #define X_LOW_BATTERY                XC_LOW_BATTERY, 0, 0
 #define X_CROSS_IN                   XC_CROSS, 0, 0                      /* IN 대기 또는 유지 중 */
-#define X_CROSS_OUT                  (XC_CROSS | DSL_SLOT(1)), 0, 0
+#define X_CROSS_OUT                  (XC_CROSS | DSL_SLOT(1)), 0, 0      /* OUT 확인 대기 또는 유지 중 (OUT 태그에서는 서지 않는다) */
 #define X_CROSS_IN_ON                (XC_CROSS | DSL_SLOT(2)), 0, 0      /* IN 유지(허가 대기 정지) 중 */
 #define X_CROSS_OUT_ON               (XC_CROSS | DSL_SLOT(3)), 0, 0
 #define X_ERR_EQ(n)                  XC_ERR_EQ, (n), 0

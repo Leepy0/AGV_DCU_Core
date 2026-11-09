@@ -9,6 +9,9 @@ extern uint16_t fake_key;           /* ui_key() */
 extern int      fake_restart_count, fake_link_full, fake_tx_count;
 extern uint16_t fake_tx[256][20];
 extern int      fake_speed_arg, fake_forback_arg, fake_turn_count;
+extern int      fake_log_count;     /* log_event 횟수. 마지막 code·a 를 남긴다 */
+extern uint16_t fake_log_code;
+extern int16_t  fake_log_a;
 
 /* EEPROM 흉내. 전원 차단은 fake_ee_cut 번째 쓰기부터 안 써지는 것으로 본다 */
 extern uint16_t fake_ee[128];

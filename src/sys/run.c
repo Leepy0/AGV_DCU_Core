@@ -144,6 +144,7 @@ void run_encoder(uint16_t wheel, uint32_t period)
     if ((D.backward != 0) == (wheel == 1u)) {
         if (D.stop_pulses > 0) { D.stop_pulses--; }
         if (D.cross_pulses > 0) { D.cross_pulses--; }
+        D.travel_pulses++;
     }
     if (D.flag_turn && (D.turn_pulses > 0)) {
         if (D.tape_align) { D.tape_turned++; }   /* 끝은 가이드가 정한다. turn_pulses 는 회전 중 표시로 둔다 */

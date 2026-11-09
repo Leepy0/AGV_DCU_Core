@@ -477,7 +477,7 @@ int main(void)
     assert(acs_pending() == 4);
     seq_run();
     assert(fake_out == 0);
-    acs_on_ack('L'); acs_on_ack('U'); acs_on_ack('A'); acs_on_ack('F');
+    acs_on_ack('L', '0'); acs_on_ack('U', '0'); acs_on_ack('A', '0'); acs_on_ack('F', '0');
     seq_run();
     assert(fake_out == BIT(O_A) && acs_station_get(1) == 42 && acs_station_count() == 2 && acs_station_get(0) == 0);
     /* ACK 시간 제한 */

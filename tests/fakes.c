@@ -37,7 +37,10 @@ void     io_seq_outputs_off(void) { fake_seq_off_count++; fake_out = 0; }
 uint16_t ui_key(void) { return fake_key; }
 
 void run_request_restart(uint16_t sec) { (void)sec; fake_restart_count++; }
-void log_event(uint16_t code, int16_t a, int16_t b) { (void)code; (void)a; (void)b; }
+int      fake_log_count;
+uint16_t fake_log_code;
+int16_t  fake_log_a;
+void log_event(uint16_t code, int16_t a, int16_t b) { (void)b; fake_log_count++; fake_log_code = code; fake_log_a = a; }
 
 int link_send(const uint16_t *buf, uint16_t n)
 {

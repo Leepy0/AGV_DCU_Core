@@ -263,22 +263,16 @@ static void on_event(const rx_item_t *it)
     if (kind != 'S') { acs_set_pan(b[2]); }
     switch (kind) {
     case 'I':
-    case 'O':
         {   /* 대기 거리는 'T' 정지 거리와 같은 방식으로 수신 지연·RFID 재시도를 보정한다.
              * 다른 쪽 대기가 이미 건 거리는 ISR 이 줄이고 있으므로 새로 건 경우만 뺀다 */
             int32_t d = tag_distance(it, num);
             int16_t fresh = (int16_t)(!D.cross_in_flag && !D.cross_out_flag);
-            if (kind == 'I') {
-                if (D.cross_in_flag || D.cross_in_on) { break; }
-                acs_cross_in(num);
-            }
-            else {
-                if (D.cross_out_flag || D.cross_out_on) { break; }
-                acs_cross_out(num);
-            }
+            if (D.cross_in_flag || D.cross_in_on) { break; }
+            acs_cross_in(num);
             if (fresh) { cross_compensate(d); }
         }
         break;
+    case 'O': acs_cross_out(num); break;      /* 보고 큐에만 넣는다. 서지 않는다 */
     case 'D': acs_report_slot(ACS_SLOT_DISPLAY, num); break;
     case 'B': run_standby(num, 1); break;
     case 'C': run_standby_clear(0); break;
@@ -406,7 +400,7 @@ static void dispatch(const rx_item_t *it)
     case 'W': on_traffic(b); break;
     case 'A':
         acs_set_pan(b[2]);
-        acs_on_ack(b[7]);
+        acs_on_ack(b[7], b[3]);
         break;
     case 'N': on_next(b); break;
     case 'C': on_command(b); break;

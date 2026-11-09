@@ -83,6 +83,7 @@ typedef struct {
     volatile int16_t stop_pulses;    /* gCnt_stop_lenght */
     volatile int16_t turn_pulses;    /* Cnt_Turn_Angle */
     volatile int16_t cross_pulses;   /* 교차로 대기 정지까지 남은 거리. cross_*_flag 가 켜져 있을 때만 뜻이 있다 */
+    volatile uint32_t travel_pulses; /* 정지 거리를 세는 바퀴의 누적 펄스. 돈다. 차로만 쓴다 */
     int16_t turn_motion;             /* Turn_Direction: 0 없음, MOTION_CCW, MOTION_CW */
     int16_t turn_obs_use;            /* Turn_OBS_Use */
     int16_t tape_align;              /* DA_Tape_Turn_Angle_Align */
@@ -102,7 +103,7 @@ typedef struct {
 
     /* 일시정지 조건 */
     int16_t cross_in_flag, cross_in_on;     /* Flag_Cross_In_Flag/On */
-    int16_t cross_out_flag, cross_out_on;   /* Flag_Cross_Out_Flag/On */
+    int16_t cross_out_flag, cross_out_on;   /* OUT 확인 대기·유지. OUT 태그에서는 서지 않는다 (acs.h) */
     int16_t cross_ack_error;                /* DA_ACS_Cross_In/Out_Ack_Error 의 OR */
     int16_t pause_stop;              /* Flag_Pause_Stop */
     int16_t ext_sen_on;              /* Ext_Sen_OnOff */

@@ -4,6 +4,7 @@
 #include <string.h>
 #include "agv/acs.h"
 #include "agv/frame.h"
+#include "agv/log.h"
 #include "fakes.h"
 
 #define D agv_drive
@@ -58,8 +59,8 @@ int main(void)
     assert(fake_tx_count == 3 && fake_tx[2][6] == 'A');
 
     /* 무응답 슬롯이 있어도 새 슬롯은 곧바로 나간다 (선두 대기 없음) */
-    acs_on_ack('U');
-    acs_on_ack('A');
+    acs_on_ack('U', '0');
+    acs_on_ack('A', '0');
     acs_report('F', 1);
     acs_schedule();
     assert(fake_tx[fake_tx_count - 1][6] == 'F');
@@ -70,7 +71,7 @@ int main(void)
     acs_report('U', 2);
     acs_report('A', 3);
     ticks(3);
-    acs_on_ack('L');
+    acs_on_ack('L', '0');
     ticks(250);
     assert(sent_info('L') == 1 && sent_info('U') >= 3 && sent_info('A') >= 3);
 
@@ -147,7 +148,7 @@ int main(void)
     acs_report_slot(ACS_SLOT_STANDBY_CLEAR, 0);
     acs_report('C', 0);
     assert(acs_pending() == 3);
-    acs_on_ack('C');
+    acs_on_ack('C', '0');
     assert(acs_pending() == 2);
     ticks(2);
     /* 가장 오래된 16 번('R')이 지워졌고 9 번('E'), 21 번('L') 만 나갔다 */
@@ -156,7 +157,7 @@ int main(void)
     /* 'L' ACK 는 호출 슬롯을 지운다 */
     setup(1, 5, 0);
     acs_report('C', 3);
-    acs_on_ack('L');
+    acs_on_ack('L', '0');
     assert(acs_pending() == 0);
 
     /* 응답은 1회 송신 후 해제 */
@@ -209,7 +210,7 @@ int main(void)
     D.cross_in_on = 1;
     ticks(2);
     assert(sent_info('I') == 1 && sent_info('O') == 1);    /* 한 호출에 하나씩 */
-    acs_on_ack('I');
+    acs_on_ack('I', '0');
     assert(acs_cross_num(ACS_CROSS_IN) == 1);
     fake_tx_count = 0;
     ticks(450);
@@ -217,7 +218,7 @@ int main(void)
     assert(sent_info('O') >= 7);                /* Out 은 In 의 간격에 끌려가지 않는다 */
     ticks(120);
     assert(sent_info('I') == 1);
-    acs_on_ack('O');
+    acs_on_ack('O', '0');
     assert(!D.cross_out_flag && !D.cross_out_on && acs_cross_num(ACS_CROSS_OUT) == 0);
 
     /* 20회째 ack_error (286 근거) */
@@ -227,7 +228,7 @@ int main(void)
     { int guard = 0;
       while (!D.cross_ack_error && (guard < 5000)) { acs_schedule(); guard++; }
       assert(sent_info('I') == 20); }
-    acs_on_ack('I');
+    acs_on_ack('I', '0');
     ticks(1);
     assert(D.cross_ack_error == 0);
 
@@ -240,10 +241,10 @@ int main(void)
     ticks(2000);
     assert(D.cross_in_flag == 1 && !D.cross_in_on);
     D.cross_pulses = 7;
-    acs_cross_out(2);                           /* 먼저 건 가까운 목표를 지킨다 */
-    assert(D.cross_out_flag == 1 && D.cross_pulses == 7);
+    acs_cross_out(2);                           /* OUT 태그는 보고만 한다. 대기도 목표도 건드리지 않는다 */
+    assert(!D.cross_out_flag && !D.cross_out_on && D.cross_pulses == 7 && acs_cross_out_count() == 1);
     acs_cross_hold();
-    assert(!D.cross_in_flag && D.cross_in_on == 1 && !D.cross_out_flag && D.cross_out_on == 1);
+    assert(!D.cross_in_flag && D.cross_in_on == 1 && !D.cross_out_flag && !D.cross_out_on);
     D.cross_in_on = 0;
     ticks(1);
     assert(acs_cross_num(ACS_CROSS_IN) == 0);
@@ -267,6 +268,166 @@ int main(void)
     acs_schedule();
     assert(sent_info('L') == 1 && sent_info('I') == 0);
 
+    /* OUT 큐: 연달아 3개는 순서대로, 같은 구역은 한 번. ACK 는 지금 보내는 OUT 의 MsgID 일 때만 지운다 */
+    setup(0, 5, 1);
+    acs_cross_out(101);                         /* 구역 1 */
+    acs_cross_out(2);
+    acs_cross_out(3);
+    acs_cross_out(2);
+    assert(acs_cross_out_count() == 3 && !D.cross_out_flag && !D.cross_out_on);
+    ticks(1);
+    assert(fake_tx_count == 1 && fake_tx[0][6] == 'O' && fake_tx[0][9] == '1');
+    ticks(30);
+    assert(sent_info('O') >= 3);                /* 맨 앞만 다시 보낸다 */
+    for (int i = 0; i < fake_tx_count; i++) { assert(fake_tx[i][9] == '1'); }
+    { uint16_t id = fake_tx[fake_tx_count - 1][3];
+      acs_on_ack('O', (id == 'F') ? '1' : (uint16_t)(id + 1));    /* 다른 MsgID: 무시 */
+      assert(acs_cross_out_count() == 3);
+      acs_on_ack('O', id);
+      assert(acs_cross_out_count() == 2 && acs_cross_num(ACS_CROSS_OUT) == 2);
+      acs_on_ack('O', id);                      /* 재전송에 대한 중복 ACK 는 다음 OUT 을 지우지 않는다 */
+      assert(acs_cross_out_count() == 2); }
+    fake_tx_count = 0;
+    ticks(1);                                   /* 다음 OUT 은 곧바로 */
+    assert(fake_tx_count == 1 && fake_tx[0][6] == 'O' && fake_tx[0][9] == '2');
+    acs_on_ack('O', fake_tx[0][3]);
+    ticks(1);
+    assert(fake_tx[1][6] == 'O' && fake_tx[1][9] == '3');
+    acs_on_ack('O', '0');                       /* 구 ACS: MsgID '0' 은 맨 앞 */
+    assert(acs_cross_out_count() == 0 && acs_cross_num(ACS_CROSS_OUT) == 0);
+    ticks(100);
+    assert(sent_info('O') == 2);
+
+    /* 재발급 전 MsgID 로 늦게 온 ACK 도 받는다 */
+    setup(0, 5, 1);
+    acs_cross_out(4);
+    ticks(1);
+    { uint16_t first = fake_tx[0][3];
+      while (sent_info('O') < 31) { acs_schedule(); }
+      assert(fake_tx[fake_tx_count - 1][3] != first);
+      acs_on_ack('O', first);
+      assert(acs_cross_out_count() == 0); }
+
+    /* 가득 차면 오래된 4개를 남기고 기록한다 */
+    setup(0, 5, 1);
+    { int n0 = fake_log_count;
+      for (int i = 1; i <= 5; i++) { acs_cross_out((int16_t)i); }
+      assert(acs_cross_out_count() == ACS_OUT_MAX && acs_cross_num(ACS_CROSS_OUT) == 1);
+      assert(fake_log_count == n0 + 1 && fake_log_code == LOG_CROSS_OUT_FULL && fake_log_a == 5);
+      for (int i = 1; i <= 4; i++) { assert(acs_cross_num(ACS_CROSS_OUT) == i); acs_on_ack('O', '0'); }
+      assert(acs_cross_out_count() == 0); }
+
+    /* 수동·조그 모드와 초기화(acs_cross_clear)에도 OUT 은 ACK 까지 보낸다. IN 대기는 지워진다 */
+    setup(0, 5, 1);
+    acs_cross_in(1);
+    acs_cross_out(2);
+    acs_cross_clear();
+    D.ui_mode = UI_PARAM;
+    ticks(50);
+    assert(sent_info('O') >= 4 && sent_info('I') == 0 && !D.cross_in_flag && acs_cross_out_count() == 1);
+    D.ui_mode = UI_JOG;
+    fake_tx_count = 0;
+    ticks(50);
+    assert(sent_info('O') >= 4);
+    acs_on_ack('O', '0');
+    fake_tx_count = 0;
+    ticks(50);
+    assert(sent_info('O') == 0);
+
+    /* OUT 이 20번 미확인이면 286 근거 */
+    setup(0, 5, 1);
+    acs_cross_out(2);
+    { int guard = 0;
+      while (!D.cross_ack_error && (guard < 5000)) { acs_schedule(); guard++; }
+      assert(sent_info('O') == 20); }
+    acs_on_ack('O', '0');
+    ticks(1);
+    assert(D.cross_ack_error == 0);
+
+    /* 교차로 꺼진 설정에서는 OUT 을 만들지 않는다 */
+    setup(0, 5, 10);
+    acs_cross_out(2);
+    assert(acs_cross_out_count() == 0);
+
+    /* 'I' 때 OUT 이 남아 있으면 OUT 대기도 같은 목표로 건다. 허가와 OUT ACK 가 둘 다 와야 풀린다 */
+    for (int order = 0; order < 2; order++) {
+        setup(0, 5, 1);
+        (void)param_set(P_CROSS_IN_CM, 60);
+        acs_cross_out(2);
+        acs_cross_in(3);
+        assert(D.cross_in_flag && D.cross_out_flag && D.cross_pulses == (int16_t)(600.0f * param_dv.one_length_pulse + 0.5f));
+        acs_cross_hold();
+        assert(D.cross_in_on && D.cross_out_on);
+        if (order == 0) { acs_cross_release(ACS_CROSS_IN); assert(D.cross_out_on); acs_on_ack('O', '0'); }
+        else            { acs_on_ack('O', '0'); assert(D.cross_in_on && !D.cross_out_on); acs_cross_release(ACS_CROSS_IN); }
+        assert(!D.cross_in_flag && !D.cross_in_on && !D.cross_out_flag && !D.cross_out_on);
+    }
+    setup(0, 5, 1);                             /* OUT 이 없으면 IN 만 */
+    (void)param_set(P_CROSS_IN_CM, 60);
+    acs_cross_in(3);
+    assert(D.cross_in_flag && !D.cross_out_flag);
+
+    /* 2 m: 가장 오래된 OUT 태그부터 잰다 */
+    setup(0, 5, 1);
+    { int32_t m = (int32_t)((float)CROSS_OUT_MAX_MM * param_dv.one_length_pulse) + 1;
+      acs_cross_out(2);
+      D.travel_pulses += (uint32_t)(m / 2);
+      acs_cross_out(3);
+      assert(!acs_cross_out_due());
+      D.travel_pulses += (uint32_t)(m / 2 + 1);
+      assert(acs_cross_out_due());
+      acs_on_ack('O', '0');
+      assert(!acs_cross_out_due());             /* 다음 OUT 은 제 태그부터 */
+      D.travel_pulses += (uint32_t)(m / 2 + 1);
+      assert(acs_cross_out_due()); }
+
+    /* EEPROM: 1 s 안에 확인되면 쓰지 않는다 */
+    setup(0, 5, 1);
+    acs_out_boot(&fake_store);
+    { int w0 = fake_ee_writes;
+      acs_cross_out(5);
+      ticks(99);
+      acs_on_ack('O', '0');
+      ticks(300);
+      assert(fake_ee_writes == w0 && fake_ee[ACS_OUT_EE_HEAD] == 0xFFFF); }
+
+    /* 1 s 넘게 미확인이면 한 번 쓰고, 부팅 뒤 읽어 다시 보내고, 확인되면 한 번 지운다 */
+    setup(0, 5, 1);
+    acs_out_boot(&fake_store);
+    { int w0 = fake_ee_writes;
+      acs_cross_out(6);
+      acs_cross_out(7);
+      ticks(99);
+      assert(fake_ee_writes == w0);
+      ticks(1);
+      assert(fake_ee_writes == w0 + 3);
+      assert(fake_ee[ACS_OUT_EE_FIRST] == 6 && fake_ee[ACS_OUT_EE_FIRST + 1] == 7 && fake_ee[ACS_OUT_EE_HEAD] == 0x4F02);
+      ticks(500);
+      assert(fake_ee_writes == w0 + 3); }
+    acs_reset();                                /* 전원 차단 */
+    fake_tx_count = 0;
+    { int w0 = fake_ee_writes;
+      acs_out_boot(&fake_store);
+      assert(acs_cross_out_count() == 2 && acs_cross_num(ACS_CROSS_OUT) == 6 && fake_ee_writes == w0);
+      ticks(1);
+      assert(fake_tx_count == 1 && fake_tx[0][6] == 'O' && fake_tx[0][9] == '6');
+      acs_on_ack('O', fake_tx[0][3]);           /* 남은 7 은 이미 1 s 넘었다: 7 만 다시 쓴다 */
+      ticks(1);
+      assert(fake_ee_writes == w0 + 2 && fake_ee[ACS_OUT_EE_FIRST] == 7 && fake_ee[ACS_OUT_EE_HEAD] == 0x4F01);
+      acs_on_ack('O', '0');
+      assert(fake_ee_writes == w0 + 3 && fake_ee[ACS_OUT_EE_HEAD] == 0xFFFF);
+      ticks(300);
+      assert(fake_ee_writes == w0 + 3); }
+    acs_reset();
+    acs_out_boot(&fake_store);
+    assert(acs_cross_out_count() == 0);
+
+    /* 깨진 기록은 읽지 않는다 */
+    setup(0, 5, 1);
+    fake_ee[ACS_OUT_EE_HEAD] = 0x4F07;
+    acs_out_boot(&fake_store);
+    assert(acs_cross_out_count() == 0);
+
     /* 스테이션 큐 상한·중복 */
     setup(1, 5, 0);
     for (int i = 1; i <= ACS_STATION_MAX; i++) { assert(acs_station_push((int16_t)i) == 1); }
@@ -283,7 +444,7 @@ int main(void)
     for (long i = 0; i < 500; i++) { acs_error_tick(); }
     ticks(1);
     assert(sent_info('X') == 1 && fake_tx[0][7] == '2' && fake_tx[0][8] == '7' && fake_tx[0][9] == '7');
-    acs_on_ack('X');
+    acs_on_ack('X', '0');
     for (long i = 500; i < 60000L; i++) { acs_error_tick(); }
     assert(acs_pending() == 0);
     acs_error_tick();

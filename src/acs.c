@@ -18,6 +18,9 @@
 #define CROSS_TRY_WRAP        100
 #define ERR_REPORT_IDLE_TICKS 500   /* 오류 5초 뒤 'X' */
 #define ERR_REPORT_TICKS_PER_MIN 6000UL
+#define OUT_SAVE_TICKS        100   /* OUT 이 1 s 넘게 미확인이면 EEPROM 에 둔다 */
+#define OUT_EE_MARK           0x4F00u   /* 머리 상위 'O', 하위 개수 */
+#define OUT_EE_EMPTY          0xFFFFu
 
 typedef struct {
     uint16_t info;          /* 0 = 비어 있음 */
@@ -34,6 +37,7 @@ typedef struct {
     int16_t  num;
     int16_t  bat;
     uint16_t msgid;
+    uint16_t msgid_old;     /* 재발급 전 MsgID. 늦게 온 ACK 도 받는다 */
     uint16_t ack;
     uint16_t ack_error;
     uint16_t retry;
@@ -41,6 +45,12 @@ typedef struct {
 } acs_cross_t;
 
 typedef struct { uint16_t slot, type, info; } acs_map_t;
+
+typedef struct {
+    int16_t  num;
+    uint16_t age;           /* 넣은 뒤 틱. OUT_SAVE_TICKS 에서 멈춘다 */
+    uint32_t at;            /* 태그 때 D.travel_pulses */
+} acs_out_t;
 
 /* 위에서 아래로 Info 를 찾으므로 'C' 는 호출 슬롯이 먼저다 */
 static const acs_map_t s_map[] = {
@@ -64,6 +74,11 @@ static int16_t     s_station[ACS_STATION_MAX];
 static uint16_t    s_station_cnt;
 static uint32_t    s_err_ticks;      /* DA_EST_cnt */
 static uint16_t    s_err_reported;   /* AGV_Error_Status_Flag */
+static acs_out_t   s_out[ACS_OUT_MAX];
+static uint16_t    s_out_cnt;
+static const param_store_t *s_out_store;
+static uint16_t    s_out_dirty;      /* 큐가 EEPROM 기록과 다르다 */
+static uint16_t    s_out_written;    /* EEPROM 에 기록이 있다 */
 
 static uint16_t acs_enabled(void)   { return param_get(P_ACS_RETRY_LEGACY) != 0; }
 uint16_t acs_pan(void)              { return s_pan; }
@@ -74,6 +89,7 @@ uint16_t acs_station_count(void)         { return s_station_cnt; }
 int16_t  acs_cross_num(uint16_t which)   { return s_cross[which].num; }
 uint16_t acs_cross_acked(uint16_t which) { return s_cross[which].ack; }
 uint16_t acs_cross_retry(uint16_t which) { return s_cross[which].retry; }
+uint16_t acs_cross_out_count(void)       { return s_out_cnt; }
 
 void acs_reset(void)
 {
@@ -92,6 +108,9 @@ void acs_reset(void)
     s_jitter = 0;
     s_err_ticks = 0;
     s_err_reported = 0;
+    s_out_cnt = 0;
+    s_out_store = 0;
+    s_out_dirty = s_out_written = 0;
     acs_station_reset();
 }
 
@@ -214,7 +233,9 @@ static int16_t older(uint16_t a, uint16_t b)
     return (int16_t)(a - b) < 0;
 }
 
-void acs_on_ack(uint16_t info)
+static void out_pop(void);
+
+void acs_on_ack(uint16_t info, uint16_t msgid)
 {
     uint16_t i;
     int16_t best = -1;
@@ -233,13 +254,10 @@ void acs_on_ack(uint16_t info)
         s_cross[ACS_CROSS_IN].retry = 0;
         s_cross[ACS_CROSS_IN].timer = CROSS_KEEPALIVE;
     }
-    else if (info == 'O') {
-        s_cross[ACS_CROSS_OUT].num = 0;
-        s_cross[ACS_CROSS_OUT].ack_error = 0;
-        s_cross[ACS_CROSS_OUT].retry = 0;
-        s_cross[ACS_CROSS_OUT].timer = CROSS_KEEPALIVE;
-        D.cross_out_flag = 0;
-        D.cross_out_on = 0;
+    else if ((info == 'O') && (s_out_cnt > 0)) {
+        /* ACK 는 구역 번호 없이 MsgID 를 되돌린다. 재전송마다 오는 중복 ACK 가 다음 OUT 을 지우지 않게 맞춰 본다 */
+        acs_cross_t *c = &s_cross[ACS_CROSS_OUT];
+        if ((msgid == '0') || (msgid == c->msgid) || (msgid == c->msgid_old)) { out_pop(); }
     }
 }
 
@@ -320,13 +338,18 @@ static void cross_begin(acs_cross_t *c, int16_t id)
     c->retry = 0;
     c->bat = param_get(P_BAT_DV);
     c->msgid = frame_msgid_next();
+    c->msgid_old = c->msgid;
 }
 
 void acs_cross_release(uint16_t which)
 {
-    cross_clear(&s_cross[which]);
-    if (which == ACS_CROSS_IN) { D.cross_in_flag = D.cross_in_on = 0; }
-    else                       { D.cross_out_flag = D.cross_out_on = 0; }
+    if (which == ACS_CROSS_IN) {
+        cross_clear(&s_cross[ACS_CROSS_IN]);
+        D.cross_in_flag = D.cross_in_on = 0;
+    }
+    else {
+        D.cross_out_flag = D.cross_out_on = 0;     /* 보고 큐는 ACK 까지 남는다. 2 m 를 넘었으면 stop.c 가 다시 건다 */
+    }
 }
 
 void acs_cross_clear(void)
@@ -355,13 +378,104 @@ void acs_cross_in(int16_t id)
     cross_begin(&s_cross[ACS_CROSS_IN], id);
     cross_arm(&D.cross_in_flag, &D.cross_in_on);
     if (seq_is_active()) { D.cross_in_on = 1; }
+    /* 앞 구역 OUT 이 아직 미확인이면 같은 자리에서 OUT 확인도 기다린다 */
+    if ((s_out_cnt > 0) && !D.cross_out_on) {
+        D.cross_out_flag = D.cross_in_flag;
+        D.cross_out_on = D.cross_in_on;
+    }
+}
+
+/* ---- OUT 큐 ---- */
+
+/* 기록은 1 s 넘게 미확인일 때만, 지우기는 기록이 있을 때만 한다(EEPROM 수명).
+ * 저장 큐는 낮은 주소부터 쓰므로 번호가 먼저, 머리가 나중에 써진다 */
+static void out_save(void)
+{
+    uint16_t i;
+    if (s_out_store == 0) { return; }
+    for (i = 0; i < s_out_cnt; i++) { s_out_store->write((uint16_t)(ACS_OUT_EE_FIRST + i), (uint16_t)s_out[i].num); }
+    s_out_store->write(ACS_OUT_EE_HEAD, (uint16_t)(OUT_EE_MARK | s_out_cnt));
+    s_out_written = 1;
+    s_out_dirty = 0;
+}
+
+static void out_push(int16_t num, uint16_t age)
+{
+    uint16_t i;
+    for (i = 0; i < s_out_cnt; i++) {
+        if (s_out[i].num == num) { return; }
+    }
+    if (s_out_cnt >= ACS_OUT_MAX) {
+        /* 오래된 쪽을 남긴다. 먼저 들어간 구역일수록 오래 막고 있고, 보내는 순서도 지킨다 */
+        log_event(LOG_CROSS_OUT_FULL, num, (int16_t)s_out_cnt);
+        return;
+    }
+    s_out[s_out_cnt].num = num;
+    s_out[s_out_cnt].age = age;
+    s_out[s_out_cnt].at = D.travel_pulses;
+    s_out_cnt++;
+    s_out_dirty = 1;
+    if (s_out_cnt == 1u) { cross_begin(&s_cross[ACS_CROSS_OUT], num); }
+}
+
+static void out_pop(void)
+{
+    uint16_t i;
+    for (i = 1; i < s_out_cnt; i++) { s_out[i - 1u] = s_out[i]; }
+    s_out_cnt--;
+    s_out_dirty = 1;
+    if (s_out_cnt > 0) {
+        cross_begin(&s_cross[ACS_CROSS_OUT], s_out[0].num);     /* 다음 OUT 을 곧바로 보낸다 */
+        return;
+    }
+    cross_clear(&s_cross[ACS_CROSS_OUT]);
+    acs_cross_release(ACS_CROSS_OUT);
+    if (s_out_written && (s_out_store != 0)) { s_out_store->write(ACS_OUT_EE_HEAD, OUT_EE_EMPTY); }
+    s_out_written = s_out_dirty = 0;
+}
+
+static void out_tick(void)
+{
+    uint16_t i;
+    for (i = 0; i < s_out_cnt; i++) {
+        if (s_out[i].age < OUT_SAVE_TICKS) { s_out[i].age++; }
+    }
+    /* 맨 앞이 가장 오래됐다 */
+    if (s_out_dirty && (s_out_cnt > 0) && (s_out[0].age >= OUT_SAVE_TICKS)) { out_save(); }
 }
 
 void acs_cross_out(int16_t id)
 {
-    if (!acs_enabled()) { return; }
-    cross_begin(&s_cross[ACS_CROSS_OUT], id);
-    cross_arm(&D.cross_out_flag, &D.cross_out_on);
+    if (!acs_enabled() || (param_dv.collision_type != 1)) { return; }
+    out_push((int16_t)(id % 100), 0);
+}
+
+int16_t acs_cross_out_due(void)
+{
+    float n = (float)CROSS_OUT_MAX_MM * param_dv.one_length_pulse;
+    if (!acs_enabled() || (s_out_cnt == 0) || (n <= 0.0f)) { return 0; }
+    return (float)(int32_t)(D.travel_pulses - s_out[0].at) >= n;
+}
+
+void acs_out_boot(const param_store_t *store)
+{
+    uint16_t i, n, head;
+
+    s_out_store = store;
+    if (store == 0) { return; }
+    head = store->read(ACS_OUT_EE_HEAD);
+    n = (uint16_t)(head & 0xFFu);
+    if (((head & 0xFF00u) != OUT_EE_MARK) || (n == 0) || (n > ACS_OUT_MAX)) { return; }
+    s_out_written = 1;
+    for (i = 0; i < n; i++) {
+        uint16_t v = store->read((uint16_t)(ACS_OUT_EE_FIRST + i));
+        if (v < 100u) { out_push((int16_t)v, OUT_SAVE_TICKS); }
+    }
+    s_out_dirty = (uint16_t)(s_out_cnt != n);    /* 깨진 칸을 뺐으면 다시 쓴다 */
+    if (s_out_cnt == 0) {
+        store->write(ACS_OUT_EE_HEAD, OUT_EE_EMPTY);
+        s_out_written = 0;
+    }
 }
 
 void acs_cross_hold(void)
@@ -385,7 +499,10 @@ static int cross_send(uint16_t which)
     acs_cross_t *c = &s_cross[which];
     uint16_t next = (uint16_t)(c->retry + 1);
 
-    if (((next % CROSS_MSGID_REISSUE) == 0) || c->ack) { c->msgid = frame_msgid_next(); }
+    if (((next % CROSS_MSGID_REISSUE) == 0) || c->ack) {
+        c->msgid_old = c->msgid;
+        c->msgid = frame_msgid_next();
+    }
     frame_build(buf, 'E', s_pan, c->msgid, (which == ACS_CROSS_IN) ? 'I' : 'O', c->num, c->bat);
     if (!link_send(buf, FRAME_LEN_LONG)) { return 0; }
     c->retry = next;
@@ -426,10 +543,12 @@ void acs_schedule(void)
     may_send = (D.ui_mode == UI_AUTO);
 
     if (param_dv.collision_type == 1) {
-        sent  = cross_tick(ACS_CROSS_IN,  (int16_t)(D.cross_in_on || D.cross_in_flag), may_send);
-        sent |= cross_tick(ACS_CROSS_OUT, (int16_t)(D.cross_out_on || D.cross_out_flag), (uint16_t)(may_send && !sent));
-        D.cross_ack_error = (int16_t)(s_cross[ACS_CROSS_IN].ack_error || s_cross[ACS_CROSS_OUT].ack_error);
+        sent = cross_tick(ACS_CROSS_IN, (int16_t)(D.cross_in_on || D.cross_in_flag), may_send);
     }
+    /* OUT 은 모드·초기화와 무관하게 ACK 까지 보낸다. 놓치면 구역이 영영 막힌다 */
+    sent |= cross_tick(ACS_CROSS_OUT, (int16_t)(s_out_cnt > 0), (uint16_t)!sent);
+    D.cross_ack_error = (int16_t)(s_cross[ACS_CROSS_IN].ack_error || s_cross[ACS_CROSS_OUT].ack_error);
+    out_tick();
     slots_tick((uint16_t)(may_send && !sent));
 }
 

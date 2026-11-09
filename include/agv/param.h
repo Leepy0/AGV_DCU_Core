@@ -17,7 +17,7 @@ enum {
     P_LAMP_EXT_USE, P_SPEED_MIN, P_SWITCH_START_NUM, P_TAG_TYPE,
     P_COMM_LINK,            /* 31: 0 지그비, 1 WiFi 브릿지 */
     P_STOP_LEN_FWD_MM, P_ACS_STANDBY, P_BRANCH_OFFSET,
-    P_CROSS_IN_CM,          /* 35: 교차로 대기 정지 위치, 'I'·'O' 태그 뒤 cm. 0 = 태그에서 바로 정지 */
+    P_CROSS_IN_CM,          /* 35: 교차로 대기 정지 위치, 'I' 태그 뒤 cm. 0 = 태그에서 바로 정지. 'O' 태그는 서지 않는다 */
     P_ACS_RETRY_LEGACY,     /* 36: 0 이면 ACS 통신 미사용 */
     P_ACS_RETRY_SEC,
     P_GUIDE_CURVE_DETECT,   /* 38: guide.h 의 GUIDE_SRC_*. 위치 소스 선택을 겸한다 */

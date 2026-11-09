@@ -596,6 +596,23 @@ static int16_t traffic_due(void)
     return (probe.phase == STOP_PHASE_CRUISE) && !cruise_left(&probe, &fb);
 }
 
+/* OUT 미확인으로 CROSS_OUT_MAX_MM 를 달렸다. 지금 속도의 제동 거리를 목표로 교차로 위치 정지를 걸고
+ * OUT 큐가 빌 때까지 선다. 더 가까운 IN 목표가 걸려 있으면 그것을 쓴다 */
+static void traffic_out_arm(void)
+{
+    stop_ctrl_t probe;
+    stop_feedback_t fb;
+    int16_t entry = (D.last_input >= 0) ? D.last_input : (int16_t)(-D.last_input);
+    float n;
+
+    get_feedback(&fb, STOP_REASON_TRAFFIC_POSITION);
+    stop_ctrl_begin(&probe, STOP_REASON_TRAFFIC_POSITION, entry, entry, P.acc, P.dcc, 1, fb.pulses_per_rpm_tick);
+    n = braking_pulses(&probe, fb.pulses_per_rpm_tick) + 1.0f;
+    if (n > 32767.0f) { n = 32767.0f; }
+    if (!D.cross_in_flag || ((int16_t)n < D.cross_pulses)) { D.cross_pulses = (int16_t)n; }
+    D.cross_out_flag = 1;
+}
+
 int16_t stop_run(void)
 {
     stop_feedback_t fb;
@@ -642,6 +659,9 @@ int16_t stop_run(void)
             D.motion = D.turn_motion;
             stop_begin_runtime(STOP_REASON_TURN_ANGLE);
         }
+    }
+    if ((D.control == RUN_DRIVE) && D.flag_run && !D.cross_out_flag && !D.cross_out_on && acs_cross_out_due()) {
+        traffic_out_arm();
     }
     blocking = stop_blocking_reason();
     /* 교차로 대기: 제동점까지는 주행 단계가 달리고 거기서 위치 정지로 넘어간다.
