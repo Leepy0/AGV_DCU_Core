@@ -401,6 +401,7 @@ void rpmt_pass_begin(void)
     uint16_t i;
 
     agv_rpmt.pass++;
+    if (ident_build_mode() && (agv_rpmt.pass == 2)) { agv_rpmt.pass = 4; }   /* 연속 시험은 1·4회만 */
     agv_rpmt.phase = 1;
     s_rt.n = 0;
     s_rt.t = 0;

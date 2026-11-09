@@ -149,7 +149,7 @@ static uint16_t any_error(void)
 
 static void blink_step(void)
 {
-    uint16_t blink = (D.ui_mode == UI_PARAM) || (D.ui_mode == UI_IO_OUT) || tune_editing()
+    uint16_t blink = (D.ui_mode == UI_PARAM) || (D.ui_mode == UI_IO_OUT) || (tune_flick() != 0u)
                   || ((D.ui_mode == UI_AUTO) && any_error())
                   || ((D.ui_mode == UI_JOG) && ((D.rpm_avg[0] > BLINK_RPM) || (D.rpm_avg[1] > BLINK_RPM)));
 
@@ -202,7 +202,7 @@ void ui_isr(uint16_t key_input)
     s_ui.cursor = (uint16_t)((s_ui.cursor + 1u) % DISP_DIGITS);
     order = s_ui.cursor;
     value = s_ui.digit[order];
-    if ((D.ui_mode == UI_PARAM) || (D.ui_mode == UI_IO_OUT) || tune_editing()) {
+    if ((D.ui_mode == UI_PARAM) || (D.ui_mode == UI_IO_OUT) || (tune_flick() != 0u)) {
         if (!s_ui.blink_on && ((s_ui.flick >> order) & 1u)) { value = DIGIT_NONE; }
     }
     else if (!s_ui.blink_on) {
@@ -769,41 +769,31 @@ static void show_history(void)
     s_ui.flick = 0;
 }
 
-/* 결과 쪽: 글자 2개 + 값 3자리 */
-static void show_tune_page(void)
+/* 메뉴·입력·연속 시험: tune_text 의 글자를 그대로 그린다 */
+static void show_tune_text(void)
 {
-    static const char name[TUNE_PAGE_COUNT][2] = {
-        {'W', 'W'}, {'D', 'I'}, {'G', 'A'}, {'O', 'V'}, {'G', 'D'}, {'G', ' '}, {'S', 'E'}, {'S', 'P'},
-        {'F', 'L'}, {'L', 'E'}, {'L', 'R'}
-    };
-    uint16_t page = tune_page();
-    int16_t v = tune_value(page);
-    int16_t m = (v < 0) ? (int16_t)-v : v;
+    char c[DISP_DIGITS];
+    uint16_t i, dot = tune_text(c);
 
-    s_ui.digit[0] = letter(name[page][0]);
-    s_ui.digit[1] = letter(name[page][1]);
-    if (v == TUNE_NO_DATA) {
-        s_ui.digit[2] = s_ui.digit[3] = s_ui.digit[4] = DIGIT_MINUS;
+    if (s_ui.msg_save) {
+        show(letter('S'), letter('A'), letter('V'), letter('E'), DIGIT_NONE);
         return;
     }
-    if (v < 0) { s_ui.digit[1] = DIGIT_MINUS; }
-    s_ui.digit[2] = digit_of(m, 100);
-    s_ui.digit[3] = digit_of(m, 10);
-    s_ui.digit[4] = digit_of(m, 1);
-    if (tune_editing()) { s_ui.flick = (uint16_t)(1u << (5 - tune_edit_place())); }   /* 고치는 자리 */
+    for (i = 0; i < DISP_DIGITS; i++) {
+        s_ui.digit[i] = ((c[i] >= '0') && (c[i] <= '9')) ? (uint16_t)(c[i] - '0') : letter(c[i]);
+    }
+    s_ui.dot = dot;
+    s_ui.flick = tune_flick();
 }
 
 static void show_tune(void)
 {
     switch (tune_state()) {
     case TUNE_WAIT:
-        if (tune_failed())          { show(letter('F'), letter('A'), letter('I'), letter('L'), DIGIT_NONE); }
-        else if (tune_ident_mode()) { show(letter('I'), letter('D'), letter('E'), letter('N'), DIGIT_NONE); }
-        else if (tune_rpm_mode())   { show(letter('R'), letter('P'), letter('M'), DIGIT_NONE, DIGIT_NONE); }
-        else if (tune_top_mode())   { show(letter('T'), letter('O'), letter('P'), DIGIT_NONE, DIGIT_NONE); }
-        else if (tune_all_mode())   { show(letter('A'), letter('L'), letter('L'), DIGIT_NONE, DIGIT_NONE); }
-        else if (tune_temp_mode())  { show(letter('T'), letter('E'), letter('M'), letter('P'), DIGIT_NONE); }
-        else                        { show(letter('T'), letter('U'), letter('N'), letter('E'), DIGIT_NONE); }
+    case TUNE_BLD:
+    case TUNE_BLD_DONE:
+    case TUNE_SAVED:
+        show_tune_text();
         break;
     case TUNE_IDENT:    /* 회, 순서 */
         show(letter('I'), letter('D'), DIGIT_NONE, ident_pass(), ident_phase());
@@ -858,21 +848,6 @@ static void show_tune(void)
             int16_t v = (tune_page() == 1u) ? agv_rpmt.low_rpm : agv_rpmt.brk_dac;
             show(letter((tune_page() == 1u) ? 'L' : 'B'), digit_of(v, 1000), digit_of(v, 100), digit_of(v, 10), digit_of(v, 1));
             if (v <= 0) { s_ui.digit[1] = s_ui.digit[2] = s_ui.digit[3] = s_ui.digit[4] = DIGIT_MINUS; }
-        }
-        break;
-    case TUNE_GO_1:     /* 본 교차선 수 */
-        show(letter('G'), letter('O'), DIGIT_NONE, 1, (uint16_t)tune_lines());
-        break;
-    case TUNE_GO_2:
-    case TUNE_STOPPING:
-        show(letter('G'), letter('O'), DIGIT_NONE, 2, (uint16_t)tune_lines());
-        break;
-    case TUNE_DONE:
-        if (s_ui.msg_save) {
-            show(letter('S'), letter('A'), letter('V'), letter('E'), DIGIT_NONE);
-        }
-        else {
-            show_tune_page();
         }
         break;
     default:

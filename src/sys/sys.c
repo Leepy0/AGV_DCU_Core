@@ -29,7 +29,7 @@
 #define ADC_START_TICK   3u     /* 10 ms 작업 한 틱 전에 변환을 시작한다 */
 #define POWER_ON_SCANS   50u    /* 전원 안정 500 ms */
 #define IO_TEST_KEYS     (KEY_MODE + KEY_UP)   /* 전원을 켤 때 누르면 IO 시험 */
-#define TUNE_KEYS        (KEY_MODE + KEY_DOWN) /* 전원을 켤 때 누르면 회전 튜닝 */
+#define TUNE_KEYS        (KEY_MODE + KEY_SET)  /* 전원을 켤 때 누르면 튜닝 모드 */
 enum { IO_TEST_NONE = 0, IO_TEST_WAIT, IO_TEST_ON };
 
 static volatile uint16_t s_ticks, s_tick10;

@@ -1053,18 +1053,329 @@ static void test_align_turn(void)
     printf("  align turn ok\n");
 }
 
-/* 튜닝 측정: 'h' 부호가 반대이고 배율이 2 이면 저장 뒤 되살아난다 */
+/* ---- 튜닝 모드 ---- */
+
+static uint16_t glyph(char c)
+{
+    if ((c >= '0') && (c <= '9')) { return (uint16_t)(c - '0'); }
+    if ((c >= 'A') && (c <= 'Z')) { return (uint16_t)(11 + (c - 'A')); }
+    return (c == '-') ? 37u : 39u;
+}
+
+/* FND 5자리가 t 와 같다 */
+static int shows(const char *t)
+{
+    uint16_t d[5];
+    int i;
+    ui_digits(d);
+    for (i = 0; i < 5; i++) {
+        if (d[i] != glyph(t[i])) { return 0; }
+    }
+    return 1;
+}
+
+/* keys 를 누른 채 전원을 켠다. EEPROM 은 keep 이면 그대로 둔다 */
+static void boot_keys(uint16_t keys, int keep)
+{
+    uint16_t ee[256];
+    memcpy(ee, host.ee, sizeof(ee));
+    host_reset();
+    if (keep) { memcpy(host.ee, ee, sizeof(ee)); }
+    memset(&D, 0, sizeof(D));
+    host.key = keys;
+    sys_boot();
+    host.adc = 300u << 4;
+    ticks(60);
+    assert(sys_power_on());
+    host.key = 0;
+    ticks(10);
+}
+
+/* 전원 투입: MODE + SET = 튜닝(t1), MODE + DOWN 은 더 이상 튜닝이 아니다 */
+static void test_tune_entry(void)
+{
+    boot_keys(KEY_MODE + KEY_DOWN, 0);
+    assert(!tune_active());
+    boot_keys(KEY_MODE + KEY_SET, 0);
+    assert(tune_active() && (tune_state() == TUNE_WAIT) && (tune_menu() == 100));
+    assert(shows("T1   ") && (D.ui_mode == UI_AUTO));
+    printf("  tune entry ok\n");
+}
+
+/* 메뉴: MODE 같은 단계 다음, SET 아래로, RESET 위로. MODE 는 파라미터·조그 화면으로 가지 않는다 */
+static void test_tune_menu(void)
+{
+    uint16_t d[5];
+    int k;
+
+    boot_keys(KEY_MODE + KEY_SET, 0);
+    key(KEY_MODE);
+    assert(tune_menu() == 200 && shows("T2   "));
+    key(KEY_MODE);
+    assert(tune_menu() == 300 && shows("T3   "));
+    key(KEY_MODE);
+    assert(tune_menu() == 100);
+    key(KEY_SET);                                     /* t1 입력: 지름, GD, 상한, L */
+    assert(tune_menu() == 110 && shows("DI202"));
+    key(KEY_MODE);
+    assert(tune_menu() == 120 && shows("GD250"));
+    key(KEY_MODE);
+    assert(tune_menu() == 130 && shows("TP060"));     /* 빈 EEPROM 상한 60 */
+    key(KEY_MODE);
+    assert(tune_menu() == 140 && shows("L0000"));
+    key(KEY_MODE);
+    assert(tune_menu() == 110);
+    key(KEY_RESET);
+    assert(tune_menu() == 100);
+    key(KEY_MODE);
+    key(KEY_SET);
+    assert(tune_menu() == 210 && shows("T21CH"));
+    ui_digits(d);
+    for (k = 0; k < 3; k++) { key(KEY_MODE); }
+    assert(tune_menu() == 240 && shows("T24AP"));
+    key(KEY_SET);                                     /* L 입력 */
+    assert(tune_menu() == 241 && shows("L0000"));
+    key(KEY_MODE);
+    assert(tune_menu() == 241);                       /* 한 칸뿐 */
+    key(KEY_RESET);
+    key(KEY_MODE);
+    assert(tune_menu() == 210);
+    key(KEY_MODE);
+    key(KEY_MODE);
+    key(KEY_SET);                                     /* t2.3 은 L 이 없다 */
+    assert(tune_menu() == 230 && shows("T23GS"));
+    key(KEY_RESET);
+    key(KEY_RESET);
+    assert(tune_menu() == 200);
+    key(KEY_MODE);
+    key(KEY_SET);
+    assert(tune_menu() == 310 && tune_ident_mode() && shows("T31ID"));
+    for (k = 0; k < 4; k++) { key(KEY_MODE); }
+    assert(tune_temp_mode() && !tune_all_mode() && shows("T35TE"));
+    key(KEY_MODE);
+    assert(tune_ident_mode());
+    assert(D.ui_mode == UI_AUTO && tune_active() && !D.flag_jog_on);
+    printf("  tune menu ok\n");
+}
+
+/* 입력: SET 수정, SHIFT 자리, UP·DOWN 값, SET 확정 즉시 저장, RESET 취소. L·상한은 다시 켜도 남는다 */
+static void test_tune_inputs(void)
+{
+    int k;
+
+    boot_keys(KEY_MODE + KEY_SET, 0);
+    key(KEY_SET);                                     /* t1 지름 */
+    key(KEY_SET);
+    assert(tune_editing() && tune_flick() == 0x10u);
+    key(KEY_UP);
+    key(KEY_SHIFT);
+    assert(tune_flick() == 0x08u);
+    key(KEY_UP);
+    assert(shows("DI213") && param_get(P_WHEEL_DIA_MM) == 202);   /* 확정 전 */
+    key(KEY_SET);
+    assert(!tune_editing() && param_get(P_WHEEL_DIA_MM) == 213);
+    ticks(10);
+    assert(host.ee[P_WHEEL_DIA_MM] == 213);
+    key(KEY_SET);
+    key(KEY_UP);
+    key(KEY_RESET);                                   /* 취소 */
+    assert(!tune_editing() && param_get(P_WHEEL_DIA_MM) == 213 && tune_menu() == 110);
+    key(KEY_MODE);
+    key(KEY_MODE);                                    /* 상한 */
+    key(KEY_SET);
+    key(KEY_SHIFT);
+    key(KEY_DOWN);                                    /* 50 */
+    key(KEY_SHIFT);                                   /* 두 자리 칸은 1 → 2 → 1 */
+    for (k = 0; k < 5; k++) { key(KEY_UP); }
+    key(KEY_SET);
+    assert(shows("SAVE "));                           /* 저장 알림 1 s */
+    ticks(100);
+    assert(shows("TP055"));
+    key(KEY_MODE);                                    /* L 네 자리 */
+    key(KEY_SET);
+    for (k = 0; k < 3; k++) { key(KEY_SHIFT); }
+    assert(tune_flick() == 0x02u);
+    for (k = 0; k < 7; k++) { key(KEY_UP); }
+    key(KEY_SHIFT);                                   /* 넷째 자리 다음은 일의 자리 */
+    for (k = 0; k < 5; k++) { key(KEY_UP); }
+    key(KEY_SET);
+    ticks(100);
+    assert(shows("L7005"));
+    ticks(20);
+    assert(host.ee[TUNE_EE_TRACK] == 7005 && host.ee[TUNE_EE_CAP] == 55);
+    boot_keys(KEY_MODE + KEY_SET, 1);
+    key(KEY_SET);
+    key(KEY_MODE);
+    key(KEY_MODE);
+    assert(shows("TP055"));
+    key(KEY_MODE);
+    assert(shows("L7005"));
+    printf("  tune inputs ok\n");
+}
+
+/* START 한 뒤 연속 시험이 끝난 것처럼 만들고 세운다. mask 와 시작 값은 ident_start_build 가 넣었다 */
+static void fake_build_done(void)
+{
+    agv_build.state = 2;
+    agv_ident.state = 2;             /* 지금 단계 칸. ident_run 이 1 을 낸다 */
+    tick();
+    assert(tune_state() == TUNE_BLD_DONE);
+    raw_a(RAW_STOP, 0);
+    ticks(2);
+    raw_a(0, RAW_STOP);
+    ticks(300);
+    assert(!D.flag_run && !D.flag_stopping);
+}
+
+/* 결과 쪽을 SAVE 까지 UP 으로 넘긴다 */
+static void to_save(void)
+{
+    int k;
+    for (k = 0; (k < 30) && !shows("SAVE "); k++) { key(KEY_UP); }
+    assert(shows("SAVE "));
+}
+
+/* t1 결과: 채택 저장 1·13·35·51 은 SET 채택, RESET 건너뛰기, SAVE 에서만 쓴다. 기준값을 쓰고 RBOT */
+static void test_tune_t1_save(void)
+{
+    uint16_t before[128];
+    int a, k;
+
+    boot_keys(KEY_MODE + KEY_SET, 0);
+    drive_up();                      /* t1 에서 START */
+    run_scan(3);
+    assert(tune_state() == TUNE_BLD && ident_build_mode() && agv_build.mask != 0);
+    assert(shows("B1008"));          /* 단계 1, 0회, 선 찾기 */
+    agv_build.high_rec = 25;
+    agv_build.dcc_rec = 35;
+    agv_build.cid_rec = 40;
+    agv_build.opt_rec = 19;
+    agv_build.min_rec = 7;
+    agv_build.wb_new = 61;
+    agv_build.top_rpm = 3000;
+    agv_build.dec_rpm_s = 3500;
+    agv_build.lr_permille = -4;
+    agv_build.amp = 'S';
+    fake_build_done();
+    ticks(200);
+    memcpy(before, host.ee, sizeof(before));
+    /* 1번: 지금 30 과 새 25 를 1 s 씩. 새 값이면 둘째 자리 점 */
+    for (k = 0; (k < 250) && !shows(" 1025"); k++) { tick(); }
+    assert(shows(" 1025"));
+    for (k = 0; (k < 250) && !shows(" 1030"); k++) { tick(); }
+    assert(shows(" 1030"));
+    key(KEY_SET);                    /* 채택 → 다음 */
+    assert(tune_page() == 1);
+    key(KEY_RESET);                  /* 13번 건너뛰기 */
+    key(KEY_SET);                    /* 35 */
+    key(KEY_SET);                    /* 51 */
+    assert(tune_page() == 4);
+    key(KEY_DOWN);
+    key(KEY_DOWN);
+    key(KEY_DOWN);
+    key(KEY_DOWN);                   /* 1번으로 돌아가도 채택 표시(첫 자리 점)가 남는다 */
+    assert(tune_page() == 0);
+    ticks(5);
+    {
+        char c[5];
+        assert(tune_text(c) & 1u);
+    }
+    /* 저장 전에는 아무것도 쓰지 않았다 */
+    assert(param_get(P_SPEED_HIGH) == 30 && param_get(P_CROSS_IN_CM) == 60 && param_get(P_OPT_FLAGS) == 0);
+    assert(!tune_base_valid());
+    to_save();
+    key(KEY_SET);
+    ticks(100);
+    assert(tune_state() == TUNE_SAVED && shows("RBOT "));
+    ticks(50);
+    assert(param_get(P_SPEED_HIGH) == 25 && param_get(P_DCC) == 40 && param_get(P_CROSS_IN_CM) == 40);
+    assert(param_get(P_OPT_FLAGS) == 19 && host.ee[116] == 19);
+    assert(host.ee[P_SPEED_HIGH] == 25 && host.ee[P_DCC] == 40 && host.ee[P_CROSS_IN_CM] == 40);
+    assert(tune_base_valid() && tune_base(TUNE_BASE_TOP) == 3000 && tune_base(TUNE_BASE_DEC) == 3500);
+    assert(tune_base(TUNE_BASE_LR) == -4 && ((uint16_t)tune_base(TUNE_BASE_AMP_SE) >> 8) == 'S');
+    /* 쓴 칸: 체크섬 0, 채택한 1·35·116, 기준값 110~114·119·125 뿐 */
+    for (a = 0; a < 128; a++) {
+        int base = (a == TUNE_EE_CHECK) || (a == 111) || (a == 112) || (a == 113) || (a == 114) || (a == 119) || (a == 125);
+        int adopt = (a == 0) || (a == P_SPEED_HIGH) || (a == P_CROSS_IN_CM) || (a == 116);
+        if (!base && !adopt) { assert(host.ee[a] == before[a]); }
+    }
+    key(KEY_MODE);                   /* 저장 뒤 키는 듣지 않는다 */
+    key(KEY_RESET);
+    assert(tune_state() == TUNE_SAVED && D.ui_mode == UI_AUTO);
+    printf("  tune t1 save ok\n");
+}
+
+/* EEPROM 자리: 128 워드 안, 파라미터·KEEP·체크섬 밖 파라미터·OUT 큐와 안 겹치고 서로 다르다 */
+static void test_tune_ee_layout(void)
+{
+    uint16_t a[TUNE_BASE_N + 3];
+    int i, j;
+
+    for (i = 0; i < TUNE_BASE_N; i++) { a[i] = tune_base_addr[i]; }
+    a[TUNE_BASE_N] = TUNE_EE_CHECK;
+    a[TUNE_BASE_N + 1] = TUNE_EE_TRACK;
+    a[TUNE_BASE_N + 2] = TUNE_EE_CAP;
+    for (i = 0; i < TUNE_BASE_N + 3; i++) {
+        assert(a[i] < 128u && a[i] > KEEP_LAST);
+        assert(!((a[i] >= PARAM_GUIDE_DIST_ADDR) && (a[i] <= 118u)));
+        assert(!((a[i] >= ACS_OUT_EE_FIRST) && (a[i] <= ACS_OUT_EE_HEAD)));
+        for (j = 0; j < i; j++) { assert(a[i] != a[j]); }
+    }
+    printf("  tune ee layout ok\n");
+}
+
+/* t2.1 빠른 점검: 기준 대비 %, NG 는 이름이 깜박인다. 추천은 채택하지 않으면 안 쓴다. SAVE 에서 RESET 은 메뉴로 */
+static void test_tune_t2_compare(void)
+{
+    int k;
+
+    test_tune_t1_save();             /* 기준값 TOP 3000, DEC 3500 */
+    boot_keys(KEY_MODE + KEY_SET, 1);
+    key(KEY_MODE);
+    key(KEY_SET);                    /* t2.1 */
+    assert(tune_base_valid());
+    drive_up();
+    run_scan(3);
+    assert(tune_state() == TUNE_BLD && shows("C1008"));
+    agv_build.high_rec = 22;
+    agv_build.top_rpm = 2700;        /* -10% NG */
+    agv_build.dec_rpm_s = 3400;      /* -2% */
+    agv_build.over_mm = 25;          /* NG */
+    agv_build.lr_permille = 15;      /* NG */
+    fake_build_done();
+    assert(tune_page() == 0 && tune_flick() == 0);
+    key(KEY_RESET);                  /* 1번 건너뛰기 */
+    for (k = 0; (k < 20) && !shows("T-010"); k++) { key(KEY_UP); }
+    assert(shows("T-010") && tune_flick() == 0x03u);
+    key(KEY_UP);
+    assert(shows("D-002") && tune_flick() == 0);
+    key(KEY_UP);
+    assert(shows("FL---"));          /* 정지가 없었다 */
+    key(KEY_UP);
+    assert(shows("ST025") && tune_flick() == 0x03u);
+    key(KEY_UP);
+    key(KEY_UP);
+    assert(shows("LR015") && tune_flick() == 0x03u);
+    to_save();
+    key(KEY_RESET);                  /* 저장 없이 메뉴로 */
+    assert(tune_state() == TUNE_WAIT && tune_menu() == 210);
+    ticks(50);
+    assert(param_get(P_SPEED_HIGH) == 25 && host.ee[P_SPEED_HIGH] == 25);
+    assert(tune_base(TUNE_BASE_TOP) == 3000);
+    printf("  tune t2 compare ok\n");
+}
+
+/* 연속 시험 중 가이드 측정: 'h' 부호가 반대이고 배율이 2 이면 저장 뒤 되살아난다. 튜닝 중 저전압은 보이지 않는다 */
 static void test_tune_guide(void)
 {
     guide_rx_t rx;
     guide_cfg_t cfg;
     int i;
 
-    boot();
-    tune_arm();
+    boot_keys(KEY_MODE + KEY_SET, 0);
     drive_up();
     run_scan(5);
-    assert(tune_state() == TUNE_GO_1);
+    assert(tune_state() == TUNE_BLD);
     memset(&rx, 0, sizeof(rx));
     rx.kind = GUIDE_RX_LED;
     for (i = 0; i < 40; i++) {
@@ -1074,8 +1385,10 @@ static void test_tune_guide(void)
         rx.led_lo = 3UL << (cell - 1);            /* 부호 반대, 배율 1 */
         tune_on_h(&rx);
     }
-    assert(tune_value(TUNE_PAGE_LED) == 2);
-    assert(tune_value(TUNE_PAGE_GUIDE) == -100);
+    assert(tune_guide_k100() == -100);
+    assert(tune_guide_save() == 1);
+    guide_cfg_get(&cfg);
+    assert(cfg.invert_fwd == 1);
     /* 저장값을 부팅 때 되살린다 */
     keep_set(KEEP_GUIDE_INV, 1);
     keep_set(KEEP_GUIDE_SCALE, 1250);
@@ -1085,36 +1398,13 @@ static void test_tune_guide(void)
     assert((cfg.invert_fwd == 1) && (cfg.invert_back == 0) && (cfg.h_scale == 1.25f));
     {   /* 튜닝 중 저전압 280 은 표시·부저에 나오지 않는다 */
         uint16_t d[5];
-        tune_arm();
-        host.key = 0;
+        boot_keys(KEY_MODE + KEY_SET, 0);
         host.adc = 100u << 4;
         ticks(1100);
         assert(D.action_err == ERR_BAT_LOW);
         ui_digits(d);
         assert(d[0] != 15u);                      /* 'E' 가 아니다 */
         assert(host.bus_out[BUS_LAMP] & 0x40u);   /* 부저 꺼짐 (저활성) */
-    }
-    {   /* 튜닝 중 MODE 는 파라미터·조그 화면으로 가지 않는다 */
-        boot();
-        tune_arm();
-        key(KEY_MODE);
-        key(KEY_MODE);
-        assert(D.ui_mode == UI_AUTO && tune_active());
-    }
-    {   /* SHIFT 다섯 번 = TEMP, 여섯 번 = TUNE */
-        uint16_t d[5];
-        int k;
-        boot();
-        tune_arm();
-        for (k = 0; k < 5; k++) { key(KEY_SHIFT); }
-        assert(tune_temp_mode() && !tune_all_mode());
-        ui_digits(d);
-        assert((d[0] == 11u + ('T' - 'A')) && (d[1] == 11u + ('E' - 'A')) && (d[2] == 11u + ('M' - 'A'))
-               && (d[3] == 11u + ('P' - 'A')));
-        key(KEY_SHIFT);
-        assert(!tune_temp_mode() && !tune_ident_mode());
-        ui_digits(d);
-        assert((d[0] == 11u + ('T' - 'A')) && (d[1] == 11u + ('U' - 'A')));
     }
     printf("  tune guide ok\n");
 }
@@ -1249,6 +1539,11 @@ int main(void)
     test_para_init();
     test_lamp();
     test_align_turn();
+    test_tune_entry();
+    test_tune_menu();
+    test_tune_inputs();
+    test_tune_ee_layout();
+    test_tune_t2_compare();
     test_tune_guide();
     test_tape_turn();
     test_io_test();

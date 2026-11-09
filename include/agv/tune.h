@@ -1,54 +1,74 @@
-/* tune.h - 튜닝 모드 */
+/* tune.h - 튜닝 모드. 전원을 켤 때 MODE + SET. 끝내려면 전원을 다시 켠다.
+ * 메뉴는 파라미터처럼 대·중·소 단계다. 키:
+ *  MODE 같은 단계 다음 칸, SET 아래 단계로·수정 시작·확정, RESET 한 단계 위·수정 취소(결과 쪽에서는 건너뛰기),
+ *  START 고른 시험, UP·DOWN 결과 넘기기·값 증감, SHIFT 고치는 자리
+ *  t1 제작   t1 아래 입력 4칸(지름 22번, GD 50번, 최고 속도 상한, 교차선 간격 L). START = 연속 시험 전체
+ *  t2 점검   t2.1 빠른 점검, t2.2 바퀴 교체, t2.3 가이드 센서 교체, t2.4 모터·앰프 교체. 2.1·2.2·2.4 는 SET 으로 L 입력
+ *  t3 개발   t3.1 IDEN, t3.2 RPM, t3.3 TOP, t3.4 ALL, t3.5 TEMP. 결과는 RAM 에만. 시험 추가는 tune.c s_dev 표 한 줄
+ * FND(tune_text): 메뉴 't' + 번호(점으로 나눔) + 두 글자 이름, 입력 이름 + 값, 연속 시험 진행 'B'(t1)·'C'(t2) + 단계 + 회 2자리
+ *  + 순서, 실패 'F' + 코드, 결과 쪽, 저장 뒤 RBOT */
 #ifndef AGV_TUNE_H
 #define AGV_TUNE_H
 #include "agv/types.h"
 #include "agv/guide.h"
 
-enum { TUNE_OFF = 0, TUNE_WAIT, TUNE_GO_1, TUNE_TURN, TUNE_RESTART, TUNE_GO_2, TUNE_STOPPING, TUNE_DONE,
+/* t3 시험의 진행 상태 다음 값이 끝 상태다 */
+enum { TUNE_OFF = 0, TUNE_WAIT, TUNE_BLD, TUNE_BLD_DONE, TUNE_SAVED,
        TUNE_IDENT, TUNE_IDENT_DONE, TUNE_RPM, TUNE_RPM_DONE, TUNE_TOP, TUNE_TOP_DONE, TUNE_ALL, TUNE_ALL_DONE,
        TUNE_TEMP, TUNE_TEMP_DONE };
 
-/* 대기 중 SHIFT 로 고르는 시험. TUNE → IDEN → RPM → TOP → ALL → TEMP → TUNE */
-enum { TUNE_MODE_TUNE = 0, TUNE_MODE_IDENT, TUNE_MODE_RPM, TUNE_MODE_TOP, TUNE_MODE_ALL, TUNE_MODE_TEMP, TUNE_MODE_COUNT };
+/* t3.n */
+enum { TUNE_DEV_IDENT = 1, TUNE_DEV_RPM, TUNE_DEV_TOP, TUNE_DEV_ALL, TUNE_DEV_TEMP };
 #define TUNE_RPM_PAGES 3          /* 최고 속도·통합 결과 쪽: 0 OK/F, 1 좌 rpm, 2 우 rpm */
 #define TUNE_RPMT_PAGES 4         /* 바닥 rpm 결과 쪽: 0 OK/F, 1 L 저속 최저 rpm, 2 B 출발 DAC, 3 A 앰프 추정 S·T */
 
-/* 결과 쪽. UP·DOWN 으로 넘긴다 */
-enum { TUNE_PAGE_WHEEL_BASE = 0,   /* WW 계산한 휠 간격 (24번). 수정 가능 */
-       TUNE_PAGE_DIAMETER,         /* DI 교차선 간격으로 고친 휠 지름 (22번). 수정 가능 */
-       TUNE_PAGE_GAP,              /* GA 선과 회전 중심 사이 간격 mm 입력. 저장값 = 입력 + OV → GD */
-       TUNE_PAGE_OVERRUN,          /* OV 선을 본 뒤 멈출 때까지 미끄러진 거리 mm */
-       TUNE_PAGE_GUIDE_DIST,       /* GD 지금 가이드센서 거리 (50번). 수정 가능 */
-       TUNE_PAGE_GUIDE,            /* G  'a' = k × 'h' 의 k × 100. 음수면 'h' 부호가 반대 */
-       TUNE_PAGE_STEER_RMS,        /* SE 직진 중 'a' 편차 RMS × 10 */
-       TUNE_PAGE_STEER_MAX,        /* SP 직진 중 'a' 편차 최대 */
-       TUNE_PAGE_FLOOR,            /* FL 정지 때 쓴 바닥 속도 rpm */
-       TUNE_PAGE_LED,              /* LE 직진 중 일반 라인 최대 점등 LED 수 (교차선 제외) */
-       TUNE_PAGE_LR,               /* LR 우/좌 펄스 비 - 1, 천분율 */
-       TUNE_PAGE_COUNT };
+/* EEPROM (128 워드 칩 기준). 0~50 파라미터·표시, 51~109 KEEP, 115~118 체크섬 밖 파라미터, 120~124 OUT 큐와 겹치지 않는다.
+ * 입력 L·상한은 확정 즉시, 기준값은 t1 결과 SAVE 때만 쓴다 */
+#define TUNE_EE_TRACK  126        /* 교차선 간격 L mm. 0 = 지름 보정 안 함 */
+#define TUNE_EE_CAP    127        /* 최고 속도 상한 m/min */
+#define TUNE_EE_CHECK  110        /* 기준값 검사 = TUNE_BASE_MARK ^ 기준값 6칸 합. 틀리면 기준값 없음 */
+#define TUNE_BASE_MARK 0xB501u    /* 아래 바이트 = 판 */
+enum { TUNE_BASE_TOP = 0,         /* 111 최고 rpm 좌우 평균 */
+       TUNE_BASE_DEC,             /* 112 타력 감속도 rpm/s */
+       TUNE_BASE_FLOOR,           /* 113 정지 바닥 속도 rpm */
+       TUNE_BASE_LR,              /* 114 우/좌 펄스 비 - 1, 천분율 */
+       TUNE_BASE_BAT,             /* 119 전압 dV (48번) */
+       TUNE_BASE_AMP_SE,          /* 125 앰프('S'·'T'·0) << 8 | 직진 편차 RMS × 10 (0~255) */
+       TUNE_BASE_N };
+extern const uint16_t tune_base_addr[TUNE_BASE_N];
+/* 점검 판정. 기준 대비 % (LR 은 지금 값) 가 넘으면 NG */
+#define TUNE_NG_TOP_PCT   (-5)
+#define TUNE_NG_DEC_PCT   (-15)
+#define TUNE_NG_FLOOR_PCT 20
+#define TUNE_NG_LR        10      /* |우/좌 - 1| 천분율 */
 #define TUNE_NO_DATA (-32767)
 
 void     tune_reset(void);
-void     tune_arm(void);          /* 전원 투입 때 켠다. 끝내려면 전원을 다시 켠다 */
-void     tune_load(void);         /* 부팅 때 저장한 가이드 부호·배율을 되살린다 */
+void     tune_arm(void);          /* 전원 투입 때 켠다 */
+void     tune_load(void);         /* 부팅: 가이드 부호·배율, 입력 L·상한을 되살린다 */
 int      tune_active(void);
-int      tune_failed(void);       /* 1 = 실패로 TUNE 로 돌아옴 */
-int      tune_ident_mode(void);   /* 1 = START 가 식별 시험을 한다. 대기 중 SHIFT 로 바꾼다 */
-int      tune_rpm_mode(void);     /* 1 = START 가 바닥 rpm 시험을 한다 */
-int      tune_top_mode(void);     /* 1 = START 가 바닥 최고 속도 시험을 한다 */
-int      tune_all_mode(void);     /* 1 = START 가 통합 시험(식별 → OPT 스윕 → 최고 속도)을 한다 */
-int      tune_temp_mode(void);    /* 1 = START 가 지정 시험(0회 → TEMP 목록 OPT 스윕)을 한다 */
+int      tune_ident_mode(void);   /* t3.1 을 골랐다 */
+int      tune_rpm_mode(void);     /* t3.2 */
+int      tune_top_mode(void);     /* t3.3 */
+int      tune_all_mode(void);     /* t3.4 */
+int      tune_temp_mode(void);    /* t3.5 */
 int      tune_editing(void);      /* 값을 고치는 중 */
-int16_t  tune_edit_place(void);   /* 1 일, 2 십, 3 백의 자리 */
 uint16_t tune_state(void);
 uint16_t tune_page(void);
+uint16_t tune_menu(void);         /* 지금 칸: 대 × 100 + 중 × 10 + 소. 예 t2.1.1 = 211, t3 = 300 */
 uint16_t tune_lines(void);        /* 이번 구간에서 본 교차선 수 */
 uint32_t tune_line_at(uint16_t i); /* i 번째 교차선을 본 때의 주행 펄스 */
 void     tune_cross_clear(void);  /* 교차선 수를 0 으로. 식별 시험이 선 찾기 전에 부른다 */
-int16_t  tune_result(void);       /* 계산한 휠 간격 값 */
-int16_t  tune_value(uint16_t page);
+int      tune_base_valid(void);
+int16_t  tune_base(uint16_t i);   /* 기준값 칸. TUNE_BASE_* */
 void     tune_run(void);          /* 10 ms */
 int      tune_key(uint16_t key);  /* 0 무시, 1 처리, 2 저장함 */
+uint16_t tune_text(char *c);      /* 메뉴·입력·연속 시험 표시 5글자('0'~'9', 'A'~'Z', '-', ' '). 반환 = 점 자리 비트 */
+uint16_t tune_flick(void);        /* 깜박일 자리 비트. 0 = 없음 */
+
+/* ident.c 가 부른다 */
+int      tune_guide_save(void);   /* 'h' 부호·배율 저장. 측정 부족이면 0 */
+int16_t  tune_guide_k100(void);   /* 'a' = k × 'h' 의 k × 100. TUNE_NO_DATA = 측정 부족 */
 
 /* guide_poll 이 부른다 */
 int      tune_want_h(void);

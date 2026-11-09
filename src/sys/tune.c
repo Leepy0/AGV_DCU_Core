@@ -1,18 +1,11 @@
-/* tune.c - 튜닝 모드. 전원을 켤 때 MODE + DOWN.
- * 주행로에 1 m 간격 교차선 A, B 를 그리고 A 앞에서 START.
- *  1. 최저 속도로 A, B 를 지난다. 두 선 사이 엔코더 거리로 휠 지름을 고쳐 바로 반영한다.
- *  2. B 에서 가이드센서 거리(GD)만큼 더 가서 멈추고 180도 정렬 회전. 회전 펄스로 휠 간격을 계산한다.
- *  3. 돌아오다 교차선(A)을 보면 바로 멈춘다. 선과 회전 중심 사이를 재서 넣으면
- *     감지 뒤 미끄러진 거리를 더해 GD 를 저장한다.
- * 직진 구간에서 'a' 와 'h' 를 번갈아 받아 가이드 부호·배율, 조향 편차, LED 점등 수, 좌우 펄스 비도 잰다.
- * 결과 키는 파라미터 편집과 같다: UP·DOWN 쪽 선택, SET 수정 시작, SHIFT 자리, UP·DOWN 값,
- * SET 확정·저장, RESET 취소. 수정 중이 아니면 RESET 은 다시 시험.
- * 대기(TUNE) 중 SHIFT 를 누를 때마다 식별 시험(IDEN, ident.c), 바닥 rpm 시험(RPM, ident.c·rpmtest.c),
- * 바닥 최고 속도 시험(TOP, ident.c), 통합 시험(ALL, ident.c), 지정 시험(TEMP, ident.c), 튜닝 순으로 바뀐다.
- * 바닥 rpm 시험은 식별 시험 주행로에서 한다. 시험 중 아무 패널 키나 누르면 끊는다.
- * 끝나면 UP·DOWN 으로 RPOK, 저속 최저 rpm(L), 출발 DAC(B), 앰프 추정(A)을 본다.
- * 최고 속도 시험은 식별 시험 주행로에서 한다. 끝나면 UP·DOWN 으로 TPOK, 좌 rpm, 우 rpm 을 본다.
- * 통합 시험은 식별 → OPT 스윕 → 최고 속도를 잇는다. 끝나면 UP·DOWN 으로 ALOK, 좌 rpm, 우 rpm 을 본다 */
+/* tune.c - 튜닝 모드 메뉴, 입력, 연속 시험(t1·t2) 결과 쪽과 기준값. 키와 FND 는 tune.h.
+ * 주행은 ident.c(연속 시험 ident_start_build, 개발 시험)와 rpmtest.c 가 한다.
+ * 여기는 선 찾기 중 'a' 와 'h' 를 번갈아 받아 교차선 수, 가이드 부호·배율, 직진 편차도 잰다.
+ * 저장 구분:
+ *  바로 저장    입력 확정(22·50번, L, 상한), 연속 시험 중 22·24·28번·'h' 부호·배율(ident.c), 점검 GA 확정(50번)
+ *  채택 저장    결과 쪽 1·13·35·51번(점검은 28·1·13번). SET 채택, RESET 건너뛰기, SAVE 에서 쓴다
+ *  기준값       t1 SAVE 때 EEPROM 110~114·119·125. t2 가 견준다
+ *  안 건드림    20·21번(KP·KI) */
 #include <math.h>
 #include "agv/tune.h"
 #include "agv/drive.h"
@@ -26,83 +19,122 @@
 #include "agv/ui.h"
 
 #define D agv_drive
-#define P param_dv
 
-#define LINE_GAP_MM       1000.0f  /* 교차선 A, B 간격 */
-#define GAP_TOL           0.3f     /* 엔코더로 잰 간격이 ±30% 를 넘으면 선을 잘못 본 것 */
-#define SEEK_LIMIT_MM     3000.0f  /* 이 거리 안에 선을 못 보면 실패 */
 #define GAP_INPUT_LOW     (-200)
 #define GAP_INPUT_UP      999
+#define TRACK_UP          9999
+#define CAP_DEFAULT       60
 #define GUIDE_PAIRS_MIN   20       /* 'a'·'h' 짝이 이만큼 모여야 부호·배율을 믿는다 */
 #define GUIDE_SCALE_MIN   0.5f
 #define GUIDE_SCALE_MAX   2.0f
 #define GUIDE_MARK        0x7E57
+#define PAGE_MAX          20
+#define ALT_TICKS         100      /* 채택 쪽: 1 s 지금 값, 1 s 새 값 */
+
+const uint16_t tune_base_addr[TUNE_BASE_N] = { 111, 112, 113, 114, 119, 125 };
+
+/* 입력 칸. t1 아래 1~4 번째, t2.x 아래 L, 점검 결과의 GA */
+enum { F_DIA = 0, F_GD, F_CAP, F_TRACK, F_GA };
+static const struct { char name[2]; int16_t digits; } s_field[] = {
+    { {'D', 'I'}, 3 }, { {'G', 'D'}, 3 }, { {'T', 'P'}, 2 }, { {'L', ' '}, 4 }, { {'G', 'A'}, 3 }
+};
+#define T1_INPUTS 4
+
+#define T1_MASK (BLD_MECH | BLD_DIA | BLD_WB | BLD_GUIDE | BLD_RPM | BLD_MIN | BLD_TOP | BLD_COAST | BLD_STOPT | BLD_STEER)
+static const struct { char tag[2]; uint16_t mask; } s_check[] = {
+    { {'C', 'H'}, BLD_MECH | BLD_DIA | BLD_TOP | BLD_COAST | BLD_STOPT | BLD_CHECK },            /* t2.1 빠른 점검 */
+    { {'W', 'H'}, BLD_MECH | BLD_DIA | BLD_WB | BLD_TOP | BLD_COAST | BLD_STOPT | BLD_CHECK },   /* t2.2 바퀴 교체 */
+    { {'G', 'S'}, BLD_MECH | BLD_GUIDE | BLD_GA },                                            /* t2.3 가이드 센서 교체 */
+    { {'A', 'P'}, BLD_MECH | BLD_DIA | BLD_RPM | BLD_TOP | BLD_COAST | BLD_STOPT | BLD_CHECK }  /* t2.4 모터·앰프 교체 */
+};
+#define CHECK_N ((uint16_t)(sizeof(s_check) / sizeof(s_check[0])))
+
+/* t3 개발 시험. 줄을 더하면 t3.n 이 는다. run 다음 상태가 끝 상태이고 ui.c 가 둘을 그린다 */
+static const struct { char tag[2]; void (*start)(void); uint16_t run; } s_dev[] = {
+    { {'I', 'D'}, ident_start,      TUNE_IDENT },
+    { {'R', 'P'}, ident_start_rpm,  TUNE_RPM },
+    { {'T', 'P'}, ident_start_top,  TUNE_TOP },
+    { {'A', 'L'}, ident_start_all,  TUNE_ALL },
+    { {'T', 'E'}, ident_start_temp, TUNE_TEMP }
+};
+#define DEV_N ((uint16_t)(sizeof(s_dev) / sizeof(s_dev[0])))
+
+/* 결과 쪽 */
+enum { PK_SET = 0, PK_VAL, PK_GA, PK_SAVE };
+enum { N_DI = 0, N_WW, N_G, N_LO, N_TP, N_DE, N_FL, N_ST, N_SE, N_LR, N_OV, N_BA, N_A };
+static const char s_name[][2] = {
+    {'D', 'I'}, {'W', 'W'}, {'G', ' '}, {'L', 'O'}, {'T', 'P'}, {'D', 'E'}, {'F', 'L'}, {'S', 'T'}, {'S', 'E'},
+    {'L', 'R'}, {'O', 'V'}, {'B', 'A'}, {'A', ' '}
+};
+typedef struct { int16_t kind, id, v, old, flag; } page_t;   /* flag: PK_SET 채택, PK_VAL NG */
 
 static struct {
-    uint16_t state, turn_seen, page, toggle, ident;
-    uint32_t start, l0, r0, dl, dr;
-    int16_t  wheel_base, dia_before, failed;
-    int16_t  editing, place, edit_value;
+    uint16_t state, cat, item, sub, page, n_page, toggle, alt;
+    int16_t  editing, place, edit_value, track, cap;
+    page_t   pg[PAGE_MAX];
     /* 교차선 */
     uint16_t lines, led_prev;
-    uint32_t line_at[2], stop_from;
-    int16_t  overrun_mm;
+    uint32_t line_at[2];
     /* 측정 */
-    int16_t  a_last, a_fresh;
+    int16_t  a_last, a_fresh, floor_max;
     float    ah, hh, se;
     uint32_t pairs, se_n;
-    int16_t  se_max, floor_max;
-    uint16_t led_max;
 } s_tune;
 
 static void clear_measure(void)
 {
-    s_tune.dl = s_tune.dr = 0;
     s_tune.ah = s_tune.hh = s_tune.se = 0.0f;
     s_tune.pairs = s_tune.se_n = 0;
-    s_tune.se_max = s_tune.floor_max = 0;
-    s_tune.led_max = 0;
+    s_tune.floor_max = 0;
     s_tune.led_prev = 0;
     s_tune.lines = 0;
     s_tune.a_fresh = 0;
-    s_tune.overrun_mm = 0;
     s_tune.page = 0;
     s_tune.editing = 0;
+}
+
+static void menu_top(void)
+{
+    s_tune.cat = 1;
+    s_tune.item = s_tune.sub = 0;
 }
 
 void tune_reset(void)
 {
     s_tune.state = TUNE_OFF;
-    s_tune.turn_seen = 0;
-    s_tune.failed = 0;
-    s_tune.ident = 0;
+    menu_top();
     clear_measure();
 }
 
-void     tune_arm(void)        { s_tune.state = TUNE_WAIT; clear_measure(); }
+void tune_arm(void)
+{
+    s_tune.state = TUNE_WAIT;
+    menu_top();
+    clear_measure();
+}
+
+static int dev_pick(uint16_t n) { return (s_tune.cat == 3u) && (s_tune.item == n); }
+
 int      tune_active(void)     { return s_tune.state != TUNE_OFF; }
-int      tune_failed(void)     { return s_tune.failed; }
-int      tune_ident_mode(void) { return s_tune.ident == TUNE_MODE_IDENT; }
-int      tune_rpm_mode(void)   { return s_tune.ident == TUNE_MODE_RPM; }
-int      tune_top_mode(void)   { return s_tune.ident == TUNE_MODE_TOP; }
-int      tune_all_mode(void)   { return s_tune.ident == TUNE_MODE_ALL; }
-int      tune_temp_mode(void)  { return s_tune.ident == TUNE_MODE_TEMP; }
+int      tune_ident_mode(void) { return dev_pick(TUNE_DEV_IDENT); }
+int      tune_rpm_mode(void)   { return dev_pick(TUNE_DEV_RPM); }
+int      tune_top_mode(void)   { return dev_pick(TUNE_DEV_TOP); }
+int      tune_all_mode(void)   { return dev_pick(TUNE_DEV_ALL); }
+int      tune_temp_mode(void)  { return dev_pick(TUNE_DEV_TEMP); }
 int      tune_editing(void)    { return s_tune.editing; }
-int16_t  tune_edit_place(void) { return s_tune.place; }
 uint16_t tune_state(void)      { return s_tune.state; }
-int16_t  tune_result(void)     { return s_tune.wheel_base; }
 uint16_t tune_page(void)       { return s_tune.page; }
+uint16_t tune_menu(void)       { return (uint16_t)(s_tune.cat * 100u + s_tune.item * 10u + s_tune.sub); }
 uint16_t tune_lines(void)      { return s_tune.lines; }
 uint32_t tune_line_at(uint16_t i) { return s_tune.line_at[(i < 2u) ? i : 1u]; }
 void     tune_cross_clear(void)  { s_tune.lines = 0; s_tune.led_prev = 0; }
 
-static uint32_t travel(void) { return run_pulses(D.backward ? 1u : 0u); }
+/* t3 시험 진행 상태 */
+static int dev_running(uint16_t st) { return (st >= TUNE_IDENT) && (((st - TUNE_IDENT) & 1u) == 0u); }
 
 static int measuring(void)
 {
-    if ((s_tune.state == TUNE_IDENT) || (s_tune.state == TUNE_TOP) || (s_tune.state == TUNE_ALL)
-        || (s_tune.state == TUNE_TEMP) || (s_tune.state == TUNE_RPM)) { return ident_want_h(); }   /* 식별 시험은 선 찾기에서만 */
-    return ((s_tune.state == TUNE_GO_1) || (s_tune.state == TUNE_GO_2)) && D.flag_run && !D.flag_stopping;
+    return ((s_tune.state == TUNE_BLD) || dev_running(s_tune.state)) && ident_want_h();   /* 선 찾기에서만 */
 }
 
 /* ---- 가이드 측정 (guide_poll 이 부른다) ---- */
@@ -116,12 +148,9 @@ int tune_want_h(void)
 
 void tune_on_a(int16_t status, int16_t pos)
 {
-    int16_t m = (pos < 0) ? (int16_t)-pos : pos;
-
     if (!measuring() || (status != GUIDE_NORMAL)) { return; }
     s_tune.se += (float)pos * (float)pos;
     s_tune.se_n++;
-    if (m > s_tune.se_max) { s_tune.se_max = m; }
     s_tune.a_last = pos;
     s_tune.a_fresh = 1;
 }
@@ -135,15 +164,10 @@ void tune_on_h(const guide_rx_t *rx)
     if (!measuring()) { return; }
     lat = guide_lateral(rx);
     while (lat != 0UL) { n = (uint16_t)(n + (uint16_t)(lat & 1UL)); lat >>= 1; }
-    /* 교차선은 앞쪽 에지에서 한 번 센다. 일반 라인 점등 수에는 넣지 않는다 */
-    if (n >= GUIDE_CROSS_LED_MIN) {
-        if ((s_tune.led_prev < GUIDE_CROSS_LED_MIN) && (s_tune.lines < 2u)) {
-            s_tune.line_at[s_tune.lines] = travel();
-            s_tune.lines++;
-        }
-    }
-    else if (n > s_tune.led_max) {
-        s_tune.led_max = n;
+    /* 교차선은 앞쪽 에지에서 한 번 센다 */
+    if ((n >= GUIDE_CROSS_LED_MIN) && (s_tune.led_prev < GUIDE_CROSS_LED_MIN) && (s_tune.lines < 2u)) {
+        s_tune.line_at[s_tune.lines] = run_pulses(D.backward ? 1u : 0u);
+        s_tune.lines++;
     }
     s_tune.led_prev = n;
     guide_track(rx, 0, D.backward, &out);
@@ -165,236 +189,13 @@ static float guide_ratio(void)
     return k;
 }
 
-/* ---- 주행 순서 ---- */
-
-static void go_slow(void)
+int16_t tune_guide_k100(void)
 {
-    if (D.speed_cmd != P.min_speed) {
-        D.speed_cmd = P.min_speed;
-        D.step = DRIVE_CHANGE_SPEED;
-    }
+    float k = guide_ratio();
+    return (k == 0.0f) ? TUNE_NO_DATA : (int16_t)(k * 100.0f + ((k < 0.0f) ? -0.5f : 0.5f));
 }
 
-static void begin_leg(uint16_t next)
-{
-    s_tune.start = travel();
-    s_tune.l0 = run_pulses(0);
-    s_tune.r0 = run_pulses(1);
-    s_tune.lines = 0;
-    s_tune.led_prev = 0;
-    s_tune.state = next;
-}
-
-static void end_leg(void)
-{
-    s_tune.dl += run_pulses(0) - s_tune.l0;
-    s_tune.dr += run_pulses(1) - s_tune.r0;
-}
-
-static float leg_mm(void) { return (float)(travel() - s_tune.start) / P.one_length_pulse; }
-
-static int16_t clamp_param(uint16_t idx, float value)
-{
-    int16_t low, up;
-    int16_t v = (int16_t)(value + 0.5f);
-
-    param_limit(idx, &low, &up);
-    if (v < low) { v = low; }
-    if (v > up)  { v = up; }
-    return v;
-}
-
-static void fail(void)
-{
-    tagact_stop();
-    D.tape_slow = 0;
-    s_tune.failed = 1;
-    s_tune.state = TUNE_WAIT;
-}
-
-/* A, B 사이 엔코더 거리로 휠 지름을 고친다. 실제 1 m 를 엔코더가 짧게 재면 바퀴가 큰 것이다 */
-static int fix_diameter(void)
-{
-    float measured = (float)(s_tune.line_at[1] - s_tune.line_at[0]) / P.one_length_pulse;
-
-    if ((measured < LINE_GAP_MM * (1.0f - GAP_TOL)) || (measured > LINE_GAP_MM * (1.0f + GAP_TOL))) { return 0; }
-    (void)param_set(P_WHEEL_DIA_MM, clamp_param(P_WHEEL_DIA_MM,
-                                                (float)param_get(P_WHEEL_DIA_MM) * LINE_GAP_MM / measured));
-    return 1;
-}
-
-void tune_run(void)
-{
-    int stopped = !D.flag_run && !D.flag_ready;
-
-    if ((stop_phase() != STOP_PHASE_IDLE) && (stop_floor_rpm() > s_tune.floor_max)) {
-        s_tune.floor_max = stop_floor_rpm();
-    }
-    switch (s_tune.state) {
-    case TUNE_WAIT:
-        if (D.flag_run && (s_tune.ident == TUNE_MODE_RPM)) {
-            s_tune.failed = 0;
-            s_tune.page = 0;
-            ident_start_rpm();
-            s_tune.state = TUNE_RPM;
-        }
-        else if (D.flag_run && (s_tune.ident == TUNE_MODE_IDENT)) {
-            s_tune.failed = 0;
-            ident_start();
-            s_tune.state = TUNE_IDENT;
-        }
-        else if (D.flag_run && (s_tune.ident == TUNE_MODE_TOP)) {
-            s_tune.failed = 0;
-            s_tune.page = 0;
-            ident_start_top();
-            s_tune.state = TUNE_TOP;
-        }
-        else if (D.flag_run && (s_tune.ident == TUNE_MODE_ALL)) {
-            s_tune.failed = 0;
-            s_tune.page = 0;
-            ident_start_all();
-            s_tune.state = TUNE_ALL;
-        }
-        else if (D.flag_run && (s_tune.ident == TUNE_MODE_TEMP)) {
-            s_tune.failed = 0;
-            s_tune.page = 0;
-            ident_start_temp();
-            s_tune.state = TUNE_TEMP;
-        }
-        else if (D.flag_run && (s_tune.ident == TUNE_MODE_TUNE)) {
-            clear_measure();
-            s_tune.failed = 0;
-            s_tune.dia_before = param_get(P_WHEEL_DIA_MM);
-            begin_leg(TUNE_GO_1);
-        }
-        break;
-    case TUNE_GO_1:          /* A, B 를 지나 B 위에서 회전 */
-        if (stopped && !D.flag_stopping) { s_tune.state = TUNE_WAIT; break; }
-        if (D.flag_stopping) { break; }
-        go_slow();
-        if (s_tune.lines >= 2u) {
-            end_leg();
-            if (!fix_diameter()) { fail(); break; }
-            D.tape_slow = 1;
-            s_tune.turn_seen = 0;
-            tagact_turn_align_cross(TURN_CW, 180u, 0u);
-            if (D.tape_align) { s_tune.state = TUNE_TURN; }
-            else              { fail(); }
-        }
-        else if (leg_mm() > SEEK_LIMIT_MM) {
-            fail();
-        }
-        break;
-    case TUNE_IDENT:
-        if (ident_run() != 0) { s_tune.state = TUNE_IDENT_DONE; }
-        break;
-    case TUNE_TOP:
-        if (ident_run() != 0) { s_tune.state = TUNE_TOP_DONE; }
-        break;
-    case TUNE_ALL:
-        if (ident_run() != 0) { s_tune.state = TUNE_ALL_DONE; }
-        break;
-    case TUNE_TEMP:
-        if (ident_run() != 0) { s_tune.state = TUNE_TEMP_DONE; }
-        break;
-    case TUNE_RPM:
-        if (ident_run() != 0) { s_tune.state = TUNE_RPM_DONE; }
-        break;
-    case TUNE_TURN:
-        if (D.flag_turn) { s_tune.turn_seen = 1; }
-        else if (s_tune.turn_seen && !D.tape_align && !D.flag_stopping && (D.turn_motion == 0)) {
-            D.tape_slow = 0;
-            if ((D.system_err != 0) || (D.stop_err != 0)) {
-                s_tune.failed = 1;
-                s_tune.state = TUNE_WAIT;
-            }
-            else {
-                s_tune.wheel_base = clamp_param(P_WHEEL_BASE_MM, (float)param_get(P_WHEEL_BASE_MM)
-                                                * (float)D.tape_turned / (float)D.tape_total_pulse);
-                run_restart_now();
-                s_tune.state = TUNE_RESTART;
-            }
-        }
-        break;
-    case TUNE_RESTART:
-        if (D.flag_run) { begin_leg(TUNE_GO_2); }
-        break;
-    case TUNE_GO_2:          /* 돌아오다 교차선을 보면 바로 멈춘다 */
-        if (stopped && !D.flag_stopping) { s_tune.state = TUNE_WAIT; break; }
-        if (D.flag_stopping) { break; }
-        go_slow();
-        if (s_tune.lines >= 1u) {
-            end_leg();
-            s_tune.stop_from = s_tune.line_at[0];
-            tagact_stop();
-            s_tune.state = TUNE_STOPPING;
-        }
-        else if (leg_mm() > SEEK_LIMIT_MM) {
-            fail();
-        }
-        break;
-    case TUNE_STOPPING:
-        if (stopped && !D.flag_stopping) {
-            s_tune.overrun_mm = (int16_t)((float)(travel() - s_tune.stop_from) / P.one_length_pulse + 0.5f);
-            s_tune.state = TUNE_DONE;
-            s_tune.page = TUNE_PAGE_GAP;
-        }
-        break;
-    default:
-        break;
-    }
-}
-
-/* ---- 결과 ---- */
-
-/* 선과 회전 중심 사이 간격의 예상값. 지금 GD 에서 미끄러진 거리를 뺀 값이다 */
-static int16_t expected_gap(void) { return (int16_t)(param_get(P_GUIDE_DIST_MM) - s_tune.overrun_mm); }
-
-int16_t tune_value(uint16_t page)
-{
-    float k;
-
-    if (s_tune.editing && (page == s_tune.page)) { return s_tune.edit_value; }
-    switch (page) {
-    case TUNE_PAGE_WHEEL_BASE: return s_tune.wheel_base;
-    case TUNE_PAGE_DIAMETER:   return param_get(P_WHEEL_DIA_MM);
-    case TUNE_PAGE_GAP:        return expected_gap();
-    case TUNE_PAGE_OVERRUN:    return s_tune.overrun_mm;
-    case TUNE_PAGE_GUIDE_DIST: return param_get(P_GUIDE_DIST_MM);
-    case TUNE_PAGE_GUIDE:
-        k = guide_ratio();
-        return (k == 0.0f) ? TUNE_NO_DATA : (int16_t)(k * 100.0f + ((k < 0.0f) ? -0.5f : 0.5f));
-    case TUNE_PAGE_STEER_RMS:
-        return (s_tune.se_n == 0) ? TUNE_NO_DATA : (int16_t)(sqrtf(s_tune.se / (float)s_tune.se_n) * 10.0f + 0.5f);
-    case TUNE_PAGE_STEER_MAX:  return s_tune.se_max;
-    case TUNE_PAGE_FLOOR:      return s_tune.floor_max;
-    case TUNE_PAGE_LED:        return (int16_t)s_tune.led_max;
-    case TUNE_PAGE_LR:
-        if (s_tune.dl == 0UL) { return TUNE_NO_DATA; }
-        return (int16_t)(((float)s_tune.dr / (float)s_tune.dl - 1.0f) * 1000.0f);
-    default: return TUNE_NO_DATA;
-    }
-}
-
-/* 저장한 가이드 부호·배율을 부팅 때 되살린다 */
-void tune_load(void)
-{
-    guide_cfg_t cfg;
-    int16_t inv, scale;
-
-    if (keep_get(KEEP_GUIDE_MARK) != GUIDE_MARK) { return; }
-    inv = keep_get(KEEP_GUIDE_INV);
-    scale = keep_get(KEEP_GUIDE_SCALE);
-    guide_cfg_get(&cfg);
-    cfg.invert_fwd = inv & 1;
-    cfg.invert_back = (inv >> 1) & 1;
-    if ((scale >= (int16_t)(GUIDE_SCALE_MIN * 1000.0f)) && (scale <= (int16_t)(GUIDE_SCALE_MAX * 1000.0f))) {
-        cfg.h_scale = (float)scale / 1000.0f;
-    }
-    guide_configure(&cfg);
-}
-
-static int save_guide(void)
+int tune_guide_save(void)
 {
     guide_cfg_t cfg;
     float k = guide_ratio();
@@ -418,55 +219,310 @@ static int save_guide(void)
     return 1;
 }
 
-static void edit_limits(uint16_t page, int16_t *low, int16_t *up)
+/* ---- EEPROM ---- */
+
+static uint16_t ee(uint16_t addr) { return storage_queued.read(addr); }
+
+/* 부팅: 가이드 부호·배율, 입력 L·상한. 빈 칸이나 한계 밖은 0·60 */
+void tune_load(void)
 {
-    switch (page) {
-    case TUNE_PAGE_WHEEL_BASE: param_limit(P_WHEEL_BASE_MM, low, up); break;
-    case TUNE_PAGE_DIAMETER:   param_limit(P_WHEEL_DIA_MM, low, up); break;
-    case TUNE_PAGE_GUIDE_DIST: param_limit(P_GUIDE_DIST_MM, low, up); break;
-    default:                   *low = GAP_INPUT_LOW; *up = GAP_INPUT_UP; break;
+    guide_cfg_t cfg;
+    int16_t inv, scale, lo, up;
+
+    s_tune.track = (int16_t)ee(TUNE_EE_TRACK);
+    if ((s_tune.track < 0) || (s_tune.track > TRACK_UP)) { s_tune.track = 0; }
+    param_limit(P_SPEED_HIGH, &lo, &up);
+    s_tune.cap = (int16_t)ee(TUNE_EE_CAP);
+    if ((s_tune.cap < lo) || (s_tune.cap > up)) { s_tune.cap = CAP_DEFAULT; }
+    if (keep_get(KEEP_GUIDE_MARK) != GUIDE_MARK) { return; }
+    inv = keep_get(KEEP_GUIDE_INV);
+    scale = keep_get(KEEP_GUIDE_SCALE);
+    guide_cfg_get(&cfg);
+    cfg.invert_fwd = inv & 1;
+    cfg.invert_back = (inv >> 1) & 1;
+    if ((scale >= (int16_t)(GUIDE_SCALE_MIN * 1000.0f)) && (scale <= (int16_t)(GUIDE_SCALE_MAX * 1000.0f))) {
+        cfg.h_scale = (float)scale / 1000.0f;
+    }
+    guide_configure(&cfg);
+}
+
+int16_t tune_base(uint16_t i) { return (int16_t)ee(tune_base_addr[(i < TUNE_BASE_N) ? i : 0u]); }
+
+int tune_base_valid(void)
+{
+    uint16_t i, sum = 0;
+    for (i = 0; i < TUNE_BASE_N; i++) { sum = (uint16_t)(sum + ee(tune_base_addr[i])); }
+    return ee(TUNE_EE_CHECK) == (uint16_t)(TUNE_BASE_MARK ^ sum);
+}
+
+/* 기준값은 t1 SAVE 때만 쓴다(쓰기 수명). 검사 칸이 맞지 않으면 기준값이 없는 것으로 본다 */
+static void base_write(void)
+{
+    const build_result_t *b = &agv_build;
+    int16_t v[TUNE_BASE_N];
+    int16_t se = (b->se_x10 < 0) ? 0 : ((b->se_x10 > 255) ? 255 : b->se_x10);
+    uint16_t i, sum = 0;
+
+    v[TUNE_BASE_TOP] = b->top_rpm;
+    v[TUNE_BASE_DEC] = b->dec_rpm_s;
+    v[TUNE_BASE_FLOOR] = b->floor_rpm;
+    v[TUNE_BASE_LR] = b->lr_permille;
+    v[TUNE_BASE_BAT] = b->bat_dv;
+    v[TUNE_BASE_AMP_SE] = (int16_t)(((uint16_t)b->amp << 8) | (uint16_t)se);
+    for (i = 0; i < TUNE_BASE_N; i++) {
+        storage_request(tune_base_addr[i], (uint16_t)v[i]);
+        sum = (uint16_t)(sum + (uint16_t)v[i]);
+    }
+    storage_request(TUNE_EE_CHECK, (uint16_t)(TUNE_BASE_MARK ^ sum));
+}
+
+/* ---- 결과 쪽 ---- */
+
+static void add(int16_t kind, int16_t id, int16_t v, int16_t old, int16_t flag)
+{
+    page_t *p;
+    if (s_tune.n_page >= PAGE_MAX) { return; }
+    p = &s_tune.pg[s_tune.n_page++];
+    p->kind = kind;
+    p->id = id;
+    p->v = v;
+    p->old = old;
+    p->flag = flag;
+}
+
+static void add_set(uint16_t idx, int16_t v)
+{
+    if (v >= 0) { add(PK_SET, (int16_t)idx, v, param_get(idx), 0); }
+}
+
+/* 점검이고 기준값이 있으면 기준 대비 % 와 판정, 아니면 값 */
+static void add_cmp(int16_t name, int16_t now, uint16_t bi, int16_t ng_pct)
+{
+    int16_t b = tune_base(bi);
+    int32_t p;
+
+    if (now <= 0) { add(PK_VAL, name, TUNE_NO_DATA, 0, 0); return; }
+    if ((s_tune.cat != 2u) || !tune_base_valid() || (b <= 0)) { add(PK_VAL, name, now, 0, 0); return; }
+    p = (((int32_t)now - b) * 100L) / b;
+    if (p > 999L)  { p = 999L; }
+    if (p < -999L) { p = -999L; }
+    add(PK_VAL, name, (int16_t)p, 0, (ng_pct < 0) ? (p < ng_pct) : (p > ng_pct));
+}
+
+static void build_pages(void)
+{
+    const build_result_t *b = &agv_build;
+    uint16_t m = (uint16_t)b->mask;
+    int chk = (s_tune.cat == 2u);
+    int16_t lr = (b->lr_permille < 0) ? (int16_t)-b->lr_permille : b->lr_permille;
+
+    s_tune.n_page = 0;
+    if (chk) { add_set(P_SPEED_MIN, b->min_rec); }
+    add_set(P_SPEED_HIGH, b->high_rec);
+    add_set(P_DCC, b->dcc_rec);
+    add_set(P_CROSS_IN_CM, b->cid_rec);
+    add_set(P_OPT_FLAGS, b->opt_rec);
+    if (b->dia_new > 0)  { add(PK_VAL, N_DI, b->dia_new, 0, 0); }
+    if (m & BLD_WB)      { add(PK_VAL, N_WW, b->wb_new, 0, 0); }
+    if (m & BLD_GUIDE)   { add(PK_VAL, N_G, b->guide_k100, 0, 0); }
+    if (m & BLD_MIN)     { add(PK_VAL, N_LO, b->min_rec, 0, 0); }
+    if (m & BLD_TOP)     { add_cmp(N_TP, b->top_rpm, TUNE_BASE_TOP, TUNE_NG_TOP_PCT); }
+    if (m & BLD_COAST)   { add_cmp(N_DE, b->dec_rpm_s, TUNE_BASE_DEC, TUNE_NG_DEC_PCT); }
+    if (m & BLD_STOPT)   {
+        add_cmp(N_FL, b->floor_rpm, TUNE_BASE_FLOOR, TUNE_NG_FLOOR_PCT);
+        add(PK_VAL, N_ST, b->over_mm, 0, chk && (b->over_mm > BLD_OVER_OK_MM));
+    }
+    add(PK_VAL, N_SE, b->se_x10, 0, 0);
+    add(PK_VAL, N_LR, b->lr_permille, 0, chk && (lr > TUNE_NG_LR));
+    if (m & BLD_GA) {
+        add(PK_VAL, N_OV, b->ov_mm, 0, 0);
+        add(PK_GA, F_GA, 0, 0, 0);
+    }
+    add(PK_VAL, N_BA, b->bat_dv, 0, 0);
+    if (m & BLD_RPM) {
+        add(PK_VAL, N_A, b->amp, 0, chk && tune_base_valid() && (b->amp != (int16_t)((uint16_t)tune_base(TUNE_BASE_AMP_SE) >> 8)));
+    }
+    add(PK_SAVE, 0, 0, 0, 0);
+}
+
+static void bld_finish(int r)
+{
+    build_result_t *b = &agv_build;
+
+    s_tune.state = TUNE_BLD_DONE;
+    s_tune.page = 0;
+    s_tune.editing = 0;
+    if (r < 0) { return; }
+    b->floor_rpm = s_tune.floor_max;
+    b->se_x10 = (s_tune.se_n == 0UL) ? 0 : (int16_t)(sqrtf(s_tune.se / (float)s_tune.se_n) * 10.0f + 0.5f);
+    b->bat_dv = param_get(P_BAT_DV);
+    build_pages();
+}
+
+/* 채택한 값과 (t1) 기준값을 쓴다. 다시 켜야 끝난다 */
+static int save_all(void)
+{
+    uint16_t i;
+
+    for (i = 0; i < s_tune.n_page; i++) {
+        const page_t *p = &s_tune.pg[i];
+        if ((p->kind == PK_SET) && p->flag) { (void)param_set((uint16_t)p->id, p->v); }
+    }
+    if (s_tune.cat == 1u) { base_write(); }
+    s_tune.state = TUNE_SAVED;
+    return 2;
+}
+
+/* ---- 입력 ---- */
+
+static int16_t field_get(int16_t f)
+{
+    switch (f) {
+    case F_DIA:   return param_get(P_WHEEL_DIA_MM);
+    case F_GD:    return param_get(P_GUIDE_DIST_MM);
+    case F_CAP:   return s_tune.cap;
+    case F_TRACK: return s_tune.track;
+    default:      return (int16_t)(param_get(P_GUIDE_DIST_MM) - agv_build.ov_mm);   /* GA 예상값 */
     }
 }
 
-/* SHIFT·UP·DOWN. 처리했으면 1 */
-static int edit_key(uint16_t key, uint16_t page)
+static void field_limits(int16_t f, int16_t *lo, int16_t *up)
 {
-    int16_t low, up, step;
-
-    if (key == KEY_SHIFT) {
-        s_tune.place = (int16_t)((s_tune.place >= 3) ? 1 : s_tune.place + 1);
-        return 1;
+    switch (f) {
+    case F_DIA:   param_limit(P_WHEEL_DIA_MM, lo, up); break;
+    case F_GD:    param_limit(P_GUIDE_DIST_MM, lo, up); break;
+    case F_CAP:   param_limit(P_SPEED_HIGH, lo, up); break;
+    case F_TRACK: *lo = 0; *up = TRACK_UP; break;
+    default:      *lo = GAP_INPUT_LOW; *up = GAP_INPUT_UP; break;
     }
-    if ((key != KEY_UP) && (key != KEY_DOWN)) { return 0; }
-    step = (s_tune.place == 3) ? 100 : ((s_tune.place == 2) ? 10 : 1);
-    edit_limits(page, &low, &up);
-    s_tune.edit_value = (int16_t)(s_tune.edit_value + ((key == KEY_UP) ? step : -step));
-    if (s_tune.edit_value < low) { s_tune.edit_value = low; }
-    if (s_tune.edit_value > up)  { s_tune.edit_value = up; }
+}
+
+/* 확정 즉시 저장. 2 = 저장함 */
+static int field_set(int16_t f, int16_t v)
+{
+    int16_t lo, up, g;
+
+    switch (f) {
+    case F_DIA: return (param_set(P_WHEEL_DIA_MM, v) == 0) ? 2 : 1;
+    case F_GD:  return (param_set(P_GUIDE_DIST_MM, v) == 0) ? 2 : 1;
+    case F_CAP:
+        s_tune.cap = v;
+        storage_request(TUNE_EE_CAP, (uint16_t)v);
+        return 2;
+    case F_TRACK:
+        s_tune.track = v;
+        storage_request(TUNE_EE_TRACK, (uint16_t)v);
+        return 2;
+    default:                   /* 잰 간격 + 감지 뒤 미끄러진 거리 = 센서와 회전 중심 사이 */
+        param_limit(P_GUIDE_DIST_MM, &lo, &up);
+        g = (int16_t)(v + agv_build.ov_mm);
+        return (param_set(P_GUIDE_DIST_MM, (g < lo) ? lo : ((g > up) ? up : g)) == 0) ? 2 : 1;
+    }
+}
+
+/* 지금 화면의 입력 칸. 없으면 -1 */
+static int16_t cur_field(void)
+{
+    if (s_tune.state == TUNE_BLD_DONE) {
+        return ((agv_build.state == 2) && (s_tune.pg[s_tune.page].kind == PK_GA)) ? F_GA : -1;
+    }
+    if (s_tune.state != TUNE_WAIT) { return -1; }
+    if ((s_tune.cat == 1u) && (s_tune.item > 0u)) { return (int16_t)(s_tune.item - 1u); }
+    if ((s_tune.cat == 2u) && (s_tune.sub > 0u))  { return F_TRACK; }
+    return -1;
+}
+
+static int edit_key(uint16_t key)
+{
+    int16_t f = cur_field(), lo, up, step;
+
+    switch (key) {
+    case KEY_SHIFT:
+        s_tune.place = (int16_t)((s_tune.place >= s_field[f].digits) ? 1 : s_tune.place + 1);
+        return 1;
+    case KEY_UP:
+    case KEY_DOWN:
+        step = (s_tune.place == 4) ? 1000 : ((s_tune.place == 3) ? 100 : ((s_tune.place == 2) ? 10 : 1));
+        field_limits(f, &lo, &up);
+        s_tune.edit_value = (int16_t)(s_tune.edit_value + ((key == KEY_UP) ? step : -step));
+        if (s_tune.edit_value < lo) { s_tune.edit_value = lo; }
+        if (s_tune.edit_value > up) { s_tune.edit_value = up; }
+        return 1;
+    case KEY_SET:
+        s_tune.editing = 0;
+        return field_set(f, s_tune.edit_value);
+    case KEY_RESET:
+        s_tune.editing = 0;
+        return 1;
+    default:
+        return 1;              /* 고치는 중 MODE 는 듣지 않는다 */
+    }
+}
+
+static int edit_begin(void)
+{
+    s_tune.edit_value = field_get(cur_field());
+    s_tune.editing = 1;
+    s_tune.place = 1;
     return 1;
 }
 
-static int editable(uint16_t page)
+/* ---- 키 ---- */
+
+static uint16_t items(void)
 {
-    return (page == TUNE_PAGE_WHEEL_BASE) || (page == TUNE_PAGE_DIAMETER)
-        || (page == TUNE_PAGE_GAP) || (page == TUNE_PAGE_GUIDE_DIST);
+    return (s_tune.cat == 1u) ? T1_INPUTS : ((s_tune.cat == 2u) ? CHECK_N : DEV_N);
 }
 
-static int commit(void)
+static int menu_key(uint16_t key)
 {
-    int16_t v = s_tune.edit_value;
+    switch (key) {
+    case KEY_MODE:             /* 같은 단계 다음 칸 */
+        if (s_tune.item == 0u)     { s_tune.cat = (uint16_t)(s_tune.cat % 3u + 1u); }
+        else if (s_tune.sub == 0u) { s_tune.item = (uint16_t)(s_tune.item % items() + 1u); }
+        return 1;
+    case KEY_SET:
+        if (s_tune.item == 0u) { s_tune.item = 1; return 1; }
+        if (cur_field() >= 0) { return edit_begin(); }
+        if ((s_tune.cat == 2u) && (s_check[s_tune.item - 1u].mask & BLD_DIA)) { s_tune.sub = 1; }
+        return 1;
+    case KEY_RESET:
+        if (s_tune.sub > 0u)       { s_tune.sub = 0; }
+        else if (s_tune.item > 0u) { s_tune.item = 0; }
+        return 1;
+    default:
+        return 1;
+    }
+}
 
-    s_tune.editing = 0;
-    switch (s_tune.page) {
-    case TUNE_PAGE_WHEEL_BASE:
-        s_tune.wheel_base = v;
-        return (param_set(P_WHEEL_BASE_MM, v) == 0) ? 2 : 1;
-    case TUNE_PAGE_DIAMETER:
-        return (param_set(P_WHEEL_DIA_MM, v) == 0) ? 2 : 1;
-    case TUNE_PAGE_GAP:          /* 잰 간격 + 감지 뒤 미끄러진 거리 = 센서와 회전 중심 사이 */
-        return (param_set(P_GUIDE_DIST_MM, clamp_param(P_GUIDE_DIST_MM, (float)(v + s_tune.overrun_mm))) == 0) ? 2 : 1;
-    case TUNE_PAGE_GUIDE_DIST:
-        return (param_set(P_GUIDE_DIST_MM, v) == 0) ? 2 : 1;
+static void next_page(void)
+{
+    if (s_tune.page + 1u < s_tune.n_page) { s_tune.page++; }
+}
+
+static int result_key(uint16_t key)
+{
+    page_t *p = &s_tune.pg[s_tune.page];
+
+    if (agv_build.state != 2) {            /* 실패: RESET 으로 메뉴 */
+        if (key != KEY_RESET) { return 0; }
+        s_tune.state = TUNE_WAIT;
+        return 1;
+    }
+    switch (key) {
+    case KEY_UP:   s_tune.page = (uint16_t)((s_tune.page + 1u) % s_tune.n_page); return 1;
+    case KEY_DOWN: s_tune.page = (uint16_t)((s_tune.page + s_tune.n_page - 1u) % s_tune.n_page); return 1;
+    case KEY_SET:
+        if (p->kind == PK_SAVE) { return save_all(); }
+        if (p->kind == PK_GA)   { return edit_begin(); }
+        if (p->kind == PK_SET)  { p->flag = 1; }
+        next_page();
+        return 1;
+    case KEY_RESET:
+        if (p->kind == PK_SAVE) { s_tune.state = TUNE_WAIT; return 1; }   /* 저장 없이 메뉴로 */
+        if (p->kind == PK_SET)  { p->flag = 0; }
+        next_page();
+        return 1;
     default:
         return 1;
     }
@@ -474,19 +530,25 @@ static int commit(void)
 
 int tune_key(uint16_t key)
 {
-    if ((s_tune.state == TUNE_RPM) && (key != 0u)) {   /* 시험 중 아무 키나 누르면 끊고 보통 정지 */
+    uint16_t st = s_tune.state;
+
+    if (key == 0u) { return 0; }
+    if (st == TUNE_RPM) {               /* 시험 중 아무 키나 누르면 끊고 보통 정지 */
         (void)ident_rpm_key();
         return 1;
     }
-    if ((s_tune.state == TUNE_TEMP) && (key != 0u) && ident_coast_key()) { return 1; }   /* 타력 중 아무 키 */
+    if (((st == TUNE_TEMP) || (st == TUNE_BLD)) && ident_coast_key()) { return 1; }   /* 타력·정지 중 아무 키 */
+    if ((st == TUNE_BLD) && ident_rpm_key()) { return 1; }
     if (D.flag_run || D.flag_stopping) { return 0; }
-    if ((s_tune.state == TUNE_WAIT) && (key == KEY_SHIFT)) {
-        s_tune.ident = (uint16_t)((s_tune.ident + 1u) % TUNE_MODE_COUNT);
-        s_tune.failed = 0;
-        return 1;
-    }
-    if ((s_tune.state == TUNE_RPM_DONE) || (s_tune.state == TUNE_TOP_DONE) || (s_tune.state == TUNE_ALL_DONE)) {
-        uint16_t n = (s_tune.state == TUNE_RPM_DONE) ? TUNE_RPMT_PAGES : TUNE_RPM_PAGES;
+    if (s_tune.editing) { return edit_key(key); }
+    switch (st) {
+    case TUNE_WAIT:     return menu_key(key);
+    case TUNE_BLD_DONE: return result_key(key);
+    case TUNE_SAVED:    return 1;      /* 전원을 다시 켠다 */
+    case TUNE_RPM_DONE:
+    case TUNE_TOP_DONE:
+    case TUNE_ALL_DONE: {
+        uint16_t n = (st == TUNE_RPM_DONE) ? TUNE_RPMT_PAGES : TUNE_RPM_PAGES;
         switch (key) {
         case KEY_UP:    s_tune.page = (uint16_t)((s_tune.page + 1u) % n); return 1;
         case KEY_DOWN:  s_tune.page = (uint16_t)((s_tune.page + n - 1u) % n); return 1;
@@ -494,37 +556,163 @@ int tune_key(uint16_t key)
         default:        return 0;
         }
     }
-    if (((s_tune.state == TUNE_IDENT_DONE) || (s_tune.state == TUNE_TEMP_DONE)) && (key == KEY_RESET)) {
-        s_tune.state = TUNE_WAIT;
-        return 1;
-    }
-    if (s_tune.state != TUNE_DONE) { return 0; }
-    if (s_tune.editing) {
-        if (edit_key(key, s_tune.page)) { return 1; }
-        if (key == KEY_RESET) { s_tune.editing = 0; return 1; }
-        if (key == KEY_SET)   { return commit(); }
-        return 0;
-    }
-    switch (key) {
-    case KEY_UP:
-        s_tune.page = (uint16_t)((s_tune.page + 1u) % TUNE_PAGE_COUNT);
-        return 1;
-    case KEY_DOWN:
-        s_tune.page = (uint16_t)((s_tune.page + TUNE_PAGE_COUNT - 1u) % TUNE_PAGE_COUNT);
-        return 1;
-    case KEY_SET:
-        if (editable(s_tune.page)) {
-            s_tune.edit_value = tune_value(s_tune.page);   /* 수정 표시를 켜기 전에 읽는다 */
-            s_tune.editing = 1;
-            s_tune.place = 1;
-            return 1;
-        }
-        if (s_tune.page == TUNE_PAGE_GUIDE) { return save_guide() ? 2 : 1; }
-        return 1;
-    case KEY_RESET:
+    case TUNE_IDENT_DONE:
+    case TUNE_TEMP_DONE:
+        if (key != KEY_RESET) { return 0; }
         s_tune.state = TUNE_WAIT;
         return 1;
     default:
         return 0;
     }
+}
+
+/* ---- 주행 ---- */
+
+static void start(void)
+{
+    s_tune.editing = 0;
+    s_tune.page = 0;
+    if ((s_tune.cat == 1u) || ((s_tune.cat == 2u) && (s_tune.item > 0u))) {
+        uint16_t m = (s_tune.cat == 1u) ? T1_MASK : s_check[s_tune.item - 1u].mask;
+        clear_measure();
+        ident_start_build(m, (m & BLD_DIA) ? s_tune.track : 0, s_tune.cap);
+        s_tune.state = TUNE_BLD;
+    }
+    else if ((s_tune.cat == 3u) && (s_tune.item > 0u)) {
+        s_dev[s_tune.item - 1u].start();
+        s_tune.state = s_dev[s_tune.item - 1u].run;
+    }
+    else {
+        tagact_stop();         /* 고른 시험이 없다 */
+    }
+}
+
+void tune_run(void)
+{
+    uint16_t st = s_tune.state;
+
+    if ((stop_phase() != STOP_PHASE_IDLE) && (stop_floor_rpm() > s_tune.floor_max)) {
+        s_tune.floor_max = stop_floor_rpm();
+    }
+    if (++s_tune.alt >= 2u * ALT_TICKS) { s_tune.alt = 0; }
+    if (st == TUNE_WAIT) {
+        if (D.flag_run && !D.flag_stopping) { start(); }
+    }
+    else if (st == TUNE_BLD) {
+        int r = ident_run();
+        if (r != 0) { bld_finish(r); }
+    }
+    else if (dev_running(st)) {
+        if (ident_run() != 0) { s_tune.state = (uint16_t)(st + 1u); }
+    }
+}
+
+/* ---- 표시 ---- */
+
+static void put(char *c, uint16_t at, int16_t v, uint16_t n)
+{
+    int16_t m = (v < 0) ? (int16_t)-v : v;
+    while (n-- > 0u) {
+        c[at + n] = (char)('0' + m % 10);
+        m = (int16_t)(m / 10);
+    }
+}
+
+/* 이름 두 글자 + 세 자리. 음수는 둘째 글자가 '-'. 1000 이상은 이름 한 글자 + 네 자리 */
+static void show_value(char *c, const char *name, int16_t v)
+{
+    c[0] = name[0];
+    c[1] = name[1];
+    if (v == TUNE_NO_DATA) { c[2] = c[3] = c[4] = '-'; return; }
+    if (v < -999) { v = -999; }
+    if (v >= 1000) { put(c, 1, v, 4); return; }
+    if (v < 0) { c[1] = '-'; }
+    put(c, 2, v, 3);
+}
+
+static void show_field(char *c, int16_t f)
+{
+    int16_t v = s_tune.editing ? s_tune.edit_value : field_get(f);
+    if (s_field[f].digits == 4) {
+        c[0] = s_field[f].name[0];
+        put(c, 1, v, 4);
+    }
+    else { show_value(c, s_field[f].name, v); }
+}
+
+/* 채택 쪽: 번호 두 자리 + 값 세 자리. 1 s 지금 값, 1 s 새 값(둘째 자리 점). 채택하면 첫 자리 점 */
+static uint16_t show_page(char *c)
+{
+    const page_t *p = &s_tune.pg[s_tune.page];
+    uint16_t dot = 0;
+
+    switch (p->kind) {
+    case PK_SET:
+        put(c, 0, p->id, 2);
+        if (p->id < 10) { c[0] = ' '; }
+        if (s_tune.alt >= ALT_TICKS) { dot = 2u; put(c, 2, p->v, 3); }
+        else                         { put(c, 2, p->old, 3); }
+        if (p->flag) { dot |= 1u; }
+        break;
+    case PK_VAL:
+        if (p->id == N_A) { c[0] = 'A'; c[4] = (p->v != 0) ? (char)p->v : '-'; }
+        else              { show_value(c, s_name[p->id], p->v); }
+        break;
+    case PK_GA:
+        show_field(c, F_GA);
+        break;
+    default:
+        c[0] = 'S'; c[1] = 'A'; c[2] = 'V'; c[3] = 'E';
+        break;
+    }
+    return dot;
+}
+
+uint16_t tune_text(char *c)
+{
+    uint16_t i, dot = 0;
+    int16_t f;
+
+    for (i = 0; i < 5u; i++) { c[i] = ' '; }
+    switch (s_tune.state) {
+    case TUNE_WAIT:
+        f = cur_field();
+        if (f >= 0) { show_field(c, f); break; }
+        c[0] = 'T';
+        c[1] = (char)('0' + s_tune.cat);
+        if (s_tune.item > 0u) {        /* t2.1CH */
+            const char *tag = (s_tune.cat == 2u) ? s_check[s_tune.item - 1u].tag : s_dev[s_tune.item - 1u].tag;
+            dot = 2u;
+            c[2] = (char)('0' + s_tune.item);
+            c[3] = tag[0];
+            c[4] = tag[1];
+        }
+        break;
+    case TUNE_BLD:                     /* B·C + 단계 + 회 2자리 + 순서 */
+        c[0] = (s_tune.cat == 1u) ? 'B' : 'C';
+        put(c, 1, (int16_t)ident_stage(), 1);
+        put(c, 2, (int16_t)ident_pass(), 2);
+        put(c, 4, (int16_t)ident_phase(), 1);
+        break;
+    case TUNE_BLD_DONE:
+        if (agv_build.state != 2) { c[0] = 'F'; put(c, 1, agv_build.fail, 4); }
+        else                      { dot = show_page(c); }
+        break;
+    default:
+        c[0] = 'R'; c[1] = 'B'; c[2] = 'O'; c[3] = 'T';
+        break;
+    }
+    return dot;
+}
+
+uint16_t tune_flick(void)
+{
+    if (s_tune.editing) {          /* 고치는 자리 */
+        return (uint16_t)(1u << (5 - s_tune.place));
+    }
+    if ((s_tune.state == TUNE_BLD_DONE) && (agv_build.state == 2)
+        && (s_tune.pg[s_tune.page].kind == PK_VAL) && s_tune.pg[s_tune.page].flag) {
+        return 0x03u;              /* NG: 이름이 깜박인다 */
+    }
+    return 0;
 }

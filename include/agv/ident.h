@@ -1,4 +1,4 @@
-/* ident.h - 식별 시험. 튜닝 모드에서 SHIFT 로 고르고 START.
+/* ident.h - 식별 시험. 튜닝 모드 t3.1 에서 START.
  * 교차선 X, Y 사이(L ≈ 5 m)를 혼자 오가며 잰다. 선마다 정렬 180도 회전.
  *  0회: 최저 속도로 선을 찾아 돌고, 다음 선까지 재서 L 을 구한다.
  *  1~6회: 속도 단계 (회 - 1) / 2 (최고 속도의 1/3, 2/3, 1)로 직진하며 조향·구동 응답을 잰다.
@@ -66,7 +66,7 @@ void     ident_abort(void);
 uint16_t ident_pass(void);
 uint16_t ident_phase(void);
 int      ident_want_h(void);       /* 1 = 선 찾기 중. 'h' 로 교차선을 본다 */
-/* ---- 바닥 최고 속도 시험 (튜닝 모드 TOP) ----
+/* ---- 바닥 최고 속도 시험 (튜닝 모드 t3.3 TOP) ----
  * 식별 시험과 같은 주행로·0회(L 측정)를 쓴다. 1·2회는 방향을 바꿔 가며 선에서 출발해
  * 지령을 TOP_CMD_RPM 까지 P.acc 램프로 올린다. 조향은 그대로 켠다.
  * 지령이 실제보다 300 rpm 넘게 앞서면 지령을 실제 속도로 끌어내려 다시 올린다(조향 권한 유지).
@@ -108,7 +108,7 @@ extern top_result_t agv_top;
 void ident_start_top(void);  /* 이후 ident_run, ident_pass, ident_phase, ident_abort, ident_want_h 를 같이 쓴다 */
 int  ident_top_mode(void);   /* 1 = 지금 돌고 있는(또는 마지막) 시험이 최고 속도 시험 */
 
-/* ---- 통합 시험 (튜닝 모드 ALL) ----
+/* ---- 통합 시험 (튜닝 모드 t3.4 ALL) ----
  * START 한 번으로 단계 1 → 2 → 3 을 잇는다. 사람 없이 끝까지 가서 선 위에서 기다린다.
  *  단계 1: 식별 시험 0~6회 그대로 (지금 OPT). 결과는 agv_ident.
  *  단계 2: OPT 스윕. 목록의 OPT 마다 2회(왕복 한 번). OPT 는 RAM 에만 바꾸고 회 시작 전에 조향 상태를 지운다.
@@ -150,7 +150,7 @@ void ident_start_all(void);  /* 이후 ident_run, ident_pass, ident_phase, ident
 int  ident_all_mode(void);   /* 1 = 지금 돌고 있는(또는 마지막) 시험이 통합 시험이나 지정 시험 */
 uint16_t ident_stage(void);  /* 통합 시험 단계 1~3, 지정 시험 1~4. 통합 시험이 아니면 0 */
 
-/* ---- 지정 시험 (튜닝 모드 TEMP) ----
+/* ---- 지정 시험 (튜닝 모드 t3.5 TEMP) ----
  * 통합 시험을 줄인 것. 단계 1 은 0회만(선 찾기, L 측정, 회전 두 번). 식별 1~6회와 최고 속도 시험은 없다.
  * 0회 두 번째 회전이 끝나면 바로 단계 2. 통합 시험 단계 2 와 같이 선에서 출발해 TEMP 목록의 OPT 마다 2회 잰다
  * (속도 단계 2, 같은 회 순서, OPT 는 RAM 에만, 회마다 조향 상태를 지움, 창이 안 들어가면 4/5 로 다시).
@@ -230,7 +230,7 @@ typedef struct {
 
 extern stopt_result_t agv_stopt;
 
-/* ---- 바닥 rpm 시험 (튜닝 모드 RPM) ----
+/* ---- 바닥 rpm 시험 (튜닝 모드 t3.2 RPM) ----
  * 0회는 식별 시험과 같다(선 찾기, L 측정, 회전 두 번). 1~5회는 rpmtest.c 가 회 안을 재고,
  * 회가 끝나면 여기서 지령을 실제 속도에서 이어 1번 최고 속도의 1/2 로 먼 선까지 간 뒤 최저 속도로 선을 찾아 돈다.
  * 5회 회전 뒤 선 위에서 기다린다. 결과는 agv_rpmt. 실패 = 회 × 10 + 단계(8 이동·선 찾기, 9 회전).
@@ -241,9 +241,66 @@ int   ident_rpm_key(void);   /* 패널 키. 바닥 rpm 시험 중이면 실패�
 float ident_decel_mm(int16_t from);       /* from rpm 에서 최저 속도까지 주행 램프 감속 거리 mm */
 void  ident_speed(int16_t v, int ramp);   /* 주행 지령. ramp 0 = 바로 */
 
+/* ---- 제작·점검 연속 시험 (튜닝 모드 t1·t2) ----
+ * START 한 번으로 아래 단계 중 mask 에 든 것을 차례로 한다. 단계 사이는 선 위에서 돌고 이어 간다(0회는 한 번만).
+ *  1 기구: 0회(선 찾기, 회전, L 측정, 회전). 둘째 직선 끝에서 입력 L 로 휠 지름을 고친다(BLD_DIA, ±10% 넘으면 실패 1008).
+ *          둘째 회전으로 휠 간격, 선 찾기 중 'a'·'h' 짝으로 가이드 부호·배율, 둘째 직선 좌우 펄스 비를 잰다.
+ *          BLD_GA 면 둘째 회전 대신 선을 보자마자 서서 미끄러진 거리(ov_mm)를 재고 끝낸다.
+ *  2 rpm: 바닥 rpm 시험 1·4회만(앰프 형식, 안정 최저 rpm). 28번 추천 = 올림(max(low_rpm × 1.2, 정지 바닥 350) ÷ 1 m/min 당 rpm),
+ *         4 미만은 4. low_rpm 이 0(300 rpm 도 불안정)이면 추천 없음. 28번은 RAM 최저 속도를 바로 안 바꾼다(다시 켜면 적용).
+ *  3 최고 속도: TOP 1·2회. 1번 추천 = min(내림(max_mpm × 0.85), 상한). 뒤 단계는 이 값(RAM)으로 달린다.
+ *  4 타력: 최고 속도로 BLD_COAST_PASSES 회. 13번 추천 = 내림(감속도 평균 × 0.8 ÷ 100), 20~60 으로 자른다. 뒤 단계는 이 값(RAM).
+ *  5 정지: 최고 속도에서 교차로 위치 정지. 제작은 목표 20, 30, 40, 50, 60 cm 차례로 하고 지나침이 BLD_OVER_OK_MM 이하인
+ *          첫 목표에서 멈춘다(35번 추천). 점검(BLD_CHECK)은 지금 35번(0 이면 60 cm)으로 한 번.
+ *  6 조향: OPT 0, 3, 19, 26 스윕(통합 시험 단계 2 와 같다). 51번 추천 = dev_rms_mm 2회 평균이 가장 작은 OPT.
+ * 바로 저장(BLD_DIA 22번, BLD_WB 24번, BLD_GUIDE 'h' 부호·배율, BLD_MIN 28번)은 그 값을 잰 단계가 끝날 때 한다.
+ * 1·13·51번은 RAM 에서만 바꾸고 끝·실패·끊김 때 시험 전 값으로 돌린다. 결과는 agv_build 와 각 단계 결과.
+ * 단계 번호는 agv_all.stage, 실패 코드 = 단계 × 1000 + 회 × 10 + 순서 */
+#define BLD_MECH   0x0001u
+#define BLD_RPM    0x0002u
+#define BLD_TOP    0x0004u
+#define BLD_COAST  0x0008u
+#define BLD_STOPT  0x0010u
+#define BLD_STEER  0x0020u
+#define BLD_DIA    0x0040u
+#define BLD_WB     0x0080u
+#define BLD_GUIDE  0x0100u
+#define BLD_MIN    0x0200u
+#define BLD_GA     0x0400u
+#define BLD_CHECK  0x0800u
+#define BLD_STAGES 6
+#define BLD_COAST_PASSES 2
+#define BLD_CIDS   5
+#define BLD_OVER_OK_MM 10
+
+typedef struct {
+    int16_t state;           /* 1 진행, 2 끝, 3 실패 */
+    int16_t fail;            /* 단계 × 1000 + 회 × 10 + 순서 */
+    int16_t mask;
+    int16_t track_in_mm;     /* 입력 L. 0 = 지름 보정 안 함 */
+    int16_t cap_mpm;         /* 1번 추천 상한 */
+    int16_t cfg_high, cfg_dcc, cfg_dia, cfg_wb;   /* 시작 때 1·13·22·24번 */
+    int16_t dia_new, wb_new; /* 고친 22·24번. 0 = 안 함 */
+    int16_t lr_permille;     /* 둘째 직선 우/좌 펄스 비 - 1, 천분율 */
+    int16_t top_rpm;         /* agv_top.max_rpm 좌우 평균. 0 = 없음 */
+    int16_t dec_rpm_s;       /* 타력 감속도 평균. 0 = 없음 */
+    int16_t over_mm;         /* 정지 단계 마지막 회 지나친 거리 */
+    int16_t ov_mm;           /* BLD_GA: 선을 본 뒤 미끄러진 거리 */
+    int16_t amp;             /* agv_rpmt.amp */
+    int16_t min_rec, high_rec, dcc_rec, cid_rec, opt_rec;   /* 28·1·13·35·51번 추천. -1 = 없음 */
+    int16_t guide_k100;      /* 기구 단계 끝 'a' = k × 'h' 의 k × 100. TUNE_NO_DATA = 측정 부족 */
+    int16_t floor_rpm, se_x10, bat_dv;   /* tune.c 가 끝에 채운다: 정지 바닥 rpm, 선 찾기 'a' RMS × 10, 48번 */
+    float   track_mm;        /* 0회에 잰 L (지름 보정 전) */
+} build_result_t;
+
+extern build_result_t agv_build;
+
+void ident_start_build(uint16_t mask, int16_t track_in_mm, int16_t cap_mpm);
+int  ident_build_mode(void); /* 1 = 지금 돌고 있는(또는 마지막) 시험이 연속 시험 */
+
 /* ---- 리셋에 남는 결과 ----
- * agv_ident·agv_top·agv_all·agv_coast·agv_rpmt·agv_stopt 는 codestart 가 지우지 않는 RAM 구역 test_keep 에 둔다.
- * test_keep_add(agv_stopt)·test_keep_rpm(agv_rpmt)은 링커가 뒤에 붙여 앞 주소를 옮기지 않는다.
+ * agv_ident·agv_top·agv_all·agv_coast·agv_rpmt·agv_stopt·agv_build 는 codestart 가 지우지 않는 RAM 구역 test_keep 에 둔다.
+ * test_keep_add(agv_stopt)·test_keep_rpm(agv_rpmt)·test_keep_bld(agv_build)는 링커가 뒤에 붙여 앞 주소를 옮기지 않는다.
  * CCS 연결로 워치독 리셋이 나도 남는다. 부팅 때 ident_keep_boot 를 한 번 부른다.
  * 표시가 틀리면(전원 투입) 모두 지우고 표시를 쓴다. 진행 중(state 1)이던 결과는 state 3, fail 이 0 이면 -1 */
 extern uint16_t test_keep_mark;

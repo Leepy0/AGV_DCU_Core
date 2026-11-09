@@ -16,7 +16,8 @@
  * 타력은 1 가속, 2 안정, 7 타력(DAC 0 고정), 8, 9. 7 은 지정 시험에 SL 정지가 없어 다시 쓴다. 결과는 agv_coast
  * 단계 4 정지 정확도는 타력과 같은 1, 2 뒤 7 교차로 위치 정지, 8, 9. 결과는 agv_stopt
  * 바닥 rpm 시험(RPM)은 같은 0회 뒤 1~5회. 회 안(순서 = 단계 1~7)은 rpmtest.c 가 하고, 끝나면 실제 속도에서 이어
- * 1번 최고 속도의 1/2 로 먼 선 쪽으로 가다 감속해 선을 찾는다(8). 결과는 agv_rpmt */
+ * 1번 최고 속도의 1/2 로 먼 선 쪽으로 가다 감속해 선을 찾는다(8). 결과는 agv_rpmt
+ * 연속 시험(튜닝 t1·t2)은 위 시험들을 단계로 잇는다(ident.h). 단계마다 s_r 과 s_top·s_rpm 을 그 단계로 돌린다 */
 #include <math.h>
 #include <string.h>
 #include "agv/ident.h"
@@ -69,7 +70,8 @@
 #define COAST_EST_RPM_T  10.0f    /* 타력 거리 어림 감속도 1000 rpm/s 를 틱으로 */
 #define COAST_GUIDE_OFF  10       /* 조향이 꺼져 있으니 가이드가 이만큼 벗어나면 푼다(위험 감속 문턱) */
 #define KEEP_MARK        ((uint16_t)(0x7E57u ^ (uint16_t)(sizeof(agv_ident) + sizeof(agv_top) + sizeof(agv_all) \
-                                                           + sizeof(agv_coast) + sizeof(agv_rpmt) + sizeof(agv_stopt))))
+                                                           + sizeof(agv_coast) + sizeof(agv_rpmt) + sizeof(agv_stopt) \
+                                                           + sizeof(agv_build))))
 
 enum { PH_RAMP = 1, PH_SETTLE, PH_HOLD, PH_SPD_UP, PH_SPD_DOWN, PH_LAT, PH_STOP, PH_SEEK, PH_TURN };
 #define PH_COAST PH_STOP          /* 지정 시험 단계 3 */
@@ -83,12 +85,14 @@ enum { PH_RAMP = 1, PH_SETTLE, PH_HOLD, PH_SPD_UP, PH_SPD_DOWN, PH_LAT, PH_STOP,
 #pragma DATA_SECTION(agv_coast, "test_keep")
 #pragma DATA_SECTION(test_keep_mark, "test_keep")
 #pragma DATA_SECTION(agv_stopt, "test_keep_add")   /* 링커가 test_keep 뒤에 둔다. 앞 주소가 그대로다 */
+#pragma DATA_SECTION(agv_build, "test_keep_bld")   /* test_keep_rpm 뒤 */
 #endif
 ident_result_t agv_ident;
 top_result_t   agv_top;
 all_result_t   agv_all;
 coast_result_t agv_coast;
 stopt_result_t agv_stopt;
+build_result_t agv_build;
 uint16_t       test_keep_mark;
 
 static const int16_t s_sweep_def[SWEEP_MAX] = { 0, 1, 2, 3, 8, 9, 10, 11, 16, 17, 18, 19, 24, 25, 26, 27 };
@@ -103,6 +107,12 @@ static struct { int16_t *state, *fail, *pass, *phase; float *track; } s_r = {
     &agv_ident.state, &agv_ident.fail, &agv_ident.pass, &agv_ident.phase, &agv_ident.track_mm
 };
 static int16_t s_top, s_all, s_temp, s_rpm;
+static uint16_t s_build;          /* 연속 시험 mask. 0 = 아님 */
+static const int16_t s_bld_opt[4] = { 0, 3, 19, 26 };
+static struct {
+    uint32_t l0, r0, line;        /* 둘째 직선 시작 펄스, BLD_GA 선을 본 펄스 */
+    int16_t  ga;                  /* 1 = BLD_GA 정지 중 */
+} s_bld;
 
 static struct {
     int16_t ri, rn, last[2], n_tq, n_lag;
@@ -136,16 +146,20 @@ static struct {
 
 #define PASS ((uint16_t)*s_r.pass)
 
-/* 통합 시험 단계 2 (OPT 스윕) 중 */
-static int sweep(void) { return s_all && (agv_all.stage == 2); }
+/* 통합 시험 단계 2 (OPT 스윕) 중. 연속 시험은 단계 6 */
+static int sweep(void) { return s_all && (agv_all.stage == (s_build ? 6 : 2)); }
 
-/* 지정 시험 단계 3 (타력)·4 (정지 정확도) 중. 가속·안정·선 찾기·회전이 같다 */
-static int coast(void) { return s_temp && (agv_all.stage >= 3); }
-static int stopt(void) { return s_temp && (agv_all.stage == 4); }
+/* 지정 시험 단계 3 (타력)·4 (정지 정확도) 중. 가속·안정·선 찾기·회전이 같다. 연속 시험은 단계 4·5 */
+static int coast(void)
+{
+    return s_build ? ((agv_all.stage == 4) || (agv_all.stage == 5)) : (s_temp && (agv_all.stage >= 3));
+}
+static int stopt(void) { return s_build ? (agv_all.stage == 5) : (s_temp && (agv_all.stage == 4)); }
 
 /* 속도 단계 0~2. 1, 2회 → 0, 3, 4회 → 1, 5, 6회 → 2. 스윕은 1, 타력은 1, 1, 2, 2, 정지 정확도는 식별과 같다 */
 static uint16_t lvl(void)
 {
+    if (s_build && coast()) { return IDENT_LEVELS - 1u; }   /* 연속 시험 타력·정지는 최고 속도 */
     if (stopt()) { return (PASS - 1u) / 2u; }
     if (coast()) { return (PASS + 1u) / 2u; }
     return sweep() ? SWEEP_LEVEL : (PASS - 1u) / 2u;
@@ -276,6 +290,7 @@ static void point_top(void)
 
 void ident_start(void)
 {
+    s_build = 0;
     s_top = 0;
     s_all = 0;
     s_temp = 0;
@@ -292,6 +307,7 @@ void ident_start(void)
 
 void ident_start_top(void)
 {
+    s_build = 0;
     s_all = 0;
     s_temp = 0;
     s_rpm = 0;
@@ -301,17 +317,23 @@ void ident_start_top(void)
 
 int ident_top_mode(void) { return s_top; }
 
-void ident_start_rpm(void)
+static void rpm_point(void)
 {
-    s_top = 0;
-    s_all = 0;
-    s_temp = 0;
     s_rpm = 1;
     point(&agv_rpmt.state, &agv_rpmt.fail, &agv_rpmt.pass, &agv_rpmt.phase, &agv_rpmt.track_mm);
     memset(&agv_rpmt, 0, sizeof(agv_rpmt));
     agv_rpmt.cfg_high = param_get(P_SPEED_HIGH);
     agv_rpmt.lim_rpm = (int16_t)(((int32_t)P.target_speed * 2L) / 3L);
     agv_rpmt.steer_k = RPMT_STEER_K;
+}
+
+void ident_start_rpm(void)
+{
+    s_build = 0;
+    s_top = 0;
+    s_all = 0;
+    s_temp = 0;
+    rpm_point();
     start_common();
 }
 
@@ -403,6 +425,21 @@ static void stopt_next(void)
     agv_stopt.state = 1;
 }
 
+static int16_t clamp_p(uint16_t idx, int32_t v)
+{
+    int16_t lo, up;
+    param_limit(idx, &lo, &up);
+    return (v < lo) ? lo : ((v > up) ? up : (int16_t)v);
+}
+
+/* 연속 시험이 RAM 에서 바꾼 1·13번을 돌린다 */
+static void build_restore(int16_t state)
+{
+    (void)param_set_ram(P_SPEED_HIGH, agv_build.cfg_high);
+    (void)param_set_ram(P_DCC, agv_build.cfg_dcc);
+    agv_build.state = state;
+}
+
 void ident_abort(void)
 {
     int16_t code = (int16_t)(*s_r.pass * 10 + *s_r.phase);
@@ -421,6 +458,11 @@ void ident_abort(void)
         (void)param_set_ram(P_OPT_FLAGS, agv_all.opt_saved);
         if (stopt()) { acs_cross_release(ACS_CROSS_IN); }   /* 단계 4 가 건 대기 */
     }
+    if (s_build && (agv_build.state == 1)) {
+        agv_build.fail = agv_all.fail;
+        build_restore(3);
+    }
+    s_bld.ga = 0;
 }
 
 uint16_t ident_pass(void)  { return (uint16_t)*s_r.pass; }
@@ -442,6 +484,7 @@ void ident_keep_boot(void)
         memset(&agv_coast, 0, sizeof(agv_coast));
         memset(&agv_rpmt, 0, sizeof(agv_rpmt));
         memset(&agv_stopt, 0, sizeof(agv_stopt));
+        memset(&agv_build, 0, sizeof(agv_build));
         test_keep_mark = KEEP_MARK;
         return;
     }
@@ -452,6 +495,7 @@ void ident_keep_boot(void)
     keep_cut(&agv_coast.state, &agv_coast.fail);
     keep_cut(&agv_rpmt.state, &agv_rpmt.fail);
     keep_cut(&agv_stopt.state, &agv_stopt.fail);
+    keep_cut(&agv_build.state, &agv_build.fail);
 }
 
 int ident_want_h(void)
@@ -890,7 +934,9 @@ static void stopt_begin(void)
     memset(sp, 0, sizeof(*sp));
     memset(&s_cs, 0, sizeof(s_cs));
     if (pass_rpm() < level_rpm()) { sp->cut = 2; }
-    d = (PASS & 1u) ? ((cid > 0) ? (float)cid * 10.0f : (float)STOPT_CID_MM) : (float)STOPT_SHORT_MM;
+    if (s_build && !(s_build & BLD_CHECK)) { d = (float)((PASS + 1u) * 100u); }   /* 제작: 20, 30, .. 60 cm */
+    else if ((PASS & 1u) || s_build) { d = (cid > 0) ? (float)cid * 10.0f : (float)STOPT_CID_MM; }
+    else { d = (float)STOPT_SHORT_MM; }
     sp->target_mm = d;
     c = coast_mm((float)pass_rpm(), 0.0f);
     s_id.budget = *s_r.track - P.guide_dist_mm - DEC_MARGIN_MM - ((c > d) ? c : d);
@@ -1086,6 +1132,30 @@ int ident_rpm_key(void)
     return 1;
 }
 
+/* 연속 시험 0회 둘째 직선 끝. 좌우 펄스 비, 입력 L 로 휠 지름(바로 저장). BLD_GA 면 바로 선다.
+ * -1 실패(잰 L 이 입력과 10% 넘게 다르다), 1 정지 시작, 0 그대로 회전 */
+static int bld_leg2(float leg)
+{
+    uint32_t dl = run_pulses(0) - s_bld.l0, dr = run_pulses(1) - s_bld.r0;
+    int16_t in = agv_build.track_in_mm;
+
+    agv_build.track_mm = leg;
+    if (dl != 0UL) { agv_build.lr_permille = (int16_t)(((float)dr / (float)dl - 1.0f) * 1000.0f); }
+    if ((s_build & BLD_DIA) && (in > 0)) {
+        float r = (float)in / leg;
+        if ((r < 0.9f) || (r > 1.1f)) { return -1; }
+        agv_build.dia_new = clamp_p(P_WHEEL_DIA_MM, (int32_t)((float)agv_build.cfg_dia * r + 0.5f));
+        (void)param_set(P_WHEEL_DIA_MM, agv_build.dia_new);
+        *s_r.track = (float)in;
+    }
+    if (!(s_build & BLD_GA)) { return 0; }
+    s_bld.line = tune_line_at(0);
+    s_bld.ga = 1;
+    tagact_stop();
+    enter(PH_STOP);
+    return 1;
+}
+
 /* 선을 봤다. 회전 중심이 선 위에 오도록 GD 만큼 더 가서 돈다 */
 static int cross_seen(void)
 {
@@ -1096,6 +1166,11 @@ static int cross_seen(void)
     if ((PASS == 0u) && (s_id.legs == 1)) {
         *s_r.track = leg;
         if (leg < TRACK_MIN_MM) { return fail_now(); }
+        if (s_build) {
+            int r = bld_leg2(leg);
+            if (r < 0) { return fail_now(); }
+            if (r > 0) { return 0; }
+        }
     }
     s_id.legs++;
     D.tape_slow = 1;
@@ -1111,7 +1186,180 @@ static int all_end(void)
 {
     agv_all.state = 2;
     (void)param_set_ram(P_OPT_FLAGS, agv_all.opt_saved);
+    if (s_build) { build_restore(2); }
     return 1;
+}
+
+/* ---- 연속 시험 (튜닝 t1·t2) ---- */
+
+void ident_start_build(uint16_t mask, int16_t track_in_mm, int16_t cap_mpm)
+{
+    all_begin(s_bld_opt, (mask & BLD_STEER) ? 4u : 0u);
+    memset(&agv_coast, 0, sizeof(agv_coast));
+    memset(&agv_stopt, 0, sizeof(agv_stopt));
+    memset(&agv_build, 0, sizeof(agv_build));
+    memset(&s_bld, 0, sizeof(s_bld));
+    agv_build.state = 1;
+    agv_build.mask = (int16_t)mask;
+    agv_build.track_in_mm = track_in_mm;
+    agv_build.cap_mpm = cap_mpm;
+    agv_build.cfg_high = param_get(P_SPEED_HIGH);
+    agv_build.cfg_dcc = param_get(P_DCC);
+    agv_build.cfg_dia = param_get(P_WHEEL_DIA_MM);
+    agv_build.cfg_wb = param_get(P_WHEEL_BASE_MM);
+    agv_build.min_rec = agv_build.high_rec = agv_build.dcc_rec = agv_build.cid_rec = agv_build.opt_rec = -1;
+    s_build = mask;
+}
+
+int ident_build_mode(void) { return s_build != 0u; }
+
+/* 단계가 끝났다. 추천값을 내고 바로 저장 몫을 저장한다. 1·13번은 뒤 단계를 위해 RAM 에 넣는다 */
+static void stage_end(uint16_t st)
+{
+    build_result_t *b = &agv_build;
+    uint16_t i, k;
+
+    switch (st) {
+    case 1:
+        agv_all.track_mm = agv_ident.track_mm;
+        agv_build.guide_k100 = tune_guide_k100();   /* 저장하면 뒤 측정은 고친 'h' 로 한다. 지금 값을 남긴다 */
+        if (s_build & BLD_GUIDE) { (void)tune_guide_save(); }
+        break;
+    case 2:
+        b->amp = agv_rpmt.amp;
+        if (agv_rpmt.low_rpm > 0) {   /* 안정 최저 rpm × 1.2. 정지 바닥(350 rpm) 아래면 선 앞 정지가 실패하니 바닥 이상.
+                                         4 m/min 미만은 파생값 계산이 6 으로 바꾸므로 4 이상 */
+            float r = (float)agv_rpmt.low_rpm * 1.2f;
+            int16_t v = (int16_t)ceilf(((r < (float)STOP_MIN_RPM) ? (float)STOP_MIN_RPM : r) / P.one_meter_rpm);
+            b->min_rec = clamp_p(P_SPEED_MIN, (v < 4) ? 4 : v);
+            if (s_build & BLD_MIN) { (void)param_set(P_SPEED_MIN, b->min_rec); }
+        }
+        break;
+    case 3:
+        top_finish();
+        b->top_rpm = (int16_t)(((int32_t)agv_top.max_rpm[0] + agv_top.max_rpm[1]) / 2);
+        if (b->top_rpm > 0) {
+            int16_t v = (int16_t)(agv_top.max_mpm * 0.85f);
+            b->high_rec = clamp_p(P_SPEED_HIGH, (v > b->cap_mpm) ? b->cap_mpm : v);
+            (void)param_set_ram(P_SPEED_HIGH, b->high_rec);
+        }
+        break;
+    case 4: {
+        int32_t sum = 0;
+        for (i = k = 0; i < BLD_COAST_PASSES; i++) {
+            if (agv_coast.p[i].dec_rpm_s > 0) { sum += agv_coast.p[i].dec_rpm_s; k++; }
+        }
+        if (k > 0u) {                 /* 타력으로 낼 수 있는 감속의 0.8. DCC 1 = 100 rpm/s */
+            b->dec_rpm_s = (int16_t)(sum / (int32_t)k);
+            b->dcc_rec = clamp_p(P_DCC, ((int32_t)b->dec_rpm_s * 8L) / 1000L);
+            (void)param_set_ram(P_DCC, b->dcc_rec);
+        }
+        break;
+    }
+    case 5: {
+        const stopt_pass_t *sp = &agv_stopt.p[PASS - 1u];
+        b->over_mm = (int16_t)sp->overshoot_mm;
+        if (!(s_build & BLD_CHECK) && (sp->overshoot_mm <= (float)BLD_OVER_OK_MM)) { b->cid_rec = (int16_t)(sp->target_mm / 10.0f); }
+        break;
+    }
+    default: {                        /* 조향: 2회 평균 편차가 가장 작은 OPT */
+        float best = 1e9f;
+        for (k = 0; k < (uint16_t)agv_all.sweep_n; k++) {
+            float sum = 0.0f, n = 0.0f;
+            for (i = 0; i < SWEEP_PASSES; i++) {
+                const ident_level_t *lv = &agv_all.sw[k].lv[i];
+                if (lv->v_mpm > 0.0f) { sum += lv->dev_rms_mm; n += 1.0f; }
+            }
+            if ((n > 0.0f) && (sum / n < best)) {
+                best = sum / n;
+                b->opt_rec = agv_all.sw[k].opt;
+            }
+        }
+        break;
+    }
+    }
+}
+
+/* mask 에서 다음 단계로 s_r 을 돌린다. 차는 선 위에 서 있다. 1 = 남은 단계 없음 */
+static int build_next(void)
+{
+    uint16_t st = (uint16_t)agv_all.stage;
+
+    do { st++; } while ((st <= BLD_STAGES) && !(s_build & (1u << (st - 1u))));
+    if (st > BLD_STAGES) { return 1; }
+    s_id.retry = 0;
+    s_top = 0;
+    s_rpm = 0;
+    agv_all.stage = (int16_t)st;
+    switch (st) {
+    case 2:
+        rpm_point();
+        agv_rpmt.track_mm = agv_all.track_mm;
+        break;
+    case 3:
+        point_top();
+        agv_top.track_mm = agv_all.track_mm;
+        break;
+    case 4:
+        point(&agv_coast.state, &agv_coast.fail, &agv_coast.pass, &agv_coast.phase, &agv_all.track_mm);
+        break;
+    case 5:
+        point(&agv_stopt.state, &agv_stopt.fail, &agv_stopt.pass, &agv_stopt.phase, &agv_all.track_mm);
+        break;
+    default:
+        agv_all.pass = agv_all.phase = 0;
+        point(&agv_all.state, &agv_all.fail, &agv_all.pass, &agv_all.phase, &agv_all.track_mm);
+        break;
+    }
+    *s_r.state = 1;
+    return 0;
+}
+
+/* 회전이 끝났다. 단계가 끝났으면 다음 단계로, 마지막이면 선 위에서 기다린다 */
+static int build_turn(void)
+{
+    uint16_t st = (uint16_t)agv_all.stage;
+    int done = 0;
+
+    if (s_id.retry) { done = 0; }    /* 속도를 낮춰 같은 회를 다시 */
+    else if (st == 1u) {
+        done = (s_id.legs >= 2);
+        if (done) {                   /* 둘째 회전은 고친 지름으로 돌았다 */
+            agv_build.wb_new = clamp_p(P_WHEEL_BASE_MM, (int32_t)((float)param_get(P_WHEEL_BASE_MM)
+                                       * (float)D.tape_turned / (float)D.tape_total_pulse + 0.5f));
+            if (s_build & BLD_WB) { (void)param_set(P_WHEEL_BASE_MM, agv_build.wb_new); }
+        }
+    }
+    else if (st == 2u) { done = (PASS >= 4u); }
+    else if (st == 3u) { done = (PASS >= TOP_PASSES); }
+    else if (st == 4u) { done = (PASS >= BLD_COAST_PASSES); }
+    else if (st == 5u) {
+        const stopt_pass_t *sp = &agv_stopt.p[PASS - 1u];
+        done = (s_build & BLD_CHECK) || (PASS >= BLD_CIDS) || (sp->overshoot_mm <= (float)BLD_OVER_OK_MM);
+    }
+    else {
+        agv_all.sw[agv_all.sweep_k].done++;
+        done = (PASS >= (uint16_t)(agv_all.sweep_n * SWEEP_PASSES));
+    }
+    if (done) {
+        *s_r.state = 2;
+        stage_end(st);
+        if (build_next()) { return all_end(); }
+    }
+    run_restart_now();
+    s_id.restart = 1;
+    return 0;
+}
+
+/* BLD_GA: 선을 보고 선 뒤 미끄러진 거리를 잰다. 기구 단계만 하고 끝낸다 */
+static int bld_ga_wait(int stopped)
+{
+    if (!stopped) { return (++s_id.t > STOP_LIMIT) ? fail_now() : 0; }
+    s_bld.ga = 0;
+    agv_build.ov_mm = (int16_t)((float)(travel() - s_bld.line) / P.one_length_pulse + 0.5f);
+    agv_ident.state = 2;
+    stage_end(1u);
+    return all_end();
 }
 
 /* 회전이 끝났다. 6회(최고 속도 시험은 2회) 뒤에는 선 위에서 기다린다.
@@ -1122,6 +1370,7 @@ static int turn_done(void)
 {
     D.tape_slow = 0;
     if ((D.system_err != 0) || (D.stop_err != 0)) { return fail_now(); }
+    if (s_build) { return build_turn(); }
     if (sweep()) {
         if (!s_id.retry) {
             agv_all.sw[agv_all.sweep_k].done++;
@@ -1186,7 +1435,11 @@ int ident_run(void)
         s_id.restart = 0;
         if (ph == PH_STOP) { seek_begin(); return 0; }
         s_id.begin = travel();
-        if ((PASS == 0u) && (s_id.legs == 1)) { seek_begin(); }   /* L 을 잰다 */
+        if ((PASS == 0u) && (s_id.legs == 1)) {                   /* L 을 잰다 */
+            s_bld.l0 = run_pulses(0);
+            s_bld.r0 = run_pulses(1);
+            seek_begin();
+        }
         else if (s_top)                       { top_begin(); }
         else if (s_rpm)                       { rpm_begin(); }
         else if (stopt())                     { stopt_begin(); }
@@ -1199,6 +1452,7 @@ int ident_run(void)
         else if (s_id.turn_seen && !D.tape_align && !D.flag_stopping && (D.turn_motion == 0)) { return turn_done(); }
         return 0;
     }
+    if (s_bld.ga) { return bld_ga_wait(stopped); }               /* 선 위에서 선다 */
     if ((ph <= PH_STOP) && D.guide_all_on) { return fail_now(); }   /* 측정 중 교차선 */
     if (coast() && (ph <= PH_COAST)) { return coast_run(stopped); }
     if (s_rpm && (ph < PH_SEEK)) { return rpm_run(stopped); }

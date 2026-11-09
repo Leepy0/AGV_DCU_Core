@@ -34,7 +34,7 @@ SECTIONS
    .ebss       : > RAML1,      PAGE = 1
    .sysmem     : > RAMH0,      PAGE = 1
    .esysmem    : > RAMH0,      PAGE = 1
-   test_keep   : { *(test_keep) . = 0xA40; *(test_keep_add) *(test_keep_rpm) } > RAMH0, PAGE = 1   /* 시험 결과. codestart 가 지우지 않아 리셋에 남는다.
-                                                                       뒤에 붙인 결과(test_keep_add, test_keep_rpm)는 앞 주소를 옮기지 않는다.
+   test_keep   : { *(test_keep) . = 0xA40; *(test_keep_add) *(test_keep_rpm) *(test_keep_bld) } > RAMH0, PAGE = 1   /* 시험 결과. codestart 가 지우지 않아 리셋에 남는다.
+                                                                       뒤에 붙인 결과(test_keep_add, test_keep_rpm, test_keep_bld)는 앞 주소를 옮기지 않는다.
                                                                        . = 0xA40: agv_stopt 를 앞 이미지와 같은 0x3FAA40 에 둔다. 앞이 넘치면 링크가 실패한다 */
 }
