@@ -6,10 +6,12 @@
 #include "agv/log.h"
 #include "agv/param.h"
 #include "agv/tagact.h"
+#include "agv/ui.h"
 
 #define D agv_drive
 
 #define SEQ_SCAN_STEPS   8     /* 한 스캔에 이어서 실행하는 스텝 수 */
+#define LOW_BATTERY_DV   230   /* 저전압 판정과 같은 값 */
 
 /* 한 실행 흐름. 시퀀스 1개 + ACT 슬롯 4개 */
 typedef struct {
@@ -54,7 +56,7 @@ static const seq_def_t *find_def(const seq_def_t *list, uint16_t n, uint16_t id)
 
 static int16_t forbidden_in_act(uint16_t kind)
 {
-    return (kind == SK_SPEED) || (kind == SK_FORBACK) || (kind == SK_TURN)
+    return (kind == SK_SPEED) || (kind == SK_FORBACK) || (kind == SK_TURN) || (kind == SK_TURN_NOWAIT)
         || (kind == SK_ERROR_HOLD) || (kind == SK_END_RESTART);
 }
 
@@ -142,8 +144,7 @@ static void out_apply(seq_runner_t *r, uint32_t on, uint32_t off)
     r->owned = (r->owned & ~off) | on;
 }
 
-/* on·off 에 같이 선 비트(any)는 "하나라도 ON", 나머지는 전부 ON / 전부 OFF */
-static uint16_t mask_true(uint32_t v, uint32_t on, uint32_t off)
+uint16_t seq_mask_true(uint32_t v, uint32_t on, uint32_t off)
 {
     uint32_t any = on & off;
     uint32_t all_on = on & ~any;
@@ -151,14 +152,62 @@ static uint16_t mask_true(uint32_t v, uint32_t on, uint32_t off)
     return ((v & all_on) == all_on) && ((v & all_off) == 0) && ((any == 0) || ((v & any) != 0));
 }
 
+uint16_t seq_xcond(uint16_t c, uint16_t a, uint16_t b, uint16_t tag)
+{
+    uint16_t kind = (uint16_t)(c & 0x7Fu);
+    uint16_t slot = (uint16_t)(c >> 8);
+    int16_t st = ((kind == XC_STATION) || (kind == XC_STATION_RUNNING) || (kind >= XC_STATION_MOD)) ? acs_station_get(slot) : 0;
+    int16_t v;
+    uint16_t ok;
+
+    switch (kind) {
+    case XC_NONE:            ok = 1; break;
+    case XC_FORBACK_MODE:    ok = (uint16_t)(param_dv.forback_mode > 0); break;
+    case XC_LOW_BATTERY:     ok = (uint16_t)(param_get(P_BAT_DV) < LOW_BATTERY_DV); break;
+    case XC_FORWARD:         ok = (uint16_t)(D.backward == 0); break;
+    case XC_BACKWARD:        ok = (uint16_t)(D.backward != 0); break;
+    case XC_STATION_RUNNING:
+    case XC_STATION:
+        ok = (uint16_t)((st >= (int16_t)a) && (st <= (int16_t)b) && ((kind == XC_STATION) || !D.flag_stopping));
+        break;
+    case XC_CROSS:
+        if (slot & 1u) { ok = (uint16_t)(D.cross_out_on || (!(slot & 2u) && D.cross_out_flag)); }
+        else           { ok = (uint16_t)(D.cross_in_on || (!(slot & 2u) && D.cross_in_flag)); }
+        break;
+    case XC_ERR_EQ:          ok = (uint16_t)(D.action_err == (int16_t)a); break;
+    case XC_PARAM_EQ:        ok = (uint16_t)(param_get(slot) == (int16_t)a); break;
+    case XC_PARAM_GE:        ok = (uint16_t)(param_get(slot) >= (int16_t)a); break;
+    case XC_PARAM_LE:        ok = (uint16_t)(param_get(slot) <= (int16_t)a); break;
+    case XC_ID:
+        v = param_get(P_AGV_ID);
+        ok = (uint16_t)((v >= (int16_t)a) && (v <= (int16_t)b));
+        break;
+    case XC_KEY:             ok = (uint16_t)(ui_key() == a); break;
+    case XC_STATION_MOD:     ok = (uint16_t)((a != 0u) && ((st % (int16_t)a) == (int16_t)b)); break;
+    case XC_STATION_DIV:     ok = (uint16_t)((a != 0u) && ((st / (int16_t)a) == (int16_t)b)); break;
+    case XC_TAG_MINUS_EQ_ST: ok = (uint16_t)((int16_t)(tag - a) == st); break;
+    case XC_TAG_EQ_ST:       ok = (uint16_t)((int16_t)tag == st); break;
+    default:                 return 0;
+    }
+    return (c & XC_NOT) ? (uint16_t)!ok : ok;
+}
+
 static uint16_t cond_true(const seq_step_t *s)
 {
-    return mask_true(io_in_mask(), s->on, s->off);
+    return seq_mask_true(io_in_mask(), s->on, s->off);
+}
+
+/* WHEN·WAIT: 입력 조건 + 두 번째 "하나라도 ON" 묶음(out) + 확장 조건(xc, arg0, arg1) */
+static uint16_t cond_full(const seq_step_t *s)
+{
+    uint32_t v = io_in_mask();
+    return seq_mask_true(v, s->on, s->off) && ((s->out == 0) || ((v & s->out) != 0))
+        && ((s->xc == 0) || seq_xcond(s->xc, s->arg0, s->arg1, 0));
 }
 
 static uint16_t cond_out_true(const seq_step_t *s)
 {
-    return mask_true(io_out_mask(), s->on, s->off);
+    return seq_mask_true(io_out_mask(), s->on, s->off);
 }
 
 static void tick(seq_runner_t *r)
@@ -169,6 +218,20 @@ static void tick(seq_runner_t *r)
 static uint16_t timed_out(const seq_runner_t *r, const seq_step_t *s)
 {
     return (s->timeout != 0) && (r->c.timer > s->timeout);
+}
+
+/* 파라미터 arg0 x 단위 arg1 틱이 지났나. a = 단위 안 틱, b = 지난 단위 수라 16비트로 99분도 센다 */
+static uint16_t param_time_over(seq_runner_t *r, const seq_step_t *s)
+{
+    int16_t v = param_get(s->arg0);
+
+    r->a++;
+    if (r->a >= s->arg1) {
+        r->a = 0;
+        if (r->b != 0xFFFFu) { r->b++; }
+    }
+    if (v < 0) { v = 0; }
+    return (r->b > (uint16_t)v) || ((r->b == (uint16_t)v) && (r->a != 0));
 }
 
 /* 라벨은 분기할 때 표에서 찾는다. 없으면 표 오류로 끝낸다 */
@@ -193,7 +256,7 @@ static uint16_t eval_when(seq_runner_t *r)
     for (i = r->c.step; i < r->nsteps; i++) {
         const seq_step_t *s = &r->tbl[i];
         if (s->kind == SK_WHEN) {
-            if (cond_true(s)) { return jump(r, s->target); }
+            if (cond_full(s)) { return jump(r, s->target); }
         }
         else if (s->kind == SK_WHEN_STATE) {
             if (seq_state_get(s->arg0) == s->arg1) { return jump(r, s->target); }
@@ -295,6 +358,7 @@ static uint16_t eval_handshake(seq_runner_t *r, const seq_step_t *s)
 
 static int16_t acs_number(const seq_step_t *s)
 {
+    if ((s->arg1 & 0xFF00u) == SEQ_NUM_STATION_K) { return acs_station_get(s->arg1 & 0xFFu); }
     switch (s->arg1) {
     case SEQ_NUM_STATION0:       return acs_station_get(0);
     case SEQ_NUM_STATION0_PLUS1: return (int16_t)(acs_station_get(0) + 1);
@@ -311,6 +375,7 @@ static uint16_t eval_turn(seq_runner_t *r, const seq_step_t *s)
         r->a = 1;
         return R_WAIT;
     }
+    if (s->kind == SK_TURN_NOWAIT) { return R_NEXT; }
     /* 거부된 회전은 다음 스캔에 바로 통과한다 */
     return ((D.turn_pulses <= 0) && (D.turn_motion == 0) && !D.flag_turn) ? (uint16_t)R_NEXT : (uint16_t)R_WAIT;
 }
@@ -351,8 +416,14 @@ static uint16_t eval_step(seq_runner_t *r, const seq_step_t *s)
         return R_NEXT;
     case SK_WAIT:
         tick(r);
-        if (cond_true(s)) { return R_NEXT; }
+        if (cond_full(s)) { return R_NEXT; }
         return timed_out(r, s) ? jump(r, s->target) : (uint16_t)R_WAIT;
+    case SK_WAIT_PARAM:
+        tick(r);
+        if (cond_full(s)) { return R_NEXT; }
+        return (param_time_over(r, s) && (param_get(s->arg0) > 0)) ? jump(r, s->target) : (uint16_t)R_WAIT;
+    case SK_DELAY_PARAM:
+        return param_time_over(r, s) ? (uint16_t)R_NEXT : (uint16_t)R_WAIT;
     case SK_WAIT_STABLE:
         return eval_wait_stable(r, s);
     case SK_WAIT_OUT:
@@ -386,6 +457,7 @@ static uint16_t eval_step(seq_runner_t *r, const seq_step_t *s)
         tagact_forback((dir_t)s->arg0);
         return R_NEXT;
     case SK_TURN:
+    case SK_TURN_NOWAIT:
         return eval_turn(r, s);
     case SK_OBS:
         D.obs_use = (int16_t)s->arg0;

@@ -5,6 +5,7 @@
 #include "agv/param.h"
 
 extern uint32_t fake_in, fake_out, fake_seq_off_count;
+extern uint16_t fake_key;           /* ui_key() */
 extern int      fake_restart_count, fake_link_full, fake_tx_count;
 extern uint16_t fake_tx[256][20];
 extern int      fake_speed_arg, fake_forback_arg, fake_turn_count;

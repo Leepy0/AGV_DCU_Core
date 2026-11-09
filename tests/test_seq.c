@@ -146,6 +146,73 @@ SEQ_BEGIN( s_wait_out )
     END_STOP
 SEQ_END
 
+/* 확장 조건: 방향, 호기 + 입력 */
+SEQ_BEGIN( s_xwhen )
+    SELECT_BEGIN
+        WHEN_IF( X_BACKWARD, L_A )
+        WHEN_IF_IN( X_ID(5, 9), IN( ON(SEN_A) ), L_B )
+    SELECT_END
+    L( L_A )
+    OUT_ON( O_A )
+    END_STOP
+    L( L_B )
+    OUT_ON( O_B )
+    END_STOP
+SEQ_END
+
+/* 교차로·부정·오류·키·파라미터, 제한 시간 */
+SEQ_BEGIN( s_xwait )
+    WAIT_IF( X_CROSS_IN )
+    OUT_ON( O_A )
+    WAIT_IF( X_NOT(X_CROSS_IN_ON) )
+    OUT_ON( O_B )
+    WAIT_IF_IN( X_ERR_EQ(281), IN( OFF(SEN_A) ) )
+    WAIT_IF( X_KEY(UP) )
+    WAIT_IF_TO( X_PARAM_EQ(P_STATION_NO, 5), 3, L_ERR )
+    OUT_ON( O_C )
+    END_STOP
+    L( L_ERR )
+    OUT_ON( OUT_EXT_5 )
+    END_STOP
+SEQ_END
+
+/* (A||B) && (C||D) */
+SEQ_BEGIN( s_any2 )
+    WAIT_ANY2( IN( ANY_ON(SEN_A, SEN_B) ), ANY2_ON(SEN_C, SEN_D) )
+    OUT_ON( O_A )
+    SELECT_BEGIN
+        WHEN_ANY2( IN( ANY_ON(SEN_A, SEN_B), OFF(SEN_E) ), ANY2_ON(SEN_C, SEN_D), L_A )
+    SELECT_END
+    L( L_A )
+    OUT_ON( O_B )
+    END_STOP
+SEQ_END
+
+/* 파라미터 분 단위: 16비트 틱을 넘는다 */
+SEQ_BEGIN( s_dparam )
+    DELAY_PARAM( P_AUTO_START_SEC, MIN )
+    OUT_ON( O_A )
+    END_STOP
+SEQ_END
+
+SEQ_BEGIN( s_tparam )
+    DELAY_PARAM( P_STATION_NO, TICK )
+    OUT_ON( O_A )
+    WAIT_TO_PARAM( IN( ON(SEN_A) ), P_AUTO_START_SEC, SEC, L_ERR )
+    OUT_ON( O_B )
+    END_STOP
+    L( L_ERR )
+    OUT_ON( O_C )
+    END_STOP
+SEQ_END
+
+SEQ_BEGIN( s_nowait )
+    TURN_NOWAIT( CCW, 90, 0, 1, 0 )
+    OUT_ON( O_A )
+    ACS( L, STATION(2) )
+    END_STOP
+SEQ_END
+
 static int call_count, call_ret;
 static int custom_fn(seq_ctx_t *c)
 {
@@ -206,10 +273,14 @@ ACT_END
 ACT_BEGIN( a_bad_hold )
     ERROR_HOLD( 290, IN( ON(SEN_A) ), L_OK )
 ACT_END
+ACT_BEGIN( a_bad_nowait )
+    TURN_NOWAIT( CW, 90, 0, 0, 0 )
+ACT_END
 
 enum {
     S_BRANCH = SEQ_SITE_BASE, S_UNMATCHED, S_TIMING, S_ACS, S_DRIVE, S_BUDGET, S_OUTS, S_FLICKER,
-    S_ANY, S_HANDSHAKE, S_WAIT_OUT, S_CALL, S_BAD_LABEL, S_ACT_START, S_PROF, S_NO_TABLE
+    S_ANY, S_HANDSHAKE, S_WAIT_OUT, S_CALL, S_BAD_LABEL, S_ACT_START, S_PROF, S_NO_TABLE,
+    S_XWHEN, S_XWAIT, S_ANY2, S_DPARAM, S_TPARAM, S_NOWAIT
 };
 
 SEQ_MAP_BEGIN( site_seqs )
@@ -230,6 +301,12 @@ SEQ_MAP_BEGIN( site_seqs )
     SEQ_MAP( PF_TWO, S_PROF, s_prof_any )
     SEQ_MAP( PF_ONE, S_PROF, s_prof1 )
     SEQ_MAP( 0, S_PROF, s_prof_any )
+    SEQ_MAP( 0, S_XWHEN, s_xwhen )
+    SEQ_MAP( 0, S_XWAIT, s_xwait )
+    SEQ_MAP( 0, S_ANY2, s_any2 )
+    SEQ_MAP( 0, S_DPARAM, s_dparam )
+    SEQ_MAP( 0, S_TPARAM, s_tparam )
+    SEQ_MAP( 0, S_NOWAIT, s_nowait )
 SEQ_MAP_END
 
 ACT_MAP_BEGIN( site_acts )
@@ -295,6 +372,7 @@ int main(void)
     BAD(a_bad_speed);
     BAD(a_bad_forback);
     BAD(a_bad_hold);
+    BAD(a_bad_nowait);
 
     assert(seq_bind(&s_site_ok) == 0);
     assert(seq_profile() == 0);
@@ -599,6 +677,158 @@ int main(void)
     D.risk_stop = 1;
     seq_abort_all();
     assert(D.risk_stop == 1);
+
+    /* ---- 확장 조건 ---- */
+    D.backward = 0;
+    start(S_XWHEN);
+    seq_run(); seq_run();
+    assert(seq_is_active() && fake_out == 0);
+    fake_in = BIT(SEN_A);                        /* 호기 7 + SEN_A */
+    seq_run();
+    assert(!seq_is_active() && fake_out == BIT(O_B));
+    start(S_XWHEN);
+    D.backward = 1;
+    seq_run();
+    assert(fake_out == BIT(O_A));
+    D.backward = 0;
+    (void)param_set(P_AGV_ID, 10);               /* 범위 밖 */
+    start(S_XWHEN);
+    fake_in = BIT(SEN_A);
+    seq_run();
+    assert(seq_is_active() && fake_out == 0);
+    (void)param_set(P_AGV_ID, 7);
+
+    start(S_XWAIT);
+    seq_run();
+    assert(fake_out == 0);
+    D.cross_in_flag = 1;                         /* 대기 */
+    seq_run();
+    assert(fake_out == (BIT(O_A) | BIT(O_B)) && seq_active_step() == 4);   /* 유지 아님이라 바로 통과 */
+    D.cross_in_flag = 0;
+    D.cross_in_on = 1;
+    start(S_XWAIT);
+    seq_run();
+    assert(fake_out == BIT(O_A) && seq_active_step() == 2);   /* 유지 중이면 머문다 */
+    D.cross_in_on = 0;
+    seq_run();
+    assert(fake_out == (BIT(O_A) | BIT(O_B)) && seq_active_step() == 4);
+    fake_in = BIT(SEN_A);
+    D.action_err = 281;
+    seq_run();
+    assert(seq_active_step() == 4);              /* SEN_A 켜짐 */
+    fake_in = 0;
+    seq_run();
+    assert(seq_active_step() == 5);
+    D.action_err = 0;
+    fake_key = KEY_DOWN;
+    seq_run();
+    assert(seq_active_step() == 5);
+    fake_key = KEY_UP;
+    (void)param_set(P_STATION_NO, 5);
+    seq_run();
+    assert(!seq_is_active() && (fake_out & BIT(O_C)));
+    fake_key = 0;
+    (void)param_set(P_STATION_NO, 4);            /* 3 틱 초과면 타임아웃 */
+    start(S_XWAIT);
+    D.cross_in_flag = 1;
+    seq_run();
+    D.cross_in_flag = 0;
+    D.action_err = 281;
+    fake_key = KEY_UP;
+    seq_run();
+    assert(seq_active_step() == 6);
+    seq_run(); seq_run();
+    assert(seq_is_active());
+    seq_run();
+    assert(!seq_is_active() && (fake_out & BIT(OUT_EXT_5)) && !(fake_out & BIT(O_C)));
+    fake_key = 0;
+    D.action_err = 0;
+
+    /* 확장 조건 평가 직접 */
+    acs_station_set(0, 43, 3);
+    acs_station_set(1, 42, 3);
+    acs_station_set(2, 145, 3);
+    assert(seq_xcond(X_STATION(1, 41, 43), 0) && !seq_xcond(X_STATION(1, 43, 50), 0));
+    assert(seq_xcond(X_STATION_MOD(0, 10, 3), 0) && !seq_xcond(X_STATION_MOD(0, 10, 4), 0));
+    assert(seq_xcond(X_STATION_DIV(2, 100, 1), 0) && seq_xcond(X_STATION_DIV(2, 10, 14), 0));
+    assert(seq_xcond(X_TAG_MINUS_EQ_STATION(1, 20), 62) && !seq_xcond(X_TAG_MINUS_EQ_STATION(1, 20), 61));
+    assert(seq_xcond(X_TAG_EQ_STATION(0), 43) && !seq_xcond(X_TAG_EQ_STATION(0), 44));
+    assert(seq_xcond(X_PARAM_GE(P_STATION_NO, 4), 0) && !seq_xcond(X_PARAM_GE(P_STATION_NO, 5), 0));
+    assert(seq_xcond(X_PARAM_LE(P_STATION_NO, 4), 0) && !seq_xcond(X_PARAM_LE(P_STATION_NO, 3), 0));
+    assert(seq_xcond(X_ID(7, 7), 0) && !seq_xcond(X_NOT(X_ID(7, 7)), 0));
+    assert(seq_xcond(X_FORWARD, 0) && !seq_xcond(X_BACKWARD, 0));
+    D.flag_stopping = 1;
+    assert(seq_xcond(X_STATION(1, 42, 42), 0) && !seq_xcond(X_STATION_RUNNING(1, 42, 42), 0));
+    D.flag_stopping = 0;
+    assert(seq_xcond(X_STATION_RUNNING(1, 42, 42), 0));
+    D.cross_out_flag = 1;
+    assert(seq_xcond(X_CROSS_OUT, 0) && !seq_xcond(X_CROSS_OUT_ON, 0) && !seq_xcond(X_CROSS_IN, 0));
+    D.cross_out_flag = 0;
+    D.cross_out_on = 1;
+    assert(seq_xcond(X_CROSS_OUT, 0) && seq_xcond(X_CROSS_OUT_ON, 0));
+    D.cross_out_on = 0;
+    assert(seq_xcond(X_ALWAYS, 0) && !seq_xcond(0x7F, 0, 0, 0));
+    acs_station_reset();
+
+    /* 두 번째 묶음 */
+    start(S_ANY2);
+    fake_in = BIT(SEN_A);
+    seq_run();
+    assert(fake_out == 0);
+    fake_in = BIT(SEN_D);
+    seq_run();
+    assert(fake_out == 0);
+    fake_in = BIT(SEN_B) | BIT(SEN_D) | BIT(SEN_E);   /* WAIT 통과, WHEN 은 SEN_E 로 거짓 */
+    seq_run();
+    assert(fake_out == BIT(O_A) && seq_is_active());
+    fake_in = BIT(SEN_A) | BIT(SEN_C);
+    seq_run();
+    assert(!seq_is_active() && fake_out == (BIT(O_A) | BIT(O_B)));
+
+    /* 파라미터 11분 = 66000 틱 (16비트 넘음) */
+    (void)param_set(P_AUTO_START_SEC, 11);
+    start(S_DPARAM);
+    for (long t = 0; t < 66000L; t++) { seq_run(); }
+    assert(seq_is_active() && fake_out == 0);
+    seq_run();
+    assert(!seq_is_active() && fake_out == BIT(O_A));
+
+    /* 틱 단위는 DELAY 와 같다(값 초과), 초 단위 제한 시간, 값 0 = 제한 없음 */
+    (void)param_set(P_STATION_NO, 2);
+    (void)param_set(P_AUTO_START_SEC, 1);
+    start(S_TPARAM);
+    seq_run(); seq_run();
+    assert(fake_out == 0);
+    seq_run();
+    assert(fake_out == BIT(O_A));
+    for (int t = 0; t < 99; t++) { seq_run(); }
+    assert(seq_is_active() && fake_out == BIT(O_A));
+    seq_run();
+    assert(!seq_is_active() && fake_out == (BIT(O_A) | BIT(O_C)));
+    (void)param_set(P_AUTO_START_SEC, 0);
+    start(S_TPARAM);
+    for (int t = 0; t < 500; t++) { seq_run(); }
+    assert(seq_is_active() && fake_out == BIT(O_A));
+    fake_in = BIT(SEN_A);
+    seq_run();
+    assert(!seq_is_active() && fake_out == (BIT(O_A) | BIT(O_B)));
+    (void)param_set(P_AUTO_START_SEC, 0);
+
+    /* 회전 비대기: 회전 중에도 다음 스캔에 다음 스텝. 번호 큐[2] */
+    acs_reset();
+    acs_station_set(2, 123, 3);
+    fake_tx_count = 0;
+    start(S_NOWAIT);
+    fake_turn_count = 0;
+    D.turn_pulses = 100;
+    seq_run();
+    assert(fake_turn_count == 1 && fake_out == 0);
+    seq_run();
+    assert(fake_turn_count == 1 && fake_out == BIT(O_A) && !seq_is_active() && acs_pending() == 1);
+    acs_schedule();
+    assert(fake_tx_count == 1 && fake_tx[0][6] == 'L' && fake_tx[0][7] == '1' && fake_tx[0][8] == '2' && fake_tx[0][9] == '3');
+    D.turn_pulses = 0;
+    acs_reset();
 
     puts("test_seq ok");
     return 0;

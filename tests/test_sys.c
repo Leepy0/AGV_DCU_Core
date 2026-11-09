@@ -73,6 +73,16 @@ static const tag_rule_t s_rules[] = {
     { 5, 0, 0, 0, 0, { TA_ACT | ACT_HOLD, 0, 0, 0 } },
     { 8, 0, 0, 0, 0, { TA_CALL | 0, 0, 0, 0 } },
     { 9, 0, TAG_COND_BACKWARD, 0, 0, { TA_STOP, 0, 0, 0 } },
+    /* 확장 조건 둘 + 입력. 시험은 tagact_dry_run 으로 맞은 규칙만 본다 */
+    TAG_IF( 20, 0, IF_X2_IN( X_ID(AGV_ID, AGV_ID), X_STATION(1, 42, 42), IN( ON(IN_START_SW) ) ), A_SPEED_LOW )
+    TAG_IF( 20, 0, IF_X2( X_ID(AGV_ID, AGV_ID), X_STATION(1, 42, 42) ), A_SPEED_MIN )
+    TAG_IF( 20, 0, IF_ID( 8, 9 ), A_SPEED_HIGH )
+    TAG_IF( 21, 0, IF_TAG_MINUS_EQ_STATION( 0, 10 ), A_OBS_ON )
+    TAG_IF( 21, 0, IF_TAG_EQ_STATION( 0 ), A_OBS_OFF )
+    TAG_IF( 22, 0, IF_STATION_MOD( 0, 10, 3 ), A_OBS_ON )
+    TAG_IF( 22, 0, IF_STATION_DIV( 0, 10, 4 ), A_OBS_OFF )
+    TAG_IF( 23, 0, IF_IN( ANY_ON(IN_EXT_16, IN_START_SW) ), A_OBS_ON )
+    TAG_IF( 23, 0, IF_X( X_NOT(X_CROSS_IN) ), A_OBS_OFF )
 };
 
 static int s_manual_count;
@@ -528,6 +538,46 @@ static void test_tag(void)
     D.turn_pulses = 0;
 
     printf("  tag ok\n");
+}
+
+/* 태그 규칙의 확장 조건·입력 조건 */
+static void test_tag_cond(void)
+{
+    uint16_t a[4];
+
+    boot();
+    acs_station_set(1, 42, 2);
+    assert((tagact_dry_run(20, a, 4) == 1) && (a[0] == A_SPEED_MIN));
+    raw_a(RAW_START, 0);                        /* START 누름 */
+    tick();
+    assert(io_in(IN_START_SW));
+    assert((tagact_dry_run(20, a, 4) == 1) && (a[0] == A_SPEED_LOW));
+    assert((tagact_dry_run(23, a, 4) == 1) && (a[0] == A_OBS_ON));
+    raw_a(0, RAW_START);
+    tick();
+    assert((tagact_dry_run(23, a, 4) == 1) && (a[0] == A_OBS_OFF));
+    D.cross_in_flag = 1;
+    assert(tagact_dry_run(23, a, 4) == 0);
+    D.cross_in_flag = 0;
+    acs_station_set(1, 43, 2);
+    assert(tagact_dry_run(20, a, 4) == 0);
+    acs_station_set(1, 42, 2);
+    (void)param_set(P_AGV_ID, 8);
+    assert((tagact_dry_run(20, a, 4) == 1) && (a[0] == A_SPEED_HIGH));
+    (void)param_set(P_AGV_ID, AGV_ID);
+
+    acs_station_set(0, 11, 2);                  /* 21 - 10 == 11 */
+    assert((tagact_dry_run(21, a, 4) == 1) && (a[0] == A_OBS_ON));
+    acs_station_set(0, 21, 2);
+    assert((tagact_dry_run(21, a, 4) == 1) && (a[0] == A_OBS_OFF));
+    acs_station_set(0, 43, 2);
+    assert((tagact_dry_run(22, a, 4) == 1) && (a[0] == A_OBS_ON));
+    acs_station_set(0, 45, 2);
+    assert((tagact_dry_run(22, a, 4) == 1) && (a[0] == A_OBS_OFF));
+    acs_station_set(0, 55, 2);
+    assert(tagact_dry_run(22, a, 4) == 0);
+    acs_station_reset();
+    printf("  tag cond ok\n");
 }
 
 static void test_compensate(void)
@@ -1103,6 +1153,7 @@ int main(void)
     test_stop_switch_aborts();
     test_tag();
     test_rx_tag_reader();
+    test_tag_cond();
     test_compensate();
     test_rfid_retry();
     test_cross();

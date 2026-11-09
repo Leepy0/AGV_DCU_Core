@@ -67,11 +67,40 @@ typedef enum {
     SK_ACT_START,         /* ACT arg0 시작 */
     SK_WAIT_ACT,          /* ACT arg0 끝날 때까지 대기 */
     SK_CALL,              /* 사용자 정의 함수: arg0 = 함수 표 인덱스 */
+    SK_DELAY_PARAM,       /* 파라미터 arg0 x arg1 틱 대기 */
+    SK_WAIT_PARAM,        /* SK_WAIT 와 같고 제한 시간이 파라미터 arg0 x arg1 틱. 값 0 이하 = 제한 없음 */
+    SK_TURN_NOWAIT,       /* SK_TURN 과 같고 완료를 기다리지 않는다. 다음 스캔에 다음 스텝. ACT 금지 */
     SK_KIND_MAX
 } seq_kind_t;
 
 /* 번호 출처 (SK_ACS) */
 enum { SEQ_NUM_CONST = 0, SEQ_NUM_STATION0, SEQ_NUM_STATION0_PLUS1, SEQ_NUM_AGV_ID };
+#define SEQ_NUM_STATION_K   0x100u
+#define SEQ_NUM_STATION(k)  (SEQ_NUM_STATION_K | (k))   /* 스테이션 큐[k] */
+
+/* 확장 조건. WHEN·WAIT 스텝과 태그 규칙이 같이 쓴다.
+ * 16비트 코드: 하위 7비트 종류, 비트 7 부정(XC_NOT), 상위 8비트 칸(큐 칸·파라미터 번호). 인자 a, b */
+enum {
+    XC_NONE = 0,          /* 항상 참 */
+    XC_FORBACK_MODE,      /* ForBack_Mode > 0 */
+    XC_LOW_BATTERY,
+    XC_FORWARD,           /* 주행 방향 전진 */
+    XC_BACKWARD,
+    XC_STATION,           /* a <= 큐[칸] <= b */
+    XC_STATION_RUNNING,   /* 위 조건 + 아직 정지가 걸리지 않음 */
+    XC_CROSS,             /* 교차로. 칸 비트0: 0 IN, 1 OUT. 비트1: 0 대기 또는 유지, 1 유지만 */
+    XC_ERR_EQ,            /* action_err == a */
+    XC_PARAM_EQ,          /* 파라미터[칸] == a */
+    XC_PARAM_GE,          /* 파라미터[칸] >= a */
+    XC_PARAM_LE,          /* 파라미터[칸] <= a */
+    XC_ID,                /* a <= P_AGV_ID <= b */
+    XC_KEY,               /* 지금 눌린 키 == a. 키를 소비하지 않는다 */
+    XC_STATION_MOD,       /* 큐[칸] % a == b */
+    XC_STATION_DIV,       /* 큐[칸] / a == b */
+    XC_TAG_MINUS_EQ_ST,   /* 태그 - a == 큐[칸]. 태그 표 전용 */
+    XC_TAG_EQ_ST          /* 태그 == 큐[칸]. 태그 표 전용 */
+};
+#define XC_NOT  0x80u
 
 /* 속도 수준 (SK_SPEED) */
 enum { SEQ_SPD_HIGH = 0xFFF0, SEQ_SPD_LOW = 0xFFF1, SEQ_SPD_LLOW = 0xFFF2, SEQ_SPD_MIN = 0xFFF3 };
@@ -89,9 +118,10 @@ typedef struct {
     uint16_t arg0;
     uint16_t arg1;
     uint16_t timeout;
+    uint16_t xc;        /* WHEN·WAIT 확장 조건 XC_*, 인자는 arg0·arg1. C28x 정렬 빈칸 자리 */
     uint32_t on;        /* 조건 must_on, SK_OUT 은 켤 출력 */
     uint32_t off;       /* 조건 must_off, SK_OUT 은 끌 출력 */
-    uint32_t out;       /* 펄스·점멸·핸드셰이크 대상 출력 */
+    uint32_t out;       /* 펄스·점멸·핸드셰이크 대상 출력. WHEN·WAIT 는 두 번째 "하나라도 ON" 묶음 */
 } seq_step_t;           /* C28x 12워드 */
 
 typedef struct {
@@ -137,6 +167,11 @@ uint16_t seq_active_id(void);
 uint16_t seq_active_step(void);
 void     seq_run(void);          /* 10 ms */
 void     seq_abort_all(void);    /* STOP·E-STOP·W 리셋 */
+
+/* 확장 조건 평가. tag 는 태그 번호 조건용 (시퀀스는 0) */
+uint16_t seq_xcond(uint16_t c, uint16_t a, uint16_t b, uint16_t tag);
+/* on·off 에 같이 선 비트는 "하나라도 ON", 나머지는 전부 ON / 전부 OFF */
+uint16_t seq_mask_true(uint32_t v, uint32_t on, uint32_t off);
 
 /* 사이트 상태 변수 (SET_STATE, WAIT_STATE, WHEN_STATE) */
 uint16_t seq_state_get(uint16_t id);

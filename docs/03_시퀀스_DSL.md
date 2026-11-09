@@ -33,7 +33,7 @@
 
 | 구분 | 매크로 | 뜻 | 레거시 |
 |---|---|---|---|
-| 출력 | `OUT_ON( a, b )` / `OUT_OFF( a, b )` | 출력 켜기·끄기, 최대 8개 | `Out = nON;` |
+| 출력 | `OUT_ON( a, b )` / `OUT_OFF( a, b )` | 출력 켜기·끄기, 최대 16개 | `Out = nON;` |
 | | `OUT_PULSE( o, 켬, 끔, 횟수 )` | 펄스 반복 | `if (cnt>0 && cnt<50) …` |
 | | `OUT_FLICKER_UNTIL_IN( o, 간격, 조건 )` | **접점 통신.** 출력을 점멸하다가 입력이 들어오면 끄고 다음 | `Out = g1sec_Pulse_Flag; if (In == nON) …` |
 | | `OUT_FLICKER_UNTIL_IN_TO( o, 간격, 조건, 제한, 라벨 )` | 위 + 시간 제한 | |
@@ -45,15 +45,21 @@
 | | `WAIT_STABLE_TO( 조건, 안정, 제한, 라벨 )` | 위 + 제한. `UNMATCHED(제한)`이면 조건이 거짓인 시간만 누적 | `else { cnt_2++; … }` |
 | | `WAIT_OUT( 조건 )` | 출력 상태 대기 | `if (Output_Spare.bit.X == nOFF)` |
 | | `DELAY( 시간 )` | 시간 대기 | `cnt++; if (cnt > N)` |
+| | `WAIT_IF( x )` / `WAIT_IF_TO( x, 제한, 라벨 )` | 확장 조건 대기 (3.3.1) | `if (AGV_Backward == ON)` |
+| | `WAIT_IF_IN( x, 조건 )` / `WAIT_IF_IN_TO( x, 조건, 제한, 라벨 )` | 확장 조건 AND 입력 조건 | `if (Flag_Cross_In_On == OFF && In_3 == nON)` |
+| | `WAIT_ANY2( 조건, ANY2_ON(c, d) )` / `WAIT_ANY2_TO( 조건, 묶음2, 제한, 라벨 )` | 두 번째 "하나라도 ON" 묶음 (3.3) | `if ((In_1 \|\| In_2) && (In_3 \|\| In_4))` |
+| | `DELAY_PARAM( P_x, 단위 )` | 파라미터 x 단위 대기 (3.3.2) | `cnt++; if (cnt > set[X] * 6000)` |
+| | `WAIT_TO_PARAM( 조건, P_x, 단위, 라벨 )` | 제한 시간이 파라미터인 `WAIT_TO` | |
 | 분기 | `SELECT_BEGIN … WHEN … SELECT_END` | 3.4절 | `if … else if` |
 | | `GOTO( 라벨 )` | 이동 | `step = n;` |
 | | `ERROR_HOLD( 코드, 조건, 라벨 )` | 오류 표시 유지, 조건 참이면 라벨로 | `case 290` |
-| ACS | `ACS( L, STATION0 )` / `ACS_N( L, 87 )` | 보고. 번호 출처 `STATION0`, `STATION0_PLUS1`, `AGV_ID` 또는 상수 | `DA_ACS_Loading(…)` |
+| ACS | `ACS( L, STATION0 )` / `ACS_N( L, 87 )` | 보고. 번호 출처 `STATION0`, `STATION0_PLUS1`, `STATION(k)`(큐[k]), `AGV_ID` 또는 상수 | `DA_ACS_Loading(…)` |
 | | `ACS_WAIT_ACK( 제한, 라벨 )` | ACK 대기 | `Scia_Send_AGV2PC_Message == ACK_NONE_MSG` |
 | | `ACS_STATION( 칸, 값, 길이 )` / `STATION_RESET` | 스테이션 큐 | `ACS_Station_Call_Num[1] = 0;` |
 | 주행 | `SPEED( HIGH·LOW·LLOW·MIN )` / `SPEED_MMIN( v )` | 재출발 속도 | `gDriving_speed = …` |
 | | `FORBACK( FWD·BACK·TOGGLE )` | 방향 전환 예약 | `AGV_ForBack_Action(FB)` |
 | | `TURN( CW, 90, fb, auto, obs )` | 회전 요청 + 완료 대기 | `AGV_Turn_Action(…)` |
+| | `TURN_NOWAIT( CW, 90, fb, auto, obs )` | 회전 요청, 다음 스캔에 다음 스텝. 회전 중 뒤 스텝이 돈다 | `AGV_Turn_Action(…); step++;` |
 | | `OBS_ON` / `OBS_OFF` | 장애물 센서 사용 | `Flag_OBS_Sen_Use` |
 | 상태 | `SET_STATE( id, 값 )` / `WAIT_STATE( id, 값 )` | 사이트 상태 변수 | `Gate1_Out`, `FL_check` 류 |
 | 병렬 | `ACT_START( id )` / `WAIT_ACT( id )` | 4절 | |
@@ -62,7 +68,7 @@
 
 ### 3.3 조건
 
-한 조건 안에 켜짐과 꺼짐을 같이 쓴다. 신호는 그룹당 최대 8개다.
+한 조건 안에 켜짐과 꺼짐을 같이 쓴다. 신호는 그룹당 최대 16개, `IN` 인자는 최대 6개다.
 
 ```c
 IN( ON( SEN_1, SEN_2 ) )                                /* 둘 다 켜짐 */
@@ -80,6 +86,52 @@ IN( ANY_ON( SEN_1, SEN_2 ), OFF( SEN_5 ) )                 /* 1·2 중 하나라
 - `ANY_ON`은 나열한 신호 중 하나라도 켜지면 참이다. `IN`으로 `ON`·`OFF`와 묶는다. `ON(x)`와 `OFF(x)`를 같이 쓰면 컴파일 오류 없이 `ANY_ON(x)`로 읽히니 주의한다.
 - 조건에 쓸 수 있는 신호는 논리 ID 0~31이다. 앰프 과부하 입력처럼 그 밖의 ID는 컴파일 오류다.
 - 조건은 그룹끼리 AND다. 같은 신호들의 OR은 `ANY_ON`. 서로 다른 조건의 OR은 `WHEN`을 나눈다.
+- `ANY_ON` 묶음은 조건 하나에 하나다. 묶음이 둘이면 `WHEN_ANY2`·`WAIT_ANY2`·`WAIT_ANY2_TO`의 둘째 인자 `ANY2_ON(...)`. 스텝의 `out` 칸을 쓴다. 이 셋에서만 된다. 확장 조건과 같이 쓸 수 없다.
+
+```c
+WAIT_ANY2( IN( ANY_ON( SEN_1, SEN_2 ), OFF( SEN_5 ) ),  ANY2_ON( SEN_3, SEN_4 ) )   /* (1||2) && (3||4) && !5 */
+```
+
+#### 3.3.1 확장 조건
+
+입력이 아닌 조건. `X_*`는 "코드, a, b" 세 값으로 펼쳐진다. 시퀀스와 태그 규칙(5절)이 같은 이름을 쓴다.
+
+| 매크로 | 참 조건 | 레거시 |
+|---|---|---|
+| `X_FORWARD` / `X_BACKWARD` | 주행 방향 | `AGV_Backward == OFF/ON` |
+| `X_CROSS_IN` / `X_CROSS_OUT` | 교차로 대기 또는 유지 중 | `Flag_Cross_In_Flag \|\| Flag_Cross_In_On` |
+| `X_CROSS_IN_ON` / `X_CROSS_OUT_ON` | 유지(허가 대기 정지) 중만 | `Flag_Cross_In_On == ON` |
+| `X_ERR_EQ( n )` | `action_err == n` | `action_err == BATTERY_LOW_VOLTAGE` |
+| `X_PARAM_EQ( P_x, v )` / `X_PARAM_GE` / `X_PARAM_LE` | 파라미터 `==`·`>=`·`<=` v | `set[X] == N` |
+| `X_ID( lo, hi )` | lo <= `P_AGV_ID` <= hi | `set[AGV_ID] == N` |
+| `X_KEY( UP )` | 지금 눌린 키 값 == `KEY_UP`. `ui_key()`만 읽고 키를 소비하지 않는다. `UP DOWN SET RESET MODE SHIFT` | `Read_Key_buffer == UP_KEY` |
+| `X_FORBACK_MODE` / `X_LOW_BATTERY` | 방향 전환 모드 > 0 / 저전압 | |
+| `X_STATION( k, lo, hi )` / `X_STATION_RUNNING( k, lo, hi )` | lo <= 큐[k] <= hi (/ + 정지 전) | `ACS_Station_Call_Num[k] == N` |
+| `X_STATION_MOD( k, n, m )` / `X_STATION_DIV( k, n, m )` | 큐[k] `%` n == m / 큐[k] `/` n == m. n = 0 은 컴파일 오류 | `ACS_Station_Call_Num[k] % N == M` |
+| `X_TAG_MINUS_EQ_STATION( k, n )` / `X_TAG_EQ_STATION( k )` | 태그 - n == 큐[k] / 태그 == 큐[k]. **태그 표 전용** | `Tag_Num - N == ACS_Station_Call_Num[k]` |
+| `X_NOT( x )` | 부정 | `== OFF` |
+
+```c
+WAIT_IF( X_NOT( X_CROSS_IN ) )                                   /* 교차로 대기·유지가 풀릴 때까지 */
+WAIT_IF_IN_TO( X_BACKWARD, IN( ON(SEN_4) ), 500, ERR )           /* 후진이고 SEN_4 켜짐, 5초 제한 */
+
+SELECT_BEGIN
+    WHEN_IF_IN( X_ID(12, 12),         IN( ON(UP_LIMIT_B) ), STOP )  /* 호기 12 만 리밋 입력이 다르다 */
+    WHEN_IF_IN( X_NOT( X_ID(12, 12) ), IN( ON(UP_LIMIT) ),   STOP )
+SELECT_END
+```
+
+- 스텝: `WHEN_IF( x, 라벨 )`, `WHEN_IF_IN( x, 조건, 라벨 )`, `WAIT_IF*`(위 표). 확장 조건은 스텝 하나에 하나, 입력 조건과 AND.
+- 저장: 스텝의 `xc`(C28x 정렬 빈칸이라 크기 그대로 12워드)에 코드, `arg0`·`arg1`에 a·b. 그래서 `WAIT_STABLE`·`WAIT_TO_PARAM`에는 못 쓴다.
+- 호기별 다른 입력 번호는 프로파일을 나누지 않고 `WHEN_ID( lo, hi, 라벨 )`(= `WHEN_IF( X_ID(lo, hi), 라벨 )`)로 한 표에서 가른다.
+
+#### 3.3.2 파라미터 시간
+
+`DELAY_PARAM( P_x, 단위 )`, `WAIT_TO_PARAM( 조건, P_x, 단위, 라벨 )`. 단위 `TICK`(10 ms), `DSEC`(0.1초), `SEC`, `MIN`. 시간 = 값 x 단위이고 `DELAY`처럼 그 시간을 넘으면 통과다.
+
+- 값은 스캔마다 다시 읽는다. 음수는 0. `WAIT_TO_PARAM`은 값 0 이하면 제한 없음.
+- 단위 안 틱과 지난 단위 수를 따로 세서 16비트 틱(655초)을 넘어도 된다. 99분 = 594000틱.
+- 파라미터 번호는 1 ~ `P_COUNT`-1, 밖이면 컴파일 오류.
 
 ### 3.4 분기
 
@@ -147,7 +199,7 @@ BELT_OFF( 2 )          /* 그 벨트 출력 전부 OFF */
 
 ### 3.6 표 형식과 크기
 
-`seq_step_t`는 C28x에서 12워드다(`tests/test_dsl.c`가 cl2000 컴파일 시 확인). 스텝 530개면 약 6,400워드에 라벨 칸이 더해진다. 기존 코드 크기와의 비교는 변환 뒤 `.map`으로 한다.
+`seq_step_t`는 C28x에서 12워드다(`tests/test_dsl.c`가 cl2000 컴파일 시 확인). 확장 조건 칸 `xc`는 정렬 빈칸에 들어가 크기가 늘지 않았다. 스텝 530개면 약 6,400워드에 라벨 칸이 더해진다. 기존 코드 크기와의 비교는 변환 뒤 `.map`으로 한다.
 
 조건은 32비트 마스크라서 논리 ID를 0~31에 배치했다(`io.h`): 입력은 EXT 16 + 보드 16, 출력은 EXT 16 + 램프·브레이크 등 9. 앰프 신호는 32 이상이다. 시퀀스가 앰프를 직접 건드리지 못하는 것이 이 구조의 의도이기도 하다.
 
@@ -256,7 +308,7 @@ TAG_IF( 36, PF_LIFT, IF_STATION( 1, 101, 116 ), A_ACT( ACT_LIFT_SIGNAL ) )
 | 장애물·교차로 일시정지 | 계속 돈다. 시간도 계속 흐른다 |
 | STOP, E-STOP, `W` 리셋, `system_err`, `stop_err` | 즉시 중단하고 **그 ACT가 켠 출력만** 끈다 |
 | 실패 | `END_ERROR(code)`는 `stop_err = code`로 주행을 멈춘다. 시퀀스의 `END_ERROR`는 `action_err`다 |
-| 금지 스텝 | `SPEED`, `SPEED_MMIN`, `FORBACK`, `TURN`, `ERROR_HOLD`, `END_RESTART`. 주행 상태를 건드리므로 `seq_bind()`가 부팅 때 거부한다 |
+| 금지 스텝 | `SPEED`, `SPEED_MMIN`, `FORBACK`, `TURN`, `TURN_NOWAIT`, `ERROR_HOLD`, `END_RESTART`. 주행 상태를 건드리므로 `seq_bind()`가 부팅 때 거부한다 |
 | 시퀀스와 같은 출력 | 금지. 겹치면 같은 스캔에서 나중에 실행되는 ACT가 이긴다. 정지 태그로 시퀀스에 들어갈 때 ACT가 남아 있을 수 있으면 첫 스텝에 `WAIT_ACT( id )` |
 | 정지 태그와 같이 사용 | `TAG( n, PF, A_STOP, A_ACT(id) )`. 정지와 동시에 시작하며 서로 기다리지 않는다 |
 
@@ -289,8 +341,31 @@ TAG_TABLE_END
 
 - `tagact_run(tag)`는 활성 프로파일과 번호가 맞는 첫 규칙을 찾아 액션을 순서대로 실행한다. 규칙이 없으면 아무것도 하지 않는다.
 - 액션은 규칙당 4칸이다. `A_TURN`은 2칸을 쓴다. 넘치면 `A_CALL( 인덱스 )`.
-- 조건: `IF_FORBACK_MODE`, `IF_LOW_BATTERY`, `IF_FORWARD`, `IF_BACKWARD`, `IF_STATION( 칸, 하한, 상한 )`. 레거시 태그 `case`의 상태 조건 상위가 `ACS_Station_Call_Num[N]`과 `AGV_Backward`다. 더 복잡하면 `A_CALL`.
-- 규칙 1개는 9워드다.
+- 조건은 `TAG_IF`의 셋째 인자 하나. 확장 조건 둘과 입력 조건 하나를 AND 한다.
+
+| 매크로 | 뜻 |
+|---|---|
+| `IF_X( x )` / `IF_X2( x1, x2 )` | 확장 조건(3.3.1) 하나 / 둘 |
+| `IF_IN( 조건 )` | 입력 조건. 시퀀스와 같은 `IN`·`ON`·`OFF`·`ANY_ON` |
+| `IF_X_IN( x, 조건 )` / `IF_X2_IN( x1, x2, 조건 )` | 확장 조건 + 입력 조건 |
+| `IF_FORBACK_MODE`, `IF_LOW_BATTERY`, `IF_FORWARD`, `IF_BACKWARD` | `IF_X( X_… )` 줄임 |
+| `IF_STATION( 칸, 하한, 상한 )`, `IF_STATION_RUNNING( … )` | 큐 범위 (/ + 정지 전) |
+| `IF_ID( lo, hi )` | 프로파일 안 일부 호기 |
+| `IF_STATION_MOD( k, n, m )`, `IF_STATION_DIV( k, n, m )` | 큐[k] % n == m, 큐[k] / n == m |
+| `IF_TAG_MINUS_EQ_STATION( k, n )`, `IF_TAG_EQ_STATION( k )` | 태그 - n == 큐[k], 태그 == 큐[k] |
+
+```c
+TAG_IF( 6,  PF_TUB,  IF_IN( ON(IN_EXT_4) ),   A_SEQ( SEQ_UNLOAD ), A_FORBACK( TOGGLE ) )   /* 입력 켜짐일 때만 */
+TAG   ( 6,  PF_TUB,  A_STOP )                                                   /* 이 줄이 없으면 뒤 공통 규칙 */
+TAG_IF( 51, PF_LIFT, IF_X2( X_ID(85, 85), X_STATION(1, 42, 42) ),  A_TURN( CCW, 90, 0, 1, 0 ) )
+TAG_IF( 52, PF_LIFT, IF_X_IN( X_ID(81, 84), IN( OFF(SEN_1) ) ),    A_STOP )
+TAG_IF( 45, PF_LIFT, IF_TAG_MINUS_EQ_STATION( 1, 40 ),             A_STOP )       /* 큐[1] == 5 */
+```
+
+- 조건이 거짓이면 다음 규칙을 본다. "조건이 아니면 아무것도 안 함"이면 뒤에 액션 없는 규칙 `TAG( n, PF, 0 )`을 둔다.
+- 태그 번호 조건은 규칙의 `tag`를 쓴다. 맞은 규칙의 `tag`가 곧 지금 태그다. 1xx·2xx 별칭을 `tagact_run( 번호 % 100 )`으로 다시 찾는 사이트는 변환된 번호로 평가된다(레거시 `Tag_Num = j`와 같음). 별칭 규칙 자체에 쓰면 1xx·2xx 번호다.
+- `X_KEY`·`X_CROSS_*`도 쓸 수 있다. 표로 안 되는 동작은 `A_CALL`.
+- 규칙 1개는 16워드다(예전 9워드). 새 칸은 `act` 뒤에 있어 `{ tag, profile, cond, a, b, { act } }` 직접 초기화와 `TAG(...)`는 그대로 된다.
 
 ### 5.1 프로파일
 

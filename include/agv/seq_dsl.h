@@ -13,12 +13,15 @@
 #include "agv/seq.h"
 #include "agv/tagact.h"
 #include "agv/io.h"
+#include "agv/param.h"
+#include "agv/ui.h"
 
 /* ---- 내부 도구 ---- */
 #define DSL_CAT_(a, b)   a##b
 #define DSL_CAT(a, b)    DSL_CAT_(a, b)
-#define DSL_NARG_(a, b, c, d, e, f, g, h, n, ...) n
-#define DSL_NARG(...)    DSL_NARG_(__VA_ARGS__, 8, 7, 6, 5, 4, 3, 2, 1, 0)
+#define DSL_NARG_(a, b, c, d, e, f, g, h, i, j, k, l, m, n_, o, p, n, ...) n
+#define DSL_NARG(...)    DSL_NARG_(__VA_ARGS__, 16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0)
+#define DSL_UNPAREN(...) __VA_ARGS__
 
 /* ID 가 0~31 또는 IO_NONE 이 아니면 컴파일 오류 (앰프 신호를 조건에 쓰는 경우 등) */
 #define DSL_ID_OK(x)     (0 * sizeof(char[(((x) < 32) || ((x) == IO_NONE)) ? 1 : -1]))
@@ -32,6 +35,14 @@
 #define DSL_MASK6(a, b, c, d, e, f)  (DSL_MASK5(a, b, c, d, e) | DSL_BIT(f))
 #define DSL_MASK7(a, b, c, d, e, f, g)     (DSL_MASK6(a, b, c, d, e, f) | DSL_BIT(g))
 #define DSL_MASK8(a, b, c, d, e, f, g, h)  (DSL_MASK7(a, b, c, d, e, f, g) | DSL_BIT(h))
+#define DSL_MASK9(a, b, c, d, e, f, g, h, i)                    (DSL_MASK8(a, b, c, d, e, f, g, h) | DSL_BIT(i))
+#define DSL_MASK10(a, b, c, d, e, f, g, h, i, j)                (DSL_MASK9(a, b, c, d, e, f, g, h, i) | DSL_BIT(j))
+#define DSL_MASK11(a, b, c, d, e, f, g, h, i, j, k)             (DSL_MASK10(a, b, c, d, e, f, g, h, i, j) | DSL_BIT(k))
+#define DSL_MASK12(a, b, c, d, e, f, g, h, i, j, k, l)          (DSL_MASK11(a, b, c, d, e, f, g, h, i, j, k) | DSL_BIT(l))
+#define DSL_MASK13(a, b, c, d, e, f, g, h, i, j, k, l, m)       (DSL_MASK12(a, b, c, d, e, f, g, h, i, j, k, l) | DSL_BIT(m))
+#define DSL_MASK14(a, b, c, d, e, f, g, h, i, j, k, l, m, n)    (DSL_MASK13(a, b, c, d, e, f, g, h, i, j, k, l, m) | DSL_BIT(n))
+#define DSL_MASK15(a, b, c, d, e, f, g, h, i, j, k, l, m, n, o) (DSL_MASK14(a, b, c, d, e, f, g, h, i, j, k, l, m, n) | DSL_BIT(o))
+#define DSL_MASK16(a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p) (DSL_MASK15(a, b, c, d, e, f, g, h, i, j, k, l, m, n, o) | DSL_BIT(p))
 #define DSL_MASK(...)    DSL_CAT(DSL_MASK, DSL_NARG(__VA_ARGS__))(__VA_ARGS__)
 
 /* 조건은 64비트 상수 하나: 하위 32비트 must_on, 상위 32비트 must_off */
@@ -41,10 +52,14 @@ typedef unsigned long long dsl_cond_t;
 /* 양쪽 절반에 같이 선 비트 = "그중 하나라도 ON". ON(x) 와 OFF(x) 를 같이 쓰면 ANY_ON(x) 로 읽힌다 */
 
 #define DSL_STEP(kind, target, a0, a1, to, on, off, out)                                     \
-    { (uint16_t)(kind), (uint16_t)(target), (uint16_t)(a0), (uint16_t)(a1), (uint16_t)(to),  \
+    { (uint16_t)(kind), (uint16_t)(target), (uint16_t)(a0), (uint16_t)(a1), (uint16_t)(to), 0u, \
       (uint32_t)(on), (uint32_t)(off), (uint32_t)(out) },
 #define DSL_STEP_C(kind, target, a0, a1, to, c, out)                                         \
     DSL_STEP(kind, target, a0, a1, to, DSL_COND_ON(c), DSL_COND_OFF(c), out)
+/* 확장 조건 스텝. x 는 X_* 세 값(코드, a, b)으로 펼쳐져 xk, xa, xb 로 들어온다. a, b 는 arg0, arg1 */
+#define DSL_STEP_X(kind, target, to, xk, xa, xb, c, any2)                                     \
+    { (uint16_t)(kind), (uint16_t)(target), (uint16_t)(xa), (uint16_t)(xb), (uint16_t)(to), (uint16_t)(xk), \
+      DSL_COND_ON(c), DSL_COND_OFF(c), (uint32_t)(any2) },
 
 /* ---- 조건 ---- */
 #define ON(...)          ((dsl_cond_t)DSL_MASK(__VA_ARGS__))
@@ -53,7 +68,42 @@ typedef unsigned long long dsl_cond_t;
 #define ANY_ON(...)      (((dsl_cond_t)DSL_MASK(__VA_ARGS__)) | (((dsl_cond_t)DSL_MASK(__VA_ARGS__)) << 32))
 #define DSL_IN1(a)       (a)
 #define DSL_IN2(a, b)    ((a) | (b))
+#define DSL_IN3(a, b, c)             ((a) | (b) | (c))
+#define DSL_IN4(a, b, c, d)          ((a) | (b) | (c) | (d))
+#define DSL_IN5(a, b, c, d, e)       ((a) | (b) | (c) | (d) | (e))
+#define DSL_IN6(a, b, c, d, e, f)    ((a) | (b) | (c) | (d) | (e) | (f))
 #define IN(...)          DSL_CAT(DSL_IN, DSL_NARG(__VA_ARGS__))(__VA_ARGS__)
+#define NO_IN            ((dsl_cond_t)0)
+/* 두 번째 "하나라도 ON" 묶음: (a||b) && (c||d). WHEN_ANY2·WAIT_ANY2 의 둘째 인자 */
+#define ANY2_ON(...)     DSL_MASK(__VA_ARGS__)
+
+/* ---- 확장 조건 (입력이 아닌 조건). X_* 는 세 값 "코드, a, b" 로 펼쳐진다 ----
+ * 시퀀스 WHEN_IF·WAIT_IF 와 태그 규칙 IF_X 가 같이 쓴다 */
+#define DSL_SLOT(k)      ((((k) & 0xFF) << 8) + (0 * sizeof(char[((k) < 256) ? 1 : -1])))
+#define DSL_NZ(n)        (0 * sizeof(char[((n) != 0) ? 1 : -1]))
+#define X_ALWAYS                     XC_NONE, 0, 0
+#define X_FORWARD                    XC_FORWARD, 0, 0
+#define X_BACKWARD                   XC_BACKWARD, 0, 0
+#define X_FORBACK_MODE               XC_FORBACK_MODE, 0, 0
+#define X_LOW_BATTERY                XC_LOW_BATTERY, 0, 0
+#define X_CROSS_IN                   XC_CROSS, 0, 0                      /* IN 대기 또는 유지 중 */
+#define X_CROSS_OUT                  (XC_CROSS | DSL_SLOT(1)), 0, 0
+#define X_CROSS_IN_ON                (XC_CROSS | DSL_SLOT(2)), 0, 0      /* IN 유지(허가 대기 정지) 중 */
+#define X_CROSS_OUT_ON               (XC_CROSS | DSL_SLOT(3)), 0, 0
+#define X_ERR_EQ(n)                  XC_ERR_EQ, (n), 0
+#define X_PARAM_EQ(p, v)             (XC_PARAM_EQ | DSL_SLOT(p)), (v), 0
+#define X_PARAM_GE(p, v)             (XC_PARAM_GE | DSL_SLOT(p)), (v), 0
+#define X_PARAM_LE(p, v)             (XC_PARAM_LE | DSL_SLOT(p)), (v), 0
+#define X_ID(lo, hi)                 XC_ID, (lo), (hi)
+#define X_KEY(k)                     XC_KEY, KEY_##k, 0
+#define X_STATION(k, lo, hi)         (XC_STATION | DSL_SLOT(k)), (lo), (hi)
+#define X_STATION_RUNNING(k, lo, hi) (XC_STATION_RUNNING | DSL_SLOT(k)), (lo), (hi)
+#define X_STATION_MOD(k, n, m)       (XC_STATION_MOD | DSL_SLOT(k)), ((n) + DSL_NZ(n)), (m)
+#define X_STATION_DIV(k, n, m)       (XC_STATION_DIV | DSL_SLOT(k)), ((n) + DSL_NZ(n)), (m)
+#define X_TAG_MINUS_EQ_STATION(k, n) (XC_TAG_MINUS_EQ_ST | DSL_SLOT(k)), (n), 0   /* 태그 표 전용 */
+#define X_TAG_EQ_STATION(k)          (XC_TAG_EQ_ST | DSL_SLOT(k)), 0, 0          /* 태그 표 전용 */
+#define X_NOT(x)                     DSL_XNOT_(x)
+#define DSL_XNOT_(k, a, b)           ((k) | XC_NOT), a, b
 
 /* 타임아웃 시간을 스텝 진입부터가 아니라 조건이 거짓인 틱만 누적해서 잰다 (레거시 else { cnt_2++ }) */
 #define UNMATCHED(t)     ((t) | SEQ_TO_UNMATCHED)
@@ -86,6 +136,11 @@ typedef unsigned long long dsl_cond_t;
 #define SELECT_BEGIN
 #define WHEN(c, label)               DSL_STEP_C(SK_WHEN, label, 0, 0, 0, c, 0)
 #define WHEN_STATE(id, val, label)   DSL_STEP(SK_WHEN_STATE, label, id, val, 0, 0, 0, 0)
+#define WHEN_IF(x, label)            DSL_STEP_X(SK_WHEN, label, 0, x, NO_IN, 0)
+#define WHEN_IF_IN(x, c, label)      DSL_STEP_X(SK_WHEN, label, 0, x, c, 0)
+#define WHEN_ANY2(c, any2, label)    DSL_STEP_C(SK_WHEN, label, 0, 0, 0, c, any2)
+/* 호기별 분기. 프로파일을 나누지 않고 한 표에서 호기 번호로 가른다 */
+#define WHEN_ID(lo, hi, label)       WHEN_IF(X_ID(lo, hi), label)
 #define OTHERWISE(label)             DSL_STEP(SK_WHEN, label, 0, 0, 0, 0, 0, 0)
 #define SELECT_END
 #define SELECT_END_TO(t, label)      DSL_STEP(SK_WHEN_TIMEOUT, label, 0, 0, t, 0, 0, 0)
@@ -123,6 +178,21 @@ typedef unsigned long long dsl_cond_t;
 #define WAIT_STABLE_TO(c, s, t, label)  DSL_STEP_C(SK_WAIT_STABLE, label, s, 0, t, c, 0)
 #define WAIT_OUT(c)                 DSL_STEP_C(SK_WAIT_OUT, SEQ_NO_LABEL, 0, 0, 0, c, 0)
 #define DELAY(t)                    DSL_STEP(SK_DELAY, SEQ_NO_LABEL, t, 0, 0, 0, 0, 0)
+#define WAIT_IF(x)                  DSL_STEP_X(SK_WAIT, SEQ_NO_LABEL, 0, x, NO_IN, 0)
+#define WAIT_IF_TO(x, t, label)     DSL_STEP_X(SK_WAIT, label, t, x, NO_IN, 0)
+#define WAIT_IF_IN(x, c)            DSL_STEP_X(SK_WAIT, SEQ_NO_LABEL, 0, x, c, 0)
+#define WAIT_IF_IN_TO(x, c, t, label)    DSL_STEP_X(SK_WAIT, label, t, x, c, 0)
+#define WAIT_ANY2(c, any2)               DSL_STEP_C(SK_WAIT, SEQ_NO_LABEL, 0, 0, 0, c, any2)
+#define WAIT_ANY2_TO(c, any2, t, label)  DSL_STEP_C(SK_WAIT, label, 0, 0, t, c, any2)
+/* 파라미터 시간: 값 x 단위. 단위 TICK(10 ms) DSEC(0.1초) SEC MIN. 값은 스캔마다 다시 읽는다 */
+#define DSL_UNIT_TICK               1
+#define DSL_UNIT_DSEC               10
+#define DSL_UNIT_SEC                100
+#define DSL_UNIT_MIN                6000
+#define DSL_PARAM_OK(p)             (0 * sizeof(char[(((p) > 0) && ((p) < P_COUNT)) ? 1 : -1]))
+#define DELAY_PARAM(p, unit)        DSL_STEP(SK_DELAY_PARAM, SEQ_NO_LABEL, (p) + DSL_PARAM_OK(p), DSL_UNIT_##unit, 0, 0, 0, 0)
+#define WAIT_TO_PARAM(c, p, unit, label) \
+    DSL_STEP_C(SK_WAIT_PARAM, label, (p) + DSL_PARAM_OK(p), DSL_UNIT_##unit, 0, c, 0)
 
 /* ---- ACS ---- */
 #define DSL_INFO_L 'L'
@@ -145,6 +215,9 @@ typedef unsigned long long dsl_cond_t;
 #define FORBACK(dir)           DSL_STEP(SK_FORBACK, SEQ_NO_LABEL, DIR_##dir, 0, 0, 0, 0, 0)
 #define TURN(dir, deg, fb, autostart, obs) \
     DSL_STEP(SK_TURN, SEQ_NO_LABEL, TURN_##dir, deg, (fb) | ((autostart) << 4) | ((obs) << 8), 0, 0, 0)
+/* 회전을 걸고 다음 스캔에 다음 스텝. 회전 중에 뒤 스텝이 돈다 */
+#define TURN_NOWAIT(dir, deg, fb, autostart, obs) \
+    DSL_STEP(SK_TURN_NOWAIT, SEQ_NO_LABEL, TURN_##dir, deg, (fb) | ((autostart) << 4) | ((obs) << 8), 0, 0, 0)
 #define ERROR_HOLD(code, c, label)  DSL_STEP_C(SK_ERROR_HOLD, label, code, 0, 0, c, 0)
 #define END_RESTART            DSL_STEP(SK_END_RESTART, SEQ_NO_LABEL, 0, 0, 0, 0, 0, 0)
 
@@ -165,14 +238,29 @@ typedef unsigned long long dsl_cond_t;
 #define ANY_PROFILE            0
 /* 위에서 아래로 첫 번째로 맞는 규칙 하나만 실행. 액션은 최대 4칸 */
 #define TAG(tag, profile, ...)  { (uint16_t)(tag), (uint16_t)(profile), TAG_COND_NONE, 0, 0, { __VA_ARGS__ } },
-#define TAG_IF(tag, profile, cond, ...)  { (uint16_t)(tag), (uint16_t)(profile), cond, { __VA_ARGS__ } },
+/* cond 는 IF_* 하나. 확장 조건 둘과 입력 조건 하나를 AND 한다 */
+#define TAG_IF(tag, profile, cond, ...)  DSL_TAG_(tag, profile, cond, (__VA_ARGS__))
+#define DSL_TAG_(t, p, k1, a1, b1, k2, a2, b2, on, off, acts)                                         \
+    { (uint16_t)(t), (uint16_t)(p), (uint16_t)(k1), (uint16_t)(a1), (uint16_t)(b1), { DSL_UNPAREN acts }, \
+      (uint16_t)(k2), (uint16_t)(a2), (uint16_t)(b2), (uint32_t)(on), (uint32_t)(off) },
 
-#define IF_FORBACK_MODE        TAG_COND_FORBACK_MODE, 0, 0
-#define IF_LOW_BATTERY         TAG_COND_LOW_BATTERY, 0, 0
-#define IF_FORWARD             TAG_COND_FORWARD, 0, 0
-#define IF_BACKWARD            TAG_COND_BACKWARD, 0, 0
-#define IF_STATION(idx, lo, hi)  (uint16_t)(TAG_COND_STATION_RANGE | ((idx) << 8)), (uint16_t)(lo), (uint16_t)(hi)
-#define IF_STATION_RUNNING(idx, lo, hi)  (uint16_t)(TAG_COND_STATION_RUNNING | ((idx) << 8)), (uint16_t)(lo), (uint16_t)(hi)
+#define IF_X(x)                x, X_ALWAYS, 0UL, 0UL
+#define IF_X2(x1, x2)          x1, x2, 0UL, 0UL
+#define IF_IN(c)               X_ALWAYS, X_ALWAYS, DSL_COND_ON(c), DSL_COND_OFF(c)
+#define IF_X_IN(x, c)          x, X_ALWAYS, DSL_COND_ON(c), DSL_COND_OFF(c)
+#define IF_X2_IN(x1, x2, c)    x1, x2, DSL_COND_ON(c), DSL_COND_OFF(c)
+
+#define IF_FORBACK_MODE        IF_X(X_FORBACK_MODE)
+#define IF_LOW_BATTERY         IF_X(X_LOW_BATTERY)
+#define IF_FORWARD             IF_X(X_FORWARD)
+#define IF_BACKWARD            IF_X(X_BACKWARD)
+#define IF_STATION(idx, lo, hi)          IF_X(X_STATION(idx, lo, hi))
+#define IF_STATION_RUNNING(idx, lo, hi)  IF_X(X_STATION_RUNNING(idx, lo, hi))
+#define IF_ID(lo, hi)                    IF_X(X_ID(lo, hi))
+#define IF_STATION_MOD(k, n, m)          IF_X(X_STATION_MOD(k, n, m))
+#define IF_STATION_DIV(k, n, m)          IF_X(X_STATION_DIV(k, n, m))
+#define IF_TAG_MINUS_EQ_STATION(k, n)    IF_X(X_TAG_MINUS_EQ_STATION(k, n))
+#define IF_TAG_EQ_STATION(k)             IF_X(X_TAG_EQ_STATION(k))
 
 #define A_STOP                 TA_STOP
 #define A_AUTOSTART(sec)       (TA_STOP_AUTOSTART | (sec))

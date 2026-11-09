@@ -3,7 +3,7 @@
  *
  * 호스트: gcc -std=c99 -DAGV_HOST_BUILD -Iinclude tests/test_dsl.c -o build/test_dsl && build/test_dsl
  * 타깃:   cl2000 -v28 -ml -mt --c99 -Iinclude --compile_only tests/test_dsl.c
- * 컴파일 오류 시험: -DNEG_AMP_INPUT, -DNEG_NO_DIRECTION 각각 컴파일이 실패해야 한다.
+ * 컴파일 오류 시험: -DNEG_AMP_INPUT, -DNEG_NO_DIRECTION, -DNEG_PARAM_ZERO, -DNEG_MOD_ZERO 각각 컴파일이 실패해야 한다.
  */
 #include "agv/seq_dsl.h"
 
@@ -57,6 +57,32 @@ SEQ_BEGIN( demo )
 #ifdef NEG_NO_DIRECTION
     BELT_ON( 3, CCW )
 #endif
+#ifdef NEG_PARAM_ZERO
+    DELAY_PARAM( 0, SEC )
+#endif
+SEQ_END
+
+/* 확장 조건, 두 번째 묶음, 파라미터 시간, 회전 비대기, 큐[k] 번호 */
+SEQ_BEGIN( ext )
+    SELECT_BEGIN
+        WHEN_IF( X_BACKWARD, SECOND )                                        /* 0 */
+        WHEN_IF_IN( X_ID(21, 23), IN( ON(SEN_A) ), SECOND )                  /* 1 */
+        WHEN_ID( 30, 30, ERR )                                               /* 2 */
+        WHEN_ANY2( IN( ANY_ON(SEN_A, SEN_B) ), ANY2_ON(SEN_C, IN_EXT_4), ERR )   /* 3 */
+    SELECT_END
+    WAIT_IF( X_NOT(X_CROSS_IN_ON) )                                          /* 4 */
+    WAIT_IF_TO( X_PARAM_GE(P_STATION_NO, 5), 300, ERR )                      /* 5 */
+    WAIT_IF_IN_TO( X_KEY(UP), IN( OFF(SEN_A) ), 100, ERR )                   /* 6 */
+    WAIT_ANY2_TO( IN( ANY_ON(SEN_A, SEN_B), OFF(SEN_C) ), ANY2_ON(IN_EXT_5, IN_EXT_6), 50, ERR )  /* 7 */
+    DELAY_PARAM( P_AUTO_START_SEC, MIN )                                     /* 8 */
+    WAIT_TO_PARAM( IN( ON(SEN_B) ), P_STATION_NO, DSEC, ERR )                /* 9 */
+    TURN_NOWAIT( CCW, 90, 0, 1, 0 )                                          /* 10 */
+    ACS( L, STATION(3) )                                                     /* 11 */
+    ACS( N, STATION0 )                                                       /* 12 */
+    WAIT( IN( ON(IN_EXT_1), ON(IN_EXT_2), ON(IN_EXT_3), OFF(IN_EXT_4), OFF(IN_EXT_5), ANY_ON(IN_EXT_6, IN_EXT_7) ) )  /* 13 */
+    OUT_ON( OUT_EXT_1, OUT_EXT_2, OUT_EXT_3, OUT_EXT_4, OUT_EXT_5, OUT_EXT_6, OUT_EXT_7, OUT_EXT_8,
+            OUT_EXT_9, OUT_EXT_10, OUT_EXT_11, OUT_EXT_12, OUT_EXT_13, OUT_EXT_14, OUT_EXT_15, OUT_EXT_16 )  /* 14 */
+    WAIT_IF( X_ERR_EQ(281) )                                                 /* 15 */
 SEQ_END
 
 ACT_BEGIN( signal_3x )
@@ -65,6 +91,7 @@ ACT_END
 
 SEQ_MAP_BEGIN( site_seqs )
     SEQ_MAP( 1, SEQ_LOAD, demo )
+    SEQ_MAP( 1, SEQ_UNLOAD, ext )
 SEQ_MAP_END
 
 ACT_MAP_BEGIN( site_acts )
@@ -75,12 +102,25 @@ TAG_TABLE_BEGIN( site_tags )
     TAG( 4, 1, A_STOP, A_SEQ(SEQ_LOAD) )
     TAG( 21, ANY_PROFILE, A_TURN(CW, 90, 0, 1, 0) )
     TAG_IF( 36, 1, IF_STATION(1, 101, 116), A_ACT(ACT_DEMO) )
+    TAG_IF( 6,  1, IF_IN( ON(SEN_C) ), A_SEQ(SEQ_UNLOAD), A_FORBACK(TOGGLE) )                     /* 3 */
+    TAG_IF( 10, 1, IF_IN( ANY_ON(SEN_A, SEN_B) ), A_SEQ(SEQ_LOAD) )                               /* 4 */
+    TAG_IF( 61, 1, IF_X2( X_ID(5, 5), X_STATION(1, 42, 42) ), A_TURN(CCW, 90, 0, 1, 0) )        /* 5 */
+    TAG_IF( 62, 1, IF_X_IN( X_ID(1, 9), IN( OFF(SEN_A) ) ), A_STOP )                              /* 6 */
+    TAG_IF( 30, 1, IF_TAG_MINUS_EQ_STATION(1, 20), A_STOP )                                       /* 7 */
+    TAG_IF( 31, 1, IF_STATION_MOD(0, 10, 3), A_STOP )                                             /* 8 */
+    TAG_IF( 32, 1, IF_STATION_DIV(2, 100, 1), A_STOP )                                            /* 9 */
+    TAG_IF( 33, 1, IF_TAG_EQ_STATION(0), A_STOP )                                                 /* 10 */
+    TAG_IF( 34, 1, IF_X2_IN( X_FORWARD, X_NOT(X_CROSS_OUT), IN( ON(SEN_A) ) ), A_STOP )           /* 11 */
+    TAG_IF( 35, 1, IF_BACKWARD, A_STOP )                                                          /* 12 */
+#ifdef NEG_MOD_ZERO
+    TAG_IF( 37, 1, IF_STATION_MOD(0, 0, 3), A_STOP )
+#endif
 TAG_TABLE_END
 
 #ifdef __TMS320C28XX__
-/* 타깃 크기 확인: 스텝 12워드, 태그 규칙 9워드 */
+/* 타깃 크기 확인: 스텝 12워드, 태그 규칙 16워드 */
 typedef char step_size_is_12[(sizeof(seq_step_t) == 12) ? 1 : -1];
-typedef char rule_size_is_9[(sizeof(tag_rule_t) == 9) ? 1 : -1];
+typedef char rule_size_is_16[(sizeof(tag_rule_t) == 16) ? 1 : -1];
 #endif
 
 #ifdef AGV_HOST_BUILD
@@ -117,6 +157,44 @@ int main(void)
     assert((site_tags[2].cond & 0xFF) == TAG_COND_STATION_RANGE && (site_tags[2].cond >> 8) == 1);
     assert(site_tags[2].cond_a == 101 && site_tags[2].cond_b == 116);
     assert(site_tags[2].act[0] == (TA_ACT | ACT_DEMO));
+
+    /* 확장 조건: xc = 코드, arg0·arg1 = 인자, out = 두 번째 묶음 */
+    {
+        const seq_step_t *e = ext_steps;
+        assert(e[0].kind == SK_WHEN && e[0].xc == XC_BACKWARD && e[0].on == 0 && e[0].off == 0 && e[0].out == 0 && e[0].target == SECOND);
+        assert(e[1].xc == XC_ID && e[1].arg0 == 21 && e[1].arg1 == 23 && e[1].on == 0x1UL && e[1].off == 0);
+        assert(e[2].xc == XC_ID && e[2].arg0 == 30 && e[2].arg1 == 30 && e[2].target == ERR);
+        assert(e[3].xc == 0 && e[3].on == 0x3UL && e[3].off == 0x3UL && e[3].out == 0xCUL);
+        assert(e[4].kind == SK_WAIT && e[4].xc == (XC_CROSS | (2 << 8) | XC_NOT) && e[4].timeout == 0);
+        assert(e[5].xc == (XC_PARAM_GE | (P_STATION_NO << 8)) && e[5].arg0 == 5 && e[5].timeout == 300 && e[5].target == ERR);
+        assert(e[6].xc == XC_KEY && e[6].arg0 == KEY_UP && e[6].on == 0 && e[6].off == 0x1UL && e[6].timeout == 100);
+        assert(e[7].xc == 0 && e[7].on == 0x3UL && e[7].off == 0x7UL && e[7].out == 0x30UL && e[7].timeout == 50);
+        assert(e[8].kind == SK_DELAY_PARAM && e[8].arg0 == P_AUTO_START_SEC && e[8].arg1 == 6000);
+        assert(e[9].kind == SK_WAIT_PARAM && e[9].arg0 == P_STATION_NO && e[9].arg1 == 10 && e[9].on == 0x2UL && e[9].xc == 0);
+        assert(e[10].kind == SK_TURN_NOWAIT && e[10].arg0 == TURN_CCW && e[10].arg1 == 90 && e[10].timeout == (1 << 4));
+        assert(e[11].kind == SK_ACS && e[11].arg0 == 'L' && e[11].arg1 == SEQ_NUM_STATION(3));
+        assert(e[12].arg1 == SEQ_NUM_STATION0);
+        assert(e[13].on == 0x67UL && e[13].off == 0x78UL);                  /* IN 6개 */
+        assert(e[14].kind == SK_OUT && e[14].on == 0xFFFFUL);               /* 신호 16개 */
+        assert(e[15].xc == XC_ERR_EQ && e[15].arg0 == 281);
+        assert(demo_steps[1].xc == 0);                                       /* 예전 스텝은 0 */
+    }
+    /* 태그: 확장 조건 둘 + 입력 조건. 새 칸은 act 뒤 */
+    assert(site_tags[0].cond == 0 && site_tags[0].cond2 == 0 && site_tags[0].in_on == 0 && site_tags[0].in_off == 0);
+    assert(site_tags[2].cond2 == 0 && site_tags[2].in_on == 0);
+    assert(site_tags[3].cond == 0 && site_tags[3].in_on == 0x4UL && site_tags[3].in_off == 0);
+    assert(site_tags[3].act[0] == (TA_SEQ | SEQ_UNLOAD) && site_tags[3].act[1] == (TA_FORBACK | DIR_TOGGLE));
+    assert(site_tags[4].in_on == 0x3UL && site_tags[4].in_off == 0x3UL);
+    assert(site_tags[5].cond == XC_ID && site_tags[5].cond_a == 5 && site_tags[5].cond_b == 5);
+    assert(site_tags[5].cond2 == (XC_STATION | (1 << 8)) && site_tags[5].cond2_a == 42 && site_tags[5].cond2_b == 42);
+    assert(site_tags[5].act[0] == (TA_TURN | TURN_CCW | (1 << 2)) && site_tags[5].act[1] == (1 << 4) && site_tags[5].in_on == 0);
+    assert(site_tags[6].cond == XC_ID && site_tags[6].cond2 == 0 && site_tags[6].in_off == 0x1UL);
+    assert(site_tags[7].cond == (XC_TAG_MINUS_EQ_ST | (1 << 8)) && site_tags[7].cond_a == 20);
+    assert(site_tags[8].cond == XC_STATION_MOD && site_tags[8].cond_a == 10 && site_tags[8].cond_b == 3);
+    assert(site_tags[9].cond == (XC_STATION_DIV | (2 << 8)) && site_tags[9].cond_a == 100 && site_tags[9].cond_b == 1);
+    assert(site_tags[10].cond == XC_TAG_EQ_ST);
+    assert(site_tags[11].cond == XC_FORWARD && site_tags[11].cond2 == (XC_CROSS | (1 << 8) | XC_NOT) && site_tags[11].in_on == 0x1UL);
+    assert(site_tags[12].cond == TAG_COND_BACKWARD && site_tags[12].act[0] == TA_STOP);
 
     puts("test_dsl ok");
     return 0;

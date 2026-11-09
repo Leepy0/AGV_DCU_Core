@@ -11,6 +11,7 @@ static void on_abort(int sig) { (void)sig; _exit(3); }
 __attribute__((constructor)) static void fakes_init(void) { signal(SIGABRT, on_abort); }
 
 uint32_t fake_in, fake_out, fake_seq_off_count;
+uint16_t fake_key;
 int      fake_restart_count, fake_link_full, fake_tx_count;
 uint16_t fake_tx[256][20];
 int      fake_speed_arg, fake_forback_arg, fake_turn_count;
@@ -20,6 +21,7 @@ int      fake_ee_writes, fake_ee_cut = -1;
 void fake_reset(void)
 {
     fake_in = fake_out = fake_seq_off_count = 0;
+    fake_key = 0;
     fake_restart_count = fake_link_full = fake_tx_count = 0;
     fake_speed_arg = fake_forback_arg = -1;
     fake_turn_count = 0;
@@ -31,6 +33,8 @@ uint32_t io_in_mask(void)  { return fake_in; }
 uint32_t io_out_mask(void) { return fake_out; }
 void     io_out_masks(uint32_t set, uint32_t clr) { fake_out = (fake_out & ~clr) | set; }
 void     io_seq_outputs_off(void) { fake_seq_off_count++; fake_out = 0; }
+
+uint16_t ui_key(void) { return fake_key; }
 
 void run_request_restart(uint16_t sec) { (void)sec; fake_restart_count++; }
 void log_event(uint16_t code, int16_t a, int16_t b) { (void)code; (void)a; (void)b; }

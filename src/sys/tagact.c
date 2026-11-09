@@ -3,6 +3,7 @@
 #include "agv/acs.h"
 #include "agv/drive.h"
 #include "agv/hal.h"
+#include "agv/io.h"
 #include "agv/log.h"
 #include "agv/param.h"
 #include "agv/run.h"
@@ -14,9 +15,6 @@
 #define P param_dv
 
 #define TURN_STOP_MIN_VIN 3     /* 이보다 빠르면 회전 전에 정지 거리를 건다 */
-#define COND_SLOT(c)      ((c) >> 8)
-#define COND_KIND(c)      ((c) & 0xFFu)
-#define LOW_BATTERY_DV    230   /* 저전압 판정과 같은 값 */
 #define TAPE_WINDOW_DEG   20.0f /* 정렬 회전이 새 라인을 찾는 목표각 앞뒤 범위 */
 
 static const tag_rule_t *s_rules;
@@ -160,22 +158,8 @@ void tagact_compensate(int32_t pulses)
 
 static uint16_t cond_ok(const tag_rule_t *r)
 {
-    int16_t station;
-
-    switch (COND_KIND(r->cond)) {
-    case TAG_COND_NONE:         return 1;
-    case TAG_COND_FORBACK_MODE: return (uint16_t)(P.forback_mode > 0);
-    case TAG_COND_LOW_BATTERY:  return (uint16_t)(param_get(P_BAT_DV) < LOW_BATTERY_DV);
-    case TAG_COND_FORWARD:      return (uint16_t)(D.backward == 0);
-    case TAG_COND_BACKWARD:     return (uint16_t)(D.backward != 0);
-    case TAG_COND_STATION_RUNNING:
-        if (D.flag_stopping) { return 0; }
-        /* fall through */
-    case TAG_COND_STATION_RANGE:
-        station = acs_station_get(COND_SLOT(r->cond));
-        return (uint16_t)((station >= (int16_t)r->cond_a) && (station <= (int16_t)r->cond_b));
-    default:                    return 0;
-    }
+    return seq_xcond(r->cond, r->cond_a, r->cond_b, r->tag) && seq_xcond(r->cond2, r->cond2_a, r->cond2_b, r->tag)
+        && seq_mask_true(io_in_mask(), r->in_on, r->in_off);
 }
 
 static const tag_rule_t *rule_find(uint16_t tag)

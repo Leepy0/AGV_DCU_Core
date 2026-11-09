@@ -3,23 +3,35 @@
 #ifndef AGV_TAGACT_H
 #define AGV_TAGACT_H
 #include "agv/types.h"
+#include "agv/seq.h"
 
 typedef enum { DIR_FWD = 1, DIR_BACK = 2, DIR_TOGGLE = 3, DIR_FWD_AFTER_TURN = 4, DIR_BACK_AFTER_TURN = 5 } dir_t;
 typedef enum { TURN_CW = 1, TURN_CCW = 2 } turn_dir_t;
 typedef enum { BRANCH_LEFT = 1, BRANCH_RIGHT = 2 } branch_dir_t;
 
+/* 조건 셋을 모두 만족하는 규칙만 맞는다. 새 칸은 끝에 두어 예전 {tag, profile, cond, a, b, {act}} 초기화가 그대로 된다 */
 typedef struct {
     uint16_t tag;        /* 태그 번호 */
     uint16_t profile;    /* 0 = 모든 프로파일 */
-    uint16_t cond;       /* 하위 8비트 TAG_COND_*, 상위 8비트 스테이션 큐 칸 */
+    uint16_t cond;       /* 확장 조건 1: XC_* (agv/seq.h). 태그 번호 조건은 이 규칙의 tag 를 쓴다 */
     uint16_t cond_a;     /* 조건 인자 */
     uint16_t cond_b;
     uint16_t act[4];     /* TA_* 액션 코드, 0 종료. TA_TURN은 2칸 */
-} tag_rule_t;
+    uint16_t cond2;      /* 확장 조건 2 */
+    uint16_t cond2_a;
+    uint16_t cond2_b;
+    uint32_t in_on;      /* 입력 조건. 시퀀스 WHEN 과 같은 인코딩 (양쪽에 선 비트 = 하나라도 ON) */
+    uint32_t in_off;
+} tag_rule_t;            /* C28x 16워드 */
 
-enum { TAG_COND_NONE = 0, TAG_COND_FORBACK_MODE, TAG_COND_LOW_BATTERY, TAG_COND_FORWARD, TAG_COND_BACKWARD,
-       TAG_COND_STATION_RANGE, /* cond_a <= 큐[칸] <= cond_b */
-       TAG_COND_STATION_RUNNING /* 위 조건 + 아직 정지가 걸리지 않음 */ };
+/* 예전 이름 */
+#define TAG_COND_NONE            XC_NONE
+#define TAG_COND_FORBACK_MODE    XC_FORBACK_MODE
+#define TAG_COND_LOW_BATTERY     XC_LOW_BATTERY
+#define TAG_COND_FORWARD         XC_FORWARD
+#define TAG_COND_BACKWARD        XC_BACKWARD
+#define TAG_COND_STATION_RANGE   XC_STATION
+#define TAG_COND_STATION_RUNNING XC_STATION_RUNNING
 
 /* 액션 코드: 상위 8비트 종류, 하위 8비트 인자 */
 #define TA_KIND(code)     ((code) >> 8)
