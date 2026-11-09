@@ -1,23 +1,41 @@
 # Target build: powershell -File tools/build_target.ps1 [-Site examples/empty_site] [-Out build/c28/agv_empty]
-param([string]$Site = 'examples/empty_site', [string]$Out = 'build/c28/agv_empty')
+#   [-ObjDir build/c28] [-CoreCache]
+# Core objects go to <ObjDir>/core, site objects to <ObjDir>/site.
+# -CoreCache reuses existing core objects. Use it only when the core tree cannot change for that ObjDir
+# (for example an app keys ObjDir by the hash of its vendored core). Site files are always compiled.
+param([string]$Site = 'examples/empty_site', [string]$Out = 'build/c28/agv_empty',
+      [string]$ObjDir = 'build/c28', [switch]$CoreCache)
 $ErrorActionPreference = 'Stop'
 Set-Location (Split-Path -Parent $PSScriptRoot)
 
 $cgt = 'C:\ti\ti-cgt-c2000_18.12.2.LTS\ti-cgt-c2000_18.12.2.LTS'
 $cl = "$cgt\bin\cl2000.exe"
 $flags = '-v28', '-ml', '-mt', '--c99', '--float_support=softlib', '-O2', '--opt_for_speed=2', '-g',
-         '--diag_warning=225', '--display_error_number', "-I$cgt\include", '-Iinclude', '-Ihal/f2808', "-I$Site"
-$objdir = 'build/c28'
-New-Item -ItemType Directory -Force $objdir | Out-Null
+         '--diag_warning=225', '--display_error_number', "-I$cgt\include", '-Iinclude', '-Ihal/f2808'
+$coreDir = Join-Path $ObjDir 'core'
+$siteDir = Join-Path $ObjDir 'site'
+New-Item -ItemType Directory -Force $coreDir, $siteDir | Out-Null
 
-$src = @(Get-ChildItem src/*.c, src/sys/*.c, hal/f2808/*.c, hal/f2808/*.asm, "$Site/*.c")
 $objs = @()
 $failed = 0
-foreach ($f in $src) {
-    $o = Join-Path $objdir ($f.BaseName + '.obj')
-    & $cl @flags "--output_file=$o" -c $f.FullName
-    if ($LASTEXITCODE -ne 0) { $failed++ }
-    $objs += $o
+function Compile($f, [string]$dir, [string[]]$extra) {
+    $o = Join-Path $dir ($f.BaseName + '.obj')
+    & $cl @flags @extra "--output_file=$o" -c $f.FullName | Out-Host
+    if ($LASTEXITCODE -ne 0) {
+        if (Test-Path $o) { Remove-Item -Force $o }
+        $script:failed++
+    }
+    return $o
+}
+
+# The core does not include site headers, so its objects do not depend on the site
+foreach ($f in @(Get-ChildItem src/*.c, src/sys/*.c, hal/f2808/*.c, hal/f2808/*.asm)) {
+    $o = Join-Path $coreDir ($f.BaseName + '.obj')
+    if ($CoreCache -and (Test-Path $o)) { $objs += $o; continue }
+    $objs += Compile $f $coreDir @()
+}
+foreach ($f in @(Get-ChildItem "$Site/*.c")) {
+    $objs += Compile $f $siteDir @("-I$Site")
 }
 if ($failed -ne 0) { Write-Output "COMPILE FAILED: $failed"; exit 1 }
 
