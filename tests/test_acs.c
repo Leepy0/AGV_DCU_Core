@@ -188,12 +188,12 @@ int main(void)
     ticks(1);
     { int c = gap(100); assert(c >= 10 && c < 14); }
 
-    /* 교차로 간격: 0 → 50틱, 큰 값 → 500틱 */
+    /* 교차로 간격: 41번 0 → 기본 10틱(0.1 s) + 지터 [0, 3). 무선 재전송(37번)과 무관. 큰 값 → 500틱 */
     setup(0, 5, 1);
     acs_cross_in(12);
     ticks(1);
     assert(fake_tx_count == 1 && fake_tx[0][6] == 'I' && fake_tx[0][7] == '0' && fake_tx[0][8] == '1' && fake_tx[0][9] == '2');
-    { int c = gap(100); assert(c >= 50 && c < 55); }
+    { int c = gap(100); assert(c >= 10 && c < 13); }
 
     setup(99, 5, 1);
     (void)param_set(P_CROSS_RETRY_100MS, 99);
