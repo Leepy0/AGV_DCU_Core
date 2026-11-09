@@ -73,7 +73,7 @@ static const para_view_t s_view[P_COUNT] = {
     {"DRS", 2}, {"LOS", 2}, {"TNS", 2}, {"ATD", 1}, {"ITM", 2}, {"SND", 0}, {"BPS", 2}, {"OBS", 2}, {"DSM", 2},
     {"BO-", 2}, {"JSP", 2}, {"ACC", 2}, {"DCC", 2}, {"AS ", 3}, {"ST ", 3}, {"BRM", 1}, {"TFB", 2}, {"TAG", 1},
     {"SL ", 3}, {"K_P", 2}, {"K_I", 2}, {"WS ", 3}, {"RG ", 3}, {"WW ", 3}, {"ID_", 2}, {"AT ", 3}, {"LO ", 3},
-    {"ACD", 2}, {"SSN", 2}, {"TTY", 1}, {"MPU", 2}, {"FL ", 3}, {"ASS", 2}, {"BGO", 2}, {"CID", 3}, {"WRT", 2},
+    {"ACD", 2}, {"SSN", 2}, {"TTY", 1}, {"MPU", 2}, {"FL ", 3}, {"ASS", 2}, {"BGO", 2}, {"CD ", 3}, {"WRT", 2},
     {"CT ", 3}, {"SO-", 2}, {"SU ", 3}, {"EST", 2}, {"RCI", 2}, {"LUS", 2}, {"C- ", 3}, {"CO-", 2}, {"AV-", 2},
     {"INT", 2}, {"V_ ", 3}, {"VT ", 3}, {"CR ", 3},
     {"GD ", 3}, {"OPT", 2}, {"FF ", 3}, {"ES ", 2}
@@ -121,6 +121,34 @@ void ui_reset(void)
 int16_t ui_para_number(void)             { return s_ui.para; }
 int16_t ui_lamp_ext(uint16_t i)          { return s_ui.lamp_ext[i]; }
 void    ui_lamp_ext_set(uint16_t i, int16_t v) { s_ui.lamp_ext[i] = v; }
+
+uint16_t ui_param_label(uint16_t idx, char *c3)
+{
+    const para_view_t *v = &s_view[(idx < P_COUNT) ? idx : 0u];
+    c3[0] = v->c[0];
+    c3[1] = v->c[1];
+    c3[2] = v->c[2];
+    return v->digits;
+}
+
+/* show_param_value 와 같은 자리: 이름 3글자 위에 값 자릿수만큼 오른쪽부터. 음수 '-' 는 3자리 이상이면 둘째, 아니면 셋째 */
+void ui_param_text(uint16_t idx, int16_t v, char *c)
+{
+    uint16_t n = ui_param_label(idx, c), i;
+    int16_t m = (v < 0) ? (int16_t)-v : v;
+
+    c[3] = c[4] = ' ';
+    if (n == 0u) {
+        c[3] = 'O';
+        c[4] = (v == 1) ? 'N' : 'F';
+        return;
+    }
+    for (i = 0; i < n; i++) {
+        c[4u - i] = (char)('0' + m % 10);
+        m = (int16_t)(m / 10);
+    }
+    if (v < 0) { c[(n >= 3u) ? 1u : 2u] = '-'; }
+}
 
 void ui_digits(uint16_t *out)
 {
@@ -786,6 +814,13 @@ static void show_tune_text(void)
     s_ui.flick = tune_flick();
 }
 
+/* 이름 한 글자 + 네 자리. 9999 를 넘으면 자르지 않고 OVER */
+static void show_wide(char name, int16_t v)
+{
+    if (v > 9999) { show(letter(name), letter('O'), letter('V'), letter('E'), letter('R')); }
+    else { show(letter(name), digit_of(v, 1000), digit_of(v, 100), digit_of(v, 10), digit_of(v, 1)); }
+}
+
 static void show_tune(void)
 {
     switch (tune_state()) {
@@ -828,10 +863,7 @@ static void show_tune(void)
             if (agv_top.state == 2) { show(letter('T'), letter('P'), letter('O'), letter('K'), DIGIT_NONE); }
             else { show(letter('T'), letter('P'), letter('F'), (uint16_t)(agv_top.fail / 10), (uint16_t)(agv_top.fail % 10)); }
         }
-        else {          /* L·R + 최고 rpm 4자리 */
-            int16_t v = agv_top.max_rpm[tune_page() - 1u];
-            show(letter((tune_page() == 1u) ? 'L' : 'R'), digit_of(v, 1000), digit_of(v, 100), digit_of(v, 10), digit_of(v, 1));
-        }
+        else { show_wide((tune_page() == 1u) ? 'L' : 'R', agv_top.max_rpm[tune_page() - 1u]); }   /* L·R + 최고 rpm 4자리 */
         break;
     case TUNE_HS:       /* 단계, 회 2자리, 순서 */
         show(letter('H'), ident_stage(), digit_of((int16_t)ident_pass(), 10), digit_of((int16_t)ident_pass(), 1), ident_phase());
@@ -850,6 +882,7 @@ static void show_tune(void)
             show(letter('C'), tune_page(), digit_of(v, 100), digit_of(v, 10), digit_of(v, 1));
             s_ui.dot = (uint16_t)(s_ui.dot | 0x08u | ((ident_hs_best() == tune_page() - 1u) ? 0x01u : 0u));
             if (v < 0) { s_ui.digit[2] = s_ui.digit[3] = s_ui.digit[4] = DIGIT_MINUS; }
+            if (v > 999) { s_ui.digit[2] = letter('O'); s_ui.digit[3] = letter('V'); s_ui.digit[4] = letter('F'); }
         }
         break;
     case TUNE_RPM:      /* 회, 단계 */
@@ -865,7 +898,7 @@ static void show_tune(void)
         }
         else {          /* L 저속 최저 rpm, B 출발 DAC. 4자리, 없으면 ---- */
             int16_t v = (tune_page() == 1u) ? agv_rpmt.low_rpm : agv_rpmt.brk_dac;
-            show(letter((tune_page() == 1u) ? 'L' : 'B'), digit_of(v, 1000), digit_of(v, 100), digit_of(v, 10), digit_of(v, 1));
+            show_wide((tune_page() == 1u) ? 'L' : 'B', v);
             if (v <= 0) { s_ui.digit[1] = s_ui.digit[2] = s_ui.digit[3] = s_ui.digit[4] = DIGIT_MINUS; }
         }
         break;

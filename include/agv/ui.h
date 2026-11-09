@@ -28,6 +28,8 @@ void     ui_iotest_wait(void);          /* IO 시험 진입 대기: TEST 표시 
 void     ui_iotest_enter(void);
 void     ui_iotest_run(void);           /* 10 ms: IO 시험 키·표시·출력 */
 void     ui_digits(uint16_t *out);      /* 시험용: 지금 표시 색인 5자리 */
+uint16_t ui_param_label(uint16_t idx, char *c3);   /* 파라미터 화면 이름 3글자. 반환 = 값 자릿수(0 = ON/OFF) */
+void     ui_param_text(uint16_t idx, int16_t v, char *c);   /* 파라미터 화면과 같은 5글자('0'~'9', 'A'~'Z', '-', ' ', '_') */
 int16_t  ui_para_number(void);
 uint16_t ui_key(void);                 /* 지금 눌린 키 값 */
 int16_t  ui_lamp_ext(uint16_t i);

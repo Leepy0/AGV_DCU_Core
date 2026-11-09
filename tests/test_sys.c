@@ -1123,6 +1123,13 @@ static void test_tune_menu(void)
     assert(tune_menu() == 130 && shows("TP060"));     /* 빈 EEPROM 상한 60 */
     key(KEY_MODE);
     assert(tune_menu() == 140 && shows("L0000"));
+    key(KEY_MODE);                                    /* ACC 상한. 빈 EEPROM 은 12번 지금 값 */
+    {
+        char want[6] = "AU0  ";
+        want[3] = (char)('0' + param_get(P_ACC) / 10);
+        want[4] = (char)('0' + param_get(P_ACC) % 10);
+        assert(tune_menu() == 150 && shows(want));
+    }
     key(KEY_MODE);
     assert(tune_menu() == 110);
     key(KEY_RESET);
@@ -1216,7 +1223,14 @@ static void test_tune_inputs(void)
     ticks(100);
     assert(shows("L7005"));
     ticks(20);
-    assert(host.ee[TUNE_EE_TRACK] == 7005 && host.ee[TUNE_EE_CAP] == 55);
+    assert(host.ee[TUNE_EE_TRACK] == 7005 && (host.ee[TUNE_EE_CAP] & 0xFFu) == 55u);
+    assert((host.ee[TUNE_EE_CAP] >> 8) == (uint16_t)param_get(P_ACC));   /* ACC 상한은 위 바이트 */
+    key(KEY_MODE);                                    /* ACC 상한 12 → 위 바이트, 속도 상한은 그대로 */
+    key(KEY_SET);
+    for (k = 0; (k < 10) && !shows("AU012"); k++) { key((param_get(P_ACC) < 12) ? KEY_UP : KEY_DOWN); }
+    key(KEY_SET);
+    ticks(120);
+    assert(shows("AU012") && host.ee[TUNE_EE_CAP] == (uint16_t)((12u << 8) | 55u));
     boot_keys(KEY_MODE + KEY_SET, 1);
     key(KEY_SET);
     key(KEY_MODE);
@@ -1224,7 +1238,41 @@ static void test_tune_inputs(void)
     assert(shows("TP055"));
     key(KEY_MODE);
     assert(shows("L7005"));
+    key(KEY_MODE);
+    assert(shows("AU012"));
     printf("  tune inputs ok\n");
+}
+
+/* 5자리 FND: 파라미터 화면 이름 + 자릿수가 다 들어가고, 결과 값은 넘치면 자르지 않고 OVF·OVER 로 보인다 */
+static void test_fnd_fit(void)
+{
+    char c[6] = "     ", l[3];
+    uint16_t i, k, n;
+
+    for (i = 1; i < P_COUNT; i++) {   /* 값 자리(오른쪽 n 칸) 앞까지만 이름 글자 */
+        n = ui_param_label(i, l);
+        if (n == 0u) { n = 2; }      /* ON/OFF */
+        for (k = (uint16_t)(5u - n); k < 3u; k++) { assert(l[k] == ' '); }
+    }
+    ui_param_text(P_CROSS_IN_CM, 60, c);
+    assert(memcmp(c, "CD060", 5) == 0);
+    ui_param_text(P_SPEED_MIN, 7, c);
+    assert(memcmp(c, "ACD07", 5) == 0);
+    tune_value_text(c, 'D', 'E', 5414, 1);
+    assert(memcmp(c, "D5414", 5) == 0);
+    tune_value_text(c, 'D', 'E', 414, 1);
+    assert(memcmp(c, "D0414", 5) == 0);
+    tune_value_text(c, 'D', 'E', 12000, 1);
+    assert(memcmp(c, "DOVER", 5) == 0);
+    tune_value_text(c, 'D', 'E', -42, 1);
+    assert(memcmp(c, "D-042", 5) == 0);
+    tune_value_text(c, 'S', 'E', 1200, 0);
+    assert(memcmp(c, "SEOVF", 5) == 0);
+    tune_value_text(c, 'L', 'R', -15, 0);
+    assert(memcmp(c, "L-015", 5) == 0);
+    tune_value_text(c, 'S', 'E', TUNE_NO_DATA, 0);
+    assert(memcmp(c, "SE---", 5) == 0);
+    printf("  fnd fit ok\n");
 }
 
 /* START 한 뒤 연속 시험이 끝난 것처럼 만들고 세운다. mask 와 시작 값은 ident_start_build 가 넣었다 */
@@ -1241,12 +1289,20 @@ static void fake_build_done(void)
     assert(!D.flag_run && !D.flag_stopping);
 }
 
-/* 결과 쪽을 SAVE 까지 UP 으로 넘긴다 */
+/* 결과 쪽 SAVE 칸: 채택 수 "SV  n" 또는 "NONE " */
+static int on_save(void)
+{
+    char c[5];
+    (void)tune_text(c);
+    return ((c[0] == 'S') && (c[1] == 'V')) || ((c[0] == 'N') && (c[1] == 'O') && (c[2] == 'N'));
+}
+
+/* 결과 쪽을 SAVE 까지 MODE 로 넘긴다(UP 과 같다) */
 static void to_save(void)
 {
     int k;
-    for (k = 0; (k < 30) && !shows("SAVE "); k++) { key(KEY_UP); }
-    assert(shows("SAVE "));
+    for (k = 0; (k < 30) && !on_save(); k++) { key(KEY_MODE); }
+    assert(on_save());
 }
 
 /* t1 결과: 채택 저장 1·13·35 는 SET 채택, RESET 건너뛰기, SAVE 에서만 쓴다. 51번 추천은 없다. 기준값을 쓰고 RBOT */
@@ -1273,33 +1329,51 @@ static void test_tune_t1_save(void)
     fake_build_done();
     ticks(200);
     memcpy(before, host.ee, sizeof(before));
-    /* 1번: 지금 30 과 새 25 를 1 s 씩. 새 값이면 둘째 자리 점 */
-    for (k = 0; (k < 250) && !shows(" 1025"); k++) { tick(); }
-    assert(shows(" 1025"));
-    for (k = 0; (k < 250) && !shows(" 1030"); k++) { tick(); }
-    assert(shows(" 1030"));
-    key(KEY_SET);                    /* 채택 → 다음 */
-    assert(tune_page() == 1);
-    key(KEY_RESET);                  /* 13번 건너뛰기 */
-    key(KEY_SET);                    /* 35 */
-    assert(tune_page() == 3);        /* 값 쪽. 51번 채택 쪽은 없다 */
-    key(KEY_DOWN);
-    key(KEY_DOWN);
-    key(KEY_DOWN);                   /* 1번으로 돌아가도 채택 표시(첫 자리 점)가 남는다 */
-    assert(tune_page() == 0);
-    ticks(5);
+    /* 1번: 파라미터 화면 이름(DRS)으로 지금 30 과 새 25 를 1 s 씩. 새 값이면 둘째 자리 점. 추천은 처음부터 채택(첫 자리 점) */
+    for (k = 0; (k < 250) && !shows("DRS25"); k++) { tick(); }
+    assert(shows("DRS25"));
+    for (k = 0; (k < 250) && !shows("DRS30"); k++) { tick(); }
+    assert(shows("DRS30"));
     {
         char c[5];
         assert(tune_text(c) & 1u);
+    }
+    key(KEY_MODE);                   /* MODE 는 다음 쪽(UP 과 같다). 채택은 그대로 */
+    assert(tune_page() == 1);
+    key(KEY_RESET);                  /* 13번 건너뛰기 → 다음 */
+    assert(tune_page() == 2);
+    {
+        char c[5];
+        assert(tune_text(c) & 1u);   /* 35번(CD)도 처음부터 채택 */
+        for (k = 0; (k < 250) && !shows("CD040"); k++) { tick(); }
+        assert(shows("CD040"));
+    }
+    key(KEY_DOWN);
+    {
+        char c[5];
+        assert(tune_page() == 1 && !(tune_text(c) & 1u));   /* 건너뛴 13번은 점이 없다 */
+    }
+    key(KEY_DOWN);
+    assert(tune_page() == 0);
+    {   /* 값 쪽 이름: 휠 간격은 파라미터 화면 이름 WW, 최고 rpm·감속도는 이름 한 글자 + 네 자리 */
+        for (k = 0; (k < 30) && !shows("WW061"); k++) { key(KEY_UP); }
+        assert(shows("WW061"));
+        for (k = 0; (k < 30) && !shows("T3000"); k++) { key(KEY_UP); }
+        assert(shows("T3000"));
+        key(KEY_UP);
+        assert(shows("D3500"));
     }
     /* 저장 전에는 아무것도 쓰지 않았다 */
     assert(param_get(P_SPEED_HIGH) == 30 && param_get(P_CROSS_IN_CM) == 60 && param_get(P_OPT_FLAGS) == 0);
     assert(!tune_base_valid());
     to_save();
+    assert(shows("SV  2"));          /* 1·35 채택, 13 건너뜀 */
     key(KEY_SET);
-    ticks(100);
-    assert(tune_state() == TUNE_SAVED && shows("RBOT "));
-    ticks(50);
+    assert(tune_state() == TUNE_SAVED && (storage_pending() != 0u) && shows("BUSY "));   /* 쓰기 끝까지 */
+    for (k = 0; (k < 300) && (storage_pending() != 0u); k++) { tick(); }
+    assert(storage_pending() == 0u);
+    ticks(5);
+    assert(shows("RBOT "));
     assert(param_get(P_SPEED_HIGH) == 25 && param_get(P_DCC) == 40 && param_get(P_CROSS_IN_CM) == 40);
     assert(param_get(P_OPT_FLAGS) == 0 && host.ee[116] == before[116]);
     assert(host.ee[P_SPEED_HIGH] == 25 && host.ee[P_DCC] == 40 && host.ee[P_CROSS_IN_CM] == 40);
@@ -1364,14 +1438,17 @@ static void test_tune_t2_compare(void)
     key(KEY_UP);
     assert(shows("D-002") && tune_flick() == 0);
     key(KEY_UP);
-    assert(shows("FL---"));          /* 정지가 없었다 */
+    assert(shows("AM---"));          /* 가속 측정이 없었다 */
     key(KEY_UP);
-    assert(shows("ST025") && tune_flick() == 0x03u);
+    assert(shows("FR---"));          /* 정지가 없었다. 이름은 파라미터 화면 FL(32번)과 다르다 */
+    key(KEY_UP);
+    assert(shows("OS025") && tune_flick() == 0x03u);
     key(KEY_UP);
     assert(shows("SE070") && tune_flick() == 0x03u);
     key(KEY_UP);
     assert(shows("LR015") && tune_flick() == 0x03u);
     to_save();
+    assert(shows("NONE "));          /* 1번을 건너뛰어 채택이 없다 */
     key(KEY_RESET);                  /* 저장 없이 메뉴로 */
     assert(tune_state() == TUNE_WAIT && tune_menu() == 210);
     ticks(50);
@@ -1632,6 +1709,7 @@ int main(void)
     test_tune_entry();
     test_tune_menu();
     test_tune_inputs();
+    test_fnd_fit();
     test_tune_ee_layout();
     test_tune_t2_compare();
     test_tune_t24_amp();

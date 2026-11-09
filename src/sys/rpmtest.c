@@ -1,5 +1,5 @@
 /* rpmtest.c - 바닥 rpm 시험의 회 안 측정. rpmtest.h 참고.
- * 선 찾기·회전·재출발·먼 선까지 이동·실패 처리는 ident.c 가 한다. 여기는 선에서 출발한 뒤 측정만 한다.
+ * 선 찾기·회전·재출발·회 사이 이동·실패 처리는 ident.c 가 한다. 여기는 출발한 뒤 측정만 한다.
  * 개루프 회(1~3)는 매 틱 motor_dac_force 로 낸다. 풀기는 ident.c 가 한다.
  * 개루프 회는 먼저 최저 속도 폐루프로 APPR_MM 간다(접근). 엔코더에 방향이 없어 방향은 이 폐루프 구간이 정한다:
  * 고정은 그 폐루프가 RUN_DRIVE 로 달리는 중에만 걸고, motor.c 는 고정 중에도 같은 D.backward 방향을 낸다.
@@ -36,7 +36,7 @@
 #define V0_TICKS      10
 #define PEAK_TICKS    20       /* 정지 전 0.2 s */
 #define GAP_MM        400.0f   /* 트리거 간격 */
-#define CUT_MM        300.0f   /* 먼 선까지 감속 거리 + 이만큼은 남긴다 */
+#define CUT_MM        300.0f   /* 앞 선까지 감속 거리 + 이만큼은 남긴다 */
 #define DEC_EVERY     4        /* 감속 거리는 4 틱마다 잰다. CPU 를 아낀다 */
 #define RING          64u      /* 2의 거듭제곱 */
 #define APPR_MM       200.0f   /* 개루프 회 앞 폐루프 접근 거리. 남은 거리 guard 는 회 시작부터 재므로 이 거리도 든다 */
@@ -75,10 +75,10 @@ static float    mm_from(uint32_t p) { return (float)(travel() - p) / P.one_lengt
 static int16_t  avg2(int16_t a, int16_t b) { return (int16_t)(((int32_t)a + (int32_t)b) / 2); }
 static int16_t  dac_clamp(int32_t v) { return (int16_t)((v < 0) ? 0 : ((v > MOTOR_DAC_MAX) ? MOTOR_DAC_MAX : v)); }
 
-/* 0 계속, 1 먼 선까지 남은 거리 < 감속 거리 + 300 mm, 2 과속 */
+/* 0 계속, 1 앞 선까지 남은 거리 < 감속 거리 + 300 mm, 2 과속 */
 static int16_t guard(void)
 {
-    float rem = agv_rpmt.track_mm - P.guide_dist_mm - mm_from(s_rt.pass0);
+    float rem = ident_ahead_mm() - P.guide_dist_mm;
 
     if ((s_rt.n++ & (DEC_EVERY - 1)) == 0) { s_rt.dec = ident_decel_mm(avg2(D.rpm_avg[0], D.rpm_avg[1])); }
     if ((D.rpm_avg[0] > agv_rpmt.lim_rpm) || (D.rpm_avg[1] > agv_rpmt.lim_rpm)) { return 2; }
@@ -483,6 +483,21 @@ static int approach(void)
 }
 
 /* ---- ident.c 가 부른다 ---- */
+
+/* pass 회를 서 있다 출발해 끝까지 재는 앞 거리 mm(회전 중심 → 앞 선). 0 = 미리 모른다(개루프), 선에서 출발 */
+float rpmt_need_mm(uint16_t pass)
+{
+    const float k = 1000.0f / 6000.0f / P.one_meter_rpm;      /* rpm·틱 → mm */
+    float run = 0.0f;
+    uint16_t i;
+
+    switch (pass) {
+    case 4:  for (i = 0; i < RPMT_LOW; i++) { run += (float)s_low[i] * (float)LOW_TICKS * k; } break;
+    case 5:  run = (float)RPMT_STOPS * GAP_MM; break;
+    default: return 0.0f;
+    }
+    return P.guide_dist_mm + CUT_MM + ident_decel_mm(STOP_MIN_RPM) + APPR_MM + run;   /* APPR_MM: 가속·정속 여유 */
+}
 
 void rpmt_pass_begin(void)
 {

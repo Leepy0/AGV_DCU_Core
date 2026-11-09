@@ -1,8 +1,9 @@
 /* tune.h - 튜닝 모드. 전원을 켤 때 MODE + SET. 끝내려면 전원을 다시 켠다.
  * 메뉴는 파라미터처럼 대·중·소 단계다. 키:
- *  MODE 같은 단계 다음 칸, SET 아래 단계로·수정 시작·확정, RESET 한 단계 위·수정 취소(결과 쪽에서는 건너뛰기),
+ *  MODE 같은 단계 다음 칸(결과 쪽은 다음 쪽), SET 아래 단계로·수정 시작·확정, RESET 한 단계 위·수정 취소
+ *  (결과 쪽에서는 채택 빼기. 추천은 처음부터 채택이고 저장 쪽 SV n 에서 SET 하면 쓰기가 끝날 때까지 BUSY 뒤 RBOT),
  *  START 고른 시험, UP·DOWN 결과 넘기기·값 증감, SHIFT 고치는 자리
- *  t1 제작   t1 아래 입력 4칸(지름 22번, GD 50번, 최고 속도 상한, 교차선 간격 L). START = 연속 시험 전체
+ *  t1 제작   t1 아래 입력 5칸(지름 22번, GD 50번, 최고 속도 상한, 교차선 간격 L, ACC 상한 AU). START = 연속 시험 전체
  *  t2 점검   t2.1 빠른 점검, t2.2 바퀴 교체, t2.3 가이드 센서 교체, t2.4 모터·앰프 교체. 2.1·2.2·2.4 는 SET 으로 L 입력
  *  t3 개발   t3.1 IDEN, t3.2 RPM, t3.3 TOP, t3.4 ALL, t3.5 TEMP, t3.6 HS(SET 으로 속도 입력). 결과는 RAM 에만.
  *            시험 추가는 tune.c s_dev 표 한 줄
@@ -27,7 +28,7 @@ enum { TUNE_DEV_IDENT = 1, TUNE_DEV_RPM, TUNE_DEV_TOP, TUNE_DEV_ALL, TUNE_DEV_TE
 /* EEPROM (128 워드 칩 기준). 0~50 파라미터·표시, 51~109 KEEP, 115~118 체크섬 밖 파라미터, 120~124 OUT 큐와 겹치지 않는다.
  * 입력 L·상한은 확정 즉시, 기준값은 t1 결과 SAVE 때만 쓴다 */
 #define TUNE_EE_TRACK  126        /* 교차선 간격 L mm. 0 = 지름 보정 안 함 */
-#define TUNE_EE_CAP    127        /* 최고 속도 상한 m/min */
+#define TUNE_EE_CAP    127        /* 아래 바이트 최고 속도 상한 m/min, 위 바이트 ACC 상한(12번 단위). 0 = 12번 지금 값 */
 #define TUNE_EE_CHECK  110        /* 기준값 검사 = TUNE_BASE_MARK ^ 기준값 6칸 합. 틀리면 기준값 없음 */
 #define TUNE_BASE_MARK 0xB501u    /* 아래 바이트 = 판 */
 enum { TUNE_BASE_TOP = 0,         /* 111 최고 rpm 좌우 평균 */
@@ -70,6 +71,8 @@ void     tune_run(void);          /* 10 ms */
 int      tune_key(uint16_t key);  /* 0 무시, 1 처리, 2 저장함 */
 uint16_t tune_text(char *c);      /* 메뉴·입력·연속 시험 표시 5글자('0'~'9', 'A'~'Z', '-', ' '). 반환 = 점 자리 비트 */
 uint16_t tune_flick(void);        /* 깜박일 자리 비트. 0 = 없음 */
+/* 결과 쪽 값 표시 5글자: 이름 두 글자 + 세 자리, wide 1 = 이름 첫 글자 + 네 자리. 넘치면 OVF·OVER. 없음(TUNE_NO_DATA)은 --- */
+void     tune_value_text(char *c, char n0, char n1, int16_t v, int wide);
 
 /* ident.c 가 부른다 */
 int      tune_guide_save(void);   /* 'h' 부호·배율 저장. 측정 부족이면 0 */

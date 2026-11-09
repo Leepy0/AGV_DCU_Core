@@ -33,12 +33,13 @@
 
 const uint16_t tune_base_addr[TUNE_BASE_N] = { 111, 112, 113, 114, 119, 125 };
 
-/* 입력 칸. t1 아래 1~4 번째, t2.x 아래 L, 점검 결과의 GA, t3.6 아래 속도 */
-enum { F_DIA = 0, F_GD, F_CAP, F_TRACK, F_GA, F_HS };
+/* 입력 칸. t1 아래 1~5 번째, t2.x 아래 L, 점검 결과의 GA, t3.6 아래 속도 */
+enum { F_DIA = 0, F_GD, F_CAP, F_TRACK, F_ACC, F_GA, F_HS };
 static const struct { char name[2]; int16_t digits; } s_field[] = {
-    { {'D', 'I'}, 3 }, { {'G', 'D'}, 3 }, { {'T', 'P'}, 2 }, { {'L', ' '}, 4 }, { {'G', 'A'}, 3 }, { {'S', 'P'}, 2 }
+    { {'D', 'I'}, 3 }, { {'G', 'D'}, 3 }, { {'T', 'P'}, 2 }, { {'L', ' '}, 4 }, { {'A', 'U'}, 2 }, { {'G', 'A'}, 3 },
+    { {'S', 'P'}, 2 }
 };
-#define T1_INPUTS 4
+#define T1_INPUTS 5
 
 #define T1_MASK (BLD_MECH | BLD_DIA | BLD_WB | BLD_GUIDE | BLD_RPM | BLD_MIN | BLD_TOP | BLD_COAST | BLD_STOPT | BLD_STEER)
 static const struct { char tag[2]; uint16_t mask; } s_check[] = {
@@ -62,18 +63,18 @@ static const struct { char tag[2]; void (*start)(void); uint16_t run; } s_dev[] 
 };
 #define DEV_N ((uint16_t)(sizeof(s_dev) / sizeof(s_dev[0])))
 
-/* 결과 쪽 */
-enum { PK_SET = 0, PK_VAL, PK_GA, PK_SAVE };
-enum { N_DI = 0, N_WW, N_G, N_LO, N_TP, N_DE, N_FL, N_ST, N_SE, N_LR, N_OV, N_BA, N_A };
+/* 결과 쪽. PK_SET 채택(파라미터 화면과 같은 이름·자릿수), PK_PAR 파라미터 값(같은 이름, 채택 없음), PK_VAL 잰 값.
+ * 잰 값 이름은 파라미터 화면 이름(ui.c s_view)과 겹치지 않는다 */
+enum { PK_SET = 0, PK_VAL, PK_PAR, PK_GA, PK_SAVE };
+enum { N_G = 0, N_TP, N_DE, N_FR, N_OS, N_SE, N_LR, N_OV, N_A, N_AM };
 static const char s_name[][2] = {
-    {'D', 'I'}, {'W', 'W'}, {'G', ' '}, {'L', 'O'}, {'T', 'P'}, {'D', 'E'}, {'F', 'L'}, {'S', 'T'}, {'S', 'E'},
-    {'L', 'R'}, {'O', 'V'}, {'B', 'A'}, {'A', ' '}
+    {'G', ' '}, {'T', 'P'}, {'D', 'E'}, {'F', 'R'}, {'O', 'S'}, {'S', 'E'}, {'L', 'R'}, {'O', 'V'}, {'A', ' '}, {'A', 'M'}
 };
-typedef struct { int16_t kind, id, v, old, flag; } page_t;   /* flag: PK_SET 채택, PK_VAL NG */
+typedef struct { int16_t kind, id, v, old, flag; } page_t;   /* flag: PK_SET 채택, PK_VAL NG. PK_VAL old 1 = 이름 한 글자 + 네 자리 */
 
 static struct {
     uint16_t state, cat, item, sub, page, n_page, toggle, alt;
-    int16_t  editing, place, edit_value, track, cap;
+    int16_t  editing, place, edit_value, track, cap, acc_cap;
     int16_t  hs, hs_up;           /* t3.6 속도(0 = 1번), 입력 상한 */
     page_t   pg[PAGE_MAX];
     /* 교차선 */
@@ -250,8 +251,11 @@ void tune_load(void)
     s_tune.track = (int16_t)ee(TUNE_EE_TRACK);
     if ((s_tune.track < 0) || (s_tune.track > TRACK_UP)) { s_tune.track = 0; }
     param_limit(P_SPEED_HIGH, &lo, &up);
-    s_tune.cap = (int16_t)ee(TUNE_EE_CAP);
+    s_tune.cap = (int16_t)(ee(TUNE_EE_CAP) & 0xFFu);
     if ((s_tune.cap < lo) || (s_tune.cap > up)) { s_tune.cap = CAP_DEFAULT; }
+    param_limit(P_ACC, &lo, &up);
+    s_tune.acc_cap = (int16_t)(ee(TUNE_EE_CAP) >> 8);
+    if ((s_tune.acc_cap < lo) || (s_tune.acc_cap > up) || (s_tune.acc_cap == 0)) { s_tune.acc_cap = param_get(P_ACC); }
     if (keep_get(KEEP_GUIDE_MARK) != GUIDE_MARK) { return; }
     inv = keep_get(KEEP_GUIDE_INV);
     scale = keep_get(KEEP_GUIDE_SCALE);
@@ -308,9 +312,10 @@ static void add(int16_t kind, int16_t id, int16_t v, int16_t old, int16_t flag)
     p->flag = flag;
 }
 
+/* 추천은 처음부터 채택(첫 자리 점). RESET 으로 뺀다 */
 static void add_set(uint16_t idx, int16_t v)
 {
-    if (v >= 0) { add(PK_SET, (int16_t)idx, v, param_get(idx), 0); }
+    if (v >= 0) { add(PK_SET, (int16_t)idx, v, param_get(idx), 1); }
 }
 
 /* 점검이고 기준값이 있으면 기준 대비 % 와 판정, 아니면 값 */
@@ -319,8 +324,10 @@ static void add_cmp(int16_t name, int16_t now, uint16_t bi, int16_t ng_pct)
     int16_t b = tune_base(bi);
     int32_t p;
 
-    if (now <= 0) { add(PK_VAL, name, TUNE_NO_DATA, 0, 0); return; }
-    if ((s_tune.cat != 2u) || !tune_base_valid() || (b <= 0)) { add(PK_VAL, name, now, 0, 0); return; }
+    int16_t w = (name == N_TP) || (name == N_DE);   /* 1000 을 넘는 값은 이름 한 글자 + 네 자리 */
+
+    if (now <= 0) { add(PK_VAL, name, TUNE_NO_DATA, w, 0); return; }
+    if ((s_tune.cat != 2u) || !tune_base_valid() || (b <= 0)) { add(PK_VAL, name, now, w, 0); return; }
     p = (((int32_t)now - b) * 100L) / b;
     if (p > 999L)  { p = 999L; }
     if (p < -999L) { p = -999L; }
@@ -339,15 +346,19 @@ static void build_pages(void)
     add_set(P_SPEED_HIGH, b->high_rec);
     add_set(P_DCC, b->dcc_rec);
     add_set(P_CROSS_IN_CM, b->cid_rec);
-    if (b->dia_new > 0)  { add(PK_VAL, N_DI, b->dia_new, 0, 0); }
-    if (m & BLD_WB)      { add(PK_VAL, N_WW, b->wb_new, 0, 0); }
+    add_set(P_ACC, b->acc_rec);
+    if (b->dia_new > 0)  { add(PK_PAR, P_WHEEL_DIA_MM, b->dia_new, 0, 0); }
+    if (m & BLD_WB)      { add(PK_PAR, P_WHEEL_BASE_MM, b->wb_new, 0, 0); }
     if (m & BLD_GUIDE)   { add(PK_VAL, N_G, b->guide_k100, 0, 0); }
-    if (m & BLD_MIN)     { add(PK_VAL, N_LO, b->min_rec, 0, 0); }
+    if (m & BLD_MIN)     { add(PK_PAR, P_SPEED_MIN, b->min_rec, 0, 0); }
     if (m & BLD_TOP)     { add_cmp(N_TP, b->top_rpm, TUNE_BASE_TOP, TUNE_NG_TOP_PCT); }
-    if (m & BLD_COAST)   { add_cmp(N_DE, b->dec_rpm_s, TUNE_BASE_DEC, TUNE_NG_DEC_PCT); }
+    if (m & BLD_COAST)   {
+        add_cmp(N_DE, b->dec_rpm_s, TUNE_BASE_DEC, TUNE_NG_DEC_PCT);
+        add(PK_VAL, N_AM, (b->acc_max > 0) ? b->acc_max : TUNE_NO_DATA, 0, 0);
+    }
     if (m & BLD_STOPT)   {
-        add_cmp(N_FL, b->floor_rpm, TUNE_BASE_FLOOR, TUNE_NG_FLOOR_PCT);
-        add(PK_VAL, N_ST, b->over_mm, 0, chk && (b->over_mm > BLD_OVER_OK_MM));
+        add_cmp(N_FR, b->floor_rpm, TUNE_BASE_FLOOR, TUNE_NG_FLOOR_PCT);
+        add(PK_VAL, N_OS, b->over_mm, 0, chk && (b->over_mm > BLD_OVER_OK_MM));
     }
     if (m & BLD_STEER)   {   /* 기준은 125 아래 바이트 */
         int16_t base = (int16_t)((uint16_t)tune_base(TUNE_BASE_AMP_SE) & 0xFFu);
@@ -359,7 +370,7 @@ static void build_pages(void)
         add(PK_VAL, N_OV, b->ov_mm, 0, 0);
         add(PK_GA, F_GA, 0, 0, 0);
     }
-    add(PK_VAL, N_BA, b->bat_dv, 0, 0);
+    add(PK_PAR, P_BAT_DV, b->bat_dv, 0, 0);
     if ((m & BLD_RPM) && chk) {      /* 앰프 형식은 점검(t2.4)만 잰다(1회). t1 기준값은 0(모름)이고 그때는 견주지 않는다 */
         int16_t base = (int16_t)((uint16_t)tune_base(TUNE_BASE_AMP_SE) >> 8);
         add(PK_VAL, N_A, b->amp, 0, tune_base_valid() && (base != 0) && (b->amp != base));
@@ -391,7 +402,7 @@ static int save_all(void)
     }
     if (s_tune.cat == 1u) { base_write(); }
     s_tune.state = TUNE_SAVED;
-    return 2;
+    return 1;                  /* SAVE 알림 대신 쓰기가 끝날 때까지 BUSY */
 }
 
 /* ---- 입력 ---- */
@@ -403,6 +414,7 @@ static int16_t field_get(int16_t f)
     case F_GD:    return param_get(P_GUIDE_DIST_MM);
     case F_CAP:   return s_tune.cap;
     case F_TRACK: return s_tune.track;
+    case F_ACC:   return s_tune.acc_cap;
     case F_HS:    return s_tune.hs;
     default:      return (int16_t)(param_get(P_GUIDE_DIST_MM) - agv_build.ov_mm);   /* GA 예상값 */
     }
@@ -415,6 +427,7 @@ static void field_limits(int16_t f, int16_t *lo, int16_t *up)
     case F_GD:    param_limit(P_GUIDE_DIST_MM, lo, up); break;
     case F_CAP:   param_limit(P_SPEED_HIGH, lo, up); break;
     case F_TRACK: *lo = 0; *up = TRACK_UP; break;
+    case F_ACC:   param_limit(P_ACC, lo, up); break;
     case F_HS:    param_limit(P_SPEED_HIGH, lo, up); *up = s_tune.hs_up; break;
     default:      *lo = GAP_INPUT_LOW; *up = GAP_INPUT_UP; break;
     }
@@ -429,8 +442,10 @@ static int field_set(int16_t f, int16_t v)
     case F_DIA: return (param_set(P_WHEEL_DIA_MM, v) == 0) ? 2 : 1;
     case F_GD:  return (param_set(P_GUIDE_DIST_MM, v) == 0) ? 2 : 1;
     case F_CAP:
-        s_tune.cap = v;
-        storage_request(TUNE_EE_CAP, (uint16_t)v);
+    case F_ACC:                /* 한 칸에 둘: 아래 바이트 최고 속도 상한, 위 바이트 ACC 상한 */
+        if (f == F_CAP) { s_tune.cap = v; }
+        else            { s_tune.acc_cap = v; }
+        storage_request(TUNE_EE_CAP, (uint16_t)(((uint16_t)s_tune.acc_cap << 8) | ((uint16_t)s_tune.cap & 0xFFu)));
         return 2;
     case F_TRACK:
         s_tune.track = v;
@@ -541,7 +556,8 @@ static int result_key(uint16_t key)
         return 1;
     }
     switch (key) {
-    case KEY_UP:   s_tune.page = (uint16_t)((s_tune.page + 1u) % s_tune.n_page); return 1;
+    case KEY_UP:
+    case KEY_MODE: s_tune.page = (uint16_t)((s_tune.page + 1u) % s_tune.n_page); return 1;
     case KEY_DOWN: s_tune.page = (uint16_t)((s_tune.page + s_tune.n_page - 1u) % s_tune.n_page); return 1;
     case KEY_SET:
         if (p->kind == PK_SAVE) { return save_all(); }
@@ -582,7 +598,8 @@ int tune_key(uint16_t key)
     case TUNE_HS_DONE: {
         uint16_t n = (st == TUNE_RPM_DONE) ? TUNE_RPMT_PAGES : ((st == TUNE_HS_DONE) ? TUNE_HS_PAGES : TUNE_RPM_PAGES);
         switch (key) {
-        case KEY_UP:    s_tune.page = (uint16_t)((s_tune.page + 1u) % n); return 1;
+        case KEY_UP:
+        case KEY_MODE:  s_tune.page = (uint16_t)((s_tune.page + 1u) % n); return 1;
         case KEY_DOWN:  s_tune.page = (uint16_t)((s_tune.page + n - 1u) % n); return 1;
         case KEY_RESET: s_tune.state = TUNE_WAIT; s_tune.page = 0; return 1;
         default:        return 0;
@@ -604,10 +621,12 @@ static void start(void)
 {
     s_tune.editing = 0;
     s_tune.page = 0;
+    ident_track_hint(s_tune.track);
     if ((s_tune.cat == 1u) || ((s_tune.cat == 2u) && (s_tune.item > 0u))) {
         uint16_t m = (s_tune.cat == 1u) ? T1_MASK : s_check[s_tune.item - 1u].mask;
         clear_measure();
         ident_start_build(m, (m & BLD_DIA) ? s_tune.track : 0, s_tune.cap);
+        agv_build.acc_cap = s_tune.acc_cap;
         s_tune.state = TUNE_BLD;
     }
     else if ((s_tune.cat == 3u) && (s_tune.item > 0u)) {
@@ -650,16 +669,30 @@ static void put(char *c, uint16_t at, int16_t v, uint16_t n)
     }
 }
 
-/* 이름 두 글자 + 세 자리. 음수는 둘째 글자가 '-'. 1000 이상은 이름 한 글자 + 네 자리 */
-static void show_value(char *c, const char *name, int16_t v)
+/* 이름 두 글자 + 세 자리(음수는 둘째 글자가 '-'). wide 면 늘 이름 한 글자 + 네 자리(음수는 천 자리가 '-').
+ * 칸을 넘는 값은 자르지 않고 OVF(세 자리)·OVER(네 자리)로 보인다 */
+static void show_value(char *c, const char *name, int16_t v, int wide)
 {
     c[0] = name[0];
     c[1] = name[1];
     if (v == TUNE_NO_DATA) { c[2] = c[3] = c[4] = '-'; return; }
-    if (v < -999) { v = -999; }
-    if (v >= 1000) { put(c, 1, v, 4); return; }
+    if (wide) {
+        if ((v > 9999) || (v < -999)) { c[1] = 'O'; c[2] = 'V'; c[3] = 'E'; c[4] = 'R'; return; }
+        put(c, 1, v, 4);
+        if (v < 0) { c[1] = '-'; }
+        return;
+    }
+    if ((v > 999) || (v < -999)) { c[2] = 'O'; c[3] = 'V'; c[4] = 'F'; return; }
     if (v < 0) { c[1] = '-'; }
     put(c, 2, v, 3);
+}
+
+void tune_value_text(char *c, char n0, char n1, int16_t v, int wide)
+{
+    char name[2];
+    name[0] = n0;
+    name[1] = n1;
+    show_value(c, name, v, wide);
 }
 
 static void show_field(char *c, int16_t f)
@@ -669,32 +702,36 @@ static void show_field(char *c, int16_t f)
         c[0] = s_field[f].name[0];
         put(c, 1, v, 4);
     }
-    else { show_value(c, s_field[f].name, v); }
+    else { show_value(c, s_field[f].name, v, 0); }
 }
 
-/* 채택 쪽: 번호 두 자리 + 값 세 자리. 1 s 지금 값, 1 s 새 값(둘째 자리 점). 채택하면 첫 자리 점 */
+/* 채택 쪽: 파라미터 화면과 같은 이름 + 값. 1 s 지금 값, 1 s 새 값(둘째 자리 점). 채택이면 첫 자리 점 */
 static uint16_t show_page(char *c)
 {
     const page_t *p = &s_tune.pg[s_tune.page];
-    uint16_t dot = 0;
+    uint16_t dot = 0, i, n = 0;
 
     switch (p->kind) {
     case PK_SET:
-        put(c, 0, p->id, 2);
-        if (p->id < 10) { c[0] = ' '; }
-        if (s_tune.alt >= ALT_TICKS) { dot = 2u; put(c, 2, p->v, 3); }
-        else                         { put(c, 2, p->old, 3); }
+        if (s_tune.alt >= ALT_TICKS) { dot = 2u; ui_param_text((uint16_t)p->id, p->v, c); }
+        else                         { ui_param_text((uint16_t)p->id, p->old, c); }
         if (p->flag) { dot |= 1u; }
+        break;
+    case PK_PAR:
+        ui_param_text((uint16_t)p->id, p->v, c);
+        if (p->v < 0) { c[3] = c[4] = '-'; }      /* 없음 */
         break;
     case PK_VAL:
         if (p->id == N_A) { c[0] = 'A'; c[4] = (p->v != 0) ? (char)p->v : '-'; }
-        else              { show_value(c, s_name[p->id], p->v); }
+        else              { show_value(c, s_name[p->id], p->v, p->old); }
         break;
-    case PK_GA:
-        show_field(c, F_GA);
+    case PK_SAVE:              /* 채택 수. 없으면 NONE */
+        for (i = 0; i < s_tune.n_page; i++) { n = (uint16_t)(n + ((s_tune.pg[i].kind == PK_SET) && s_tune.pg[i].flag)); }
+        if (n == 0u) { c[0] = 'N'; c[1] = 'O'; c[2] = 'N'; c[3] = 'E'; }
+        else         { c[0] = 'S'; c[1] = 'V'; put(c, 4, (int16_t)n, 1); }
         break;
     default:
-        c[0] = 'S'; c[1] = 'A'; c[2] = 'V'; c[3] = 'E';
+        show_field(c, F_GA);
         break;
     }
     return dot;
@@ -729,6 +766,10 @@ uint16_t tune_text(char *c)
     case TUNE_BLD_DONE:
         if (agv_build.state != 2) { c[0] = 'F'; put(c, 1, agv_build.fail, 4); }
         else                      { dot = show_page(c); }
+        break;
+    case TUNE_SAVED:                   /* EEPROM 쓰기가 다 끝나야 RBOT. 그 전에 끄면 안 된다 */
+        if (storage_pending() != 0u) { c[0] = 'B'; c[1] = 'U'; c[2] = 'S'; c[3] = 'Y'; break; }
+        c[0] = 'R'; c[1] = 'B'; c[2] = 'O'; c[3] = 'T';
         break;
     default:
         c[0] = 'R'; c[1] = 'B'; c[2] = 'O'; c[3] = 'T';
