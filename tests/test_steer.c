@@ -183,7 +183,7 @@ int main(void)
     { float p = D.kf_p00, pos = D.kf_pos, rate = D.kf_rate;
       D.guide_all_off = 1;
       steer_run(1);
-      assert(D.kf_rate == rate && D.kf_pos == pos + rate * 0.02f && D.kf_p00 > p); }
+      assert(D.kf_rate == rate && D.kf_pos == pos + rate * 0.01f && D.kf_p00 > p); }   /* 기본 10 ms */
     /* 커브면 Q 가 20 배 */
     setup();
     steer_run(1);
@@ -191,7 +191,7 @@ int main(void)
     D.guide_led = 0x00FF;
     { float p00 = D.kf_p00;
       float p11 = D.kf_p11;
-      float p00_pred = p00 + 0.0004f * p11 + 0.02f * 20.0f;
+      float p00_pred = p00 + 0.0001f * p11 + 0.02f * 20.0f;
       steer_run(1);
       assert(near0(D.kf_p00 - (1.0f - p00_pred / (p00_pred + 4.0f)) * p00_pred) < 1e-5f); }
 
@@ -253,7 +253,7 @@ int main(void)
       assert(D.p_kp == 35.0f * 1.3f);
       (void)param_set(P_GUIDE_CURVE_DETECT, 0); }
 
-    /* 선택 비트: 변화율 항 부호. 칼만 상태를 고정해 두 경우의 출력을 비교한다 */
+    /* 변화율 항 부호: 기본은 감쇠, QUIRK_DAMP_SIGN_OLD 는 예전 부호. 칼만 상태를 고정해 비교한다 */
     { float out_p, out_a, out_b;
       int k;
       for (k = 0; k < 3; k++) {
@@ -263,27 +263,32 @@ int main(void)
           D.kf_pos = 3.0f;
           D.kf_rate = (k == 0) ? 0.0f : 50.0f;    /* y = 0 이라 변화율이 유지된다 */
           D.kf_p00 = D.kf_p11 = 0.0f; D.kf_p01 = 0.0f;
-          (void)param_set(P_OPT_FLAGS, (k == 2) ? OPT_STEER_D_SIGN : 0);
+          (void)param_set(P_LEGACY_QUIRKS, (k == 1) ? QUIRK_DAMP_SIGN_OLD : 0);
           steer_run(0);
           if (k == 0) { out_p = D.p_pi_out; } else if (k == 1) { out_a = D.p_pi_out; } else { out_b = D.p_pi_out; }
       }
       assert(out_a != out_p);
       assert(near0((out_a - out_p) + (out_b - out_p)) < 1e-3f);
-      assert(out_b < out_a);                      /* 양의 변화율에는 음의 감쇠 */
-      (void)param_set(P_OPT_FLAGS, 0); }
+      assert(out_b < out_a);                      /* 기본: 양의 변화율에는 음의 감쇠 */
+      (void)param_set(P_LEGACY_QUIRKS, 0); }
 
-    /* 선택 비트: 10 ms 조향은 칼만 dt 0.01 */
-    setup();
-    (void)param_set(P_OPT_FLAGS, OPT_STEER_10MS);
-    D.guide_pos = 4;
-    steer_run(1);
-    D.guide_pos = 8;
-    steer_run(1);
-    { float pos = D.kf_pos, rate = D.kf_rate;
-      D.guide_all_off = 1;
-      steer_run(1);
-      assert(D.kf_pos == pos + rate * 0.01f); }
-    (void)param_set(P_OPT_FLAGS, 0);
+    /* 조향 주기: 기본 10 ms(칼만 dt 0.01), QUIRK_STEER_20MS 는 0.02 */
+    { int k;
+      for (k = 0; k < 2; k++) {
+          float pos, rate;
+          setup();
+          (void)param_set(P_LEGACY_QUIRKS, k ? QUIRK_STEER_20MS : 0);
+          D.guide_pos = 4;
+          steer_run(1);
+          D.guide_pos = 8;
+          steer_run(1);
+          pos = D.kf_pos;
+          rate = D.kf_rate;
+          D.guide_all_off = 1;
+          steer_run(1);
+          assert(D.kf_pos == pos + rate * (k ? 0.02f : 0.01f));
+      }
+      (void)param_set(P_LEGACY_QUIRKS, 0); }
 
     /* 선택 비트: 칼만 위치를 조향 입력으로 */
     setup();
@@ -299,7 +304,8 @@ int main(void)
     assert(D.p_err == -5);
     (void)param_set(P_OPT_FLAGS, 0);
 
-    /* 선택 비트: 휠 간격 비례. 60 cm 면 그대로, 120 cm 면 비례 출력이 두 배 */
+    /* 휠 간격 비례: 기본. 60 cm 면 그대로, 120 cm 면 비례 출력이 두 배. QUIRK_NO_WB_GAIN 은 비례하지 않는다.
+     * 예전 OPT 값 19(b0·b1·b4)는 비어 있는 비트라 아무 일도 하지 않는다 */
     { float out60;
       setup();
       (void)param_set(P_WHEEL_BASE_MM, 60);
@@ -307,18 +313,24 @@ int main(void)
       steer_run(0);
       out60 = D.p_pi_out;
       setup();
-      (void)param_set(P_WHEEL_BASE_MM, 60);
-      (void)param_set(P_OPT_FLAGS, OPT_STEER_WB);
+      (void)param_set(P_WHEEL_BASE_MM, 120);
       D.guide_pos = 3;
       steer_run(0);
-      assert(near0(D.p_pi_out - out60) < 1e-3f);
+      assert(near0(D.p_pi_out - 2.0f * out60) < 1e-2f);
       setup();
       (void)param_set(P_WHEEL_BASE_MM, 120);
-      (void)param_set(P_OPT_FLAGS, OPT_STEER_WB);
+      (void)param_set(P_OPT_FLAGS, 19);
       D.guide_pos = 3;
       steer_run(0);
       assert(near0(D.p_pi_out - 2.0f * out60) < 1e-2f);
       (void)param_set(P_OPT_FLAGS, 0);
+      setup();
+      (void)param_set(P_WHEEL_BASE_MM, 120);
+      (void)param_set(P_LEGACY_QUIRKS, QUIRK_NO_WB_GAIN);
+      D.guide_pos = 3;
+      steer_run(0);
+      assert(near0(D.p_pi_out - out60) < 1e-3f);
+      (void)param_set(P_LEGACY_QUIRKS, 0);
       (void)param_set(P_WHEEL_BASE_MM, 60); }
 
     /* 식별 시험 옆 계단: p_test 만큼 지령이 옮겨 간다 */

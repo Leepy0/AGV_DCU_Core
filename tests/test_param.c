@@ -52,14 +52,14 @@ int main(void)
     assert(param_get(P_OPT_FLAGS) == 0 && param_get(P_SPEED_FF) == 0 && param_get(P_ENC_STALL_TICKS) == 0);
     assert(param_set(P_OPT_FLAGS, 64) == -1 && param_set(P_OPT_FLAGS, 37) == 0 && param_opt(OPT_PAUSE_RESUME_SMOOTH));
     assert(param_set(P_OPT_FLAGS, 5) == 0 && fake_ee[116] == 5);
-    assert(param_opt(OPT_STEER_10MS) && !param_opt(OPT_STEER_D_SIGN) && param_opt(OPT_RESUME_CRUISE));
+    assert(!param_opt(OPT_KF_POSITION) && param_opt(OPT_RESUME_CRUISE));
     assert(param_set(P_SPEED_FF, 120) == 0 && fake_ee[117] == 120 && P.speed_ff == 0.12f);
     assert(param_set(P_ENC_STALL_TICKS, 30) == 0 && fake_ee[118] == 30 && P.stall_ticks == 30);
     assert(param_boot(&fake_store, 2611) == 0 && param_get(P_OPT_FLAGS) == 5 && param_get(P_SPEED_FF) == 120);
     /* RAM 에만: 값은 바뀌고 EEPROM 은 그대로 */
     fake_ee_writes = 0;
     assert(param_set_ram(P_OPT_FLAGS, 64) == -1 && param_set_ram(0, 1) == -1);
-    assert(param_set_ram(P_OPT_FLAGS, 2) == 0 && param_get(P_OPT_FLAGS) == 2 && !param_opt(OPT_STEER_10MS));
+    assert(param_set_ram(P_OPT_FLAGS, 2) == 0 && param_get(P_OPT_FLAGS) == 2 && !param_opt(OPT_RESUME_CRUISE));
     assert(param_set_ram(P_SPEED_TURN, 12) == 0 && param_get(P_SPEED_TURN) == 12);
     assert(fake_ee_writes == 0 && fake_ee[116] == 5 && fake_ee[P_SPEED_TURN] == 13);
     assert(param_boot(&fake_store, 2611) == 0 && param_get(P_OPT_FLAGS) == 5 && param_get(P_SPEED_TURN) == 13);
@@ -155,6 +155,10 @@ int main(void)
     assert(param_boot(&fake_store, 1) == 0);
     assert(param_get(P_LEGACY_QUIRKS) == 5);
     assert(param_quirk(QUIRK_RISK_FLAG) == 1 && param_quirk(QUIRK_H_POSITION) == 0);
+    /* 조향 레거시 비트 b4~b6 까지 127. 128 은 넘는다 */
+    assert(param_set(P_LEGACY_QUIRKS, 128) == -1 && param_set(P_LEGACY_QUIRKS, QUIRK_STEER_LEGACY | 0x0F) == 0);
+    assert(param_get(P_LEGACY_QUIRKS) == 127 && param_quirk(QUIRK_STEER_20MS) && param_quirk(QUIRK_NO_WB_GAIN));
+    assert(param_set(P_LEGACY_QUIRKS, 5) == 0);
 
     /* 도중 전원 차단: 어느 쓰기에서 끊겨도 표시가 안 찍히고 다음 부팅에 끝난다 */
     for (int cut = 0; cut < 5; cut++) {

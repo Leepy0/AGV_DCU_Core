@@ -4,7 +4,8 @@
  *  START 고른 시험, UP·DOWN 결과 넘기기·값 증감, SHIFT 고치는 자리
  *  t1 제작   t1 아래 입력 4칸(지름 22번, GD 50번, 최고 속도 상한, 교차선 간격 L). START = 연속 시험 전체
  *  t2 점검   t2.1 빠른 점검, t2.2 바퀴 교체, t2.3 가이드 센서 교체, t2.4 모터·앰프 교체. 2.1·2.2·2.4 는 SET 으로 L 입력
- *  t3 개발   t3.1 IDEN, t3.2 RPM, t3.3 TOP, t3.4 ALL, t3.5 TEMP. 결과는 RAM 에만. 시험 추가는 tune.c s_dev 표 한 줄
+ *  t3 개발   t3.1 IDEN, t3.2 RPM, t3.3 TOP, t3.4 ALL, t3.5 TEMP, t3.6 HS(SET 으로 속도 입력). 결과는 RAM 에만.
+ *            시험 추가는 tune.c s_dev 표 한 줄
  * FND(tune_text): 메뉴 't' + 번호(점으로 나눔) + 두 글자 이름, 입력 이름 + 값, 연속 시험 진행 'B'(t1)·'C'(t2) + 단계 + 회 2자리
  *  + 순서, 실패 'F' + 코드, 결과 쪽, 저장 뒤 RBOT */
 #ifndef AGV_TUNE_H
@@ -15,12 +16,13 @@
 /* t3 시험의 진행 상태 다음 값이 끝 상태다 */
 enum { TUNE_OFF = 0, TUNE_WAIT, TUNE_BLD, TUNE_BLD_DONE, TUNE_SAVED,
        TUNE_IDENT, TUNE_IDENT_DONE, TUNE_RPM, TUNE_RPM_DONE, TUNE_TOP, TUNE_TOP_DONE, TUNE_ALL, TUNE_ALL_DONE,
-       TUNE_TEMP, TUNE_TEMP_DONE };
+       TUNE_TEMP, TUNE_TEMP_DONE, TUNE_HS, TUNE_HS_DONE };
 
 /* t3.n */
-enum { TUNE_DEV_IDENT = 1, TUNE_DEV_RPM, TUNE_DEV_TOP, TUNE_DEV_ALL, TUNE_DEV_TEMP };
+enum { TUNE_DEV_IDENT = 1, TUNE_DEV_RPM, TUNE_DEV_TOP, TUNE_DEV_ALL, TUNE_DEV_TEMP, TUNE_DEV_HS };
 #define TUNE_RPM_PAGES 3          /* 최고 속도·통합 결과 쪽: 0 OK/F, 1 좌 rpm, 2 우 rpm */
 #define TUNE_RPMT_PAGES 4         /* 바닥 rpm 결과 쪽: 0 OK/F, 1 L 저속 최저 rpm, 2 B 출발 DAC, 3 A 앰프 추정 S·T */
+#define TUNE_HS_PAGES 5           /* 고속 스윕 결과 쪽: 0 OK(+가장 좋은 후보)/F, 1~4 후보 평균 편차 RMS */
 
 /* EEPROM (128 워드 칩 기준). 0~50 파라미터·표시, 51~109 KEEP, 115~118 체크섬 밖 파라미터, 120~124 OUT 큐와 겹치지 않는다.
  * 입력 L·상한은 확정 즉시, 기준값은 t1 결과 SAVE 때만 쓴다 */
@@ -41,6 +43,7 @@ extern const uint16_t tune_base_addr[TUNE_BASE_N];
 #define TUNE_NG_DEC_PCT   (-15)
 #define TUNE_NG_FLOOR_PCT 20
 #define TUNE_NG_LR        10      /* |우/좌 - 1| 천분율 */
+#define TUNE_NG_SE_PCT    50      /* 직진 편차 RMS */
 #define TUNE_NO_DATA (-32767)
 
 void     tune_reset(void);
@@ -52,6 +55,8 @@ int      tune_rpm_mode(void);     /* t3.2 */
 int      tune_top_mode(void);     /* t3.3 */
 int      tune_all_mode(void);     /* t3.4 */
 int      tune_temp_mode(void);    /* t3.5 */
+int      tune_hs_mode(void);      /* t3.6 */
+int16_t  tune_hs_mpm(void);       /* t3.6 입력 속도. 0 = 1번 */
 int      tune_editing(void);      /* 값을 고치는 중 */
 uint16_t tune_state(void);
 uint16_t tune_page(void);

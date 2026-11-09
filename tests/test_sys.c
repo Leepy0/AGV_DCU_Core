@@ -1153,6 +1153,20 @@ static void test_tune_menu(void)
     for (k = 0; k < 4; k++) { key(KEY_MODE); }
     assert(tune_temp_mode() && !tune_all_mode() && shows("T35TE"));
     key(KEY_MODE);
+    assert(tune_hs_mode() && shows("T36HS"));
+    key(KEY_SET);                                     /* 속도 입력. 기본 1번(30), 1번 위로는 못 간다 */
+    assert(tune_menu() == 361 && shows("SP030"));
+    key(KEY_SET);
+    key(KEY_UP);
+    key(KEY_SET);
+    assert(shows("SP030") && tune_hs_mpm() == 30);
+    key(KEY_SET);
+    key(KEY_DOWN);
+    key(KEY_SET);
+    assert(shows("SP029") && tune_hs_mpm() == 29 && host.ee[TUNE_EE_CAP] != 29);   /* RAM 에만 */
+    key(KEY_RESET);
+    assert(tune_menu() == 360);
+    key(KEY_MODE);
     assert(tune_ident_mode());
     assert(D.ui_mode == UI_AUTO && tune_active() && !D.flag_jog_on);
     printf("  tune menu ok\n");
@@ -1235,7 +1249,7 @@ static void to_save(void)
     assert(shows("SAVE "));
 }
 
-/* t1 결과: 채택 저장 1·13·35·51 은 SET 채택, RESET 건너뛰기, SAVE 에서만 쓴다. 기준값을 쓰고 RBOT */
+/* t1 결과: 채택 저장 1·13·35 는 SET 채택, RESET 건너뛰기, SAVE 에서만 쓴다. 51번 추천은 없다. 기준값을 쓰고 RBOT */
 static void test_tune_t1_save(void)
 {
     uint16_t before[128];
@@ -1249,7 +1263,7 @@ static void test_tune_t1_save(void)
     agv_build.high_rec = 25;
     agv_build.dcc_rec = 35;
     agv_build.cid_rec = 40;
-    agv_build.opt_rec = 19;
+    agv_build.se_x10 = 43;           /* 편차 단계 4.3 mm */
     agv_build.min_rec = 7;
     agv_build.wb_new = 61;
     agv_build.top_rpm = 3000;
@@ -1268,9 +1282,7 @@ static void test_tune_t1_save(void)
     assert(tune_page() == 1);
     key(KEY_RESET);                  /* 13번 건너뛰기 */
     key(KEY_SET);                    /* 35 */
-    key(KEY_SET);                    /* 51 */
-    assert(tune_page() == 4);
-    key(KEY_DOWN);
+    assert(tune_page() == 3);        /* 값 쪽. 51번 채택 쪽은 없다 */
     key(KEY_DOWN);
     key(KEY_DOWN);
     key(KEY_DOWN);                   /* 1번으로 돌아가도 채택 표시(첫 자리 점)가 남는다 */
@@ -1289,14 +1301,15 @@ static void test_tune_t1_save(void)
     assert(tune_state() == TUNE_SAVED && shows("RBOT "));
     ticks(50);
     assert(param_get(P_SPEED_HIGH) == 25 && param_get(P_DCC) == 40 && param_get(P_CROSS_IN_CM) == 40);
-    assert(param_get(P_OPT_FLAGS) == 19 && host.ee[116] == 19);
+    assert(param_get(P_OPT_FLAGS) == 0 && host.ee[116] == before[116]);
     assert(host.ee[P_SPEED_HIGH] == 25 && host.ee[P_DCC] == 40 && host.ee[P_CROSS_IN_CM] == 40);
     assert(tune_base_valid() && tune_base(TUNE_BASE_TOP) == 3000 && tune_base(TUNE_BASE_DEC) == 3500);
     assert(tune_base(TUNE_BASE_LR) == -4 && ((uint16_t)tune_base(TUNE_BASE_AMP_SE) >> 8) == 'S');
-    /* 쓴 칸: 체크섬 0, 채택한 1·35·116, 기준값 110~114·119·125 뿐 */
+    assert(((uint16_t)tune_base(TUNE_BASE_AMP_SE) & 0xFFu) == 43u);
+    /* 쓴 칸: 체크섬 0, 채택한 1·35, 기준값 110~114·119·125 뿐 */
     for (a = 0; a < 128; a++) {
         int base = (a == TUNE_EE_CHECK) || (a == 111) || (a == 112) || (a == 113) || (a == 114) || (a == 119) || (a == 125);
-        int adopt = (a == 0) || (a == P_SPEED_HIGH) || (a == P_CROSS_IN_CM) || (a == 116);
+        int adopt = (a == 0) || (a == P_SPEED_HIGH) || (a == P_CROSS_IN_CM);
         if (!base && !adopt) { assert(host.ee[a] == before[a]); }
     }
     key(KEY_MODE);                   /* 저장 뒤 키는 듣지 않는다 */
@@ -1342,6 +1355,7 @@ static void test_tune_t2_compare(void)
     agv_build.dec_rpm_s = 3400;      /* -2% */
     agv_build.over_mm = 25;          /* NG */
     agv_build.lr_permille = 15;      /* NG */
+    agv_build.se_x10 = 70;           /* 기준 43 의 +63% NG */
     fake_build_done();
     assert(tune_page() == 0 && tune_flick() == 0);
     key(KEY_RESET);                  /* 1번 건너뛰기 */
@@ -1354,6 +1368,7 @@ static void test_tune_t2_compare(void)
     key(KEY_UP);
     assert(shows("ST025") && tune_flick() == 0x03u);
     key(KEY_UP);
+    assert(shows("SE070") && tune_flick() == 0x03u);
     key(KEY_UP);
     assert(shows("LR015") && tune_flick() == 0x03u);
     to_save();
@@ -1407,6 +1422,46 @@ static void test_tune_guide(void)
         assert(host.bus_out[BUS_LAMP] & 0x40u);   /* 부저 꺼짐 (저활성) */
     }
     printf("  tune guide ok\n");
+}
+
+/* 위치 소스 'h' 만(38번 2): 연속 시험 선 찾기 중에도 매 틱 'H' 만 보낸다('a'·'h' 번갈음 없음).
+ * 위치는 LED 덩어리에 h_scale 을 곱해 'a' 단위로 쓰고, 덩어리 폭이 커브 판정 입력이다 */
+static void test_guide_h_only(void)
+{
+    guide_cfg_t cfg;
+    int k, a = 0, h = 0;
+
+    boot_keys(KEY_MODE + KEY_SET, 0);
+    drive_up();
+    run_scan(3);
+    assert(tune_state() == TUNE_BLD && ident_want_h());   /* 선 찾기: 'a' 소스면 번갈아 보낸다 */
+    for (k = 0; k < 6; k++) {
+        host.sci[HAL_SCI_B].tx_len = 0;
+        run_scan(1);
+        assert(host.sci[HAL_SCI_B].tx_len == 4);
+        if (host.sci[HAL_SCI_B].tx[1] == 'A') { a++; } else { h++; }
+    }
+    assert(a == 3 && h == 3);
+    assert(param_set_ram(P_GUIDE_CURVE_DETECT, GUIDE_SRC_LED_ONLY) == 0);   /* 주행 중 바꾼다 */
+    for (k = 0; k < 6; k++) {
+        host.sci[HAL_SCI_B].tx_len = 0;
+        guide_led_reply(LED_CENTER);
+        run_encoder(0, 20000);
+        run_encoder(1, 20000);
+        tick();
+        assert(host.sci[HAL_SCI_B].tx_len == 4 && host.sci[HAL_SCI_B].tx[1] == 'H');
+    }
+    assert(D.guide_pos == 0 && D.guide_span == 2 && D.stop_err == 0 && D.flag_run);
+    guide_cfg_get(&cfg);
+    cfg.h_scale = 1.5f;
+    guide_configure(&cfg);
+    guide_led_reply(LED_NEAR);                      /* 'h' 위치 -6 → 'a' 단위 -9 */
+    tick();
+    assert(D.guide_pos == -9);
+    cfg.h_scale = 1.0f;
+    guide_configure(&cfg);
+    assert(param_set_ram(P_GUIDE_CURVE_DETECT, GUIDE_SRC_POSITION) == 0);
+    printf("  guide h only ok\n");
 }
 
 /* 교차 테이프를 두 번 보면 정렬 회전을 건다 */
@@ -1545,6 +1600,7 @@ int main(void)
     test_tune_ee_layout();
     test_tune_t2_compare();
     test_tune_guide();
+    test_guide_h_only();
     test_tape_turn();
     test_io_test();
     test_acs_off();

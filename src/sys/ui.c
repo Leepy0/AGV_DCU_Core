@@ -833,6 +833,25 @@ static void show_tune(void)
             show(letter((tune_page() == 1u) ? 'L' : 'R'), digit_of(v, 1000), digit_of(v, 100), digit_of(v, 10), digit_of(v, 1));
         }
         break;
+    case TUNE_HS:       /* 단계, 회 2자리, 순서 */
+        show(letter('H'), ident_stage(), digit_of((int16_t)ident_pass(), 10), digit_of((int16_t)ident_pass(), 1), ident_phase());
+        break;
+    case TUNE_HS_DONE:
+        if (tune_page() == 0u) {        /* HSOK + 가장 좋은 후보 번호, 또는 F + 단계 + 회 2자리 + 순서 */
+            int16_t f = agv_all.fail;
+            uint16_t best = ident_hs_best();
+            if (agv_all.state == 2) {
+                show(letter('H'), letter('S'), letter('O'), letter('K'), (best < HS_CANDS) ? best + 1u : DIGIT_MINUS);
+            }
+            else { show(letter('F'), digit_of(f, 1000), digit_of(f, 100), digit_of(f, 10), digit_of(f, 1)); }
+        }
+        else {          /* C + 후보 번호 + 평균 편차 RMS mm(소수 한 자리). 가장 좋은 후보는 첫 자리 점 */
+            int16_t v = ident_hs_rms10(tune_page() - 1u);
+            show(letter('C'), tune_page(), digit_of(v, 100), digit_of(v, 10), digit_of(v, 1));
+            s_ui.dot = (uint16_t)(s_ui.dot | 0x08u | ((ident_hs_best() == tune_page() - 1u) ? 0x01u : 0u));
+            if (v < 0) { s_ui.digit[2] = s_ui.digit[3] = s_ui.digit[4] = DIGIT_MINUS; }
+        }
+        break;
     case TUNE_RPM:      /* 회, 단계 */
         show(letter('R'), letter('P'), DIGIT_NONE, ident_pass(), ident_phase());
         break;

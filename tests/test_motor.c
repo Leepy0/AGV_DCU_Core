@@ -386,6 +386,20 @@ int main(void)
     motor_run();
     assert(D.amp_dir == MOTION_BACK && D.sound_on == 1);
 
+    /* 조향 주기: 기본은 motor_run 마다(10 ms), QUIRK_STEER_20MS 는 두 번에 한 번 */
+    setup();
+    D.guide_pos = 3;
+    motor_run();
+    assert(D.guide_kf_init == 1);
+    setup();
+    (void)param_set(P_LEGACY_QUIRKS, QUIRK_STEER_20MS);
+    D.guide_pos = 3;
+    motor_run();
+    assert(D.guide_kf_init == 0);
+    motor_run();
+    assert(D.guide_kf_init == 1);
+    (void)param_set(P_LEGACY_QUIRKS, 0);
+
     /* 속도 피드포워드: 오차 0 이어도 지령에 비례한 토크 */
     setup();
     D.control = RUN_TURN;

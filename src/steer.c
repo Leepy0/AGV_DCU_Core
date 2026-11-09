@@ -166,7 +166,7 @@ void steer_run(int16_t tuning_type)
     int16_t clear_integral;
     float   sen, pos;
     /* 10 ms 조향: 칼만 dt 와 적분 이득을 주기에 맞춘다 */
-    int16_t fast = param_opt(OPT_STEER_10MS);
+    int16_t fast = !param_quirk(QUIRK_STEER_20MS);
     float   dt = fast ? (GUIDE_KF_DT * 0.5f) : GUIDE_KF_DT;
     float   i_scale = fast ? 0.5f : 1.0f;
 
@@ -211,7 +211,7 @@ void steer_run(int16_t tuning_type)
         /* 센서가 회전 중심에서 멀수록 같은 방향 오차에 위치가 크게 변한다. 기준 거리 250 mm 로 맞춘다 */
         float geom = (P.guide_dist_mm > 0.0f) ? (STEER_GUIDE_REF_MM / P.guide_dist_mm) : 1.0f;
         /* 같은 바퀴 차에 차체가 도는 속도는 휠 간격에 반비례한다. 간격이 넓으면 그만큼 크게 준다 */
-        if (param_opt(OPT_STEER_WB)) { geom *= ((float)param_get(P_WHEEL_BASE_MM) * 10.0f) / STEER_WB_REF_MM; }
+        if (!param_quirk(QUIRK_NO_WB_GAIN)) { geom *= ((float)param_get(P_WHEEL_BASE_MM) * 10.0f) / STEER_WB_REF_MM; }
 
         D.p_err_1 = D.p_err;
         if (D.branch_start != 0) {        /* 분기 중에는 센서 대신 고정 편이 지령을 쓴다 */
@@ -226,8 +226,8 @@ void steer_run(int16_t tuning_type)
 
         p_out = D.p_kp * (float)D.p_err * geom;
         rate_ff = GUIDE_KD_RATE * (!D.backward ? D.kf_rate : -D.kf_rate) * geom;
-        /* 오차 = 지령 - 위치 이므로 감쇠는 -Kd × 위치 변화율이다. 기존 부호는 반대다 */
-        if (param_opt(OPT_STEER_D_SIGN)) { rate_ff = -rate_ff; }
+        /* 오차 = 지령 - 위치 이므로 감쇠는 -Kd × 위치 변화율이다. 예전 부호는 반대다 */
+        if (!param_quirk(QUIRK_DAMP_SIGN_OLD)) { rate_ff = -rate_ff; }
 
         if (!clear_integral && !D.flag_stopping && !stop_is_braking()) {
             i_candidate = s_steer.i_out + (D.p_ki * (float)D.p_err * geom * i_scale);

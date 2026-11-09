@@ -27,7 +27,7 @@ enum {
     P_ACS_VERSION,
     P_PARA_INIT, P_VERSION, P_BAT_DV, P_BAT_PERCENT,
     P_GUIDE_DIST_MM,        /* 50: 회전 중심에서 가이드센서까지 mm. 체크섬 밖 EEPROM 115 에 따로 둔다 */
-    P_OPT_FLAGS,            /* 51: 시험용 개선 스위치 비트. 0 = 전부 기존 동작 */
+    P_OPT_FLAGS,            /* 51: 시험용 개선 스위치 비트. 0 = 전부 끔 */
     P_SPEED_FF,             /* 52: 속도 피드포워드, 1000 rpm 당 토크 지령. 0 = 끔 */
     P_ENC_STALL_TICKS,      /* 53: 엔코더 고착 판정 틱(10 ms). 0 = 끔 */
     P_COUNT
@@ -39,6 +39,11 @@ enum {
 #define QUIRK_H_POSITION   0x02u   /* b1 'h' 응답이 위치값을 자리표 10 으로 덮는다 */
 #define QUIRK_CURVE_NOW    0x04u   /* b2 위험 감속 중 curve_now 를 켠다 */
 #define QUIRK_TURN_START   0x08u   /* b3 회전을 0 rpm 부터 시작한다 */
+/* b4~b6: 기본이 된 조향 개선(예전 P_OPT_FLAGS b0·b1·b4)을 하나씩 끈다. 셋 다 켜면 예전 OPT 0 조향 */
+#define QUIRK_STEER_20MS    0x10u  /* b4 조향을 20 ms 마다 돌린다 (기본 10 ms, 칼만 dt 0.01, 적분 이득 1/2) */
+#define QUIRK_DAMP_SIGN_OLD 0x20u  /* b5 변화율 항을 예전 부호로 더한다 (기본은 감쇠) */
+#define QUIRK_NO_WB_GAIN    0x40u  /* b6 조향 이득을 휠 간격에 비례시키지 않는다 (기본 60 cm 기준 비례) */
+#define QUIRK_STEER_LEGACY  (QUIRK_STEER_20MS | QUIRK_DAMP_SIGN_OLD | QUIRK_NO_WB_GAIN)
 
 /* 주소 50 표시. 31·38·39·44 의 1회 초기화가 끝나면 쓴다 */
 #define PARAM_MIGRATE_ADDR 50
@@ -48,12 +53,10 @@ enum {
 #define PARAM_GUIDE_DIST_LOW     100
 #define PARAM_GUIDE_DIST_UP      999
 
-/* P_OPT_FLAGS 비트. 기본 0 이 기존 동작이다. 실차 A/B 뒤 기본값을 정한다 */
-#define OPT_STEER_10MS     0x01u   /* 조향을 10 ms 마다 돌린다 (기존 20 ms) */
-#define OPT_STEER_D_SIGN   0x02u   /* 변화율 항 부호를 뒤집어 감쇠로 쓴다 */
+/* P_OPT_FLAGS 비트. 기본 0 = 끔. 실차 A/B 뒤 기본값을 정한다.
+ * b0·b1·b4 는 기본 동작이 되어 비었다(값이 남아 있어도 무시한다). 예전 동작은 QUIRK_STEER_LEGACY */
 #define OPT_RESUME_CRUISE  0x04u   /* 일시정지 재개 때 남은 거리가 길면 최대 속도까지 가속한다 */
 #define OPT_KF_POSITION    0x08u   /* 조향 입력을 칼만 추정 위치로 쓴다 (기존 원시값) */
-#define OPT_STEER_WB       0x10u   /* 조향 이득을 휠 간격에 비례시킨다. 60 cm 기준. 크기가 다른 차량을 같은 이득으로 쓴다 */
 #define OPT_PAUSE_RESUME_SMOOTH 0x20u /* 일시정지 감속 중 원인이 풀리면 0 까지 가지 않고 지금 지령에서 다시 간다 */
 
 /* 저장 계층. 부팅 경로의 write 는 끝난 뒤 돌아와야 한다.

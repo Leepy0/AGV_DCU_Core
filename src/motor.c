@@ -548,7 +548,7 @@ void motor_run(void)
     }
 
     s_motor.steer_gate++;
-    if (param_opt(OPT_STEER_10MS) || (s_motor.steer_gate > 1)) {
+    if (!param_quirk(QUIRK_STEER_20MS) || (s_motor.steer_gate > 1)) {
         int16_t tuning = (D.vin_out > P.low_speed) ? 2 : 1;
         D.offset_kp = (int16_t)((float)D.w_cmd[0] * 0.0001f * (float)param_get(P_STEER_RPM_OFFSET));
         steer_run(tuning);

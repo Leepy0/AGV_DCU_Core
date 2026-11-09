@@ -82,10 +82,12 @@ static void on_led(const guide_rx_t *rx)
     guide_out_t out;
 
     store_led(rx);
-    if (guide_source_led()) {
+    if (guide_source_led()) {   /* 위치를 'a' 단위로 바꾼다. 배율은 튜닝 모드가 잰 h_scale(기본 1) */
+        float v;
         guide_track(rx, D.branch_start, D.backward, &out);
+        v = (float)out.pos * guide_h_scale();
         D.guide_span = out.width;
-        apply_status(out.status, out.pos);
+        apply_status(out.status, (int16_t)((v >= 0.0f) ? (v + 0.5f) : (v - 0.5f)));
         return;
     }
     /* 'a' 소스 중 분기·테이프 구간. 패턴이 전부 꺼짐·켜짐일 때만 위치 상태를 고친다 */

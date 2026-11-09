@@ -1,5 +1,21 @@
 # 변경 이력
 
+## 미릴리스 (2026-11-09, 조향 기본값)
+- 10 ms 조향, 변화율 항 감쇠 부호, 휠 간격 비례 이득을 기본 동작으로 했다(시험 차량 A/B: 직진 편차 RMS 10.8 → 4.3 mm).
+  `P_OPT_FLAGS` b0·b1·b4 는 비었다(남은 값은 무시, 범위 0~63 그대로). 예전 동작은 `P_LEGACY_QUIRKS` b4 `QUIRK_STEER_20MS`,
+  b5 `QUIRK_DAMP_SIGN_OLD`, b6 `QUIRK_NO_WB_GAIN`(셋 = `QUIRK_STEER_LEGACY`). 39번 범위 0~127.
+- 조향 스윕 칸을 `sweep_cand_t {opt, quirk, src}`(51·39·38번)로 바꿨다. `ident_sweep_set`·`ident_temp_set` 인자도 같다.
+  기본 ALL·TEMP 목록은 예전 OPT 값과 같은 조향 조합이다. `agv_all` 에 `quirk_saved`, `src_saved`, `hs_mpm`, `need_mm`,
+  `sw[k].quirk`·`src` 를 더했다. 스윕은 세 값을 RAM 에만 바꾸고 끝·실패·끊김 때 되돌린다.
+- t1 제작: 조향(OPT) 스윕과 51번 추천을 뺐다. 단계 6 은 지금 설정으로 직진 한 회(추천 최고 속도의 2/3)이고, 정속 편차
+  RMS × 10 이 `se_x10`(기준값 125 아래 바이트)이다. 예전 `se_x10` 은 선 찾기 중 `'a'` RMS 였다. t2.1·2.2·2.4 도 같은 한 회를 하고
+  기준 대비 +50%(`TUNE_NG_SE_PCT`) 넘으면 NG. `agv_build.opt_rec` 를 없앴다.
+- t3.6 고속 스윕(HS): SET 으로 속도(m/min, 기본 1번, 1번과 입력 L 에 맞게 상한). 0회 뒤 잰 L 이 `ident_hs_need_mm` 보다 짧으면
+  실패 `HS_FAIL_SHORT`(2000). 아니면 후보 표(`s_hs_cand`: 기본 'h' 만, 기본 'a', 기본 + 칼만 'h' 만, 예전 OPT 0 'a')를 칸마다 왕복
+  2회. 결과 쪽 UP·DOWN: `HSOK` + 가장 좋은 후보, `C` + 후보 + 평균 편차 RMS(mm, 소수 한 자리, 최선은 첫 자리 점).
+- `'h'` 만 위치 소스(38번 2)에서 위치에 `h_scale` 을 곱한다(전에는 정렬 회전 보정에만 썼다). `tune_guide_save` 는 배율을
+  `|k|` 로 둔다(k 는 배율 전 위치와 견준 값이다).
+
 ## 미릴리스 (2026-11-09)
 - 튜닝 모드를 메뉴로 바꿨다. 전원 투입 MODE + SET(전에는 MODE + DOWN). MODE 같은 단계 다음 칸, SET 아래로·확정,
   RESET 위로·취소·건너뛰기, START 시작, UP·DOWN 결과·값, SHIFT 자리. FND `t1`, `t2.1CH` 처럼 't' + 번호(점) + 두 글자.
