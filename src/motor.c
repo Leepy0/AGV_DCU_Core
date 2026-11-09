@@ -74,6 +74,7 @@ void motor_dac_force(int16_t left, int16_t right)
 }
 
 void    motor_dac_release(void)             { s_motor.forcing = 0; }
+int16_t motor_dac_forced(void)              { return s_motor.forcing; }
 int16_t motor_raw_rpm(uint16_t wheel)       { return s_motor.raw[wheel]; }
 void    motor_spike_set(int16_t rpm)        { s_motor.spike = (rpm > 0) ? rpm : 0; }
 int16_t motor_spike(void)                   { return (s_motor.spike > 0) ? s_motor.spike : MOTOR_RPM_SPIKE; }
@@ -533,7 +534,7 @@ void motor_run(void)
     motor_feedback_update();
     motor_stall_check();
 
-    if (s_motor.forcing) {      /* 최대 rpm·타력 시험: 주행·조향·정지 제어를 모두 건너뛴다 */
+    if (s_motor.forcing) {      /* 바닥 rpm·타력 시험: 주행·조향·정지 제어를 모두 건너뛴다 */
         uint16_t i;
         int16_t ok = (int16_t)(!D.system_err && !D.estop);
         D.amp_run = ok;

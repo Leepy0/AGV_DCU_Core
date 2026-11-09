@@ -27,10 +27,11 @@ void    motor_drive_step(void);                 /* Driving_auto */
 int16_t motor_turn_adjust(void);                /* DA_Tape_Turn_Angle_Adj */
 void    motor_run(void);                        /* Motor_Run_Process. 오류 판정과 수동 동작은 호출자 몫 */
 
-/* 최대 rpm 시험(rpmtest.c). 속도 PI 를 거치지 않고 두 바퀴 DAC 를 고정한다. 오류·E-STOP 이면 0 */
+/* 바닥 rpm·타력 시험. 속도 PI 를 거치지 않고 두 바퀴 DAC 를 고정한다. 오류·E-STOP 이면 0 */
 #define MOTOR_DAC_MAX        4095
 void    motor_dac_force(int16_t left, int16_t right);
 void    motor_dac_release(void);
+int16_t motor_dac_forced(void);               /* 1 = 고정 중 */
 int16_t motor_raw_rpm(uint16_t wheel);          /* 스파이크 컷 전 rpm. 32767 에서 자른다 */
 void    motor_spike_set(int16_t rpm);           /* 측정 rpm 스파이크 컷. 0 = 기본 MOTOR_RPM_SPIKE */
 int16_t motor_spike(void);

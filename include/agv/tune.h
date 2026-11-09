@@ -10,7 +10,8 @@ enum { TUNE_OFF = 0, TUNE_WAIT, TUNE_GO_1, TUNE_TURN, TUNE_RESTART, TUNE_GO_2, T
 
 /* 대기 중 SHIFT 로 고르는 시험. TUNE → IDEN → RPM → TOP → ALL → TEMP → TUNE */
 enum { TUNE_MODE_TUNE = 0, TUNE_MODE_IDENT, TUNE_MODE_RPM, TUNE_MODE_TOP, TUNE_MODE_ALL, TUNE_MODE_TEMP, TUNE_MODE_COUNT };
-#define TUNE_RPM_PAGES 3          /* 최대 rpm·최고 속도·통합 결과 쪽: 0 OK/F, 1 좌 rpm, 2 우 rpm */
+#define TUNE_RPM_PAGES 3          /* 최고 속도·통합 결과 쪽: 0 OK/F, 1 좌 rpm, 2 우 rpm */
+#define TUNE_RPMT_PAGES 4         /* 바닥 rpm 결과 쪽: 0 OK/F, 1 L 저속 최저 rpm, 2 B 출발 DAC, 3 A 앰프 추정 S·T */
 
 /* 결과 쪽. UP·DOWN 으로 넘긴다 */
 enum { TUNE_PAGE_WHEEL_BASE = 0,   /* WW 계산한 휠 간격 (24번). 수정 가능 */
@@ -33,7 +34,7 @@ void     tune_load(void);         /* 부팅 때 저장한 가이드 부호·배�
 int      tune_active(void);
 int      tune_failed(void);       /* 1 = 실패로 TUNE 로 돌아옴 */
 int      tune_ident_mode(void);   /* 1 = START 가 식별 시험을 한다. 대기 중 SHIFT 로 바꾼다 */
-int      tune_rpm_mode(void);     /* 1 = START 가 최대 rpm 시험(바퀴 띄움)을 한다 */
+int      tune_rpm_mode(void);     /* 1 = START 가 바닥 rpm 시험을 한다 */
 int      tune_top_mode(void);     /* 1 = START 가 바닥 최고 속도 시험을 한다 */
 int      tune_all_mode(void);     /* 1 = START 가 통합 시험(식별 → OPT 스윕 → 최고 속도)을 한다 */
 int      tune_temp_mode(void);    /* 1 = START 가 지정 시험(0회 → TEMP 목록 OPT 스윕)을 한다 */

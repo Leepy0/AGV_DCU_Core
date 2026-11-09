@@ -230,8 +230,20 @@ typedef struct {
 
 extern stopt_result_t agv_stopt;
 
+/* ---- 바닥 rpm 시험 (튜닝 모드 RPM) ----
+ * 0회는 식별 시험과 같다(선 찾기, L 측정, 회전 두 번). 1~5회는 rpmtest.c 가 회 안을 재고,
+ * 회가 끝나면 여기서 지령을 실제 속도에서 이어 1번 최고 속도의 1/2 로 먼 선까지 간 뒤 최저 속도로 선을 찾아 돈다.
+ * 5회 회전 뒤 선 위에서 기다린다. 결과는 agv_rpmt. 실패 = 회 × 10 + 단계(8 이동·선 찾기, 9 회전).
+ * 개루프 중 실패는 DAC 고정을 충격 없이 풀고 보통 정지한다 */
+void  ident_start_rpm(void); /* 이후 ident_run, ident_pass, ident_phase, ident_abort, ident_want_h 를 같이 쓴다 */
+int   ident_rpm_mode(void);  /* 1 = 지금 돌고 있는(또는 마지막) 시험이 바닥 rpm 시험 */
+int   ident_rpm_key(void);   /* 패널 키. 바닥 rpm 시험 중이면 실패시키고 1 */
+float ident_decel_mm(int16_t from);       /* from rpm 에서 최저 속도까지 주행 램프 감속 거리 mm */
+void  ident_speed(int16_t v, int ramp);   /* 주행 지령. ramp 0 = 바로 */
+
 /* ---- 리셋에 남는 결과 ----
  * agv_ident·agv_top·agv_all·agv_coast·agv_rpmt·agv_stopt 는 codestart 가 지우지 않는 RAM 구역 test_keep 에 둔다.
+ * test_keep_add(agv_stopt)·test_keep_rpm(agv_rpmt)은 링커가 뒤에 붙여 앞 주소를 옮기지 않는다.
  * CCS 연결로 워치독 리셋이 나도 남는다. 부팅 때 ident_keep_boot 를 한 번 부른다.
  * 표시가 틀리면(전원 투입) 모두 지우고 표시를 쓴다. 진행 중(state 1)이던 결과는 state 3, fail 이 0 이면 -1 */
 extern uint16_t test_keep_mark;

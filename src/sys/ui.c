@@ -843,17 +843,21 @@ static void show_tune(void)
             show(letter((tune_page() == 1u) ? 'L' : 'R'), digit_of(v, 1000), digit_of(v, 100), digit_of(v, 10), digit_of(v, 1));
         }
         break;
-    case TUNE_RPM:      /* 단계 */
-        show(letter('R'), letter('P'), DIGIT_NONE, DIGIT_NONE, rpmt_level());
+    case TUNE_RPM:      /* 회, 단계 */
+        show(letter('R'), letter('P'), DIGIT_NONE, ident_pass(), ident_phase());
         break;
     case TUNE_RPM_DONE:
         if (tune_page() == 0u) {
             if (agv_rpmt.state == 2) { show(letter('R'), letter('P'), letter('O'), letter('K'), DIGIT_NONE); }
             else { show(letter('R'), letter('P'), letter('F'), (uint16_t)(agv_rpmt.fail / 10), (uint16_t)(agv_rpmt.fail % 10)); }
         }
-        else {          /* L·R + 최대 rpm 4자리 */
-            int16_t v = agv_rpmt.max_rpm[tune_page() - 1u];
-            show(letter((tune_page() == 1u) ? 'L' : 'R'), digit_of(v, 1000), digit_of(v, 100), digit_of(v, 10), digit_of(v, 1));
+        else if (tune_page() == 3u) {   /* A + 앰프 추정 S·T, 모르면 - */
+            show(letter('A'), DIGIT_NONE, DIGIT_NONE, DIGIT_NONE, letter((agv_rpmt.amp != 0) ? (char)agv_rpmt.amp : '-'));
+        }
+        else {          /* L 저속 최저 rpm, B 출발 DAC. 4자리, 없으면 ---- */
+            int16_t v = (tune_page() == 1u) ? agv_rpmt.low_rpm : agv_rpmt.brk_dac;
+            show(letter((tune_page() == 1u) ? 'L' : 'B'), digit_of(v, 1000), digit_of(v, 100), digit_of(v, 10), digit_of(v, 1));
+            if (v <= 0) { s_ui.digit[1] = s_ui.digit[2] = s_ui.digit[3] = s_ui.digit[4] = DIGIT_MINUS; }
         }
         break;
     case TUNE_GO_1:     /* 본 교차선 수 */

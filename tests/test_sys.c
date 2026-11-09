@@ -906,6 +906,19 @@ static void test_keep_results(void)
     assert(agv_coast.state == 3 && agv_coast.fail == -1 && agv_coast.p[3].dist_mm == 700);
     assert(agv_rpmt.state == 3 && agv_rpmt.fail == -1);
     assert(agv_stopt.state == 3 && agv_stopt.fail == -1 && agv_stopt.p[5].overshoot_mm == 150.0f);
+    /* 끝난 바닥 rpm 결과는 그대로 */
+    agv_rpmt.state = 2;
+    agv_rpmt.fail = 0;
+    agv_rpmt.amp = 'S';
+    agv_rpmt.brk.move_dac[1] = 120;
+    agv_rpmt.stp[RPMT_STOPS - 1].dist_mm = 12.5f;
+    agv_rpmt.stp[RPMT_STOPS - 1].trace[RPMT_TRACE - 1] = 61;
+    boot();
+    assert(agv_rpmt.state == 2 && agv_rpmt.fail == 0 && agv_rpmt.amp == 'S' && agv_rpmt.brk.move_dac[1] == 120);
+    assert(agv_rpmt.stp[RPMT_STOPS - 1].dist_mm == 12.5f && agv_rpmt.stp[RPMT_STOPS - 1].trace[RPMT_TRACE - 1] == 61);
+    test_keep_mark = 0;                    /* 전원 투입: 지운다 */
+    boot();
+    assert(agv_rpmt.state == 0 && agv_rpmt.stp[RPMT_STOPS - 1].dist_mm == 0.0f);
     printf("  keep results ok\n");
 }
 
