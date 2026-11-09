@@ -30,6 +30,12 @@ enum {
     P_OPT_FLAGS,            /* 51: 시험용 개선 스위치 비트. 0 = 전부 끔 */
     P_SPEED_FF,             /* 52: 속도 피드포워드, 1000 rpm 당 토크 지령. 0 = 끔 */
     P_ENC_STALL_TICKS,      /* 53: 엔코더 고착 판정 틱(10 ms). 0 = 끔 */
+    /* 54~58: 공차 프로필. 체크섬 밖 EEPROM 77~81(KEEP 빈 칸). 공차 값이 적재 칸 하한보다 작으면(0 포함) 적재 값을 쓴다 */
+    P_EMPTY_SPEED,          /* 54 EDS: 공차 최고 속도 m/min (적재 1번) */
+    P_EMPTY_TURN,           /* 55 ETN: 공차 회전 속도 (적재 3번) */
+    P_EMPTY_ACC,            /* 56 EAC: 공차 가속 (적재 12번) */
+    P_EMPTY_DCC,            /* 57 EDC: 공차 감속 (적재 13번) */
+    P_LOAD_DETECT,          /* 58 LDS: 적재 감지 사용. 0 = 늘 적재(예전과 같다) */
     P_COUNT
 };
 #define P_SAVED_LAST 45   /* 이 번호까지 EEPROM 에 저장한다 */
@@ -52,6 +58,7 @@ enum {
 #define PARAM_GUIDE_DIST_DEFAULT 250
 #define PARAM_GUIDE_DIST_LOW     100
 #define PARAM_GUIDE_DIST_UP      999
+#define PARAM_EMPTY_ADDR0        77    /* 54~58 번 → 77~81 */
 
 /* P_OPT_FLAGS 비트. 기본 0 = 끔. 실차 A/B 뒤 기본값을 정한다.
  * b0·b1·b4 는 기본 동작이 되어 비었다(값이 남아 있어도 무시한다). 예전 동작은 QUIRK_STEER_LEGACY */
@@ -85,10 +92,9 @@ typedef struct {
     int16_t stop_len, fwd_stop_len;                 /* gStop_length, gFoward_Stop_length */
     int16_t display_mode, turn_mode, forback_mode;
     int16_t auto_drive_mode, auto_slow_mode, agv_type_mode;
-    int16_t actuator_delay, switch_start_num;
+    int16_t actuator_delay;
     int16_t for_bumper, back_bumper, for_obs, back_obs;
     int16_t acs_group, acs_standby;
-    int16_t collision_type;                         /* gDA_Collision_Type */
 } param_dv_t;
 
 extern param_dv_t param_dv;
@@ -109,5 +115,11 @@ int16_t  param_quirk(uint16_t bit);
 int16_t  param_opt(uint16_t bit);                          /* P_OPT_FLAGS 비트 */
 int16_t  param_rpm(int16_t m_per_min);                     /* GetSpeed_Pulse */
 int16_t  param_digit(int16_t value, int16_t place);        /* Get_Decimal_Point_Value */
+/* 적재·공차 프로필. empty 1 이면 target_speed·turn_speed·acc·dcc(와 low·llow)를 공차 값으로 다시 계산한다.
+ * 부팅은 적재(0). 바뀔 때만 부른다 */
+void     param_profile(int16_t empty);
+int16_t  param_profile_empty(void);
+/* 1·3·12·13번의 지금 프로필 값. 공차이고 공차 값이 쓸 만하면 54~57번, 아니면 그 번호 값 */
+int16_t  param_active(uint16_t idx);
 
 #endif /* AGV_PARAM_H */

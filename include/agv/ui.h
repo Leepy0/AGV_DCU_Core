@@ -11,8 +11,10 @@
 #define KEY_SET    0x10
 #define KEY_DOWN   0x20
 
-/* 파라미터 편집 화면 단계. 1~3 그룹 선택, 11~13 번호 선택·편집 */
-enum { UI_GROUP_USE = 1, UI_GROUP_OTHER = 2, UI_GROUP_LAMP = 3 };
+/* 파라미터 편집 화면 단계. 1~5 묶음 선택(MODE 다음 묶음), 11~15 번호 선택(UP·DOWN)·편집.
+ * 묶음 표시 P1SPD 속도, P2RUN 주행·안전, P3CAR 차량·튜닝, P4COM 통신·표시(램프 포함), P5INF 정보·개발.
+ * 5번 묶음 목록에서 SHIFT 2 s = 숨김 항목(4·43·38·39번)을 이번 전원 동안 보인다 */
+enum { UI_GROUP_SPEED = 1, UI_GROUP_RUN, UI_GROUP_CAR, UI_GROUP_COMM, UI_GROUP_INFO, UI_GROUP_COUNT = UI_GROUP_INFO };
 #define UI_PARA_LAMP_FIRST 91
 #define UI_PARA_LAMP_LAST  93
 #define UI_LAMP_EXT_COUNT  3

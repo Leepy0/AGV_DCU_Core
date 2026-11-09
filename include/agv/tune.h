@@ -26,7 +26,7 @@ enum { TUNE_DEV_IDENT = 1, TUNE_DEV_RPM, TUNE_DEV_TOP, TUNE_DEV_ALL, TUNE_DEV_TE
 #define TUNE_RPMT_PAGES 4         /* 바닥 rpm 결과 쪽: 0 OK/F, 1 L 저속 최저 rpm, 2 B 출발 DAC, 3 A 앰프 추정 S·T */
 #define TUNE_HS_PAGES 5           /* 고속 스윕 결과 쪽: 0 OK(+가장 좋은 후보)/F, 1~4 후보 평균 편차 RMS */
 
-/* EEPROM (128 워드 칩 기준). 0~50 파라미터·표시, 51~109 KEEP, 115~118 체크섬 밖 파라미터, 120~124 OUT 큐와 겹치지 않는다.
+/* EEPROM (128 워드 칩 기준). 0~50 파라미터·표시, 51~109 KEEP(77~81 은 공차 파라미터), 115~118 체크섬 밖 파라미터, 120~124 OUT 큐와 겹치지 않는다.
  * 입력 L·상한은 확정 즉시, 기준값은 t1 결과 SAVE 때만 쓴다. 회전 보정비는 KEEP 54(storage.h), 기구 단계 끝에 바로 쓴다 */
 #define TUNE_EE_TRACK  126        /* 교차선 간격 L mm. 0 = 지름 보정 안 함 */
 #define TUNE_EE_CAP    127        /* 아래 바이트 최고 속도 상한 m/min, 위 바이트 ACC 상한(12번 단위). 0 = 12번 지금 값 */

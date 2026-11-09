@@ -67,8 +67,15 @@ static const extra_t s_extra[] = {
     { P_GUIDE_DIST_MM,   PARAM_GUIDE_DIST_ADDR, PARAM_GUIDE_DIST_LOW, PARAM_GUIDE_DIST_UP, PARAM_GUIDE_DIST_DEFAULT },
     { P_OPT_FLAGS,       116, 0, 63,  0 },
     { P_SPEED_FF,        117, 0, 999, 0 },
-    { P_ENC_STALL_TICKS, 118, 0, 99,  0 }
+    { P_ENC_STALL_TICKS, 118, 0, 99,  0 },
+    /* 공차 프로필. 한계 위는 적재 칸(1·3·12·13번)과 같고 0 = 적재 값. 77~81 은 KEEP 의 빈 칸이다 */
+    { P_EMPTY_SPEED, PARAM_EMPTY_ADDR0,      0, 60, 0 },
+    { P_EMPTY_TURN,  PARAM_EMPTY_ADDR0 + 1u, 0, 15, 0 },
+    { P_EMPTY_ACC,   PARAM_EMPTY_ADDR0 + 2u, 0, 60, 0 },
+    { P_EMPTY_DCC,   PARAM_EMPTY_ADDR0 + 3u, 0, 60, 0 },
+    { P_LOAD_DETECT, PARAM_EMPTY_ADDR0 + 4u, 0, 1,  0 }
 };
+static int16_t s_empty;
 #define EXTRA_COUNT (sizeof(s_extra) / sizeof(s_extra[0]))
 
 static const extra_t *extra_find(uint16_t i)
@@ -94,6 +101,16 @@ static int16_t limit_ok(uint16_t i, int16_t v)
     }
     return (v >= s_limit[i].low) && (v <= s_limit[i].up);
 }
+
+int16_t param_active(uint16_t idx)
+{
+    uint16_t e = (idx == P_SPEED_HIGH) ? P_EMPTY_SPEED : (idx == P_SPEED_TURN) ? P_EMPTY_TURN
+               : (idx == P_ACC) ? P_EMPTY_ACC : (idx == P_DCC) ? P_EMPTY_DCC : 0u;
+    if (s_empty && (e != 0u) && (s_set[e] >= s_limit[idx].low)) { return s_set[e]; }
+    return param_get(idx);
+}
+
+int16_t param_profile_empty(void) { return s_empty; }
 
 static int16_t sum_saved(void)
 {
@@ -156,11 +173,11 @@ static void recalc_all(void)
     param_dv.guide_dist_mm = (float)s_set[P_GUIDE_DIST_MM];
     param_dv.speed_ff = (float)s_set[P_SPEED_FF] / 1000.0f;
     param_dv.stall_ticks = s_set[P_ENC_STALL_TICKS];
-    param_dv.turn_speed = param_rpm(s_set[P_SPEED_TURN]);
+    param_dv.turn_speed = param_rpm(param_active(P_SPEED_TURN));
     if (param_dv.turn_speed < param_dv.turn_min) { param_dv.turn_speed = param_dv.turn_min; }
     recalc_turn_pulses();
     param_dv.jog_speed = param_rpm(s_set[P_SPEED_JOG]);
-    param_dv.target_speed = param_rpm(s_set[P_SPEED_HIGH]);
+    param_dv.target_speed = param_rpm(param_active(P_SPEED_HIGH));
     recalc_low();
     param_dv.min_speed = param_rpm((s_set[P_SPEED_MIN] >= 4) ? s_set[P_SPEED_MIN] : 6);
     recalc_llow();
@@ -175,23 +192,32 @@ static void recalc_all(void)
     param_dv.display_mode = s_set[P_DISPLAY_MODE];
     param_dv.turn_mode = param_digit(s_set[P_TURN_FORBACK], 10);
     param_dv.forback_mode = param_digit(s_set[P_TURN_FORBACK], 1);
-    param_dv.acc = s_set[P_ACC];
-    param_dv.dcc = s_set[P_DCC];
+    param_dv.acc = param_active(P_ACC);
+    param_dv.dcc = param_active(P_DCC);
     recalc_stop_len();
     recalc_fwd_stop_len();
     param_dv.auto_drive_mode = (int16_t)(s_set[P_AUTO_DRIVE_MODE] & 1);
     param_dv.auto_slow_mode = (int16_t)((s_set[P_AUTO_DRIVE_MODE] >> 1) & 1);
     param_dv.agv_type_mode = (int16_t)(10 * param_digit(s_set[P_AGV_TYPE], 100) + param_digit(s_set[P_AGV_TYPE], 10));
     param_dv.actuator_delay = (int16_t)(s_set[P_SPEED_MIN] * 10);
-    param_dv.switch_start_num = s_set[P_SWITCH_START_NUM];
     param_dv.for_bumper = param_digit(s_set[P_BUMPER_USE], 10);
     param_dv.back_bumper = param_digit(s_set[P_BUMPER_USE], 1);
     param_dv.for_obs = param_digit(s_set[P_OBS_USE], 10);
     param_dv.back_obs = param_digit(s_set[P_OBS_USE], 1);
     param_dv.acs_group = param_digit(s_set[P_ACS_STANDBY], 10);
     param_dv.acs_standby = param_digit(s_set[P_ACS_STANDBY], 1);
-    /* 교차로 보고 판정은 일의 자리 하나로 통일하고 부팅 때 바로 계산한다 */
-    param_dv.collision_type = (param_digit(s_set[P_CROSS_MODE], 1) != 0) ? 1 : 0;
+}
+
+void param_profile(int16_t empty)
+{
+    s_empty = (int16_t)(empty != 0);
+    param_dv.target_speed = param_rpm(param_active(P_SPEED_HIGH));
+    param_dv.turn_speed = param_rpm(param_active(P_SPEED_TURN));
+    if (param_dv.turn_speed < param_dv.turn_min) { param_dv.turn_speed = param_dv.turn_min; }
+    param_dv.acc = param_active(P_ACC);
+    param_dv.dcc = param_active(P_DCC);
+    recalc_low();
+    recalc_llow();
 }
 
 /* init_para 대응. 번호마다 고치는 파생값이 다르다 */
@@ -199,7 +225,7 @@ static void recalc_one(uint16_t i)
 {
     switch (i) {
     case P_SPEED_HIGH:
-        param_dv.target_speed = param_rpm(s_set[P_SPEED_HIGH]);
+        param_dv.target_speed = param_rpm(param_active(P_SPEED_HIGH));
         recalc_llow();
         break;
     case P_SPEED_LOW:
@@ -207,7 +233,7 @@ static void recalc_one(uint16_t i)
         recalc_llow();
         break;
     case P_SPEED_TURN:
-        param_dv.turn_speed = param_rpm(s_set[P_SPEED_TURN]);
+        param_dv.turn_speed = param_rpm(param_active(P_SPEED_TURN));
         recalc_turn_pulses();
         break;
     case P_AUTO_DRIVE_MODE:
@@ -224,8 +250,12 @@ static void recalc_one(uint16_t i)
         break;
     case P_DISPLAY_MODE:  param_dv.display_mode = s_set[P_DISPLAY_MODE]; break;
     case P_SPEED_JOG:     param_dv.jog_speed = param_rpm(s_set[P_SPEED_JOG]); break;
-    case P_ACC:           param_dv.acc = s_set[P_ACC]; break;
-    case P_DCC:           param_dv.dcc = s_set[P_DCC]; break;
+    case P_ACC:           param_dv.acc = param_active(P_ACC); break;
+    case P_DCC:           param_dv.dcc = param_active(P_DCC); break;
+    case P_EMPTY_SPEED:
+    case P_EMPTY_TURN:
+    case P_EMPTY_ACC:
+    case P_EMPTY_DCC:     if (s_empty) { param_profile(1); } break;
     case P_TURN_FORBACK:
         param_dv.turn_mode = param_digit(s_set[P_TURN_FORBACK], 10);
         param_dv.forback_mode = param_digit(s_set[P_TURN_FORBACK], 1);
@@ -244,14 +274,10 @@ static void recalc_one(uint16_t i)
         param_dv.agv_type_mode = (int16_t)(10 * param_digit(s_set[P_AGV_TYPE], 100) + param_digit(s_set[P_AGV_TYPE], 10));
         break;
     case P_SPEED_MIN:     param_dv.actuator_delay = (int16_t)(s_set[P_SPEED_MIN] * 10); break;
-    case P_SWITCH_START_NUM: param_dv.switch_start_num = s_set[P_SWITCH_START_NUM]; break;
     case P_STOP_LEN_FWD_MM:  recalc_fwd_stop_len(); break;
     case P_ACS_STANDBY:
         param_dv.acs_group = param_digit(s_set[P_ACS_STANDBY], 10);
         param_dv.acs_standby = param_digit(s_set[P_ACS_STANDBY], 1);
-        break;
-    case P_CROSS_MODE:
-        param_dv.collision_type = (param_digit(s_set[P_CROSS_MODE], 1) != 0) ? 1 : 0;
         break;
     default:
         break;
@@ -378,6 +404,7 @@ int16_t param_boot(const param_store_t *store, int16_t version)
     int16_t status = 0;
 
     s_store = store;
+    s_empty = 0;
     s_set[P_PARA_INIT] = 0;
     s_set[P_VERSION] = version;
     s_set[P_BAT_DV] = 0;

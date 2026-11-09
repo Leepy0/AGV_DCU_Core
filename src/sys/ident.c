@@ -150,6 +150,7 @@ static struct {
     uint32_t l0, r0, line;        /* 둘째 직선 시작 펄스, BLD_GA 선을 본 펄스 */
     int16_t  ga;                  /* 1 = BLD_GA 정지 중 */
     float    cid;                 /* 정지 단계(제작) 이번 목표 mm */
+    int16_t  prof_high, prof_dcc; /* 정지 단계를 공차 프로필로 달리기 전 1·13번. 0 = 안 바꿈 */
 } s_bld;
 
 /* 직선 위 회전 중심 위치 mm. 0회에 L 을 잰 뒤 엔코더와 진행 방향으로 잇고, 교차선을 볼 때마다 다시 맞춘다.
@@ -1506,6 +1507,29 @@ void ident_start_build(uint16_t mask, int16_t track_in_mm, int16_t cap_mpm)
 
 int ident_build_mode(void) { return s_build != 0u; }
 
+/* 제작 정지 단계: LDS 가 켜져 있고 EDS 가 지금(추천) 1번보다 빠르면 min(EDS, 상한) 과 EDC(쓸 수 없으면 지금 13번)로
+ * 달린다. 빠른 공차 프로필도 CD 안에 서야 한다. 단계 끝에 되돌린다(실패·끊김은 build_restore) */
+static void stopt_profile(int on)
+{
+    int16_t eds = param_get(P_EMPTY_SPEED), edc = param_get(P_EMPTY_DCC), lo, up;
+
+    if (!on) {
+        if (s_bld.prof_high > 0) { (void)param_set_ram(P_SPEED_HIGH, s_bld.prof_high); }
+        if (s_bld.prof_dcc > 0)  { (void)param_set_ram(P_DCC, s_bld.prof_dcc); }
+        s_bld.prof_high = s_bld.prof_dcc = 0;
+        return;
+    }
+    if ((agv_build.cap_mpm > 0) && (eds > agv_build.cap_mpm)) { eds = agv_build.cap_mpm; }
+    if ((s_build & BLD_CHECK) || (param_get(P_LOAD_DETECT) == 0) || (eds <= param_get(P_SPEED_HIGH))) { return; }
+    s_bld.prof_high = param_get(P_SPEED_HIGH);
+    (void)param_set_ram(P_SPEED_HIGH, eds);
+    param_limit(P_DCC, &lo, &up);
+    if (edc >= lo) {
+        s_bld.prof_dcc = param_get(P_DCC);
+        (void)param_set_ram(P_DCC, edc);
+    }
+}
+
 /* 단계가 끝났다. 추천값을 내고 바로 저장 몫을 저장한다. 1·13번은 뒤 단계를 위해 RAM 에 넣는다 */
 static void stage_end(uint16_t st)
 {
@@ -1551,6 +1575,7 @@ static void stage_end(uint16_t st)
     }
     case 5: {
         const stopt_pass_t *sp = &agv_stopt.p[PASS - 1u];
+        stopt_profile(0);
         b->over_mm = (int16_t)sp->overshoot_mm;
         if (!(s_build & BLD_CHECK) && (sp->overshoot_mm <= (float)BLD_OVER_OK_MM)) { b->cid_rec = (int16_t)(sp->target_mm / 10.0f); }
         break;
@@ -1594,6 +1619,7 @@ static int build_next(void)
         break;
     case 5:
         point(&agv_stopt.state, &agv_stopt.fail, &agv_stopt.pass, &agv_stopt.phase, &agv_all.track_mm);
+        stopt_profile(1);
         break;
     default:
         agv_all.pass = agv_all.phase = 0;

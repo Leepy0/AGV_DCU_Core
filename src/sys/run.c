@@ -40,6 +40,7 @@
 #define BUMPER_RUN_VIN     30
 #define WAIT_SEC_TICKS     100
 #define NO_ACTION_TYPE     2        /* 이 차종군은 Auto Start 를 유지한다 */
+#define EMPTY_TICKS        500      /* 서서 적재 센서가 모두 꺼진 채 5 s 면 공차 */
 
 static volatile uint32_t s_pulses[2];
 static volatile int32_t  s_rail_cut, s_curve_cnt;
@@ -63,6 +64,7 @@ static struct {
     int16_t init_step, init_cnt;      /* Inital_start, Inital_cnt */
     int16_t drive_started;            /* Flag_Driving_start */
     int16_t was_stopping, prev_len;   /* 이번 틱 정지 요청 판단 */
+    int16_t empty_cnt;                /* 공차 판정 */
 } s_run;
 
 static void drive_pre(void);
@@ -87,6 +89,8 @@ void run_reset(void)
     s_run.bat_filtered = BAT_ADC_INIT;
     s_run.init_step = s_run.init_cnt = 0;
     s_run.drive_started = 0;
+    s_run.empty_cnt = 0;
+    if (param_profile_empty()) { param_profile(0); }
     D.ui_mode = UI_AUTO;
     D.control = RUN_READY;
     D.step = DRIVE_CHANGE_SPEED;
@@ -278,7 +282,7 @@ static void stop_switch(void)
     s_run.standby_auto = 0;
     s_run.standby_cnt = 0;
     tape_clear();
-    P.dcc = param_get(P_DCC);
+    P.dcc = param_active(P_DCC);
 }
 
 void run_command_stop(void)
@@ -849,6 +853,30 @@ static void tape_stop(void)
     }
 }
 
+/* ---- 적재·공차 ---- */
+
+/* 켤 때와 모르면 적재. 센서 하나라도 켜지면 바로 적재, 서서 모두 꺼진 채 5 s 면 공차. 달리는 중에는 공차로 가지 않는다.
+ * 달리는 중 적재로 바뀌면 지령을 적재 최고 속도로 낮춰 적재 DCC 로 줄인다 */
+static void load_tick(void)
+{
+    uint32_t mask = seq_load_mask();
+    int16_t loaded = (param_get(P_LOAD_DETECT) == 0) || (mask == 0UL) || tune_active() || ((io_in_mask() & mask) != 0UL);
+    int16_t stopped = !D.flag_run || (D.vin_out == 0);
+
+    if (loaded || !stopped) { s_run.empty_cnt = 0; }
+    else if (s_run.empty_cnt < EMPTY_TICKS) { s_run.empty_cnt++; }
+    if (loaded && param_profile_empty()) {
+        param_profile(0);
+        if (D.speed_cmd > P.target_speed) {
+            D.speed_cmd = P.target_speed;
+            if (D.step == DRIVE_CRUISE) { D.step = DRIVE_CHANGE_SPEED; }
+        }
+    }
+    else if (!loaded && !param_profile_empty() && (s_run.empty_cnt >= EMPTY_TICKS)) {
+        param_profile(1);
+    }
+}
+
 /* ---- 공개 10 ms ---- */
 
 void run_coordinate(void)
@@ -865,6 +893,7 @@ void run_coordinate(void)
     input_filter();
     apply_errors();
     if (D.flag_jog_on && (D.control == RUN_JOG)) { jog_step(); }
+    load_tick();
     s_run.was_stopping = D.flag_stopping;
     s_run.prev_len = D.stop_pulses;
 }

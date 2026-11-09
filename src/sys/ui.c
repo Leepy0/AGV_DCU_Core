@@ -26,10 +26,8 @@
 #define BACKUP_MSG_TICKS 500
 #define PULSE_TICKS      50     /* 500 ms 마다 램프 처리 */
 #define HISTORY_TICKS    500
-#define GROUP_USE_LAST   15     /* 메뉴 순서표의 그룹 경계 */
-#define GROUP_OTHER_FIRST 16
-#define GROUP_OTHER_LAST 52
 #define PARA_EDIT_LAST   46     /* 이 번호까지 편집한다 */
+#define HIDDEN_HOLD_TICKS 200   /* SHIFT 2 s */
 #define EDIT_OFF_FLAG    0
 #define SCREEN_LIST      10     /* 이 값을 더하면 번호 목록 화면 */
 #define SEG_BRAKE2       0x80u  /* ioport.h 참조 */
@@ -53,17 +51,30 @@ static const uint16_t s_seg[] = {
 #define SEG_DOT  10
 #define SEG_COUNT (sizeof(s_seg) / sizeof(s_seg[0]))
 
-/* 메뉴 순서 → 파라미터 번호 */
+/* 메뉴 순서 → 파라미터 번호. 묶음 다섯 개를 이어 둔다. 15·29·30·42번은 메뉴에 없다(값은 EEPROM 에 그대로) */
 static const uint16_t s_menu[] = {
-    P_SPEED_HIGH, P_SPEED_LOW, P_SPEED_TURN, P_BUMPER_USE, P_OBS_USE, P_AUTO_START_SEC, P_TURN_FORBACK,
-    P_STOP_LEN_MM, P_GUIDE_DIST_MM, P_WHEEL_DIA_MM, P_GEAR_RATIO, P_WHEEL_BASE_MM, P_AGV_ID, P_AGV_TYPE, P_SPEED_MIN,
-    P_STOP_LEN_FWD_MM,
-    P_AUTO_DRIVE_MODE, P_INTERFACE_MODE, P_SOUND, P_DISPLAY_MODE, P_BAT_OFFSET_DV, P_SPEED_JOG, P_ACC, P_DCC,
-    P_STATION_NO, P_BRANCH_MODE, P_TAG_DIGITS, P_STEER_KP, P_STEER_KI, P_SWITCH_START_NUM, P_TAG_TYPE,
-    P_COMM_LINK, P_ACS_STANDBY, P_BRANCH_OFFSET, P_CROSS_IN_CM, P_ACS_RETRY_LEGACY, P_ACS_RETRY_SEC,
-    P_GUIDE_CURVE_DETECT, P_LEGACY_QUIRKS, P_ERR_REPORT_MIN, P_CROSS_RETRY_100MS, P_CROSS_MODE,
-    P_STEER_RPM_OFFSET, P_GUIDE_TIMEOUT, P_OPT_FLAGS, P_SPEED_FF, P_ENC_STALL_TICKS, P_ACS_VERSION, P_LAMP_EXT_USE, P_PARA_INIT, P_VERSION, P_BAT_DV,
-    P_BAT_PERCENT
+    /* 1 속도 */
+    P_SPEED_HIGH, P_SPEED_LOW, P_SPEED_TURN, P_EMPTY_SPEED, P_EMPTY_TURN, P_ACC, P_DCC, P_SPEED_JOG,
+    P_EMPTY_ACC, P_EMPTY_DCC, P_SPEED_MIN,
+    /* 2 주행·안전 */
+    P_STOP_LEN_MM, P_CROSS_IN_CM, P_AUTO_START_SEC, P_OBS_USE, P_BUMPER_USE, P_STOP_LEN_FWD_MM, P_LOAD_DETECT,
+    P_GUIDE_DIST_MM, P_TURN_FORBACK, P_BRANCH_MODE, P_BRANCH_OFFSET, P_ENC_STALL_TICKS, P_GUIDE_TIMEOUT,
+    /* 3 차량·튜닝 */
+    P_AGV_ID, P_WHEEL_DIA_MM, P_WHEEL_BASE_MM, P_GEAR_RATIO, P_AGV_TYPE, P_TAG_DIGITS, P_OPT_FLAGS,
+    P_STEER_KP, P_STEER_KI, P_SPEED_FF,
+    /* 4 통신·표시. 램프 셋은 27번(LO)이 켜졌을 때만 */
+    P_ACS_RETRY_LEGACY, P_CROSS_RETRY_100MS, P_ACS_STANDBY, P_ACS_RETRY_SEC, P_COMM_LINK, P_INTERFACE_MODE,
+    P_ACS_VERSION, P_ERR_REPORT_MIN, P_SOUND, P_DISPLAY_MODE, P_BAT_OFFSET_DV, P_LAMP_EXT_USE,
+    UI_PARA_LAMP_FIRST, UI_PARA_LAMP_FIRST + 1, UI_PARA_LAMP_LAST,
+    /* 5 정보·개발. 뒤 넷은 숨김 */
+    P_BAT_DV, P_BAT_PERCENT, P_VERSION, P_PARA_INIT,
+    P_AUTO_DRIVE_MODE, P_STEER_RPM_OFFSET, P_GUIDE_CURVE_DETECT, P_LEGACY_QUIRKS
+};
+#define MENU_COUNT ((int16_t)(sizeof(s_menu) / sizeof(s_menu[0])))
+#define MENU_HIDDEN_FIRST (MENU_COUNT - 4)
+static const int16_t s_group_end[UI_GROUP_COUNT] = { 11, 24, 34, 49, MENU_COUNT };   /* 묶음 다음 첫 칸 */
+static const char s_group_name[UI_GROUP_COUNT][DISP_DIGITS] = {
+    {'P','1','S','P','D'}, {'P','2','R','U','N'}, {'P','3','C','A','R'}, {'P','4','C','O','M'}, {'P','5','I','N','F'}
 };
 
 /* 번호별 화면: 글자 3개 + 값 자릿수. 자릿수 0 은 ON/OFF 표시 */
@@ -73,10 +84,11 @@ static const para_view_t s_view[P_COUNT] = {
     {"DRS", 2}, {"LOS", 2}, {"TNS", 2}, {"ATD", 1}, {"ITM", 2}, {"SND", 0}, {"BPS", 2}, {"OBS", 2}, {"DSM", 2},
     {"BO-", 2}, {"JSP", 2}, {"ACC", 2}, {"DCC", 2}, {"AS ", 3}, {"ST ", 3}, {"BRM", 1}, {"TFB", 2}, {"TAG", 1},
     {"SL ", 3}, {"K_P", 2}, {"K_I", 2}, {"WS ", 3}, {"RG ", 3}, {"WW ", 3}, {"ID_", 2}, {"AT ", 3}, {"LO ", 3},
-    {"ACD", 2}, {"SSN", 2}, {"TTY", 1}, {"MPU", 2}, {"FL ", 3}, {"ASS", 2}, {"BGO", 2}, {"CD ", 3}, {"WRT", 2},
-    {"CT ", 3}, {"SO-", 2}, {"SU ", 3}, {"EST", 2}, {"RCI", 2}, {"LUS", 2}, {"C- ", 3}, {"CO-", 2}, {"AV-", 2},
+    {"SPN", 2}, {"SSN", 2}, {"TTY", 1}, {"CML", 2}, {"FL ", 3}, {"ASS", 2}, {"BGO", 2}, {"CD ", 3}, {"WRT", 2},
+    {"CT ", 3}, {"GSR", 2}, {"LG ", 3}, {"EST", 2}, {"RCI", 2}, {"LUS", 2}, {"SR ", 3}, {"GTO", 2}, {"AV-", 2},
     {"INT", 2}, {"V_ ", 3}, {"VT ", 3}, {"CR ", 3},
-    {"GD ", 3}, {"OPT", 2}, {"FF ", 3}, {"ES ", 2}
+    {"GD ", 3}, {"OPT", 2}, {"FF ", 3}, {"ES ", 2},
+    {"EDS", 2}, {"ETN", 2}, {"EAC", 2}, {"EDC", 2}, {"LDS", 0}
 };
 static const char s_lamp_name[UI_LAMP_EXT_COUNT] = { 'G', 'R', 'Y' };
 
@@ -86,6 +98,7 @@ static struct {
     volatile uint16_t buffer;     /* Read_Key_buffer */
     uint16_t buffer_old, data, data_old, confirm;
     uint16_t long_cnt, long_press;
+    uint16_t shift_hold, show_hidden;   /* 숨김 항목. 이번 전원 동안 */
     /* 파라미터 화면 */
     int16_t  screen;              /* Flag_para_display_set_on */
     int16_t  edit;                /* Flag_para_edit_on */
@@ -311,42 +324,39 @@ static void value_step(int16_t sign)
 static void menu_load(void)
 {
     s_ui.para = (int16_t)s_menu[s_ui.menu];
-    s_ui.value = param_get((uint16_t)s_ui.para);
+    s_ui.value = para_value(s_ui.para);
 }
 
-static void lamp_load(void) { s_ui.value = s_ui.lamp_ext[s_ui.para - UI_PARA_LAMP_FIRST]; }
+static int16_t group_first(int16_t g) { return (g > 1) ? s_group_end[g - 2] : 0; }
 
-/* 목록·그룹 화면에서 위아래 */
+static int16_t menu_visible(int16_t m)
+{
+    if ((s_menu[m] >= UI_PARA_LAMP_FIRST) && (param_get(P_LAMP_EXT_USE) == 0)) { return 0; }
+    return (m < MENU_HIDDEN_FIRST) || s_ui.show_hidden;
+}
+
+/* 목록에서 위아래. 묶음 안에서 돈다. 묶음 첫 칸은 늘 보인다 */
 static void list_step(int16_t sign)
 {
-    int16_t group = (int16_t)(s_ui.screen - SCREEN_LIST);
+    int16_t g = (int16_t)(s_ui.screen - SCREEN_LIST);
+    int16_t first = group_first(g), last = (int16_t)(s_group_end[g - 1] - 1);
 
-    if (group == UI_GROUP_LAMP) {
-        s_ui.para = (int16_t)(s_ui.para + sign);
-        if (s_ui.para > UI_PARA_LAMP_LAST)  { s_ui.para = UI_PARA_LAMP_FIRST; }
-        if (s_ui.para < UI_PARA_LAMP_FIRST) { s_ui.para = UI_PARA_LAMP_LAST; }
-        lamp_load();
-        return;
-    }
-    s_ui.menu = (int16_t)(s_ui.menu + sign);
-    if (group == UI_GROUP_USE) {
-        if (s_ui.menu > GROUP_USE_LAST) { s_ui.menu = 0; }
-        if (s_ui.menu < 0)              { s_ui.menu = GROUP_USE_LAST; }
-    }
-    else {
-        if (s_ui.menu > GROUP_OTHER_LAST)  { s_ui.menu = GROUP_OTHER_FIRST; }
-        if (s_ui.menu < GROUP_OTHER_FIRST) { s_ui.menu = GROUP_OTHER_LAST; }
-    }
+    do {
+        s_ui.menu = (int16_t)(s_ui.menu + sign);
+        if (s_ui.menu > last)  { s_ui.menu = first; }
+        if (s_ui.menu < first) { s_ui.menu = last; }
+    } while (!menu_visible(s_ui.menu));
     menu_load();
 }
 
-static void group_step(int16_t sign)
+/* 5번 묶음 목록에서 SHIFT 를 2 s 누르면 숨김 항목을 이번 전원 동안 보인다 */
+static void hidden_hold(void)
 {
-    s_ui.screen = (int16_t)(s_ui.screen + sign);
-    if (s_ui.screen > UI_GROUP_LAMP) { s_ui.screen = UI_GROUP_USE; }
-    if (s_ui.screen < UI_GROUP_USE)  { s_ui.screen = UI_GROUP_LAMP; }
-    if ((s_ui.screen == UI_GROUP_LAMP) && (param_get(P_LAMP_EXT_USE) == 0)) {
-        s_ui.screen = (sign > 0) ? UI_GROUP_USE : UI_GROUP_OTHER;
+    if ((D.ui_mode == UI_PARAM) && (s_ui.screen == SCREEN_LIST + UI_GROUP_INFO) && !s_ui.edit && (s_ui.buffer == KEY_SHIFT)) {
+        if (++s_ui.shift_hold >= HIDDEN_HOLD_TICKS) { s_ui.show_hidden = 1; }
+    }
+    else {
+        s_ui.shift_hold = 0;
     }
 }
 
@@ -368,9 +378,6 @@ static void up_down(int16_t sign)
         else {
             list_step(sign);
         }
-    }
-    else if (s_ui.screen > 0) {
-        group_step(sign);
     }
 }
 
@@ -406,6 +413,9 @@ static void key_mode(void)
         link_select();
         link_guide_init();
     }
+    else if ((D.ui_mode == UI_PARAM) && (s_ui.screen < SCREEN_LIST)) {   /* 다음 묶음 */
+        s_ui.screen = (int16_t)((s_ui.screen % UI_GROUP_COUNT) + 1);
+    }
 }
 
 static void key_reset(void)
@@ -427,14 +437,8 @@ static void key_reset(void)
 
 static void enter_group(void)
 {
-    if (s_ui.screen == UI_GROUP_LAMP) {
-        s_ui.para = UI_PARA_LAMP_FIRST;
-        lamp_load();
-    }
-    else {
-        s_ui.menu = (s_ui.screen == UI_GROUP_USE) ? 0 : GROUP_OTHER_FIRST;
-        menu_load();
-    }
+    s_ui.menu = group_first(s_ui.screen);
+    menu_load();
     s_ui.screen = (int16_t)(s_ui.screen + SCREEN_LIST);
 }
 
@@ -459,7 +463,7 @@ static void commit(void)
     s_ui.edit = EDIT_OFF_FLAG;
     s_ui.msg_save = 1;
     s_ui.msg_ticks = 0;
-    if (s_ui.screen == (SCREEN_LIST + UI_GROUP_LAMP)) {
+    if (s_ui.para >= UI_PARA_LAMP_FIRST) {
         s_ui.lamp_ext[s_ui.para - UI_PARA_LAMP_FIRST] = s_ui.value;
         return;
     }
@@ -471,7 +475,7 @@ static void key_set(void)
 {
     if (D.ui_mode != UI_PARAM) { return; }
     if (s_ui.screen == 0) {
-        s_ui.screen = UI_GROUP_USE;
+        s_ui.screen = UI_GROUP_SPEED;
     }
     else if (s_ui.screen < SCREEN_LIST) {
         enter_group();
@@ -666,7 +670,7 @@ static int16_t run_value(void)
     case DISP_TAG_COUNT: return comm_recent_num();
     case DISP_BAT_V:     s_ui.dot |= 1u << 3; return param_get(P_BAT_DV);
     case DISP_BAT_RATE:  s_ui.dot |= 1u << 3; return param_get(P_BAT_PERCENT);
-    case DISP_STATION:   return (param_get(P_INTERFACE_MODE) == 0) ? param_get(P_STATION_NO) : acs_station_get(0);
+    case DISP_STATION:   return (acs_station_count() > 0u) ? acs_station_get(0) : -1;   /* -1 = --- */
     default:             return 0;
     }
 }
@@ -680,6 +684,9 @@ static void show_run(void)
         s_ui.digit[0] = digit_of(v, 10000);
         s_ui.digit[1] = digit_of(v, 1000);
         show_number_tail(v, 0);
+    }
+    else if ((v < 0) && (P.display_mode == DISP_STATION)) {
+        s_ui.digit[2] = s_ui.digit[3] = s_ui.digit[4] = DIGIT_MINUS;
     }
     if (D.branch_start != 0) {
         show(letter('B'), letter('R'), DIGIT_UNDER, letter((D.branch_start == BRANCH_LEFT) ? 'L' : 'R'),
@@ -765,14 +772,9 @@ static void show_param(void)
     else if (s_ui.msg_init) {
         show(letter('I'), letter('N'), letter('I'), letter('T'), DIGIT_NONE);
     }
-    else if (s_ui.screen == UI_GROUP_USE) {
-        show(letter('U'), letter('S'), letter('E'), DIGIT_NONE, DIGIT_NONE);
-    }
-    else if (s_ui.screen == UI_GROUP_OTHER) {
-        show(letter('O'), letter('T'), letter('H'), DIGIT_NONE, DIGIT_NONE);
-    }
-    else if (s_ui.screen == UI_GROUP_LAMP) {
-        show(letter('L'), letter('A'), letter('M'), letter('P'), DIGIT_NONE);
+    else if ((s_ui.screen > 0) && (s_ui.screen < SCREEN_LIST)) {
+        const char *c = s_group_name[s_ui.screen - 1];
+        show(letter(c[0]), (uint16_t)(c[1] - '0'), letter(c[2]), letter(c[3]), letter(c[4]));
     }
     else if (s_ui.screen > SCREEN_LIST) {
         show_param_value();
@@ -915,6 +917,7 @@ static void display_update(void)
     s_ui.flick = 0;
     if (D.ui_mode == UI_AUTO)     {
         show_auto();
+        if (param_profile_empty()) { s_ui.dot |= 1u << 1; }   /* 공차: 둘째 자리 점 */
         if (tune_active() && !any_error() && !D.flag_turn) { show_tune(); }
     }
     else if (D.ui_mode == UI_JOG) {
@@ -994,6 +997,7 @@ static void lamp_update(void)
 
 void ui_run(void)
 {
+    hidden_hold();
     key_process();
     display_update();
     if (++s_ui.pulse_cnt >= PULSE_TICKS) {

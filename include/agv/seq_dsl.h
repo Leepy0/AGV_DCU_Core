@@ -125,7 +125,10 @@ typedef unsigned long long dsl_cond_t;
 #define ACT_MAP_END              SEQ_MAP_END
 
 #define PROFILE_TABLE_BEGIN(name)  const profile_row_t name[] = {
-#define PROFILE(profile, type, from, to)  { (uint16_t)(profile), (uint16_t)(type), (uint16_t)(from), (uint16_t)(to) },
+#define PROFILE(profile, type, from, to)  { (uint16_t)(profile), (uint16_t)(type), (uint16_t)(from), (uint16_t)(to), 0UL },
+/* 적재 센서가 있는 프로파일. mask = LOAD_SENSORS(SEN_1, ...) 하나라도 켜지면 적재 */
+#define PROFILE_LOAD(profile, type, from, to, mask)  { (uint16_t)(profile), (uint16_t)(type), (uint16_t)(from), (uint16_t)(to), (uint32_t)(mask) },
+#define LOAD_SENSORS(...)          DSL_MASK(__VA_ARGS__)
 #define PROFILE_TABLE_END          };
 
 /* ---- 라벨·분기 ---- */

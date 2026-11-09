@@ -260,13 +260,19 @@ int main(void)
 
     /* 시퀀스가 돌고 있으면 바로 On: seq_is_active 는 test_seq 범위. 여기서는 꺼진 상태만 본다 */
 
-    /* 교차로 꺼진 설정도 다른 슬롯은 나간다 */
-    setup(1, 5, 10);    /* 일의 자리 0 */
-    assert(param_dv.collision_type == 0);
+    /* 교차로 IN·OUT 보고는 42번(LUS)과 무관하고 ACS 사용(36번)만 따른다 */
+    setup(1, 5, 10);    /* 예전 "교차로 끔"(일의 자리 0) */
     acs_cross_in(1);
-    acs_report('L', 1);
-    acs_schedule();
-    assert(sent_info('L') == 1 && sent_info('I') == 0);
+    acs_cross_out(2);
+    ticks(1);
+    assert(sent_info('I') == 1);
+    ticks(300);
+    assert(sent_info('O') >= 1);
+    setup(1, 0, 1);     /* ACS 미사용: LUS 가 켜져 있어도 보내지 않는다 */
+    acs_cross_in(1);
+    acs_cross_out(2);
+    ticks(300);
+    assert(sent_info('I') == 0 && sent_info('O') == 0);
 
     /* OUT 큐: 연달아 3개는 순서대로, 같은 구역은 한 번. ACK 는 지금 보내는 OUT 의 MsgID 일 때만 지운다 */
     setup(0, 5, 1);
@@ -344,8 +350,11 @@ int main(void)
     ticks(1);
     assert(D.cross_ack_error == 0);
 
-    /* 교차로 꺼진 설정에서는 OUT 을 만들지 않는다 */
+    /* 42번(LUS) 값과 무관하게 OUT 을 만든다. ACS 미사용(36번 0)이면 만들지 않는다 */
     setup(0, 5, 10);
+    acs_cross_out(2);
+    assert(acs_cross_out_count() == 1);
+    setup(0, 0, 1);
     acs_cross_out(2);
     assert(acs_cross_out_count() == 0);
 

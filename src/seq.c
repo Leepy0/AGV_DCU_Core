@@ -32,11 +32,13 @@ int seq_request_flag[SEQ_MAX];
 static const seq_site_t *s_site;
 static uint16_t      s_nacts;      /* 금지 스텝이 있으면 0 으로 두어 ACT 를 쓰지 않는다 */
 static uint16_t      s_profile;
+static uint32_t      s_load_mask;
 static seq_runner_t  s_seq;
 static seq_runner_t  s_act[ACT_SLOTS];
 static uint16_t      s_state[SEQ_STATE_COUNT];
 
 uint16_t seq_profile(void)      { return s_profile; }
+uint32_t seq_load_mask(void)    { return s_load_mask; }
 int      seq_is_active(void)    { return s_seq.active != 0; }
 uint16_t seq_active_id(void)    { return s_seq.active ? s_seq.c.id : (uint16_t)SEQ_NONE; }
 uint16_t seq_active_step(void)  { return s_seq.c.step; }
@@ -67,10 +69,12 @@ void seq_pick_profile(void)
     int16_t id = param_get(P_AGV_ID);
 
     s_profile = 0;
+    s_load_mask = 0;
     for (i = 0; (s_site != 0) && (i < s_site->nprofiles); i++) {
         const profile_row_t *row = &s_site->profiles[i];
         if (((row->agv_type == 0u) || (row->agv_type == (uint16_t)type)) && ((uint16_t)id >= row->id_from) && ((uint16_t)id <= row->id_to)) {
             s_profile = row->profile;
+            s_load_mask = row->load_mask;
             break;
         }
     }

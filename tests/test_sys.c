@@ -63,7 +63,11 @@ static const seq_def_t s_seqs[] = { { 0, SEQ_LOAD, s_load_steps, sizeof(s_load_s
 static const seq_def_t s_acts[] = { { 0, ACT_HOLD, a_hold_steps, sizeof(a_hold_steps) / sizeof(a_hold_steps[0]) } };
 static int stop_len_call(seq_ctx_t *c) { (void)c; tagact_stop_length(); return 1; }
 static const seq_call_fn s_calls[] = { stop_len_call };
-static const seq_site_t s_site = { s_seqs, 1, s_acts, 1, s_calls, 1, 0, 0 };
+/* 호기 77 만 적재 센서가 있다(시험용) */
+PROFILE_TABLE_BEGIN( s_profiles )
+    PROFILE_LOAD( 1, 0, 77, 77, LOAD_SENSORS(IN_EXT_1, IN_EXT_2) )
+PROFILE_TABLE_END
+static const seq_site_t s_site = { s_seqs, 1, s_acts, 1, s_calls, 1, s_profiles, 1 };
 
 /* 태그 표 */
 static const tag_rule_t s_rules[] = {
@@ -104,9 +108,15 @@ static void tick(void)
 }
 static void ticks(int n) { while (n-- > 0) { tick(); } }
 
+static int s_ext_board;           /* 1 = 확장 입력 보드(입력 B b3 점퍼), 입력은 모두 꺼짐 */
+
 static void boot(void)
 {
     host_reset();
+    if (s_ext_board) {
+        host.bus_in[BUS_IN_B] |= 0x08u;
+        host.bus_in[BUS_EXT_IN_A] = host.bus_in[BUS_EXT_IN_B] = 0xFFu;
+    }
     memset(&D, 0, sizeof(D));
     /* 호기 번호가 있는 EEPROM. 체크섬은 첫 부팅이 만든다 */
     sys_boot();
@@ -167,6 +177,8 @@ static void drive_up(void)
 static void run_scan(int n)
 {
     while (n-- > 0) {
+        host_sci_t *b = &host.sci[HAL_SCI_B];
+        if (b->rx_pos == b->rx_len) { b->rx_len = b->rx_pos = 0; }   /* 다 읽었으면 버퍼를 비운다(긴 주행) */
         guide_reply(0);
         run_encoder(0, 20000);
         run_encoder(1, 20000);
@@ -804,7 +816,7 @@ static void test_ui(void)
     assert(host.sci[HAL_SCI_A].brr == 0x1A);          /* 파라미터 모드 115200 */
     ui_digits(d);
     assert(d[0] == 26);                               /* P */
-    key(KEY_SET);                                     /* USE */
+    key(KEY_SET);                                     /* P1SPD */
     key(KEY_SET);                                     /* 첫 번호 */
     assert(ui_para_number() == P_SPEED_HIGH);
     key(KEY_UP);
@@ -826,6 +838,179 @@ static void test_ui(void)
     printf("  ui ok\n");
 }
 
+/* 파라미터 메뉴 5묶음: MODE 로 묶음, SET 들어가기, UP 항목, RESET 나오기. 5번 묶음 SHIFT 2 s 숨김 */
+static void test_menu5(void)
+{
+    static const uint16_t want[] = {
+        P_SPEED_HIGH, P_SPEED_LOW, P_SPEED_TURN, P_EMPTY_SPEED, P_EMPTY_TURN, P_ACC, P_DCC, P_SPEED_JOG,
+        P_EMPTY_ACC, P_EMPTY_DCC, P_SPEED_MIN,
+        P_STOP_LEN_MM, P_CROSS_IN_CM, P_AUTO_START_SEC, P_OBS_USE, P_BUMPER_USE, P_STOP_LEN_FWD_MM, P_LOAD_DETECT,
+        P_GUIDE_DIST_MM, P_TURN_FORBACK, P_BRANCH_MODE, P_BRANCH_OFFSET, P_ENC_STALL_TICKS, P_GUIDE_TIMEOUT,
+        P_AGV_ID, P_WHEEL_DIA_MM, P_WHEEL_BASE_MM, P_GEAR_RATIO, P_AGV_TYPE, P_TAG_DIGITS, P_OPT_FLAGS,
+        P_STEER_KP, P_STEER_KI, P_SPEED_FF,
+        P_ACS_RETRY_LEGACY, P_CROSS_RETRY_100MS, P_ACS_STANDBY, P_ACS_RETRY_SEC, P_COMM_LINK, P_INTERFACE_MODE,
+        P_ACS_VERSION, P_ERR_REPORT_MIN, P_SOUND, P_DISPLAY_MODE, P_BAT_OFFSET_DV, P_LAMP_EXT_USE, 91, 92, 93,
+        P_BAT_DV, P_BAT_PERCENT, P_VERSION, P_PARA_INIT,
+        P_AUTO_DRIVE_MODE, P_STEER_RPM_OFFSET, P_GUIDE_CURVE_DETECT, P_LEGACY_QUIRKS
+    };
+    static const int ends[5] = { 11, 24, 34, 49, 57 };
+    static const struct { uint16_t idx; char c[4]; } names[] = {
+        { P_SPEED_MIN, "SPN" }, { P_GUIDE_TIMEOUT, "GTO" }, { P_COMM_LINK, "CML" }, { P_STEER_RPM_OFFSET, "SR " },
+        { P_GUIDE_CURVE_DETECT, "GSR" }, { P_LEGACY_QUIRKS, "LG " }, { P_EMPTY_SPEED, "EDS" }, { P_EMPTY_TURN, "ETN" },
+        { P_EMPTY_ACC, "EAC" }, { P_EMPTY_DCC, "EDC" }, { P_LOAD_DETECT, "LDS" }, { P_AUTO_DRIVE_MODE, "ATD" }
+    };
+    uint16_t d[5];
+    char l[3];
+    int g, i, k = 0, n;
+
+    assert(sizeof(want) / sizeof(want[0]) == 57u);
+    for (i = 0; i < 57; i++) {          /* 빠진 넷 */
+        assert(want[i] != P_STATION_NO && want[i] != P_SWITCH_START_NUM && want[i] != P_TAG_TYPE && want[i] != P_CROSS_MODE);
+    }
+    for (i = 0; i < (int)(sizeof(names) / sizeof(names[0])); i++) {
+        (void)ui_param_label(names[i].idx, l);
+        assert(memcmp(l, names[i].c, 3) == 0);
+    }
+    boot();
+    (void)param_set(P_LAMP_EXT_USE, 1);
+    key(KEY_MODE);
+    key(KEY_MODE);
+    ticks(40);
+    assert(D.ui_mode == UI_PARAM);
+    key(KEY_SET);
+    for (g = 0; g < 5; g++) {
+        ui_digits(d);
+        assert(d[0] == 26 && d[1] == (uint16_t)(g + 1));       /* P1 ~ P5 */
+        key(KEY_UP);                                          /* 묶음 화면에서 UP 은 아무 일 없다 */
+        ui_digits(d);
+        assert(d[1] == (uint16_t)(g + 1));
+        key(KEY_SET);
+        n = (g == 4) ? 4 : ends[g] - k;
+        for (i = 0; i < n; i++) {
+            assert(ui_para_number() == (int16_t)want[k + i]);
+            key(KEY_UP);
+        }
+        assert(ui_para_number() == (int16_t)want[k]);           /* 숨김 없이 돈다 */
+        if (g == 4) {
+            host.key = KEY_SHIFT;                             /* 1.5 s 는 모자란다 */
+            ticks(150);
+            host.key = 0;
+            ticks(10);
+            for (i = 0; i < 4; i++) { key(KEY_UP); }
+            assert(ui_para_number() == P_BAT_DV);
+            host.key = KEY_SHIFT;
+            ticks(210);
+            host.key = 0;
+            ticks(10);
+            for (i = 0; i < 8; i++) {
+                assert(ui_para_number() == (int16_t)want[k + i]);
+                key(KEY_UP);
+            }
+            assert(ui_para_number() == P_BAT_DV);
+        }
+        key(KEY_RESET);
+        k = ends[g];
+        key(KEY_MODE);
+    }
+    ui_digits(d);
+    assert(d[1] == 1 && d[2] == 29 && d[3] == 26 && d[4] == 14);   /* P1SPD */
+    /* 27번 0 이면 램프 셋이 없다 */
+    (void)param_set(P_LAMP_EXT_USE, 0);
+    for (i = 0; i < 3; i++) { key(KEY_MODE); }
+    key(KEY_SET);
+    for (i = 0; i < 12; i++) { key(KEY_UP); }
+    assert(ui_para_number() == P_ACS_RETRY_LEGACY);
+    key(KEY_RESET);
+    key(KEY_RESET);
+    key(KEY_MODE);
+    assert(D.ui_mode == UI_AUTO);
+    printf("  menu 5 ok\n");
+}
+
+static void ext_in(uint16_t bit, int on)
+{
+    if (on) { host.bus_in[BUS_EXT_IN_A] &= (uint16_t)~bit; }
+    else    { host.bus_in[BUS_EXT_IN_A] |= bit; }
+}
+
+/* 적재·공차: LDS 0 이면 그대로, 센서가 켜지면 바로 적재, 서서 5 s 꺼져야 공차, 달리는 중에는 공차로 가지 않는다 */
+static void test_load_profile(void)
+{
+    int16_t load_t, load_dcc;
+
+    s_ext_board = 1;
+    boot();
+    (void)param_set(P_AGV_ID, 77);
+    seq_pick_profile();
+    assert(seq_load_mask() == ((1UL << IN_EXT_1) | (1UL << IN_EXT_2)));
+    assert(!io_in(IN_EXT_1) && !io_in(IN_EXT_2));
+    (void)param_set(P_EMPTY_SPEED, 45);
+    (void)param_set(P_EMPTY_DCC, 30);
+    load_t = P.target_speed;
+    load_dcc = P.dcc;
+    ticks(600);
+    assert(!param_profile_empty() && P.target_speed == load_t && P.dcc == load_dcc);   /* LDS 0 */
+
+    (void)param_set(P_LOAD_DETECT, 1);
+    ticks(490);
+    assert(!param_profile_empty());
+    ext_in(0x02u, 1);                                 /* 4.9 s 에 센서: 다시 센다 */
+    ticks(2);
+    ext_in(0x02u, 0);
+    ticks(490);
+    assert(!param_profile_empty());
+    ticks(15);
+    assert(param_profile_empty() && P.target_speed == param_rpm(45) && P.dcc == 30 && P.acc == param_get(P_ACC));
+    (void)param_set(P_EMPTY_SPEED, 0);                /* 0 = 적재 값 */
+    assert(P.target_speed == load_t);
+    (void)param_set(P_EMPTY_SPEED, 45);
+    ext_in(0x01u, 1);                                 /* 바로 적재 */
+    ticks(2);
+    assert(!param_profile_empty() && P.target_speed == load_t && P.dcc == load_dcc);
+    ext_in(0x01u, 0);
+
+    /* 달리는 중에는 공차로 가지 않는다 */
+    ticks(10);
+    drive_up();
+    run_scan(700);
+    assert(D.flag_run && (D.vin_out > 0) && !param_profile_empty());
+    run_command_stop();
+    ticks(300);
+    s_ext_board = 0;
+    boot();
+    printf("  load profile ok\n");
+}
+
+/* 달리는 중 적재로 바뀌면 지령을 적재 최고 속도로 낮춘다 */
+static void test_load_while_running(void)
+{
+    int16_t load_t;
+
+    s_ext_board = 1;
+    boot();
+    (void)param_set(P_AGV_ID, 77);
+    seq_pick_profile();
+    (void)param_set(P_EMPTY_SPEED, 45);
+    (void)param_set(P_LOAD_DETECT, 1);
+    load_t = (int16_t)param_rpm(param_get(P_SPEED_HIGH));
+    ticks(520);
+    assert(param_profile_empty());
+    drive_up();
+    run_scan(20);
+    assert(param_profile_empty());
+    D.speed_cmd = P.target_speed;
+    D.step = DRIVE_CRUISE;
+    D.vin_out = P.target_speed;
+    ext_in(0x01u, 1);
+    run_scan(1);
+    assert(!param_profile_empty() && P.target_speed == load_t && D.speed_cmd == load_t);
+    assert(D.step == DRIVE_CHANGE_SPEED && D.vin_out > load_t);
+    ext_in(0x01u, 0);
+    s_ext_board = 0;
+    boot();
+    printf("  load while running ok\n");
+}
+
 static void test_para_init(void)
 {
     int i;
@@ -837,7 +1022,7 @@ static void test_para_init(void)
     ticks(40);
     assert(D.ui_mode == UI_PARAM);
     key(KEY_SET);
-    key(KEY_UP);                                      /* OTHER */
+    for (i = 0; i < 4; i++) { key(KEY_MODE); }        /* P5INF */
     key(KEY_SET);
     for (i = 0; (i < 40) && (ui_para_number() != P_PARA_INIT); i++) { key(KEY_UP); }
     assert(ui_para_number() == P_PARA_INIT);
@@ -1280,7 +1465,9 @@ static void test_fnd_fit(void)
     ui_param_text(P_CROSS_IN_CM, 60, c);
     assert(memcmp(c, "CD060", 5) == 0);
     ui_param_text(P_SPEED_MIN, 7, c);
-    assert(memcmp(c, "ACD07", 5) == 0);
+    assert(memcmp(c, "SPN07", 5) == 0);
+    ui_param_text(P_LOAD_DETECT, 1, c);
+    assert(memcmp(c, "LDSON", 5) == 0);
     tune_value_text(c, 'D', 'E', 5414, 1);
     assert(memcmp(c, "D5414", 5) == 0);
     tune_value_text(c, 'D', 'E', 414, 1);
@@ -1431,6 +1618,8 @@ static void test_tune_ee_layout(void)
         assert(!((a[i] >= ACS_OUT_EE_FIRST) && (a[i] <= ACS_OUT_EE_HEAD)));
         for (j = 0; j < i; j++) { assert(a[i] != a[j]); }
     }
+    /* 공차 파라미터 77~81 은 KEEP 의 빈 칸(태그 이력 뒤, 스테이션 개수 앞) */
+    assert(PARAM_EMPTY_ADDR0 >= KEEP_TAG_NUM0 + 5 && PARAM_EMPTY_ADDR0 + 4 < KEEP_STATION_CNT);
     printf("  tune ee layout ok\n");
 }
 
@@ -1754,6 +1943,9 @@ int main(void)
     test_cross_out();
     test_status_report();
     test_ui();
+    test_menu5();
+    test_load_profile();
+    test_load_while_running();
     test_para_init();
     test_lamp();
     test_align_turn();

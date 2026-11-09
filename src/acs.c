@@ -446,7 +446,7 @@ static void out_tick(void)
 
 void acs_cross_out(int16_t id)
 {
-    if (!acs_enabled() || (param_dv.collision_type != 1)) { return; }
+    if (!acs_enabled()) { return; }
     out_push((int16_t)(id % 100), 0);
 }
 
@@ -542,9 +542,8 @@ void acs_schedule(void)
     /* 수동·파라미터 모드에서는 보내지 않고 슬롯도 소모하지 않는다 */
     may_send = (D.ui_mode == UI_AUTO);
 
-    if (param_dv.collision_type == 1) {
-        sent = cross_tick(ACS_CROSS_IN, (int16_t)(D.cross_in_on || D.cross_in_flag), may_send);
-    }
+    /* 교차로 보고는 ACS 사용(36번 WRT)만 따른다. 42번(LUS)은 무시한다 */
+    sent = cross_tick(ACS_CROSS_IN, (int16_t)(D.cross_in_on || D.cross_in_flag), may_send);
     /* OUT 은 모드·초기화와 무관하게 ACK 까지 보낸다. 놓치면 구역이 영영 막힌다 */
     sent |= cross_tick(ACS_CROSS_OUT, (int16_t)(s_out_cnt > 0), (uint16_t)!sent);
     D.cross_ack_error = (int16_t)(s_cross[ACS_CROSS_IN].ack_error || s_cross[ACS_CROSS_OUT].ack_error);

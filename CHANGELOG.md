@@ -1,5 +1,34 @@
 # 변경 이력
 
+## 미릴리스 (2026-11-09, 파라미터 메뉴·공차 프로필)
+- 파라미터 메뉴를 5묶음으로 바꿨다. EEPROM 번호·체크섬(1\~45)은 그대로다. 묶음 화면 `P1SPD` 속도, `P2RUN` 주행·안전,
+  `P3CAR` 차량·튜닝, `P4COM` 통신·표시(27번이 켜지면 램프 G·R·Y 포함), `P5INF` 정보·개발. 키: PARA 에서 SET → 묶음,
+  MODE 다음 묶음(UP·DOWN 은 묶음 화면에서 아무 일 없다), SET 들어가기, UP·DOWN 항목, SET 수정·확정, RESET 나오기.
+  5번 묶음 목록에서 SHIFT 를 2 s 누르면 숨김 항목(4 ATD, 43 SR, 38 GSR, 39 LG)을 이번 전원 동안 보인다.
+  예전 USE·OTH·LAMP 묶음은 없어졌다.
+- 이름: 28 `ACD`→`SPN`, 44 `CO-`→`GTO`, 31 `MPU`→`CML`, 43 `C-`→`SR`, 38 `SO-`→`GSR`, 39 `SU`→`LG`.
+  43·39 는 값이 3자리라 FND 에 두 글자만 들어간다. 튜닝 결과 쪽도 같은 이름(`ui_param_text`)을 쓴다.
+- 메뉴에서 뺐다: 15(ST), 29(SSN), 30(TTY), 42(LUS). EEPROM 칸·한계·기본값은 그대로다. 코어는 이 넷을 읽지 않는다
+  (`param_dv.switch_start_num`, `param_dv.collision_type` 삭제). 스테이션 표시(9번 = 7)는 인터페이스와 무관하게
+  ACS 목적지 큐 첫 값, 비면 `---`.
+- 42번(LUS) 무시: 교차로 IN 보고와 OUT 큐는 36번(WRT ≠ 0, ACS 사용)만 따른다. 전에는 42번 일의 자리가 0 이면
+  'I' 태그에서 CD 정지·허가 대기는 하면서 IN 을 보고하지 않아 일반 출발 지령이 올 때까지 서 있었다.
+- 공차 프로필: 새 파라미터 54 EDS 공차 최고 속도, 55 ETN 공차 회전 속도, 56 EAC 공차 가속, 57 EDC 공차 감속,
+  58 LDS 적재 감지(0 끔·1 켬). 체크섬 밖 EEPROM 77\~81(KEEP 빈 칸). 한계는 1·3·12·13번 위와 같고 0(또는 그 번호 하한
+  아래)이면 적재 값. 기본 모두 0, LDS 0 이면 예전과 같다.
+  - 적재 센서는 사이트가 프로파일별로 준다: `PROFILE_LOAD(profile, type, from, to, LOAD_SENSORS(...))`,
+    `profile_row_t.load_mask`, `seq_load_mask()`. 정의 없는 프로파일은 LDS 를 켜도 늘 적재.
+  - 판정(`run.c load_tick`, 10 ms): 켤 때·튜닝 중·모르면 적재. 센서 하나라도 켜지면 바로 적재. 서 있고(`flag_run` 0
+    또는 `vin_out` 0) 센서가 모두 꺼진 채 5 s 면 공차. 달리는 중에는 공차로 바뀌지 않는다. 달리는 중 적재로 바뀌면
+    지령을 적재 최고 속도로 낮춰 적재 DCC 로 줄인다.
+  - `param_profile(empty)`·`param_profile_empty()`·`param_active(idx)`: `target_speed`·`turn_speed`·`acc`·`dcc`(와
+    low·llow)가 지금 프로필 값이다. 정지 거리 계산(stop.c)은 원래 `P.dcc` 를 쓰므로 실제 DCC 를 쓴다.
+  - 운전 화면: 공차면 둘째 자리 점.
+  - t1 제작: LDS 가 켜져 있고 min(EDS, 1번 추천 상한)이 지금(추천) 1번보다 빠르면 정지 단계(35번 추천)만 그 속도와
+    EDC(쓸 수 없으면 추천 DCC)로 달리고 단계 끝에 되돌린다.
+- `storage_request` 가 KEEP 칸(51\~109)을 쓰면 KEEP 거울도 맞춘다. 77\~81 파라미터가 `keep_flush_if_changed` 에
+  옛 값으로 덮이지 않게.
+
 ## 미릴리스 (2026-11-09, 제자리 회전)
 - 정렬 회전 끝을 거리 감속으로 바꿨다. 새 라인이 보이면 위치(가이드 `h`, GD)로 남은 각을 고친 `tape_end_cnt` 까지
   v² = 최저² + 2 × (회전 감속 × 0.75) × 거리로 줄여 마지막 2도(`TAPE_CREEP_DEG`)만 최저 속도로 간다. 전에는 라인이

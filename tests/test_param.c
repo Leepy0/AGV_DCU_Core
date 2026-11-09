@@ -64,6 +64,19 @@ int main(void)
     assert(fake_ee_writes == 0 && fake_ee[116] == 5 && fake_ee[P_SPEED_TURN] == 13);
     assert(param_boot(&fake_store, 2611) == 0 && param_get(P_OPT_FLAGS) == 5 && param_get(P_SPEED_TURN) == 13);
     assert(param_set(P_OPT_FLAGS, 0) == 0 && param_set(P_SPEED_FF, 0) == 0 && param_set(P_ENC_STALL_TICKS, 0) == 0);
+    /* 공차 프로필: 기본 0, 77~81 저장, 0·적재 하한 아래는 적재 값. 부팅은 적재 */
+    assert(param_get(P_EMPTY_SPEED) == 0 && param_get(P_LOAD_DETECT) == 0 && !param_profile_empty());
+    { int16_t t = P.target_speed, d = P.dcc, a = P.acc;
+      assert(param_set(P_EMPTY_SPEED, 45) == 0 && fake_ee[PARAM_EMPTY_ADDR0] == 45 && P.target_speed == t);
+      assert(param_set(P_EMPTY_DCC, 30) == 0 && fake_ee[PARAM_EMPTY_ADDR0 + 3] == 30 && param_set(P_LOAD_DETECT, 2) == -1);
+      param_profile(1);
+      assert(P.target_speed == param_rpm(45) && P.dcc == 30 && P.acc == a);   /* EAC 0 = 적재 값 */
+      assert(param_active(P_SPEED_HIGH) == 45 && param_active(P_SPEED_TURN) == param_get(P_SPEED_TURN));
+      assert(param_set(P_EMPTY_SPEED, 5) == 0 && P.target_speed == t);           /* 1번 하한 7 아래 */
+      param_profile(0);
+      assert(P.target_speed == t && P.dcc == d && P.acc == a);
+      assert(param_boot(&fake_store, 2611) == 0 && param_get(P_EMPTY_DCC) == 30 && !param_profile_empty());
+      assert(param_set(P_EMPTY_SPEED, 0) == 0 && param_set(P_EMPTY_DCC, 0) == 0); }
     /* 빈 EEPROM → 한계 위반 → 기본값 1 세트 저장 */
     assert(param_get(P_SPEED_HIGH) == 30 && param_get(P_SPEED_LOW) == 25 && param_get(P_SPEED_TURN) == 13);
     assert(param_get(P_ACS_VERSION) == 11 && param_get(P_VERSION) == 2611);
@@ -96,7 +109,6 @@ int main(void)
     assert(param_get(P_ACS_RETRY_SEC) == 1 && param_get(P_CROSS_MODE) == 1 && param_get(P_ERR_REPORT_MIN) == 10);
     assert(param_get(P_CROSS_IN_CM) == 60);
     assert(param_get(P_BAT_OFFSET_DV) == -9 && (int16_t)fake_ee[P_BAT_OFFSET_DV] == -9);
-    assert(P.collision_type == 1);
     param_default(3);
     assert(param_get(P_WHEEL_BASE_MM) == 130 && param_get(P_AGV_ID) == 3 && param_get(P_SPEED_MIN) == 7);
     assert(param_get(P_STOP_LEN_MM) == 0 && param_get(P_AGV_TYPE) == 33);
@@ -131,8 +143,7 @@ int main(void)
     assert(param_set(P_SPEED_TURN, 3) == 0 && P.turn_speed == param_rpm(3));
     assert(param_set(P_SPEED_LOW, 60) == 0 && P.low_speed == P.target_speed);
     assert(param_set(P_STEER_KI, 5) == 0 && agv_drive.p_ki == 5.0f * 0.1f);
-    assert(param_set(P_CROSS_MODE, 10) == 0 && P.collision_type == 0);
-    assert(param_set(P_CROSS_MODE, 1) == 0 && P.collision_type == 1);
+    assert(param_set(P_CROSS_MODE, 10) == 0);       /* 42번은 무시한다. 한계·저장만 남는다 */
 
     /* 체크섬 불일치는 읽은 값을 그대로 쓴다 */
     fake_ee[0] = (uint16_t)(fake_ee[0] + 1);

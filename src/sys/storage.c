@@ -30,6 +30,8 @@ void storage_request(uint16_t addr, uint16_t value)
 {
     if (addr >= EE_WORDS) { return; }
     s_val[addr] = value;
+    /* KEEP 빈 칸을 쓰는 파라미터(77~81)가 keep_flush 로 옛 값에 덮이지 않게 */
+    if ((addr >= KEEP_FIRST) && (addr <= KEEP_LAST)) { s_keep[addr - KEEP_FIRST] = (int16_t)value; }
     s_dirty[addr >> 4] |= (uint16_t)(1u << (addr & 15u));
 }
 
