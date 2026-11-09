@@ -60,7 +60,7 @@ static const uint16_t s_menu[] = {
     P_STOP_LEN_FWD_MM,
     P_AUTO_DRIVE_MODE, P_INTERFACE_MODE, P_SOUND, P_DISPLAY_MODE, P_BAT_OFFSET_DV, P_SPEED_JOG, P_ACC, P_DCC,
     P_STATION_NO, P_BRANCH_MODE, P_TAG_DIGITS, P_STEER_KP, P_STEER_KI, P_SWITCH_START_NUM, P_TAG_TYPE,
-    P_COMM_LINK, P_ACS_STANDBY, P_BRANCH_OFFSET, P_CROSS_IN_TIME, P_ACS_RETRY_LEGACY, P_ACS_RETRY_SEC,
+    P_COMM_LINK, P_ACS_STANDBY, P_BRANCH_OFFSET, P_CROSS_IN_CM, P_ACS_RETRY_LEGACY, P_ACS_RETRY_SEC,
     P_GUIDE_CURVE_DETECT, P_LEGACY_QUIRKS, P_ERR_REPORT_MIN, P_CROSS_RETRY_100MS, P_CROSS_MODE,
     P_STEER_RPM_OFFSET, P_GUIDE_TIMEOUT, P_OPT_FLAGS, P_SPEED_FF, P_ENC_STALL_TICKS, P_ACS_VERSION, P_LAMP_EXT_USE, P_PARA_INIT, P_VERSION, P_BAT_DV,
     P_BAT_PERCENT
@@ -73,7 +73,7 @@ static const para_view_t s_view[P_COUNT] = {
     {"DRS", 2}, {"LOS", 2}, {"TNS", 2}, {"ATD", 1}, {"ITM", 2}, {"SND", 0}, {"BPS", 2}, {"OBS", 2}, {"DSM", 2},
     {"BO-", 2}, {"JSP", 2}, {"ACC", 2}, {"DCC", 2}, {"AS ", 3}, {"ST ", 3}, {"BRM", 1}, {"TFB", 2}, {"TAG", 1},
     {"SL ", 3}, {"K_P", 2}, {"K_I", 2}, {"WS ", 3}, {"RG ", 3}, {"WW ", 3}, {"ID_", 2}, {"AT ", 3}, {"LO ", 3},
-    {"ACD", 2}, {"SSN", 2}, {"TTY", 1}, {"MPU", 2}, {"FL ", 3}, {"ASS", 2}, {"BGO", 2}, {"CIT", 2}, {"WRT", 2},
+    {"ACD", 2}, {"SSN", 2}, {"TTY", 1}, {"MPU", 2}, {"FL ", 3}, {"ASS", 2}, {"BGO", 2}, {"CID", 3}, {"WRT", 2},
     {"CT ", 3}, {"SO-", 2}, {"SU ", 3}, {"EST", 2}, {"RCI", 2}, {"LUS", 2}, {"C- ", 3}, {"CO-", 2}, {"AV-", 2},
     {"INT", 2}, {"V_ ", 3}, {"VT ", 3}, {"CR ", 3},
     {"GD ", 3}, {"OPT", 2}, {"FF ", 3}, {"ES ", 2}

@@ -82,6 +82,7 @@ typedef struct {
     /* 정지·회전 거리. 엔코더 ISR 이 감소시킨다 */
     volatile int16_t stop_pulses;    /* gCnt_stop_lenght */
     volatile int16_t turn_pulses;    /* Cnt_Turn_Angle */
+    volatile int16_t cross_pulses;   /* 교차로 대기 정지까지 남은 거리. cross_*_flag 가 켜져 있을 때만 뜻이 있다 */
     int16_t turn_motion;             /* Turn_Direction: 0 없음, MOTION_CCW, MOTION_CW */
     int16_t turn_obs_use;            /* Turn_OBS_Use */
     int16_t tape_align;              /* DA_Tape_Turn_Angle_Align */

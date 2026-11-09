@@ -37,7 +37,6 @@ typedef struct {
     uint16_t ack;
     uint16_t ack_error;
     uint16_t retry;
-    uint16_t delay;         /* Flag 뒤 On 까지 지연 카운터 (Cnt_Flag_Cross_*) */
     int16_t  timer;
 } acs_cross_t;
 
@@ -85,7 +84,6 @@ void acs_reset(void)
         s_cross[i].ack = 0;
         s_cross[i].ack_error = 0;
         s_cross[i].retry = 0;
-        s_cross[i].delay = 0;
         s_cross[i].timer = 0;
     }
     s_stat.tx = s_stat.retry = s_stat.give_up = 0;
@@ -239,7 +237,6 @@ void acs_on_ack(uint16_t info)
         s_cross[ACS_CROSS_OUT].num = 0;
         s_cross[ACS_CROSS_OUT].ack_error = 0;
         s_cross[ACS_CROSS_OUT].retry = 0;
-        s_cross[ACS_CROSS_OUT].delay = 0;
         s_cross[ACS_CROSS_OUT].timer = CROSS_KEEPALIVE;
         D.cross_out_flag = 0;
         D.cross_out_on = 0;
@@ -321,7 +318,6 @@ static void cross_begin(acs_cross_t *c, int16_t id)
     c->timer = 0;
     c->ack_error = 0;
     c->retry = 0;
-    c->delay = 0;
     c->bat = param_get(P_BAT_DV);
     c->msgid = frame_msgid_next();
 }
@@ -329,7 +325,6 @@ static void cross_begin(acs_cross_t *c, int16_t id)
 void acs_cross_release(uint16_t which)
 {
     cross_clear(&s_cross[which]);
-    s_cross[which].delay = 0;
     if (which == ACS_CROSS_IN) { D.cross_in_flag = D.cross_in_on = 0; }
     else                       { D.cross_out_flag = D.cross_out_on = 0; }
 }
@@ -340,11 +335,25 @@ void acs_cross_clear(void)
     acs_cross_release(ACS_CROSS_OUT);
 }
 
+/* 허가 없이 갈 수 있는 거리를 건다. 0 cm 는 태그에서 바로 선다.
+ * shortcut: In·Out 이 함께 기다리면 먼저 건 (가까운) 목표 하나만 센다. 둘을 따로 세야 하면 카운터를 나눈다 */
+static void cross_arm(int16_t *flag, int16_t *on)
+{
+    float n = (float)param_get(P_CROSS_IN_CM) * 10.0f * param_dv.one_length_pulse + 0.5f;
+
+    if (n < 1.0f) {
+        *on = 1;
+        return;
+    }
+    if (!D.cross_in_flag && !D.cross_out_flag) { D.cross_pulses = (n > 32767.0f) ? (int16_t)32767 : (int16_t)n; }
+    *flag = 1;
+}
+
 void acs_cross_in(int16_t id)
 {
     if (!acs_enabled()) { return; }
     cross_begin(&s_cross[ACS_CROSS_IN], id);
-    D.cross_in_flag = 1;
+    cross_arm(&D.cross_in_flag, &D.cross_in_on);
     if (seq_is_active()) { D.cross_in_on = 1; }
 }
 
@@ -352,7 +361,13 @@ void acs_cross_out(int16_t id)
 {
     if (!acs_enabled()) { return; }
     cross_begin(&s_cross[ACS_CROSS_OUT], id);
-    D.cross_out_flag = 1;
+    cross_arm(&D.cross_out_flag, &D.cross_out_on);
+}
+
+void acs_cross_hold(void)
+{
+    if (D.cross_in_flag)  { D.cross_in_on = 1; D.cross_in_flag = 0; }
+    if (D.cross_out_flag) { D.cross_out_on = 1; D.cross_out_flag = 0; }
 }
 
 static int32_t cross_interval(void)
@@ -377,19 +392,6 @@ static int cross_send(uint16_t which)
     if (c->retry >= CROSS_ACK_ERROR_TRY) { c->ack_error = 1; }
     if (c->retry >= CROSS_TRY_WRAP)      { c->retry = 0; }
     return 1;
-}
-
-/* Flag 뒤 P_CROSS_IN_TIME × 100 ms 안에 허가가 없으면 정지로 넘어간다 */
-static void cross_delay(acs_cross_t *c, int16_t *flag, int16_t *on)
-{
-    if (*flag) {
-        c->delay++;
-        if (c->delay > (uint16_t)param_get(P_CROSS_IN_TIME) * 10u) {
-            *on = 1;
-            *flag = 0;
-            c->delay = 0;
-        }
-    }
 }
 
 /* 반환: 이번 호출에 프레임을 보냈으면 1 */
@@ -423,8 +425,6 @@ void acs_schedule(void)
     /* 수동·파라미터 모드에서는 보내지 않고 슬롯도 소모하지 않는다 */
     may_send = (D.ui_mode == UI_AUTO);
 
-    cross_delay(&s_cross[ACS_CROSS_IN], &D.cross_in_flag, &D.cross_in_on);
-    cross_delay(&s_cross[ACS_CROSS_OUT], &D.cross_out_flag, &D.cross_out_on);
     if (param_dv.collision_type == 1) {
         sent  = cross_tick(ACS_CROSS_IN,  (int16_t)(D.cross_in_on || D.cross_in_flag), may_send);
         sent |= cross_tick(ACS_CROSS_OUT, (int16_t)(D.cross_out_on || D.cross_out_flag), (uint16_t)(may_send && !sent));

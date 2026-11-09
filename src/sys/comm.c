@@ -176,6 +176,23 @@ static int32_t tag_distance(const rx_item_t *it, int16_t num)
     return (int32_t)(now - from);
 }
 
+/* 교차로 대기 거리에서 수신 뒤 달린 거리를 뺀다. 이미 지나쳤으면 바로 정지 유지 */
+static void cross_compensate(int32_t pulses)
+{
+    uint16_t irq;
+
+    if ((pulses <= 0) || (!D.cross_in_flag && !D.cross_out_flag)) { return; }
+    irq = hal_irq_save();
+    if (pulses >= (int32_t)D.cross_pulses) {
+        D.cross_pulses = 0;
+        hal_irq_restore(irq);
+        acs_cross_hold();
+        return;
+    }
+    D.cross_pulses = (int16_t)(D.cross_pulses - (int16_t)pulses);
+    hal_irq_restore(irq);
+}
+
 /* ---- 'E' ---- */
 
 static void tag_history_push(void)
@@ -242,15 +259,25 @@ static void on_event(const rx_item_t *it)
         if (tagact_run((uint16_t)num)) { tagact_compensate(d); }
         return;
     }
-    s_rfid.valid = 0;
     /* 'S' 의 [2] 는 PAN 이 아니라 부명령이다 */
     if (kind != 'S') { acs_set_pan(b[2]); }
     switch (kind) {
     case 'I':
-        if (!D.cross_in_flag && !D.cross_in_on) { acs_cross_in(num); }
-        break;
     case 'O':
-        if (!D.cross_out_flag && !D.cross_out_on) { acs_cross_out(num); }
+        {   /* 대기 거리는 'T' 정지 거리와 같은 방식으로 수신 지연·RFID 재시도를 보정한다.
+             * 다른 쪽 대기가 이미 건 거리는 ISR 이 줄이고 있으므로 새로 건 경우만 뺀다 */
+            int32_t d = tag_distance(it, num);
+            int16_t fresh = (int16_t)(!D.cross_in_flag && !D.cross_out_flag);
+            if (kind == 'I') {
+                if (D.cross_in_flag || D.cross_in_on) { break; }
+                acs_cross_in(num);
+            }
+            else {
+                if (D.cross_out_flag || D.cross_out_on) { break; }
+                acs_cross_out(num);
+            }
+            if (fresh) { cross_compensate(d); }
+        }
         break;
     case 'D': acs_report_slot(ACS_SLOT_DISPLAY, num); break;
     case 'B': run_standby(num, 1); break;
@@ -258,6 +285,7 @@ static void on_event(const rx_item_t *it)
     case 'S': speed_command(b, num); break;
     default: break;
     }
+    s_rfid.valid = 0;
 }
 
 /* ---- 'W' ---- */

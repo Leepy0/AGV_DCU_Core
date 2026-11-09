@@ -31,6 +31,7 @@
 #define STOP_RAPID_DCC_DIV       1
 #define STOP_RAPID_DCC_MAX       60
 #define STOP_ENCODER_PPR         12
+#define STOP_OBSTACLE_CLEAR_TICKS 30    /* OPT_PAUSE_RESUME_SMOOTH: 감속 중 장애물이 이만큼 비어야 이어 간다 */
 
 typedef enum {
     STOP_REASON_NONE = 0,
@@ -38,6 +39,7 @@ typedef enum {
     STOP_REASON_TAG_DOCKING,
     STOP_REASON_BEFORE_TURN,
     STOP_REASON_TURN_ANGLE,
+    STOP_REASON_TRAFFIC_POSITION,       /* 교차로 대기 목표 D.cross_pulses. 서면 STOP_REASON_TRAFFIC 유지로 넘어간다 */
     STOP_REASON_COMMAND = 10,
     STOP_REASON_SWITCH,
     STOP_REASON_OBSTACLE,

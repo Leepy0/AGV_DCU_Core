@@ -38,18 +38,19 @@
 typedef unsigned long long dsl_cond_t;
 #define DSL_COND_ON(c)   ((uint32_t)(c))
 #define DSL_COND_OFF(c)  ((uint32_t)((c) >> 32))
-/* 같은 신호를 ON 과 OFF 양쪽에 쓰면 컴파일 오류 */
-#define DSL_COND_OK(c)   (0 * sizeof(char[(DSL_COND_ON(c) & DSL_COND_OFF(c)) ? -1 : 1]))
+/* 양쪽 절반에 같이 선 비트 = "그중 하나라도 ON". ON(x) 와 OFF(x) 를 같이 쓰면 ANY_ON(x) 로 읽힌다 */
 
 #define DSL_STEP(kind, target, a0, a1, to, on, off, out)                                     \
     { (uint16_t)(kind), (uint16_t)(target), (uint16_t)(a0), (uint16_t)(a1), (uint16_t)(to),  \
       (uint32_t)(on), (uint32_t)(off), (uint32_t)(out) },
 #define DSL_STEP_C(kind, target, a0, a1, to, c, out)                                         \
-    DSL_STEP(kind, target, a0, a1, to, DSL_COND_ON(c) + DSL_COND_OK(c), DSL_COND_OFF(c), out)
+    DSL_STEP(kind, target, a0, a1, to, DSL_COND_ON(c), DSL_COND_OFF(c), out)
 
 /* ---- 조건 ---- */
 #define ON(...)          ((dsl_cond_t)DSL_MASK(__VA_ARGS__))
 #define OFF(...)         (((dsl_cond_t)DSL_MASK(__VA_ARGS__)) << 32)
+/* 나열한 신호 중 하나라도 켜짐. 같은 마스크를 양쪽 절반에 넣는다. 예: IN( ANY_ON(S1, S2), OFF(S5) ) */
+#define ANY_ON(...)      (((dsl_cond_t)DSL_MASK(__VA_ARGS__)) | (((dsl_cond_t)DSL_MASK(__VA_ARGS__)) << 32))
 #define DSL_IN1(a)       (a)
 #define DSL_IN2(a, b)    ((a) | (b))
 #define IN(...)          DSL_CAT(DSL_IN, DSL_NARG(__VA_ARGS__))(__VA_ARGS__)

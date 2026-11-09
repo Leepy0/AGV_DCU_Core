@@ -3,7 +3,7 @@
  *
  * 호스트: gcc -std=c99 -DAGV_HOST_BUILD -Iinclude tests/test_dsl.c -o build/test_dsl && build/test_dsl
  * 타깃:   cl2000 -v28 -ml -mt --c99 -Iinclude --compile_only tests/test_dsl.c
- * 컴파일 오류 시험: -DNEG_SAME_SIGNAL, -DNEG_AMP_INPUT, -DNEG_NO_DIRECTION 각각 컴파일이 실패해야 한다.
+ * 컴파일 오류 시험: -DNEG_AMP_INPUT, -DNEG_NO_DIRECTION 각각 컴파일이 실패해야 한다.
  */
 #include "agv/seq_dsl.h"
 
@@ -49,9 +49,8 @@ SEQ_BEGIN( demo )
     FORBACK( BACK )
     TURN( CW, 90, 1, 1, 0 )
     END_RESTART
-#ifdef NEG_SAME_SIGNAL
-    WAIT( IN( ON(SEN_A), OFF(SEN_A) ) )
-#endif
+    WAIT( ANY_ON(SEN_A, SEN_B) )
+    WAIT( IN( ANY_ON(SEN_A, SEN_B), OFF(IN_EXT_4) ) )
 #ifdef NEG_AMP_INPUT
     WAIT( IN( ON(IN_AMP_L_OVERLOAD) ) )
 #endif
@@ -107,6 +106,10 @@ int main(void)
     assert(s[15].kind == SK_ERROR_HOLD && s[15].arg0 == 290 && s[15].on == (1UL << IN_START_SW) && s[15].target == SECOND);
     assert(s[16].arg0 == DIR_BACK);
     assert(s[17].arg0 == TURN_CW && s[17].arg1 == 90 && s[17].timeout == (1 | (1 << 4)));
+
+    /* ANY_ON: 같은 마스크가 양쪽 절반에 */
+    assert(s[19].on == 0x3UL && s[19].off == 0x3UL);
+    assert(s[20].on == 0x3UL && s[20].off == 0xBUL);                     /* any=A·B + 전부 OFF=EXT_4 */
 
     assert(site_seqs[0].nsteps == sizeof(demo_steps) / sizeof(seq_step_t));
     assert(site_acts[0].id == ACT_DEMO && site_acts[0].nsteps == 1);

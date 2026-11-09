@@ -11,6 +11,8 @@
 #define SEN_A   IN_EXT_1
 #define SEN_B   IN_EXT_2
 #define SEN_C   IN_EXT_3
+#define SEN_D   IN_EXT_4
+#define SEN_E   IN_EXT_5
 #define O_A     OUT_EXT_1
 #define O_B     OUT_EXT_2
 #define O_C     OUT_EXT_3
@@ -37,6 +39,20 @@ SEQ_BEGIN( s_branch )
     OUT_OFF( O_A )
     END_RESTART
     L( L_B )
+    OUT_ON( O_B )
+    END_STOP
+    L( L_C )
+    END_ERROR( 123 )
+SEQ_END
+
+/* ANY_ON: 4개 중 하나라도 켜지고 SEN_E 꺼짐 */
+SEQ_BEGIN( s_any )
+    SELECT_BEGIN
+        WHEN( IN( ANY_ON(SEN_A, SEN_B, SEN_C, SEN_D), OFF(SEN_E) ), L_A )
+    SELECT_END_TO( 100, L_C )
+    L( L_A )
+    OUT_ON( O_A )
+    WAIT( ANY_ON(SEN_B, SEN_C) )
     OUT_ON( O_B )
     END_STOP
     L( L_C )
@@ -193,7 +209,7 @@ ACT_END
 
 enum {
     S_BRANCH = SEQ_SITE_BASE, S_UNMATCHED, S_TIMING, S_ACS, S_DRIVE, S_BUDGET, S_OUTS, S_FLICKER,
-    S_HANDSHAKE, S_WAIT_OUT, S_CALL, S_BAD_LABEL, S_ACT_START, S_PROF, S_NO_TABLE
+    S_ANY, S_HANDSHAKE, S_WAIT_OUT, S_CALL, S_BAD_LABEL, S_ACT_START, S_PROF, S_NO_TABLE
 };
 
 SEQ_MAP_BEGIN( site_seqs )
@@ -205,6 +221,7 @@ SEQ_MAP_BEGIN( site_seqs )
     SEQ_MAP( 0, S_BUDGET, s_budget )
     SEQ_MAP( 0, S_OUTS, s_outs )
     SEQ_MAP( 0, S_FLICKER, s_flicker )
+    SEQ_MAP( 0, S_ANY, s_any )
     SEQ_MAP( 0, S_HANDSHAKE, s_handshake )
     SEQ_MAP( 0, S_WAIT_OUT, s_wait_out )
     SEQ_MAP( 0, S_CALL, s_call )
@@ -300,6 +317,22 @@ int main(void)
     seq_run();                     /* 4 틱째 = 3 초과 */
     assert(!seq_is_active() && fake_out == 0 && fake_restart_count == 1);
     assert(seq_request_flag[S_BRANCH] == 0);
+
+    /* ANY_ON: 0개 켜짐 = 거짓, 1개 = 참, OFF 항목 위반 = 거짓 */
+    start(S_ANY);
+    seq_run(); seq_run();
+    assert(seq_is_active() && seq_active_step() == 0 && fake_out == 0);
+    fake_in = BIT(SEN_C) | BIT(SEN_E);          /* ANY 만족, SEN_E 켜져 있어 거짓 */
+    seq_run();
+    assert(fake_out == 0);
+    fake_in = BIT(SEN_D);                       /* 4번째 하나만 */
+    seq_run();
+    assert(fake_out == BIT(O_A) && seq_is_active());
+    seq_run();                                  /* WAIT ANY_ON(B,C): D 만으로는 거짓 */
+    assert(fake_out == BIT(O_A));
+    fake_in = BIT(SEN_D) | BIT(SEN_B);
+    seq_run();
+    assert(fake_out == (BIT(O_A) | BIT(O_B)));
 
     /* WHEN 묶음 시간 제한 */
     start(S_BRANCH);

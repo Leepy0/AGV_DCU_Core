@@ -16,7 +16,8 @@ enum {
     P_STEER_KP, P_STEER_KI, P_WHEEL_DIA_MM, P_GEAR_RATIO, P_WHEEL_BASE_MM, P_AGV_ID, P_AGV_TYPE,
     P_LAMP_EXT_USE, P_SPEED_MIN, P_SWITCH_START_NUM, P_TAG_TYPE,
     P_COMM_LINK,            /* 31: 0 지그비, 1 WiFi 브릿지 */
-    P_STOP_LEN_FWD_MM, P_ACS_STANDBY, P_BRANCH_OFFSET, P_CROSS_IN_TIME,
+    P_STOP_LEN_FWD_MM, P_ACS_STANDBY, P_BRANCH_OFFSET,
+    P_CROSS_IN_CM,          /* 35: 교차로 대기 정지 위치, 'I'·'O' 태그 뒤 cm. 0 = 태그에서 바로 정지 */
     P_ACS_RETRY_LEGACY,     /* 36: 0 이면 ACS 통신 미사용 */
     P_ACS_RETRY_SEC,
     P_GUIDE_CURVE_DETECT,   /* 38: guide.h 의 GUIDE_SRC_*. 위치 소스 선택을 겸한다 */
@@ -53,6 +54,7 @@ enum {
 #define OPT_RESUME_CRUISE  0x04u   /* 일시정지 재개 때 남은 거리가 길면 최대 속도까지 가속한다 */
 #define OPT_KF_POSITION    0x08u   /* 조향 입력을 칼만 추정 위치로 쓴다 (기존 원시값) */
 #define OPT_STEER_WB       0x10u   /* 조향 이득을 휠 간격에 비례시킨다. 60 cm 기준. 크기가 다른 차량을 같은 이득으로 쓴다 */
+#define OPT_PAUSE_RESUME_SMOOTH 0x20u /* 일시정지 감속 중 원인이 풀리면 0 까지 가지 않고 지금 지령에서 다시 간다 */
 
 /* 저장 계층. 부팅 경로의 write 는 끝난 뒤 돌아와야 한다.
  * 운전 중에는 저장 큐에 넣는 구현으로 바꿔 끼워도 된다 */

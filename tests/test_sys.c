@@ -634,6 +634,8 @@ static void test_cross(void)
     send_frame(b, 0);
     run_scan(1);
     assert(D.cross_in_flag == 1);
+    /* 대기 거리 CID cm. 'T' 처럼 수신 뒤 달린 1 펄스를 뺀다 */
+    assert(D.cross_pulses == (int16_t)((float)param_get(P_CROSS_IN_CM) * 10.0f * P.one_length_pulse + 0.5f) - 1);
     run_scan(1);
     assert(tx_has('E', 'I'));
     /* ACS 정지: 교차로 대기 */

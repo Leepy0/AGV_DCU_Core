@@ -50,14 +50,15 @@ int main(void)
     assert(param_set(P_GUIDE_DIST_MM, 250) == 0);
     /* 시험용 스위치: 기본 0, 체크섬 밖 116~118 */
     assert(param_get(P_OPT_FLAGS) == 0 && param_get(P_SPEED_FF) == 0 && param_get(P_ENC_STALL_TICKS) == 0);
-    assert(param_set(P_OPT_FLAGS, 32) == -1 && param_set(P_OPT_FLAGS, 5) == 0 && fake_ee[116] == 5);
+    assert(param_set(P_OPT_FLAGS, 64) == -1 && param_set(P_OPT_FLAGS, 37) == 0 && param_opt(OPT_PAUSE_RESUME_SMOOTH));
+    assert(param_set(P_OPT_FLAGS, 5) == 0 && fake_ee[116] == 5);
     assert(param_opt(OPT_STEER_10MS) && !param_opt(OPT_STEER_D_SIGN) && param_opt(OPT_RESUME_CRUISE));
     assert(param_set(P_SPEED_FF, 120) == 0 && fake_ee[117] == 120 && P.speed_ff == 0.12f);
     assert(param_set(P_ENC_STALL_TICKS, 30) == 0 && fake_ee[118] == 30 && P.stall_ticks == 30);
     assert(param_boot(&fake_store, 2611) == 0 && param_get(P_OPT_FLAGS) == 5 && param_get(P_SPEED_FF) == 120);
     /* RAM 에만: 값은 바뀌고 EEPROM 은 그대로 */
     fake_ee_writes = 0;
-    assert(param_set_ram(P_OPT_FLAGS, 32) == -1 && param_set_ram(0, 1) == -1);
+    assert(param_set_ram(P_OPT_FLAGS, 64) == -1 && param_set_ram(0, 1) == -1);
     assert(param_set_ram(P_OPT_FLAGS, 2) == 0 && param_get(P_OPT_FLAGS) == 2 && !param_opt(OPT_STEER_10MS));
     assert(param_set_ram(P_SPEED_TURN, 12) == 0 && param_get(P_SPEED_TURN) == 12);
     assert(fake_ee_writes == 0 && fake_ee[116] == 5 && fake_ee[P_SPEED_TURN] == 13);
@@ -93,6 +94,7 @@ int main(void)
     param_default(2);
     assert(param_get(P_SPEED_HIGH) == 25 && param_get(P_GEAR_RATIO) == 60 && param_get(P_AGV_TYPE) == 22);
     assert(param_get(P_ACS_RETRY_SEC) == 1 && param_get(P_CROSS_MODE) == 1 && param_get(P_ERR_REPORT_MIN) == 10);
+    assert(param_get(P_CROSS_IN_CM) == 60);
     assert(param_get(P_BAT_OFFSET_DV) == -9 && (int16_t)fake_ee[P_BAT_OFFSET_DV] == -9);
     assert(P.collision_type == 1);
     param_default(3);

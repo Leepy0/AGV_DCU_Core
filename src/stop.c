@@ -1,5 +1,6 @@
 /* stop.c - MotorStop 상태기계. 상수와 동작은 원본 그대로이며 docs/07 의 비교 시험으로 확인한다 */
 #include "agv/stop.h"
+#include "agv/acs.h"
 #include "agv/drive.h"
 #include "agv/motor.h"
 #include "agv/param.h"
@@ -16,12 +17,13 @@ static int16_t s_paused_valid;
 static int16_t s_paused_sign = 1;
 static int16_t s_command_sign = 1;
 static int16_t s_pause_alarm;
+static int16_t s_clear_ticks;            /* 일시정지 감속 중 원인이 비어 있던 연속 틱 */
 
 /* ---- 제어기 ---- */
 
 int16_t stop_is_position(int16_t reason)
 {
-    return (reason >= STOP_REASON_TAG_POSITION) && (reason <= STOP_REASON_TURN_ANGLE);
+    return (reason >= STOP_REASON_TAG_POSITION) && (reason <= STOP_REASON_TRAFFIC_POSITION);
 }
 
 int16_t stop_is_pause(int16_t reason)
@@ -107,7 +109,9 @@ void stop_ctrl_begin(stop_ctrl_t *c, int16_t reason, int16_t entry_rpm, int16_t 
         limit = (reason == STOP_REASON_TURN_ANGLE)
               ? turn_dcc(dcc)
               : stop_clamp(dcc, 1, STOP_RAPID_DCC_MAX);
-        c->phase = (reason == STOP_REASON_TURN_ANGLE) ? STOP_PHASE_CRUISE : STOP_PHASE_DECELERATE;
+        /* 회전과 교차로 대기는 제동점까지 순항한다 */
+        c->phase = ((reason == STOP_REASON_TURN_ANGLE) || (reason == STOP_REASON_TRAFFIC_POSITION))
+                 ? STOP_PHASE_CRUISE : STOP_PHASE_DECELERATE;
         c->decel_limit = limit;
         if ((reason == STOP_REASON_TURN_ANGLE) && (c->accel_limit > limit)) { c->accel_limit = limit; }
         if (remaining <= 0) {
@@ -117,7 +121,7 @@ void stop_ctrl_begin(stop_ctrl_t *c, int16_t reason, int16_t entry_rpm, int16_t 
             set_zero(c);
             c->phase = STOP_PHASE_FAILED;
         }
-        else if (reason != STOP_REASON_TURN_ANGLE) {
+        else if (c->phase != STOP_PHASE_CRUISE) {
             start_distance_brake(c, remaining, pulse_scale);
         }
     }
@@ -215,6 +219,13 @@ static float braking_pulses(const stop_ctrl_t *c, float scale)
     return rpm_sum * scale;
 }
 
+/* 순항을 한 틱 더 해도 남은 거리 안에서 설 수 있는가 */
+static int16_t cruise_left(const stop_ctrl_t *c, const stop_feedback_t *fb)
+{
+    return (float)fb->remaining_pulses > braking_pulses(c, fb->pulses_per_rpm_tick) +
+           (float)c->maximum_rpm * fb->pulses_per_rpm_tick * 2.0f;
+}
+
 int16_t stop_ctrl_update(stop_ctrl_t *c, const stop_feedback_t *fb)
 {
     int16_t both_idle, one_stalled, ceiling;
@@ -252,10 +263,7 @@ int16_t stop_ctrl_update(stop_ctrl_t *c, const stop_feedback_t *fb)
         return 0;
     }
     if (c->phase == STOP_PHASE_CRUISE) {
-        if ((float)fb->remaining_pulses > braking_pulses(c, fb->pulses_per_rpm_tick) +
-            (float)c->maximum_rpm * fb->pulses_per_rpm_tick * 2.0f) {
-            return ramp(c, c->maximum_rpm);
-        }
+        if (cruise_left(c, fb)) { return ramp(c, c->maximum_rpm); }
         c->phase = STOP_PHASE_DECELERATE;
         start_distance_brake(c, fb->remaining_pulses, fb->pulses_per_rpm_tick);
     }
@@ -326,6 +334,7 @@ void stop_clear(void)
 {
     stop_ctrl_reset(&s_ctrl);
     s_paused_valid = 0;
+    s_clear_ticks = 0;
 }
 
 void stop_clear_request(void)     { s_request = STOP_REASON_NONE; }
@@ -373,7 +382,7 @@ static void get_feedback(stop_feedback_t *fb, int16_t reason)
                     (3.14159265f * STOP_ANGLE_TOL_DEG / 180.0f);
     }
     else {
-        fb->remaining_pulses = D.stop_pulses;
+        fb->remaining_pulses = (reason == STOP_REASON_TRAFFIC_POSITION) ? D.cross_pulses : D.stop_pulses;
         tolerance = P.one_length_pulse * STOP_DISTANCE_TOL_MM;
     }
     fb->tolerance_pulses = (tolerance > 0.0f) ? (int16_t)tolerance : 0;
@@ -430,7 +439,16 @@ static void finish(void)
     D.flag_stopping = 1;
     D.flag_ready = D.flag_run = D.flag_jog_on = D.flag_turn = 0;
     D.amp_run = 0;
+    acs_cross_hold();       /* 교차로 대기 중 다른 정지로 섰다. 허가까지 다시 출발하지 않는다 */
 }
+
+/* 일시정지 뒤 이어 갈 위치 정지. 교차로 목표는 cross_pulses 에 남아 있어 기억하지 않는다 */
+static int16_t resumable(int16_t reason)
+{
+    return stop_is_position(reason) && (reason != STOP_REASON_TRAFFIC_POSITION);
+}
+
+static int16_t traffic_waiting(void) { return D.cross_in_flag || D.cross_out_flag; }
 
 static void remember_paused(void)
 {
@@ -439,19 +457,20 @@ static void remember_paused(void)
     s_paused_valid = 1;
 }
 
-static void resume_after_pause(void)
+/* 정지를 거두고 지령 entry(크기)·가속도 accel 에서 이어 간다. 멈춘 뒤 재개면 둘 다 0 이다 */
+static void resume_at(int16_t entry, int16_t accel)
 {
     if (s_paused_valid) {
         /* stop_pulses·turn_pulses 는 일시정지 내내 그대로이므로 끊긴 위치 정지를 남은 거리로 다시 시작한다.
-         * 멈춘 뒤 다시 가는 것이라 진입 rpm 은 0 이고, 학습한 바닥 속도는 이어받는다 */
+         * 진입 rpm 은 지금 지령이고, 학습한 바닥 속도는 이어받는다 */
         stop_feedback_t fb;
         int16_t saved_floor = s_paused.floor_rpm;
 
         get_feedback(&fb, s_paused.reason);
-        stop_ctrl_begin(&s_ctrl, s_paused.reason, 0, s_paused.maximum_rpm, P.acc, P.dcc,
+        stop_ctrl_begin(&s_ctrl, s_paused.reason, entry, s_paused.maximum_rpm, P.acc, P.dcc,
                         fb.remaining_pulses, fb.pulses_per_rpm_tick);
         s_command_sign = s_paused_sign;
-        D.vin_out = 0;
+        D.vin_out = (int16_t)(s_command_sign * entry);
         D.scv_accel = 0;
         s_ctrl.floor_rpm = saved_floor;
         s_ctrl.candidate_floor_rpm = saved_floor;
@@ -468,19 +487,39 @@ static void resume_after_pause(void)
         stop_begin_runtime(STOP_REASON_COMMAND);
     }
     else {
+        /* 주행 램프가 지금 지령·가속도에서 이어받는다. 램프는 가속 쪽 저크(acc/8)로 감속도를 풀므로
+         * 제동 감속도를 그대로 넘기면 한참 더 떨어지고 저속에서는 0 을 넘는다. acc 안으로 묶어 넘긴다 */
         stop_ctrl_reset(&s_ctrl);
+        D.vin_out = (int16_t)(s_command_sign * entry);
+        D.scv_accel = (int16_t)(s_command_sign * stop_clamp(accel, (int16_t)(-P.acc), P.acc));
         D.step = DRIVE_CHANGE_SPEED;
     }
     if (D.action_err == s_pause_alarm) { D.action_err = 0; }
     s_pause_alarm = 0;
+    s_clear_ticks = 0;
     D.obs_on = 0;
+}
+
+/* 교차로 대기 거리가 제동점에 왔는가. 주행 단계와 같은 진입·최대 rpm 으로 순항 판정을 해 본다 */
+static int16_t traffic_due(void)
+{
+    stop_ctrl_t probe;
+    stop_feedback_t fb;
+    int16_t entry = (D.last_input >= 0) ? D.last_input : (int16_t)(-D.last_input);
+    int16_t maximum = (D.speed_cmd > entry) ? D.speed_cmd : entry;
+
+    get_feedback(&fb, STOP_REASON_TRAFFIC_POSITION);
+    stop_ctrl_begin(&probe, STOP_REASON_TRAFFIC_POSITION, entry, maximum, P.acc, P.dcc,
+                    fb.remaining_pulses, fb.pulses_per_rpm_tick);
+    /* 바닥 속도 아래로 달리면 위치 제동을 못 한다. 목표에 닿을 때 유지로 선다 */
+    return (probe.phase == STOP_PHASE_CRUISE) && !cruise_left(&probe, &fb);
 }
 
 int16_t stop_run(void)
 {
     stop_feedback_t fb;
     int16_t request = s_request;
-    int16_t blocking = stop_blocking_reason();
+    int16_t blocking;
 
     s_request = STOP_REASON_NONE;
     if (D.stop_err != 0) { request = STOP_REASON_COMMAND; }
@@ -501,9 +540,13 @@ int16_t stop_run(void)
     }
     if ((request != STOP_REASON_NONE) &&
         !((s_ctrl.reason == STOP_REASON_TURN_ANGLE) && stop_is_position(request) && (D.turn_pulses <= 0))) {
-        if (stop_is_pause(request) && stop_is_position(s_ctrl.reason)) { remember_paused(); }
+        if (stop_is_pause(request) && resumable(s_ctrl.reason)) { remember_paused(); }
         else if (!stop_is_pause(request)) { s_paused_valid = 0; }
         if ((request != s_ctrl.reason) || stop_is_position(request)) { stop_begin_runtime(request); }
+    }
+    /* 서기 전에 허가가 왔다. 아직 진짜 정지가 아니므로 0 으로 내리지 않고 지금 지령에서 이어 간다 */
+    if ((s_ctrl.reason == STOP_REASON_TRAFFIC_POSITION) && !traffic_waiting() && !D.cross_in_on && !D.cross_out_on) {
+        resume_at(s_ctrl.command_rpm, s_ctrl.acceleration);
     }
     if (s_ctrl.phase == STOP_PHASE_IDLE) {
         if (D.flag_stopping) {
@@ -519,27 +562,54 @@ int16_t stop_run(void)
             stop_begin_runtime(STOP_REASON_TURN_ANGLE);
         }
     }
+    blocking = stop_blocking_reason();
+    /* 교차로 대기: 제동점까지는 주행 단계가 달리고 거기서 위치 정지로 넘어간다.
+     * 남은 거리가 더 짧은 태그 정지는 그대로 두고, 선 뒤 finish 가 유지로 넘긴다 */
+    if ((blocking == STOP_REASON_NONE) && traffic_waiting() && (D.control == RUN_DRIVE) &&
+        (((s_ctrl.phase == STOP_PHASE_IDLE) && D.flag_run) ||
+         (resumable(s_ctrl.reason) && (s_ctrl.reason != STOP_REASON_TURN_ANGLE) &&
+          (s_ctrl.phase < STOP_PHASE_WAIT_QUIET) && (D.stop_pulses > D.cross_pulses)))) {
+        if (D.cross_pulses <= 0) {
+            acs_cross_hold();
+            blocking = stop_blocking_reason();
+        }
+        else if (traffic_due()) {
+            if (s_ctrl.phase != STOP_PHASE_IDLE) { remember_paused(); }
+            stop_begin_runtime(STOP_REASON_TRAFFIC_POSITION);
+        }
+    }
     /* 장애물·교차로는 태그 접근 마지막 구간도 끊는다. 위치 목표와 학습한 바닥을 기억해 두고,
      * 끊긴 목표를 도착으로 치지 않는다 */
     if ((blocking != STOP_REASON_NONE) &&
         ((s_ctrl.phase == STOP_PHASE_IDLE) || stop_is_position(s_ctrl.reason))) {
-        if (stop_is_position(s_ctrl.reason)) { remember_paused(); }
+        if (resumable(s_ctrl.reason)) { remember_paused(); }
         stop_begin_runtime(blocking);
     }
-    if ((blocking == STOP_REASON_NONE) && stop_is_pause(s_ctrl.reason) && (s_ctrl.phase == STOP_PHASE_COMPLETE)) {
-        resume_after_pause();
+    if ((blocking != STOP_REASON_NONE) || !stop_is_pause(s_ctrl.reason)) {
+        s_clear_ticks = 0;
+    }
+    else if (s_ctrl.phase == STOP_PHASE_COMPLETE) {
+        resume_at(0, 0);
+    }
+    else if (param_opt(OPT_PAUSE_RESUME_SMOOTH)
+             && ((s_ctrl.phase == STOP_PHASE_DECELERATE) || (s_ctrl.phase == STOP_PHASE_APPROACH))) {
+        /* 서기 전에 원인이 풀렸다. 장애물은 잠깐 비는 깜빡임을 거른다 */
+        if (s_clear_ticks < STOP_OBSTACLE_CLEAR_TICKS) { s_clear_ticks++; }
+        if ((s_ctrl.reason != STOP_REASON_OBSTACLE) || (s_clear_ticks >= STOP_OBSTACLE_CLEAR_TICKS)) {
+            resume_at(s_ctrl.command_rpm, s_ctrl.acceleration);
+        }
     }
     if (s_ctrl.phase == STOP_PHASE_IDLE) { return 0; }
-    if (stop_is_pause(s_ctrl.reason)) {
+    if (stop_is_pause(s_ctrl.reason) || (s_ctrl.reason == STOP_REASON_TRAFFIC_POSITION)) {
         D.obs_on = 1;
-        s_pause_alarm = (s_ctrl.reason == STOP_REASON_TRAFFIC)
+        s_pause_alarm = ((s_ctrl.reason == STOP_REASON_TRAFFIC) || (s_ctrl.reason == STOP_REASON_TRAFFIC_POSITION))
                       ? (D.cross_ack_error ? ERR_CROSS_NO_ACK : ERR_CROSS_WAIT)
                       : ((s_ctrl.reason == STOP_REASON_PAUSE) ? ERR_PAUSE : ERR_OBSTACLE);
         D.action_err = s_pause_alarm;
     }
     if (D.flag_stopping) { D.stopping_process = 1; }
     if (D.control != RUN_JOG) { D.amp_dir = D.motion; }
-    if (D.immediate_stop && stop_is_position(s_ctrl.reason)) {
+    if (D.immediate_stop && resumable(s_ctrl.reason)) {
         D.stop_pulses = 0;
         if ((s_ctrl.phase != STOP_PHASE_WAIT_QUIET) && (s_ctrl.phase != STOP_PHASE_COMPLETE)) { set_zero(&s_ctrl); }
     }
@@ -550,6 +620,10 @@ int16_t stop_run(void)
     if (s_ctrl.phase == STOP_PHASE_FAILED) {
         D.stop_err = ERR_STOP_APPROACH;
         D.wait_start = D.run_restart = 0;
+    }
+    else if (s_ctrl.reason == STOP_REASON_TRAFFIC_POSITION) {
+        /* 목표에 섰다. 다음 틱부터 교차로 유지(STOP_REASON_TRAFFIC)가 허가까지 세운다 */
+        if ((s_ctrl.phase == STOP_PHASE_WAIT_QUIET) || (s_ctrl.phase == STOP_PHASE_COMPLETE)) { acs_cross_hold(); }
     }
     else if (s_ctrl.phase == STOP_PHASE_COMPLETE) {
         /* 정지가 끝나면 위험 감속 표시도 끝이다. 남으면 다음 주행 내내 적분 0·커브 모드가 된다 */

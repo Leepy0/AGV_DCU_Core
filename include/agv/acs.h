@@ -51,6 +51,9 @@ uint16_t acs_cross_acked(uint16_t which);
 uint16_t acs_cross_retry(uint16_t which);
 void     acs_cross_release(uint16_t which);   /* ACS 허가 또는 초기화: 재전송과 대기를 끝낸다 */
 void     acs_cross_clear(void);
+/* 대기(cross_*_flag) 중에는 태그 뒤 P_CROSS_IN_CM 까지 가서 선다 (stop.c 교차로 위치 정지).
+ * 정지가 끝나면 유지(cross_*_on)로 넘어가 허가까지 서 있는다 */
+void     acs_cross_hold(void);                 /* 대기를 유지로 넘긴다 */
 
 /* 스테이션 큐. push 반환 1 추가, 0 중복·0번·가득 참 */
 int      acs_station_push(int16_t n);

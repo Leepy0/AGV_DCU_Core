@@ -142,16 +142,23 @@ static void out_apply(seq_runner_t *r, uint32_t on, uint32_t off)
     r->owned = (r->owned & ~off) | on;
 }
 
+/* on·off 에 같이 선 비트(any)는 "하나라도 ON", 나머지는 전부 ON / 전부 OFF */
+static uint16_t mask_true(uint32_t v, uint32_t on, uint32_t off)
+{
+    uint32_t any = on & off;
+    uint32_t all_on = on & ~any;
+    uint32_t all_off = off & ~any;
+    return ((v & all_on) == all_on) && ((v & all_off) == 0) && ((any == 0) || ((v & any) != 0));
+}
+
 static uint16_t cond_true(const seq_step_t *s)
 {
-    uint32_t in = io_in_mask();
-    return ((in & s->on) == s->on) && ((in & s->off) == 0);
+    return mask_true(io_in_mask(), s->on, s->off);
 }
 
 static uint16_t cond_out_true(const seq_step_t *s)
 {
-    uint32_t out = io_out_mask();
-    return ((out & s->on) == s->on) && ((out & s->off) == 0);
+    return mask_true(io_out_mask(), s->on, s->off);
 }
 
 static void tick(seq_runner_t *r)

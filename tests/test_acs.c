@@ -184,14 +184,12 @@ int main(void)
 
     /* 교차로 간격: CT=1 → 10틱 */
     setup(1, 5, 1);
-    (void)param_set(P_CROSS_IN_TIME, 99);
     acs_cross_in(12);
     ticks(1);
     { int c = gap(100); assert(c >= 10 && c < 14); }
 
     /* 교차로 간격: 0 → 50틱, 큰 값 → 500틱 */
     setup(0, 5, 1);
-    (void)param_set(P_CROSS_IN_TIME, 99);
     acs_cross_in(12);
     ticks(1);
     assert(fake_tx_count == 1 && fake_tx[0][6] == 'I' && fake_tx[0][7] == '0' && fake_tx[0][8] == '1' && fake_tx[0][9] == '2');
@@ -199,7 +197,6 @@ int main(void)
 
     setup(99, 5, 1);
     (void)param_set(P_CROSS_RETRY_100MS, 99);
-    (void)param_set(P_CROSS_IN_TIME, 99);
     acs_cross_in(12);
     ticks(1);
     { int c = gap(700); assert(c >= 500 && c < 550); }
@@ -207,7 +204,6 @@ int main(void)
     /* ACK 뒤 500틱 교체. Cross-In/Out 은 서로 독립 */
     setup(0, 5, 1);
     (void)param_set(P_CROSS_RETRY_100MS, 5);    /* 50틱 */
-    (void)param_set(P_CROSS_IN_TIME, 99);
     acs_cross_in(1);
     acs_cross_out(2);
     D.cross_in_on = 1;
@@ -226,7 +222,6 @@ int main(void)
 
     /* 20회째 ack_error (286 근거) */
     setup(0, 5, 1);
-    (void)param_set(P_CROSS_IN_TIME, 99);
     acs_cross_in(1);
     D.cross_in_on = 1;
     { int guard = 0;
@@ -236,17 +231,31 @@ int main(void)
     ticks(1);
     assert(D.cross_ack_error == 0);
 
-    /* Flag 뒤 지연이 지나면 On, 꺼지면 상태 전부 초기화 */
+    /* 대기 거리: CID cm 를 펄스로 건다. 시간으로는 On 이 되지 않고, 유지로 넘기면 On. 꺼지면 상태 전부 초기화 */
     setup(0, 5, 1);
-    (void)param_set(P_CROSS_IN_TIME, 3);
+    (void)param_set(P_CROSS_IN_CM, 60);
     acs_cross_in(1);
-    ticks(30);
     assert(D.cross_in_flag == 1 && !D.cross_in_on);
-    ticks(1);
-    assert(!D.cross_in_flag && D.cross_in_on == 1);
+    assert(D.cross_pulses == (int16_t)(600.0f * param_dv.one_length_pulse + 0.5f));
+    ticks(2000);
+    assert(D.cross_in_flag == 1 && !D.cross_in_on);
+    D.cross_pulses = 7;
+    acs_cross_out(2);                           /* 먼저 건 가까운 목표를 지킨다 */
+    assert(D.cross_out_flag == 1 && D.cross_pulses == 7);
+    acs_cross_hold();
+    assert(!D.cross_in_flag && D.cross_in_on == 1 && !D.cross_out_flag && D.cross_out_on == 1);
     D.cross_in_on = 0;
     ticks(1);
     assert(acs_cross_num(ACS_CROSS_IN) == 0);
+
+    /* 0 cm 는 태그에서 바로 정지 (대기 없이 On) */
+    setup(0, 5, 1);
+    (void)param_set(P_CROSS_IN_CM, 0);
+    acs_cross_in(1);
+    assert(!D.cross_in_flag && D.cross_in_on == 1);
+    ticks(1);
+    assert(sent_info('I') == 1);
+    assert(param_set(P_CROSS_IN_CM, 999) == 0 && param_set(P_CROSS_IN_CM, 1000) != 0);
 
     /* 시퀀스가 돌고 있으면 바로 On: seq_is_active 는 test_seq 범위. 여기서는 꺼진 상태만 본다 */
 

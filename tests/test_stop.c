@@ -2,7 +2,9 @@
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
+#include "agv/acs.h"
 #include "agv/motor.h"
+#include "agv/param.h"
 #include "agv/steer.h"
 #include "agv/stop.h"
 #include "fakes.h"
@@ -11,6 +13,7 @@
 #define P param_dv
 
 static long s_left_acc[2];
+static long s_travel;          /* 주행 바퀴 누적 펄스 */
 
 static void setup(int16_t rpm)
 {
@@ -21,6 +24,8 @@ static void setup(int16_t rpm)
     stop_reset();
     steer_reset();
     memset(s_left_acc, 0, sizeof(s_left_acc));
+    s_travel = 0;
+    acs_reset();
     D.ui_mode = UI_AUTO;
     D.control = RUN_DRIVE;
     D.step = DRIVE_CRUISE;
@@ -40,6 +45,7 @@ static void plant(int16_t stiction)
             s_left_acc[i] -= 6000;
             motor_encoder_pulse(i);
             D.period[i] = 500000000L / (rpm ? rpm : 1);
+            if ((i == 0) && !D.backward) { s_travel++; if (D.cross_pulses > 0) { D.cross_pulses--; } }
             if ((i == 0) && !D.backward && (D.stop_pulses > 0)) { D.stop_pulses--; }
             if ((i == 1) && D.backward && (D.stop_pulses > 0))  { D.stop_pulses--; }
             if (D.turn_pulses > 0) { D.turn_pulses--; }
@@ -59,6 +65,245 @@ static int run_until_idle(int16_t stiction, int limit)
     int t = 0;
     while (D.flag_run && (t < limit)) { tick(stiction); t++; }
     return t;
+}
+
+/* 한 틱 지령 변화 한계. 바닥 속도 이하에서 0 으로 내리는 것은 설계다 (바퀴가 안 돈다) */
+static int16_t s_prev;
+static int s_jump, s_flip, s_zero;
+static void watch_reset(void) { s_prev = D.last_input; s_jump = s_flip = s_zero = 0; }
+static void watch(void)
+{
+    int16_t bound = (int16_t)(P.dcc + P.dcc / STOP_JERK_DIV + 1);
+    int16_t step = (int16_t)(D.last_input - s_prev);
+    if (step < 0) { step = (int16_t)(-step); }
+    if ((step > bound) && !((D.last_input == 0) && (s_prev <= STOP_MIN_RPM + bound))) { s_jump++; }
+    if (D.last_input < 0) { s_flip++; }
+    if (D.last_input == 0) { s_zero++; }
+    s_prev = D.last_input;
+}
+static void watch_tick(void) { tick(0); watch(); }
+
+static float travel_mm(long from) { return (float)(s_travel - from) / P.one_length_pulse; }
+
+/* 가속 중 정지·일시정지: 지령이 튀지 않고 부호가 안 바뀌고 끝까지 선다 */
+static void test_ramp_continuity(void)
+{
+    int k, t;
+    for (k = 0; k < 2; k++) {
+        setup(400);
+        D.speed_cmd = 3000;
+        D.step = DRIVE_CHANGE_SPEED;
+        watch_reset();
+        for (t = 0; t < 60; t++) { watch_tick(); }
+        assert(D.last_input > 600 && D.scv_accel > 0);       /* 가속 중이다 */
+        if (k == 0) { stop_request_rapid(STOP_REASON_COMMAND); D.flag_stopping = 1; }
+        else        { D.pause_stop = 1; }
+        for (t = 0; (t < 3000) && D.flag_run && (stop_phase() != STOP_PHASE_COMPLETE); t++) { watch_tick(); }
+        assert(s_jump == 0 && s_flip == 0);
+        assert((k == 0) ? (D.flag_run == 0) : (stop_phase() == STOP_PHASE_COMPLETE));
+        assert(D.last_input == 0);
+    }
+}
+
+/* 교차로 대기 정지: 태그 뒤 CID cm 에서 선다 */
+static long traffic_begin(int16_t rpm, int16_t cm)
+{
+    setup(rpm);
+    (void)param_set(P_CROSS_IN_CM, cm);
+    acs_cross_in(1);
+    watch_reset();
+    return s_travel;
+}
+
+static int run_until_hold(int limit)
+{
+    int t = 0;
+    while (!((stop_reason() == STOP_REASON_TRAFFIC) && (stop_phase() == STOP_PHASE_COMPLETE)) && (t < limit)) {
+        watch_tick();
+        t++;
+    }
+    return t;
+}
+
+static void test_traffic(void)
+{
+    static const int16_t speeds[3] = { 1200, 2000, 3000 };
+    int k, t;
+    long from;
+
+    for (k = 0; k < 3; k++) {
+        int seen_drive = 0, seen_alarm = 0;
+        from = traffic_begin(speeds[k], 60);
+        assert(D.cross_in_flag && !D.cross_in_on);
+        watch_reset();
+        for (t = 0; (t < 3000) && (stop_reason() != STOP_REASON_TRAFFIC_POSITION); t++) {
+            watch_tick();
+            if ((stop_phase() == STOP_PHASE_IDLE) && (D.last_input == speeds[k])) { seen_drive++; }
+        }
+        assert(seen_drive > 0);                                   /* 제동점까지 주행 단계가 그대로 달린다 */
+        assert(stop_phase() == STOP_PHASE_DECELERATE);
+        for (t = 0; (t < 3000) && (stop_reason() == STOP_REASON_TRAFFIC_POSITION); t++) {
+            watch_tick();
+            if (D.action_err == ERR_CROSS_WAIT) { seen_alarm++; }
+        }
+        assert(seen_alarm > 0);
+        assert(run_until_hold(3000) < 3000);
+        assert(D.action_err == ERR_CROSS_WAIT && D.cross_in_on && !D.cross_in_flag);
+        { float err = travel_mm(from) - 600.0f;
+          printf("  traffic %d rpm: %.1f mm\n", speeds[k], travel_mm(from));
+          assert(err > -3.0f && err < 3.0f); }
+        assert(s_jump == 0 && s_flip == 0);
+        for (t = 0; t < 200; t++) { tick(0); assert(D.last_input == 0); }   /* 허가까지 선다 */
+        acs_cross_release(ACS_CROSS_IN);                          /* 선 뒤 허가: 오늘처럼 다시 출발 */
+        tick(0);
+        assert(stop_phase() == STOP_PHASE_IDLE && D.step == DRIVE_CHANGE_SPEED && D.action_err == 0);
+        for (t = 0; t < 1000; t++) { tick(0); }
+        assert(D.last_input == speeds[k] && D.flag_run == 1);
+    }
+
+    /* 서기 전에 허가: 0 으로 내리지 않고 지금 지령에서 다시 가속한다 */
+    for (k = 0; k < 3; k++) {
+        int16_t low;
+        traffic_begin(speeds[k], 60);
+        for (t = 0; (t < 3000) && (stop_reason() != STOP_REASON_TRAFFIC_POSITION); t++) { tick(0); }
+        while (D.last_input > (speeds[k] * 2) / 3) { tick(0); }
+        if (k == 2) { while (stop_phase() != STOP_PHASE_APPROACH) { tick(0); } }   /* 바닥 속도에서 허가 */
+        watch_reset();
+        low = D.last_input;
+        acs_cross_release(ACS_CROSS_IN);
+        for (t = 0; t < 1500; t++) { watch_tick(); if (D.last_input < low) { low = D.last_input; } }
+        assert(s_zero == 0 && s_jump == 0 && s_flip == 0);
+        assert(low > 0);
+        assert(stop_phase() == STOP_PHASE_IDLE && D.last_input == speeds[k] && D.cross_in_on == 0);
+    }
+
+    /* 0 cm: 태그 읽은 자리에서 곧바로 급정지 */
+    traffic_begin(2000, 0);
+    assert(D.cross_in_on && !D.cross_in_flag);
+    tick(0);
+    assert(stop_reason() == STOP_REASON_TRAFFIC && stop_phase() == STOP_PHASE_DECELERATE);
+    assert(run_until_hold(3000) < 3000);
+
+    /* 명시적 정지가 이긴다. 선 뒤에는 허가까지 유지 */
+    traffic_begin(2000, 60);
+    for (t = 0; (t < 3000) && (stop_reason() != STOP_REASON_TRAFFIC_POSITION); t++) { tick(0); }
+    tick(0);
+    stop_request_rapid(STOP_REASON_COMMAND);
+    D.flag_stopping = 1;
+    tick(0);
+    assert(stop_reason() == STOP_REASON_COMMAND);
+    assert(run_until_idle(0, 3000) < 3000);
+    assert(D.cross_in_on && !D.cross_in_flag);
+
+    /* 남은 거리가 더 짧은 태그 정지가 이기고, 선 뒤 다시 출발해도 허가까지 안 움직인다 */
+    from = traffic_begin(2000, 60);
+    D.stop_pulses = 300;
+    D.flag_stopping = 1;
+    stop_request_tag();
+    assert(run_until_idle(0, 3000) < 3000);
+    assert(D.cross_in_on && !D.cross_in_flag);
+    assert(travel_mm(from) < 0.5f + 300.0f / P.one_length_pulse);
+    tick(0);                                                      /* 운전 끝: 제어기 초기화 */
+    D.flag_stopping = 0;
+    D.flag_run = 1;
+    D.step = DRIVE_CHANGE_SPEED;
+    for (t = 0; t < 300; t++) { tick(0); assert(D.last_input == 0); }
+    assert(stop_reason() == STOP_REASON_TRAFFIC && D.action_err == ERR_CROSS_WAIT);
+    acs_cross_release(ACS_CROSS_IN);
+    for (t = 0; t < 300; t++) { tick(0); }
+    assert(D.last_input > 0);
+
+    /* 더 먼 태그 정지는 교차로 목표에서 끊기고, 허가 뒤 남은 거리를 이어 간다 */
+    from = traffic_begin(2000, 60);
+    D.stop_pulses = 1500;
+    D.flag_stopping = 1;
+    stop_request_tag();
+    assert(run_until_hold(3000) < 3000);
+    { float err = travel_mm(from) - 600.0f; assert(err > -3.0f && err < 3.0f); }
+    assert(D.flag_run == 1 && D.stop_pulses > 0);
+    acs_cross_release(ACS_CROSS_IN);
+    tick(0);
+    assert(stop_reason() == STOP_REASON_TAG_DOCKING);
+    assert(run_until_idle(0, 5000) < 5000);
+    assert(D.stop_pulses == 0);
+    { long n = s_travel - from; assert(n >= 1498 && n <= 1502); }
+
+    /* 제동 중 장애물: 교차로 목표를 지키고, 풀린 뒤 같은 자리에 선다 */
+    from = traffic_begin(2000, 60);
+    for (t = 0; (t < 3000) && (stop_reason() != STOP_REASON_TRAFFIC_POSITION); t++) { tick(0); }
+    for (t = 0; t < 5; t++) { tick(0); }
+    D.ext_sen_on = 1;
+    tick(0);
+    assert(stop_reason() == STOP_REASON_OBSTACLE);
+    for (t = 0; (t < 3000) && (stop_phase() != STOP_PHASE_COMPLETE); t++) { tick(0); }
+    assert(D.cross_in_flag && D.cross_pulses > 0);
+    D.ext_sen_on = 0;
+    assert(run_until_hold(3000) < 3000);
+    { float err = travel_mm(from) - 600.0f; assert(err > -3.0f && err < 3.0f); }
+}
+
+/* OPT_PAUSE_RESUME_SMOOTH: 감속 중 원인이 풀리면 0 까지 가지 않는다 */
+static void pause_begin(int16_t opt)
+{
+    setup(3000);
+    (void)param_set(P_OPT_FLAGS, opt);
+    watch_reset();
+}
+
+static void test_smooth_resume(void)
+{
+    int t;
+
+    /* 장애물이 0.3 s 비면 감속 중에 지금 지령에서 다시 간다 */
+    pause_begin(OPT_PAUSE_RESUME_SMOOTH);
+    D.ext_sen_on = 1;
+    for (t = 0; t < 5; t++) { watch_tick(); }
+    D.ext_sen_on = 0;
+    for (t = 0; t < 15; t++) { watch_tick(); }                       /* 0.3 s 보다 짧은 깜빡임 */
+    assert(stop_reason() == STOP_REASON_OBSTACLE && stop_phase() == STOP_PHASE_DECELERATE);
+    D.ext_sen_on = 1;
+    for (t = 0; t < 5; t++) { watch_tick(); }
+    D.ext_sen_on = 0;
+    for (t = 0; t < STOP_OBSTACLE_CLEAR_TICKS - 1; t++) { watch_tick(); }
+    assert(stop_reason() == STOP_REASON_OBSTACLE && stop_phase() == STOP_PHASE_DECELERATE);
+    watch_tick();
+    assert(stop_phase() == STOP_PHASE_IDLE && D.step == DRIVE_CHANGE_SPEED && D.action_err == 0);
+    for (t = 0; t < 1500; t++) { watch_tick(); }
+    assert(s_zero == 0 && s_jump == 0 && s_flip == 0 && D.last_input == 3000);
+
+    /* 일시정지(PAUSE)는 풀리는 즉시 */
+    pause_begin(OPT_PAUSE_RESUME_SMOOTH);
+    D.pause_stop = 1;
+    for (t = 0; t < 20; t++) { watch_tick(); }
+    D.pause_stop = 0;
+    watch_tick();
+    assert(stop_phase() == STOP_PHASE_IDLE);
+    for (t = 0; t < 1500; t++) { watch_tick(); }
+    assert(s_zero == 0 && s_jump == 0 && D.last_input == 3000);
+
+    /* 태그 위치 정지가 끊긴 경우: 같은 목표로 지금 지령에서 다시 제동한다 */
+    pause_begin(OPT_PAUSE_RESUME_SMOOTH);
+    D.stop_pulses = 3000;
+    D.flag_stopping = 1;
+    stop_request_tag();
+    for (t = 0; t < 10; t++) { watch_tick(); }
+    D.pause_stop = 1;
+    for (t = 0; t < 10; t++) { watch_tick(); }
+    D.pause_stop = 0;
+    watch_tick();
+    assert(stop_reason() == STOP_REASON_TAG_DOCKING && D.last_input > 1000);
+    while (D.flag_run && (s_zero == 0)) { watch_tick(); }
+    assert(D.stop_pulses == 0 && s_jump == 0 && s_flip == 0);
+    { long n = s_travel; assert(n >= 2998 && n <= 3002); }
+
+    /* 비트 꺼짐: 기존대로 0 까지 서고 나서 다시 출발 */
+    pause_begin(0);
+    D.ext_sen_on = 1;
+    for (t = 0; t < 5; t++) { watch_tick(); }
+    D.ext_sen_on = 0;
+    for (t = 0; (t < 3000) && (stop_phase() != STOP_PHASE_IDLE); t++) { watch_tick(); }
+    assert(s_zero > 0 && D.step == DRIVE_CHANGE_SPEED);
+    (void)param_set(P_OPT_FLAGS, 0);
 }
 
 int main(void)
@@ -314,6 +559,9 @@ int main(void)
     D.vin_out = 340;
     assert(stop_alignment_speed(100) > 340);
 
+    test_ramp_continuity();
+    test_traffic();
+    test_smooth_resume();
     puts("test_stop ok");
     return 0;
 }
