@@ -7,7 +7,8 @@
  *  t2 점검   t2.1 빠른 점검, t2.2 바퀴 교체, t2.3 가이드 센서 교체, t2.4 모터·앰프 교체. 2.1·2.2·2.4 는 SET 으로 L 입력
  *  t3 개발   t3.1 IDEN, t3.2 RPM, t3.3 TOP, t3.4 ALL, t3.5 TEMP, t3.6 HS(SET 으로 속도 입력). 결과는 RAM 에만.
  *            시험 추가는 tune.c s_dev 표 한 줄
- * FND(tune_text): 메뉴 't' + 번호(점으로 나눔) + 두 글자 이름, 입력 이름 + 값, 연속 시험 진행 'B'(t1)·'C'(t2) + 단계 + 회 2자리
+ * FND(tune_text): 켠 뒤 1 s(또는 첫 키까지) EEPROM 칩 크기 EE128·EE256(storage.h ee_probe),
+ *  메뉴 't' + 번호(점으로 나눔) + 두 글자 이름, 입력 이름 + 값, 연속 시험 진행 'B'(t1)·'C'(t2) + 단계 + 회 2자리
  *  + 순서, 실패 'F' + 코드, 결과 쪽, 저장 뒤 RBOT */
 #ifndef AGV_TUNE_H
 #define AGV_TUNE_H
@@ -26,7 +27,7 @@ enum { TUNE_DEV_IDENT = 1, TUNE_DEV_RPM, TUNE_DEV_TOP, TUNE_DEV_ALL, TUNE_DEV_TE
 #define TUNE_HS_PAGES 5           /* 고속 스윕 결과 쪽: 0 OK(+가장 좋은 후보)/F, 1~4 후보 평균 편차 RMS */
 
 /* EEPROM (128 워드 칩 기준). 0~50 파라미터·표시, 51~109 KEEP, 115~118 체크섬 밖 파라미터, 120~124 OUT 큐와 겹치지 않는다.
- * 입력 L·상한은 확정 즉시, 기준값은 t1 결과 SAVE 때만 쓴다 */
+ * 입력 L·상한은 확정 즉시, 기준값은 t1 결과 SAVE 때만 쓴다. 회전 보정비는 KEEP 54(storage.h), 기구 단계 끝에 바로 쓴다 */
 #define TUNE_EE_TRACK  126        /* 교차선 간격 L mm. 0 = 지름 보정 안 함 */
 #define TUNE_EE_CAP    127        /* 아래 바이트 최고 속도 상한 m/min, 위 바이트 ACC 상한(12번 단위). 0 = 12번 지금 값 */
 #define TUNE_EE_CHECK  110        /* 기준값 검사 = TUNE_BASE_MARK ^ 기준값 6칸 합. 틀리면 기준값 없음 */
@@ -74,7 +75,14 @@ uint16_t tune_flick(void);        /* 깜박일 자리 비트. 0 = 없음 */
 /* 결과 쪽 값 표시 5글자: 이름 두 글자 + 세 자리, wide 1 = 이름 첫 글자 + 네 자리. 넘치면 OVF·OVER. 없음(TUNE_NO_DATA)은 --- */
 void     tune_value_text(char *c, char n0, char n1, int16_t v, int wide);
 
+/* 제자리 회전 보정비 = 실제 회전에 든 펄스 ÷ 휠 간격(24번)으로 계산한 펄스. 잰 값 × 1000 을 KEEP_TURN_SCALE 에 둔다.
+ * 이 범위 밖(빈 EEPROM 포함)이면 보정 없음(1). 일반·정렬 회전의 목표 펄스와 TN 표시에 건다(tagact_turn) */
+#define TUNE_TURN_LOW  750
+#define TUNE_TURN_UP   1300
+float    tune_turn_scale(void);
+
 /* ident.c 가 부른다 */
+void     tune_turn_scale_set(int16_t x1000);   /* 바로 저장. 범위 밖이면 범위 끝으로 */
 int      tune_guide_save(void);   /* 'h' 부호·배율 저장. 측정 부족이면 0 */
 int16_t  tune_guide_k100(void);   /* 'a' = k × 'h' 의 k × 100. TUNE_NO_DATA = 측정 부족 */
 

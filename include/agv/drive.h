@@ -85,6 +85,7 @@ typedef struct {
     volatile int16_t cross_pulses;   /* 교차로 대기 정지까지 남은 거리. cross_*_flag 가 켜져 있을 때만 뜻이 있다 */
     volatile uint32_t travel_pulses; /* 정지 거리를 세는 바퀴의 누적 펄스. 돈다. 차로만 쓴다 */
     int16_t turn_motion;             /* Turn_Direction: 0 없음, MOTION_CCW, MOTION_CW */
+    int16_t turn_90;                 /* 지금 회전의 90도 두 바퀴 펄스 = 휠 간격 값 × 회전 보정비. tagact_turn 이 넣는다 */
     int16_t turn_obs_use;            /* Turn_OBS_Use */
     int16_t tape_align;              /* DA_Tape_Turn_Angle_Align */
     int16_t tape_slow;               /* 1 = 정렬 회전을 처음부터 최저 속도로 돈다 */
@@ -93,8 +94,10 @@ typedef struct {
     int16_t tape_max;                /* DA_Tape_Turn_Max */
     int16_t tape_total_pulse;        /* DA_Tape_Turn_Total_Pulse */
     int16_t tape_lost_cnt;           /* DA_Tape_Turn_Origin_Lost_Cnt */
-    float   tape_slip_ratio;         /* DA_Tape_Turn_Slip_Ratio */
-    float   tape_target_cnt;         /* DA_Tape_Turn_Target_Cnt */
+    float   tape_slip_ratio;         /* DA_Tape_Turn_Slip_Ratio. 출발 라인으로 잰 실제/펄스 비 */
+    float   tape_target_cnt;         /* DA_Tape_Turn_Target_Cnt. 슬립 보정 목표. 탐색 범위의 기준 */
+    float   tape_end_cnt;            /* 라인 중앙 예상 펄스. 목표를 새 라인 위치로 고친 값. 감속 계획과 TN 표시 */
+    float   tape_sum_mt, tape_sum_tt;   /* 슬립비 최소제곱 누적: 잰 펄스 × 돈 펄스, 돈 펄스² */
     int16_t tape_stop_id;            /* DA_Guide_Stop_Action. 0 = 없음 */
     int16_t tape_turn_dir;           /* DA_Tape_Turn_Dir. 교차 테이프를 찾으면 회전한다 */
     int16_t tape_turn_deg;           /* DA_Tape_Turn_Degree */

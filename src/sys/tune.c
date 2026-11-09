@@ -2,7 +2,7 @@
  * 주행은 ident.c(연속 시험 ident_start_build, 개발 시험)와 rpmtest.c 가 한다.
  * 여기는 선 찾기 중 'a' 와 'h' 를 번갈아 받아 교차선 수, 가이드 부호·배율, 직진 편차도 잰다.
  * 저장 구분:
- *  바로 저장    입력 확정(22·50번, L, 상한), 연속 시험 중 22·24·28번·'h' 부호·배율(ident.c), 점검 GA 확정(50번)
+ *  바로 저장    입력 확정(22·50번, L, 상한), 연속 시험 중 22·28번·회전 보정비·'h' 부호·배율(ident.c), 점검 GA 확정(50번)
  *  채택 저장    결과 쪽 1·13·35번(점검은 28·1·13번). SET 채택, RESET 건너뛰기, SAVE 에서 쓴다
  *  기준값       t1 SAVE 때 EEPROM 110~114·119·125. t2 가 견준다
  *  안 건드림    20·21번(KP·KI) */
@@ -30,6 +30,7 @@
 #define GUIDE_MARK        0x7E57
 #define PAGE_MAX          20
 #define ALT_TICKS         100      /* 채택 쪽: 1 s 지금 값, 1 s 새 값 */
+#define SPLASH_TICKS      100      /* 켠 뒤 칩 크기 EE128·EE256 를 보이는 시간 */
 
 const uint16_t tune_base_addr[TUNE_BASE_N] = { 111, 112, 113, 114, 119, 125 };
 
@@ -66,14 +67,15 @@ static const struct { char tag[2]; void (*start)(void); uint16_t run; } s_dev[] 
 /* 결과 쪽. PK_SET 채택(파라미터 화면과 같은 이름·자릿수), PK_PAR 파라미터 값(같은 이름, 채택 없음), PK_VAL 잰 값.
  * 잰 값 이름은 파라미터 화면 이름(ui.c s_view)과 겹치지 않는다 */
 enum { PK_SET = 0, PK_VAL, PK_PAR, PK_GA, PK_SAVE };
-enum { N_G = 0, N_TP, N_DE, N_FR, N_OS, N_SE, N_LR, N_OV, N_A, N_AM };
+enum { N_G = 0, N_TP, N_DE, N_FR, N_OS, N_SE, N_LR, N_OV, N_A, N_AM, N_RT };
 static const char s_name[][2] = {
-    {'G', ' '}, {'T', 'P'}, {'D', 'E'}, {'F', 'R'}, {'O', 'S'}, {'S', 'E'}, {'L', 'R'}, {'O', 'V'}, {'A', ' '}, {'A', 'M'}
+    {'G', ' '}, {'T', 'P'}, {'D', 'E'}, {'F', 'R'}, {'O', 'S'}, {'S', 'E'}, {'L', 'R'}, {'O', 'V'}, {'A', ' '}, {'A', 'M'},
+    {'R', 'T'}
 };
 typedef struct { int16_t kind, id, v, old, flag; } page_t;   /* flag: PK_SET 채택, PK_VAL NG. PK_VAL old 1 = 이름 한 글자 + 네 자리 */
 
 static struct {
-    uint16_t state, cat, item, sub, page, n_page, toggle, alt;
+    uint16_t state, cat, item, sub, page, n_page, toggle, alt, splash;
     int16_t  editing, place, edit_value, track, cap, acc_cap;
     int16_t  hs, hs_up;           /* t3.6 속도(0 = 1번), 입력 상한 */
     page_t   pg[PAGE_MAX];
@@ -114,6 +116,7 @@ void tune_reset(void)
 void tune_arm(void)
 {
     s_tune.state = TUNE_WAIT;
+    s_tune.splash = SPLASH_TICKS;
     menu_top();
     clear_measure();
 }
@@ -238,6 +241,18 @@ int tune_guide_save(void)
     return 1;
 }
 
+float tune_turn_scale(void)
+{
+    int16_t v = keep_get(KEEP_TURN_SCALE);
+    return ((v >= TUNE_TURN_LOW) && (v <= TUNE_TURN_UP)) ? (float)v / 1000.0f : 1.0f;
+}
+
+void tune_turn_scale_set(int16_t x1000)
+{
+    keep_set(KEEP_TURN_SCALE, (x1000 < TUNE_TURN_LOW) ? TUNE_TURN_LOW : ((x1000 > TUNE_TURN_UP) ? TUNE_TURN_UP : x1000));
+    keep_flush_if_changed();
+}
+
 /* ---- EEPROM ---- */
 
 static uint16_t ee(uint16_t addr) { return storage_queued.read(addr); }
@@ -348,7 +363,7 @@ static void build_pages(void)
     add_set(P_CROSS_IN_CM, b->cid_rec);
     add_set(P_ACC, b->acc_rec);
     if (b->dia_new > 0)  { add(PK_PAR, P_WHEEL_DIA_MM, b->dia_new, 0, 0); }
-    if (m & BLD_WB)      { add(PK_PAR, P_WHEEL_BASE_MM, b->wb_new, 0, 0); }
+    if (m & BLD_WB)      { add(PK_VAL, N_RT, (b->turn_x1000 > 0) ? b->turn_x1000 : TUNE_NO_DATA, 1, 0); }   /* R1110 = 1.110 */
     if (m & BLD_GUIDE)   { add(PK_VAL, N_G, b->guide_k100, 0, 0); }
     if (m & BLD_MIN)     { add(PK_PAR, P_SPEED_MIN, b->min_rec, 0, 0); }
     if (m & BLD_TOP)     { add_cmp(N_TP, b->top_rpm, TUNE_BASE_TOP, TUNE_NG_TOP_PCT); }
@@ -580,6 +595,7 @@ int tune_key(uint16_t key)
     uint16_t st = s_tune.state;
 
     if (key == 0u) { return 0; }
+    if ((key & (key - 1u)) == 0u) { s_tune.splash = 0; }   /* 키 하나. 켤 때 누른 MODE + SET 은 아니다 */
     if (st == TUNE_RPM) {               /* 시험 중 아무 키나 누르면 끊고 보통 정지 */
         (void)ident_rpm_key();
         return 1;
@@ -646,6 +662,7 @@ void tune_run(void)
         s_tune.floor_max = stop_floor_rpm();
     }
     if (++s_tune.alt >= 2u * ALT_TICKS) { s_tune.alt = 0; }
+    if (s_tune.splash > 0u) { s_tune.splash--; }
     if (st == TUNE_WAIT) {
         if (D.flag_run && !D.flag_stopping) { start(); }
     }
@@ -745,6 +762,11 @@ uint16_t tune_text(char *c)
     for (i = 0; i < 5u; i++) { c[i] = ' '; }
     switch (s_tune.state) {
     case TUNE_WAIT:
+        if (s_tune.splash > 0u) {      /* EE128 · EE256 */
+            c[0] = c[1] = 'E';
+            put(c, 2, (int16_t)ee_probe.ee_words, 3);
+            break;
+        }
         f = cur_field();
         if (f >= 0) { show_field(c, f); break; }
         c[0] = 'T';

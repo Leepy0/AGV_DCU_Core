@@ -22,6 +22,7 @@ typedef struct {
     uint16_t ee[256];
     uint32_t ee_writes;
     int      ee_bad_addr;          /* 이 주소는 써도 값이 안 들어간다 */
+    int      ee_128;               /* 1 = 128 워드 칩: 주소 7비트를 무시한다 */
 } host_hw_t;
 
 extern host_hw_t host;

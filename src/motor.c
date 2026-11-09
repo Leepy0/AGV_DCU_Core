@@ -7,6 +7,8 @@
 #include "agv/steer.h"
 #include "agv/stop.h"
 
+float sqrtf(float x);
+
 #define D agv_drive
 #define P param_dv
 
@@ -20,13 +22,15 @@
 #define GUIDE_REALIGN_RANGE  3
 #define GUIDE_REALIGN_TICKS  10
 #define TAPE_SLIP_MIN_DEG    3.0f    /* 이만큼 돈 뒤에 슬립비를 잰다. 초반 잡음을 뺀다 */
-/* 슬립 보정 범위. 넓으면 측정 오차로 목표각이 탐색 범위를 벗어나 있는 라인을 못 찾는다.
-   180도에서 10% 는 18도라 탐색 범위 20도 안에 든다 */
-#define TAPE_SLIP_LOW        0.9f
-#define TAPE_SLIP_HIGH       1.1f
+/* 슬립 보정 범위 ±25%. 탐색 범위는 보정 전·후 목표를 함께 덮으므로 측정이 틀려도 라인이 범위 밖으로 나가지 않는다 */
+#define TAPE_SLIP_LOW        0.8f
+#define TAPE_SLIP_HIGH       1.25f
+#define TAPE_SLIP_POS        12      /* 출발 라인이 이 안일 때만 슬립을 잰다. 센서 가장자리는 위치가 포화한다 */
 #define TAPE_LOST_TICKS      5       /* 라인이 이 틱을 넘게 안 보이면 출발 라인을 벗어난 것 */
-#define TAPE_SLOW_POS        12      /* 새 라인이 이 안에 들면 최저 속도 */
+#define TAPE_SLOW_POS        12      /* 새 라인이 이 안에 들면 라인을 잡은 것(단계 2) */
 #define TAPE_CENTER_POS      1       /* 이 안이면 회전을 끝낸다 */
+#define TAPE_CREEP_DEG       2.0f    /* 최저 속도로 도는 마지막 각. 라인 가운데 맞추기 */
+#define TAPE_PLAN_DCC        0.75f   /* 감속 계획 = 회전 감속(DCC/4, 많아야 10) × 이 값. S커브 지연 여유 */
 #define GUIDE_BIT_PITCH_MM   6.89f
 #define PI_F                 3.14159265f
 
@@ -389,11 +393,17 @@ void motor_drive_step(void)
 
 /* ---- 테이프 회전 정렬 ---- */
 
+/* 이 회전의 실제 1도당 두 바퀴 펄스. tagact_turn 이 넣은 turn_90(회전 보정비를 건 값), 없으면 휠 간격 값 */
+static float tape_deg_pulse(void)
+{
+    return (float)((D.turn_90 > 0) ? D.turn_90 : P.turn_90) / 90.0f;
+}
+
 static int32_t guide_offset_to_pulse(int16_t guide)
 {
     float offset_mm = (float)guide * guide_h_scale() * GUIDE_BIT_PITCH_MM;
     float angle_deg = (offset_mm / P.guide_dist_mm) * (180.0f / PI_F);
-    return (int32_t)(angle_deg * ((float)P.turn_90 / 90.0f));
+    return (int32_t)(angle_deg * tape_deg_pulse());
 }
 
 static void tape_end(void)
@@ -405,25 +415,39 @@ static void tape_end(void)
 
 static int32_t abs32(int32_t v) { return (v < 0) ? -v : v; }
 
-/* 지금 속도에서 최저 속도까지 줄이는 데 드는 두 바퀴 합 펄스 */
-static float tape_brake_pulses(void)
+/* 라인 중앙까지 left 펄스. 마지막 TAPE_CREEP_DEG 만 최저 속도로 가게 거리로 감속한다: v² = 최저² + 2·a·거리 */
+static int16_t tape_plan(float left)
 {
-    float v = (float)D.vin_out;
+    float d = left - TAPE_CREEP_DEG * tape_deg_pulse();
+    float k = ((float)STOP_ENCODER_PPR / 6000.0f) * 2.0f;     /* rpm·틱당 두 바퀴 펄스 */
     float low = (float)P.turn_min;
+    float v;
 
-    if (v <= low) { return 0.0f; }
-    return ((v * v - low * low) / (2.0f * (float)stop_turn_dcc())) * ((float)STOP_ENCODER_PPR / 6000.0f) * 2.0f;
+    if (d <= 0.0f) { return P.turn_min; }
+    v = sqrtf(low * low + 2.0f * TAPE_PLAN_DCC * (float)stop_turn_dcc() * d / k);
+    return (v >= (float)P.turn_speed) ? P.turn_speed : (int16_t)v;
 }
 
-/* 정렬 회전 한 틱. 가이드는 회전 중 'h' 로만 받는다. 위치 부호는 보지 않아 실측 전에도 쓴다 */
+/* 새 라인이 보이면 위치로 남은 각을 알 수 있다. 중앙 예상을 고친다. 많아야 탐색 범위 끝 */
+static void tape_refine(int32_t turned, int32_t pos, float hi)
+{
+    float end = (float)turned + (float)abs32(guide_offset_to_pulse((int16_t)pos));
+    D.tape_end_cnt = (end > hi) ? hi : end;
+}
+
+/* 정렬 회전 한 틱. 가이드는 회전 중 'h' 로만 받는다. 위치 부호는 보지 않아 실측 전에도 쓴다.
+ * 목표 = 휠 간격·회전 보정비로 잡은 펄스 ÷ 슬립비(출발 라인이 보이는 동안 최소제곱으로 계속 고침).
+ * 탐색 범위 = 보정 전·후 목표 둘 다 ± tape_max. 라인을 보면 위치로 중앙 예상(tape_end_cnt)을 고치고 거기까지 거리로 감속한다 */
 static int16_t tape_adjust(void)
 {
     int16_t speed = D.tape_slow ? P.turn_min : P.turn_speed;
     int32_t turned = D.tape_turned;
-    float   late = (float)turned - (D.tape_target_cnt + (float)D.tape_max);
+    float   total = (float)D.tape_total_pulse;
+    float   lo = ((D.tape_target_cnt < total) ? D.tape_target_cnt : total) - (float)D.tape_max;
+    float   hi = ((D.tape_target_cnt > total) ? D.tape_target_cnt : total) + (float)D.tape_max;
     int32_t pos = abs32(D.guide_pos);
     int16_t seen = (int16_t)(!D.guide_all_off && !D.guide_all_on);
-    float   brake = tape_brake_pulses();
+    int16_t in_win = (int16_t)((float)turned >= lo);
 
     switch (D.tape_step) {
     case 0:     /* 출발 라인에서 멀어지는 동안 슬립비를 잰다 */
@@ -433,12 +457,16 @@ static int16_t tape_adjust(void)
                 D.tape_origin = D.guide_pos;
                 D.tape_origin_ok = 1;
             }
-            if (turned > (int32_t)(((float)P.turn_90 / 90.0f) * TAPE_SLIP_MIN_DEG)) {
-                int32_t measured = abs32(guide_offset_to_pulse((int16_t)(D.guide_pos - D.tape_origin)));
-                if (measured > 0) {
-                    D.tape_slip_ratio = (float)measured / (float)turned;
+            if (seen && (pos <= TAPE_SLIP_POS) && ((float)turned > tape_deg_pulse() * TAPE_SLIP_MIN_DEG)) {
+                float m = (float)abs32(guide_offset_to_pulse((int16_t)(D.guide_pos - D.tape_origin)));
+                float t = (float)turned;
+                if (m > 0.0f) {      /* 원점을 지나는 직선 m = 비 × t 에 맞춘다. 많이 돈 표본일수록 무겁다 */
+                    D.tape_sum_mt += m * t;
+                    D.tape_sum_tt += t * t;
+                    D.tape_slip_ratio = D.tape_sum_mt / D.tape_sum_tt;
                     if (D.tape_slip_ratio < TAPE_SLIP_LOW)  { D.tape_slip_ratio = TAPE_SLIP_LOW; }
                     if (D.tape_slip_ratio > TAPE_SLIP_HIGH) { D.tape_slip_ratio = TAPE_SLIP_HIGH; }
+                    D.tape_target_cnt = D.tape_end_cnt = total / D.tape_slip_ratio;
                 }
             }
         }
@@ -446,32 +474,30 @@ static int16_t tape_adjust(void)
             D.tape_lost_cnt++;
         }
         /* 라인이 끝내 안 사라져도 목표각 앞에서는 찾기로 넘어간다 */
-        if ((D.tape_lost_cnt > TAPE_LOST_TICKS)
-            || ((float)turned >= ((float)D.tape_total_pulse - (float)D.tape_max))) {
-            D.tape_target_cnt = (float)D.tape_total_pulse / D.tape_slip_ratio;
+        if ((D.tape_lost_cnt > TAPE_LOST_TICKS) || in_win) {
             D.tape_step = 1;
         }
         break;
-    case 1:     /* 목표각 근방에서만 새 라인을 찾는다 */
-        if (late > 0.0f) {
+    case 1:     /* 탐색 범위에서만 새 라인을 찾는다 */
+        if ((float)turned > hi) {
             D.system_err = ERR_GUIDE_SENSOR;
             tape_end();
         }
-        else if (seen && (pos <= TAPE_SLOW_POS)
-                 && ((float)turned >= (D.tape_target_cnt - (float)D.tape_max))) {
-            speed = P.turn_min;
-            D.tape_step = 2;
-        }
-        else if ((float)turned >= (D.tape_target_cnt - brake)) {
-            speed = P.turn_min;      /* 감속이 느리니 라인을 보기 전에 줄인다 */
+        else if (seen && in_win) {
+            tape_refine(turned, pos, hi);
+            if (pos <= TAPE_SLOW_POS) { D.tape_step = 2; }
         }
         break;
-    case 2:     /* 최저 속도로 중앙까지 */
-        speed = P.turn_min;
-        if ((seen && (pos <= TAPE_CENTER_POS)) || (late > 0.0f)) { tape_end(); }
+    case 2:     /* 라인을 잡았다. 중앙까지 */
+        if (seen) { tape_refine(turned, pos, hi); }
+        if ((seen && (pos <= TAPE_CENTER_POS)) || ((float)turned > hi)) { tape_end(); }
         break;
     default:
         break;
+    }
+    if (D.tape_align) {
+        int16_t plan = tape_plan(D.tape_end_cnt - (float)turned);
+        if (plan < speed) { speed = plan; }
     }
     return speed;
 }

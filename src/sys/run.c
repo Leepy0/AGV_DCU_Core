@@ -218,6 +218,8 @@ static void tape_clear(void)
     D.tape_total_pulse = 0;
     D.tape_slip_ratio = 1.0f;
     D.tape_target_cnt = 0.0f;
+    D.tape_end_cnt = 0.0f;
+    D.tape_sum_mt = D.tape_sum_tt = 0.0f;
     D.tape_lost_cnt = 0;
     D.tape_turned = 0;
 }

@@ -617,13 +617,14 @@ static int16_t error_code(void)
     return D.action_err;
 }
 
-/* 남은 회전각. 정렬 회전은 펄스를 따로 세므로 목표까지 남은 양으로 본다 */
+/* 남은 회전각. 정렬 회전은 펄스를 따로 세므로 라인 중앙 예상까지 남은 양으로 본다. 각은 회전 보정비를 건 펄스로 */
 static int16_t turn_left_deg(void)
 {
-    int32_t left = D.tape_align ? ((int32_t)D.tape_target_cnt - D.tape_turned) : (int32_t)D.turn_pulses;
+    int32_t left = D.tape_align ? ((int32_t)D.tape_end_cnt - D.tape_turned) : (int32_t)D.turn_pulses;
+    int32_t q = (D.turn_90 > 0) ? D.turn_90 : P.turn_90;
 
-    if ((left <= 0) || (P.turn_90 <= 0)) { return 0; }
-    return (int16_t)((left * 90L) / (int32_t)P.turn_90);
+    if ((left <= 0) || (q <= 0)) { return 0; }
+    return (int16_t)((left * 90L) / q);
 }
 
 static void show_idle(void)

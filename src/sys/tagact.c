@@ -61,6 +61,15 @@ void tagact_forback(dir_t d)
 static int16_t s_turn_from_stop;   /* 1 = 멈춘 상태에서도 회전을 건다 (튜닝 모드) */
 static int16_t s_turn_stop_len;    /* 0 = 정지 거리(SL). 교차선 기준이면 센서 거리(GD) */
 
+/* 제자리 회전 90도 펄스. 튜닝 모드가 잰 회전 보정비가 있으면 건다(일반·정렬 회전 모두). 없으면 휠 간격 값 그대로 */
+static int16_t turn_90(void)
+{
+    float s = tune_turn_scale();
+    float q = (float)P.turn_90 * s + 0.5f;
+    if (s == 1.0f) { return P.turn_90; }
+    return (q > 16383.0f) ? 16383 : (int16_t)q;
+}
+
 void tagact_turn(turn_dir_t d, uint16_t deg, dir_t fb, uint16_t autostart, uint16_t obs)
 {
     if ((P.turn_mode <= 0) || (D.turn_pulses != 0) || (D.stop_pulses != 0)
@@ -82,9 +91,10 @@ void tagact_turn(turn_dir_t d, uint16_t deg, dir_t fb, uint16_t autostart, uint1
     }
     tagact_forback(fb);
     D.turn_motion = (d == TURN_CW) ? MOTION_CW : MOTION_CCW;
-    if (deg == 90u)       { D.turn_pulses = P.turn_90; }
-    else if (deg == 180u) { D.turn_pulses = P.turn_180; }
-    else                  { D.turn_pulses = (int16_t)((P.turn_90 / 90) * (int16_t)deg); }
+    D.turn_90 = turn_90();
+    if (deg == 90u)       { D.turn_pulses = D.turn_90; }
+    else if (deg == 180u) { D.turn_pulses = (int16_t)(D.turn_90 * 2); }   /* 보정이 없으면 P.turn_180 과 같다 */
+    else                  { D.turn_pulses = (int16_t)((D.turn_90 / 90) * (int16_t)deg); }
     D.turn_obs_use = (int16_t)obs;
     if (autostart == 1u) { D.wait_start = (P.turn_mode == 2) ? 1 : 0; }
     if (D.flag_stopping) { stop_request_tag(); }
@@ -98,8 +108,9 @@ void tagact_turn_align(turn_dir_t d, uint16_t deg, uint16_t next)
     tagact_turn(d, deg, (dir_t)fb, (uint16_t)((next >> 4) & 0xFu), (uint16_t)((next >> 8) & 0xFu));
     if ((before != 0) || (D.turn_pulses <= 0)) { return; }
     D.tape_total_pulse = D.turn_pulses;
-    D.tape_target_cnt = (float)D.turn_pulses;
-    D.tape_max = (int16_t)(((float)P.turn_90 / 90.0f) * TAPE_WINDOW_DEG);
+    D.tape_target_cnt = D.tape_end_cnt = (float)D.turn_pulses;
+    D.tape_sum_mt = D.tape_sum_tt = 0.0f;
+    D.tape_max = (int16_t)(((float)D.turn_90 / 90.0f) * TAPE_WINDOW_DEG);
     D.tape_slip_ratio = 1.0f;
     D.tape_lost_cnt = 0;
     D.tape_turned = 0;

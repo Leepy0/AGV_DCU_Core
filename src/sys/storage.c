@@ -110,11 +110,32 @@ static uint16_t queue_read(uint16_t addr) { return (addr < EE_WORDS) ? s_val[add
 const param_store_t storage_blocking = { boot_read, boot_write };
 const param_store_t storage_queued   = { queue_read, storage_request };
 
+ee_probe_t ee_probe;
+
+/* 위 128 워드를 읽기만 한다(쓰지 않는다). 칩이 128 워드면 주소 7비트를 무시해 0~127 이 다시 읽힌다 */
+static void probe_size(void)
+{
+    uint16_t a;
+    ee_probe.diff_n = ee_probe.first_addr = ee_probe.first_lo = ee_probe.first_hi = 0;
+    for (a = EE_WORDS; a < 2u * EE_WORDS; a++) {
+        uint16_t v = hal_ee_read(a);
+        if (v == s_val[a & (EE_WORDS - 1u)]) { continue; }
+        if (ee_probe.diff_n == 0u) {
+            ee_probe.first_addr = a;
+            ee_probe.first_lo = s_val[a & (EE_WORDS - 1u)];
+            ee_probe.first_hi = v;
+        }
+        ee_probe.diff_n++;
+    }
+    ee_probe.ee_words = (ee_probe.diff_n != 0u) ? (uint16_t)(2u * EE_WORDS) : (uint16_t)EE_WORDS;
+}
+
 void storage_load(void)
 {
     uint16_t a;
     for (a = 0; a < EE_WORDS; a++) { s_val[a] = hal_ee_read(a); }
     for (a = 0; a < (uint16_t)KEEP_COUNT; a++) { s_keep[a] = (int16_t)s_val[KEEP_FIRST + a]; }
+    probe_size();
 }
 
 /* ---- KEEP ---- */

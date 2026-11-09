@@ -264,7 +264,7 @@ void  ident_speed(int16_t v, int ramp);   /* 주행 지령. ramp 0 = 바로 */
 /* ---- 제작·점검 연속 시험 (튜닝 모드 t1·t2) ----
  * START 한 번으로 아래 단계 중 mask 에 든 것을 차례로 한다. 단계 사이는 선 위에서 돌고 이어 간다(0회는 한 번만).
  *  1 기구: 0회(선 찾기, 회전, L 측정, 회전). 둘째 직선 끝에서 입력 L 로 휠 지름을 고친다(BLD_DIA, ±10% 넘으면 실패 1008).
- *          둘째 회전으로 휠 간격, 선 찾기 중 'a'·'h' 짝으로 가이드 부호·배율, 둘째 직선 좌우 펄스 비를 잰다.
+ *          둘째 회전(0회 회전, 최저 속도)으로 제자리 회전 보정비(BLD_WB, 24번은 안 바꾼다), 선 찾기 중 'a'·'h' 짝으로 가이드 부호·배율, 둘째 직선 좌우 펄스 비를 잰다.
  *          BLD_GA 면 둘째 회전 대신 선을 보자마자 서서 미끄러진 거리(ov_mm)를 재고 끝낸다.
  *  2 rpm: 바닥 rpm 시험 4회(안정 최저 rpm)만. 점검(BLD_CHECK, t2.4)은 1회(앰프 형식)도 한다. 제작의 앰프 형식은 0(모름). 28번 추천 = 올림(max(low_rpm × 1.2, 정지 바닥 350) ÷ 1 m/min 당 rpm),
  *         4 미만은 4. low_rpm 이 0(300 rpm 도 불안정)이면 추천 없음. 28번은 RAM 최저 속도를 바로 안 바꾼다(다시 켜면 적용).
@@ -278,7 +278,7 @@ void  ident_speed(int16_t v, int ramp);   /* 주행 지령. ramp 0 = 바로 */
  *          첫 후보 = acc_cap). 정지 단계는 시작 때 ACC. 12번 추천 = min(깨끗한 가장 큰 값, acc_cap). 끝나면 12번 RAM 을 되돌린다.
  *  6 편차: 지금 설정(51·39·38번 그대로)으로 직진 BLD_DEV_PASSES 회. 통합 시험 단계 2 의 한 회와 같다(최고 속도의 2/3,
  *          앞 단계에서 RAM 에 넣은 1번 추천 기준). 정속 편차 RMS × 10 이 se_x10(기준값 125 아래 바이트, t2 판정)이다.
- * 바로 저장(BLD_DIA 22번, BLD_WB 24번, BLD_GUIDE 'h' 부호·배율, BLD_MIN 28번)은 그 값을 잰 단계가 끝날 때 한다.
+ * 바로 저장(BLD_DIA 22번, BLD_WB 회전 보정비 KEEP 54, BLD_GUIDE 'h' 부호·배율, BLD_MIN 28번)은 그 값을 잰 단계가 끝날 때 한다.
  * 1·13번은 RAM 에서만 바꾸고 끝·실패·끊김 때 시험 전 값으로 돌린다. 결과는 agv_build 와 각 단계 결과.
  * 단계 번호는 agv_all.stage, 실패 코드 = 단계 × 1000 + 회 × 10 + 순서 */
 #define BLD_MECH   0x0001u
@@ -288,7 +288,7 @@ void  ident_speed(int16_t v, int ramp);   /* 주행 지령. ramp 0 = 바로 */
 #define BLD_STOPT  0x0010u
 #define BLD_STEER  0x0020u
 #define BLD_DIA    0x0040u
-#define BLD_WB     0x0080u
+#define BLD_WB     0x0080u   /* 제자리 회전 보정비(tune_turn_scale). 이름은 예전 휠 간격 측정 그대로 */
 #define BLD_GUIDE  0x0100u
 #define BLD_MIN    0x0200u
 #define BLD_GA     0x0400u
@@ -305,7 +305,8 @@ typedef struct {
     int16_t track_in_mm;     /* 입력 L. 0 = 지름 보정 안 함 */
     int16_t cap_mpm;         /* 1번 추천 상한 */
     int16_t cfg_high, cfg_dcc, cfg_dia, cfg_wb;   /* 시작 때 1·13·22·24번 */
-    int16_t dia_new, wb_new; /* 고친 22·24번. 0 = 안 함 */
+    int16_t dia_new;         /* 고친 22번. 0 = 안 함 */
+    int16_t turn_x1000;      /* 잰 제자리 회전 보정비 × 1000(둘째 회전 펄스 ÷ 휠 간격 180도 펄스). 0 = 안 함 */
     int16_t lr_permille;     /* 둘째 직선 우/좌 펄스 비 - 1, 천분율 */
     int16_t top_rpm;         /* agv_top.max_rpm 좌우 평균. 0 = 없음 */
     int16_t dec_rpm_s;       /* 타력 감속도 평균. 0 = 없음 */

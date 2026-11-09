@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "agv/branch.h"
+#include "agv/guide.h"
 #include "agv/motor.h"
 #include "agv/steer.h"
 #include "agv/stop.h"
@@ -242,14 +243,15 @@ int main(void)
     D.guide_pos = 1;
     (void)motor_turn_adjust();
     assert(D.tape_align == 0 && D.turn_pulses == 0);
-    /* 정렬 회전 감속은 일반 회전과 같다. 라인을 보기 전에 미리 줄인다 */
+    /* 정렬 회전 감속은 일반 회전과 같다(DCC/4). 라인을 보기 전에 미리 줄인다 */
     setup();
     (void)param_set(P_DCC, 40);
     D.control = RUN_TURN;
     D.tape_step = 1;
     D.tape_align = 1;
     D.turn_pulses = 2000;
-    D.tape_target_cnt = 2000.0f;
+    D.tape_total_pulse = 2000;
+    D.tape_target_cnt = D.tape_end_cnt = 2000.0f;
     D.tape_max = 100;
     D.guide_all_off = 1;
     D.tape_turned = 0;
@@ -267,27 +269,82 @@ int main(void)
       }
       assert(D.vin_out < P.turn_speed); }
     assert(stop_turn_dcc() == 10);
-    /* 슬립: 시작 위치와의 차로 재고 범위를 넘지 않는다. 틀어지면 라인이 탐색 범위 밖으로 나간다 */
+    /* 거리 감속: 회전 속도로 오다가 중앙 앞 2도 근처에서 최저 속도가 된다. 최저 속도 구간은 몇 도뿐이다 */
+    {
+        float rate, acc = 0.0f, at_min = -1.0f;
+        setup();
+        (void)param_set(P_DCC, 40);
+        D.control = RUN_TURN;
+        D.tape_step = 1;
+        D.tape_align = 1;
+        D.turn_90 = 2435;                     /* 휠 간격 205 cm 쯤 */
+        rate = (float)D.turn_90 / 90.0f;
+        D.turn_pulses = D.tape_total_pulse = 4870;
+        D.tape_target_cnt = D.tape_end_cnt = 4870.0f;
+        D.tape_max = (int16_t)(rate * 20.0f);
+        D.guide_all_off = 1;
+        D.vin_out = P.turn_speed;
+        D.tape_turned = 3000;
+        while (D.tape_turned < 4870) {
+            (void)motor_turn_adjust();
+            acc += (float)D.vin_out * (12.0f / 6000.0f) * 2.0f;   /* 두 바퀴 펄스 */
+            while (acc >= 1.0f) { acc -= 1.0f; D.tape_turned++; }
+            if ((at_min < 0.0f) && (D.vin_out <= P.turn_min)) { at_min = (float)D.tape_turned; }
+        }
+        assert(at_min > 0.0f);
+        printf("  정렬 회전 최저 속도 구간 %.1f 도\n", (4870.0f - at_min) / rate);
+        assert((4870.0f - at_min) / rate <= 3.0f && (4870.0f - at_min) / rate >= 1.0f);
+        assert(D.vin_out == P.turn_min);
+    }
+    /* 슬립: 출발 라인과의 차로 재고 최소제곱으로 계속 고친다. 가장자리(12칸 밖)는 버린다. 범위 ±25% */
     setup();
+    guide_reset();                            /* 'h' 배율 1 */
     D.control = RUN_TURN;
     D.tape_step = 0;
     D.tape_align = 1;
+    D.turn_90 = 900;                          /* 1도 10 펄스 */
     D.turn_pulses = 2000;
     D.tape_total_pulse = 2000;
+    D.tape_target_cnt = D.tape_end_cnt = 2000.0f;
     D.tape_max = 200;
     D.tape_slip_ratio = 1.0f;
     D.guide_pos = 5;
     (void)motor_turn_adjust();
     assert(D.tape_origin_ok == 1 && D.tape_origin == 5);
     D.tape_turned = 100;
-    D.guide_pos = 15;
+    D.guide_pos = 12;                         /* 7칸 = 48.2 mm, GD 250 이면 11.05도 = 110 펄스 */
     (void)motor_turn_adjust();
-    assert(D.tape_slip_ratio >= 0.9f && D.tape_slip_ratio <= 1.1f);
+    assert(D.tape_slip_ratio > 1.09f && D.tape_slip_ratio < 1.11f);
+    assert(D.tape_target_cnt > 1810.0f && D.tape_target_cnt < 1830.0f && D.tape_end_cnt == D.tape_target_cnt);
+    D.tape_turned = 120;
+    D.guide_pos = 15;                         /* 가장자리: 버린다 */
+    (void)motor_turn_adjust();
+    assert(D.tape_slip_ratio > 1.09f && D.tape_slip_ratio < 1.11f);
+    D.tape_turned = 40;                       /* 같은 110 펄스를 40 에서 보면 비가 커진다: (110·100 + 110·40) / (100² + 40²) = 1.33 */
+    D.guide_pos = 12;
+    (void)motor_turn_adjust();
+    assert(D.tape_slip_ratio == 1.25f);
+    assert(D.tape_target_cnt == 1600.0f);
+    D.tape_turned = 300;
     D.tape_lost_cnt = 6;
     D.guide_all_off = 1;
     (void)motor_turn_adjust();
     assert(D.tape_step == 1);
-    assert(D.tape_target_cnt >= 1818.0f && D.tape_target_cnt <= 2223.0f);
+    /* 탐색 범위는 보정 전(2000)·후(1600) 목표를 둘 다 덮는다: 1400 ~ 2200 */
+    D.guide_all_off = 0;
+    D.guide_pos = 3;
+    D.tape_turned = 1390;
+    (void)motor_turn_adjust();
+    assert(D.tape_step == 1);                 /* 범위 밖 라인은 무시 */
+    D.tape_turned = 2150;
+    (void)motor_turn_adjust();
+    assert(D.tape_step == 2 && D.system_err == 0);
+    assert(D.tape_end_cnt > 2150.0f + 40.0f && D.tape_end_cnt < 2150.0f + 50.0f);   /* 3칸 = 4.7도 남음 */
+    D.tape_step = 1;
+    D.guide_all_off = 1;
+    D.tape_turned = 2201;
+    (void)motor_turn_adjust();
+    assert(D.system_err == ERR_GUIDE_SENSOR && D.tape_align == 0);
     /* 일반 회전은 가이드를 보지 않는다 */
     setup();
     D.control = RUN_TURN;
@@ -295,12 +352,18 @@ int main(void)
     D.guide_all_off = 1;
     for (int i = 0; i < 20; i++) { (void)motor_turn_adjust(); }
     assert(D.turn_pulses == 500 && D.tape_step == 0);
-    /* Step 2 동안 최저 속도 쪽으로 감속한다 */
+    /* 단계 2: 라인 위치로 남은 각을 알고 거리로 감속한다. 중앙 2도 안이면 최저 속도 */
     setup();
+    D.control = RUN_TURN;
     D.tape_step = 2; D.tape_align = 1; D.turn_pulses = 2000; D.tape_turned = 1900;
-    D.tape_target_cnt = 2000.0f; D.tape_max = 100;
-    D.guide_pos = 5;
+    D.tape_total_pulse = 2000;
+    D.tape_target_cnt = D.tape_end_cnt = 2000.0f; D.tape_max = 100;
+    D.guide_pos = 9;                          /* 14.2도 남음 */
     D.vin_out = P.turn_speed;
+    for (int i = 0; i < 2000; i++) { (void)motor_turn_adjust(); }
+    assert(D.tape_align == 1 && D.vin_out > P.turn_min && D.vin_out < P.turn_speed);
+    D.guide_all_off = 1;                      /* 라인이 잠깐 안 보이면 마지막 예상을 쓴다 */
+    D.tape_end_cnt = (float)D.tape_turned + (float)P.turn_90 / 90.0f;
     for (int i = 0; i < 2000; i++) { (void)motor_turn_adjust(); }
     assert(D.vin_out == ((P.turn_min > STOP_MIN_RPM) ? P.turn_min : STOP_MIN_RPM));
 

@@ -1369,7 +1369,7 @@ static int cross_at(uint32_t line)
     s_pos.ref = line;
     s_pos.turn_at = lp;
     s_id.legs++;
-    D.tape_slow = (PASS == 0u);    /* 0회 회전은 휠 간격을 잰다. 나머지는 회전 속도(3번)로 돈다 */
+    D.tape_slow = (PASS == 0u);    /* 0회 회전은 회전 보정비를 잰다. 나머지는 회전 속도(3번)로 돈다 */
     s_id.turn_seen = 0;
     tagact_turn_align_cross(TURN_CW, 180u, 0u);
     if (!D.tape_align) { return fail_now(); }
@@ -1639,10 +1639,11 @@ static int build_turn(void)
     if (s_id.retry) { done = 0; }    /* 속도를 낮춰 같은 회를 다시 */
     else if (st == 1u) {
         done = (s_id.legs >= 2);
-        if (done) {                   /* 둘째 회전은 고친 지름으로 돌았다 */
-            agv_build.wb_new = clamp_p(P_WHEEL_BASE_MM, (int32_t)((float)param_get(P_WHEEL_BASE_MM)
-                                       * (float)D.tape_turned / (float)D.tape_total_pulse + 0.5f));
-            if (s_build & BLD_WB) { (void)param_set(P_WHEEL_BASE_MM, agv_build.wb_new); }
+        if (done) {                   /* 둘째 회전은 고친 지름으로 돌았다. 목표 펄스에는 지금 보정비가 걸려 있다 */
+            float r = tune_turn_scale() * (float)D.tape_turned / (float)D.tape_total_pulse;
+            int16_t v = (int16_t)(r * 1000.0f + 0.5f);
+            agv_build.turn_x1000 = (v < TUNE_TURN_LOW) ? TUNE_TURN_LOW : ((v > TUNE_TURN_UP) ? TUNE_TURN_UP : v);
+            if (s_build & BLD_WB) { tune_turn_scale_set(agv_build.turn_x1000); }
         }
     }
     else if (st == 2u) { done = (PASS >= 4u); }

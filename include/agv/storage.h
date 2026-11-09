@@ -5,6 +5,7 @@
  * ISR 에서 부르지 않는다.
  * 주소: 0~45 파라미터, 50 표시, 51~106 KEEP (번호는 현장 EEPROM 과 호환).
  * 체크섬 밖: 115~118 파라미터(param.c), 120~124 미확인 OUT 큐(acs.h).
+ * 칩 크기: 128 워드로 쓴다. 부팅 때 128~255 를 읽기만 해서 0~127 과 견주어 실제 크기를 ee_probe 에 남긴다.
  */
 #ifndef AGV_STORAGE_H
 #define AGV_STORAGE_H
@@ -14,6 +15,7 @@
 #define KEEP_FIRST          51
 #define KEEP_LAST           109
 #define KEEP_BACKWARD       51
+#define KEEP_TURN_SCALE     54    /* 튜닝 모드가 잰 제자리 회전 보정비 × 1000. 범위 밖이면 보정 없음(tune.h) */
 #define KEEP_STATION0       57    /* 스테이션 큐 10칸 */
 #define KEEP_STATION_SLOTS  10
 #define KEEP_TAG_INDEX0     67    /* 태그 이력 종류 5칸 */
@@ -26,6 +28,15 @@
 #define KEEP_GUIDE_SCALE    109   /* 배율 × 1000 */
 
 #define STORAGE_RETRY       3     /* 읽기 검증 실패 뒤 다시 쓰는 횟수 */
+
+/* 칩 크기 시험 결과(부팅, 읽기만). 128~255 가 모두 addr & 0x7F 의 값과 같으면 주소 7비트를 무시하는 128 워드 칩 */
+typedef struct {
+    uint16_t ee_words;       /* 128 또는 256 */
+    uint16_t diff_n;         /* 128~255 중 0~127 과 다른 워드 수 */
+    uint16_t first_addr;     /* 처음 다른 주소(128~255). 없으면 0 */
+    uint16_t first_lo, first_hi;   /* 그 주소 & 0x7F 의 값, 그 주소의 값 */
+} ee_probe_t;
+extern ee_probe_t ee_probe;
 
 extern const param_store_t storage_blocking;   /* 부팅: 끝날 때까지 기다린다 */
 extern const param_store_t storage_queued;     /* 운전 중: 큐에 넣고 돌아온다 */

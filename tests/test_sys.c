@@ -1098,8 +1098,31 @@ static void test_tune_entry(void)
     assert(!tune_active());
     boot_keys(KEY_MODE + KEY_SET, 0);
     assert(tune_active() && (tune_state() == TUNE_WAIT) && (tune_menu() == 100));
-    assert(shows("T1   ") && (D.ui_mode == UI_AUTO));
+    assert(shows("EE256") && (D.ui_mode == UI_AUTO));   /* 켠 뒤 1 s 칩 크기 */
+    ticks(100);
+    assert(shows("T1   "));
+    boot_keys(KEY_MODE + KEY_SET, 0);
+    key(KEY_MODE);                   /* 키를 누르면 바로 메뉴 */
+    assert(shows("T2   "));
     printf("  tune entry ok\n");
+}
+
+/* 칩 크기: 128~255 를 읽기만 해 0~127 과 견준다. 128 워드 칩은 주소 7비트를 무시한다 */
+static void test_ee_probe(void)
+{
+    int a, same = 1;
+
+    boot();
+    assert(ee_probe.ee_words == 256 && ee_probe.diff_n > 0 && ee_probe.first_addr >= 128);
+    assert(ee_probe.first_hi == 0xFFFFu && ee_probe.first_lo != 0xFFFFu);   /* 위는 빈 칸, 아래는 부팅 때 읽은 값 */
+    for (a = 128; a < 256; a++) { same = same && (host.ee[a] == 0xFFFFu); }
+    assert(same);                    /* 위 128 워드는 쓰지 않았다 */
+    host_reset();
+    host.ee_128 = 1;
+    memset(&D, 0, sizeof(D));
+    sys_boot();
+    assert(ee_probe.ee_words == 128 && ee_probe.diff_n == 0 && ee_probe.first_addr == 0);
+    printf("  ee probe ok\n");
 }
 
 /* 메뉴: MODE 같은 단계 다음, SET 아래로, RESET 위로. MODE 는 파라미터·조그 화면으로 가지 않는다 */
@@ -1321,7 +1344,7 @@ static void test_tune_t1_save(void)
     agv_build.cid_rec = 40;
     agv_build.se_x10 = 43;           /* 편차 단계 4.3 mm */
     agv_build.min_rec = 7;
-    agv_build.wb_new = 61;
+    agv_build.turn_x1000 = 1110;
     agv_build.top_rpm = 3000;
     agv_build.dec_rpm_s = 3500;
     agv_build.lr_permille = -4;
@@ -1355,9 +1378,9 @@ static void test_tune_t1_save(void)
     }
     key(KEY_DOWN);
     assert(tune_page() == 0);
-    {   /* 값 쪽 이름: 휠 간격은 파라미터 화면 이름 WW, 최고 rpm·감속도는 이름 한 글자 + 네 자리 */
-        for (k = 0; (k < 30) && !shows("WW061"); k++) { key(KEY_UP); }
-        assert(shows("WW061"));
+    {   /* 값 쪽 이름: 회전 보정비·최고 rpm·감속도는 이름 한 글자 + 네 자리 */
+        for (k = 0; (k < 30) && !shows("R1110"); k++) { key(KEY_UP); }
+        assert(shows("R1110"));
         for (k = 0; (k < 30) && !shows("T3000"); k++) { key(KEY_UP); }
         assert(shows("T3000"));
         key(KEY_UP);
@@ -1576,6 +1599,34 @@ static void test_guide_h_only(void)
     printf("  guide h only ok\n");
 }
 
+/* 회전 보정비: KEEP 54 에 × 1000. 다시 켜도 남고, 일반·정렬 회전 목표 펄스에 건다. 범위 밖이면 보정 없음 */
+static void test_turn_scale(void)
+{
+    int16_t q;
+
+    boot();
+    assert(tune_turn_scale() == 1.0f);           /* 빈 칸 */
+    (void)param_set(P_TURN_FORBACK, 10);
+    tagact_turn_align_stopped(TURN_CW, 180u, 0u);
+    assert(D.turn_90 == P.turn_90 && D.turn_pulses == P.turn_180 && D.tape_total_pulse == P.turn_180);
+    tune_turn_scale_set(1110);
+    ticks(20);
+    assert(host.ee[KEEP_TURN_SCALE] == 1110u);
+    boot_keys(0, 1);
+    assert(tune_turn_scale() > 1.1099f && tune_turn_scale() < 1.1101f);
+    (void)param_set(P_TURN_FORBACK, 10);
+    tagact_turn_align_stopped(TURN_CW, 180u, 0u);
+    q = (int16_t)((float)P.turn_90 * 1.11f + 0.5f);
+    assert(D.turn_90 == q && D.turn_pulses == q * 2 && D.tape_total_pulse == q * 2);
+    assert(D.tape_target_cnt == (float)(q * 2) && D.tape_end_cnt == D.tape_target_cnt);
+    assert(D.tape_max == (int16_t)((float)q / 90.0f * 20.0f));
+    tune_turn_scale_set(2000);                   /* 범위 끝으로 */
+    assert(keep_get(KEEP_TURN_SCALE) == TUNE_TURN_UP);
+    keep_set(KEEP_TURN_SCALE, 1400);             /* 손댄 값이 범위 밖이면 보정 없음 */
+    assert(tune_turn_scale() == 1.0f);
+    printf("  turn scale ok\n");
+}
+
 /* 교차 테이프를 두 번 보면 정렬 회전을 건다 */
 static void test_tape_turn(void)
 {
@@ -1707,6 +1758,7 @@ int main(void)
     test_lamp();
     test_align_turn();
     test_tune_entry();
+    test_ee_probe();
     test_tune_menu();
     test_tune_inputs();
     test_fnd_fit();
@@ -1715,6 +1767,7 @@ int main(void)
     test_tune_t24_amp();
     test_tune_guide();
     test_guide_h_only();
+    test_turn_scale();
     test_tape_turn();
     test_io_test();
     test_acs_off();

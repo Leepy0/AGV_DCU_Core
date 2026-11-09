@@ -73,11 +73,13 @@ int hal_sci_rx(uint16_t port, uint16_t *byte)
 
 uint16_t hal_sci_take_errors(uint16_t port) { (void)port; return 0; }
 
-uint16_t hal_ee_read(uint16_t addr) { return host.ee[addr]; }
+static uint16_t ee_addr(uint16_t addr) { return (uint16_t)(addr & (host.ee_128 ? 0x7Fu : 0xFFu)); }
+
+uint16_t hal_ee_read(uint16_t addr) { return host.ee[ee_addr(addr)]; }
 
 void hal_ee_write_begin(uint16_t addr, uint16_t value)
 {
-    s_pending_addr = addr;
+    s_pending_addr = ee_addr(addr);
     s_pending_value = value;
     s_pending = 1;
     host.ee_writes++;
