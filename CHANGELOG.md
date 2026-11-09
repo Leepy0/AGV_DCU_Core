@@ -2,8 +2,8 @@
 
 ## 미릴리스 (2026-11-09, 조향 기본값)
 - 10 ms 조향, 변화율 항 감쇠 부호, 휠 간격 비례 이득을 기본 동작으로 했다(시험 차량 A/B: 직진 편차 RMS 10.8 → 4.3 mm).
-  `P_OPT_FLAGS` b0·b1·b4 는 비었다(남은 값은 무시, 범위 0~63 그대로). 예전 동작은 `P_LEGACY_QUIRKS` b4 `QUIRK_STEER_20MS`,
-  b5 `QUIRK_DAMP_SIGN_OLD`, b6 `QUIRK_NO_WB_GAIN`(셋 = `QUIRK_STEER_LEGACY`). 39번 범위 0~127.
+  `P_OPT_FLAGS` b0·b1·b4 는 비었다(남은 값은 무시, 범위 0\~63 그대로). 예전 동작은 `P_LEGACY_QUIRKS` b4 `QUIRK_STEER_20MS`,
+  b5 `QUIRK_DAMP_SIGN_OLD`, b6 `QUIRK_NO_WB_GAIN`(셋 = `QUIRK_STEER_LEGACY`). 39번 범위 0\~127.
 - 조향 스윕 칸을 `sweep_cand_t {opt, quirk, src}`(51·39·38번)로 바꿨다. `ident_sweep_set`·`ident_temp_set` 인자도 같다.
   기본 ALL·TEMP 목록은 예전 OPT 값과 같은 조향 조합이다. `agv_all` 에 `quirk_saved`, `src_saved`, `hs_mpm`, `need_mm`,
   `sw[k].quirk`·`src` 를 더했다. 스윕은 세 값을 RAM 에만 바꾸고 끝·실패·끊김 때 되돌린다.
@@ -21,11 +21,11 @@
   RESET 위로·취소·건너뛰기, START 시작, UP·DOWN 결과·값, SHIFT 자리. FND `t1`, `t2.1CH` 처럼 't' + 번호(점) + 두 글자.
   - t1 제작: 입력(22·50번, 최고 속도 상한, 교차선 간격 L) 확정 즉시 저장. START 한 번으로 연속 시험
     `ident_start_build`: 0회(L 로 22번, 둘째 회전으로 24번, 'h' 부호·배율) → 바닥 rpm 1·4회(28번) → TOP 1·2회(1번 추천)
-    → 타력 2회(13번 추천) → 교차로 위치 정지 20~60 cm(35번 추천) → OPT 0·3·19·26 스윕(51번 추천).
+    → 타력 2회(13번 추천) → 교차로 위치 정지 20\~60 cm(35번 추천) → OPT 0·3·19·26 스윕(51번 추천).
     22·24·28번·'h' 는 단계 끝에 바로 저장, 1·13·35·51번은 결과 쪽에서 채택한 것만 SAVE 때 저장. 1·13·51번은 시험 중 RAM 에만.
     28번 추천은 정지 바닥(350 rpm) 아래로 내리지 않는다.
   - t2 점검: 빠른 점검·바퀴·가이드 센서(선에서 바로 서서 OV, GA 입력으로 50번)·모터·앰프 교체. 기준값 대비 %, NG 깜박임.
-  - 기준값: t1 SAVE 때 EEPROM 110~114·119·125(검사 워드 110). 입력 L·상한 126·127. 128 워드 안, 다른 구역과 안 겹친다.
+  - 기준값: t1 SAVE 때 EEPROM 110\~114·119·125(검사 워드 110). 입력 L·상한 126·127. 128 워드 안, 다른 구역과 안 겹친다.
   - t3 개발: IDEN·RPM·TOP·ALL·TEMP 그대로(`s_dev` 표). 예전 1 m 교차선 튜닝 흐름은 없앴다.
   - 결과 `agv_build` 를 `test_keep_bld`(test_keep_rpm 뒤)에 둔다.
 
@@ -38,9 +38,9 @@
   주행 중 DAC 고정은 진행 방향을 그대로 둔다.
 - 지정 시험(TEMP): 튜닝 대기 중 SHIFT 로 고른다(TUNE → IDEN → RPM → TOP → ALL → TEMP). 0회(선 찾기, L)만 한 뒤
   통합 시험 단계 2 와 같은 OPT 스윕을 TEMP 목록(기본 {0,3,19,26,0,3,19,26}, `ident_temp_set`)으로 하고 단계 2 끝에서 멈춘다.
-  식별 1~6회·최고 속도 없음. 결과 `agv_all`(stage 2). FND `T`+단계·회·순서, `TMOK`/`F`+코드.
+  식별 1\~6회·최고 속도 없음. 결과 `agv_all`(stage 2). FND `T`+단계·회·순서, `TMOK`/`F`+코드.
 - 옆 계단: 응답을 정속 평균에서 잰다(목표 = 평균 + 4칸). 치우침이 있으면 계단이 줄어 t63·지연이 0 으로 나오던 문제. `lat_err_mm` = 창 끝 평균 - (평균 + 4칸).
-- 통합 시험: 튜닝 대기 중 SHIFT 로 고른다(TUNE → IDEN → RPM → TOP → ALL). START 한 번으로 식별 시험 0~6회,
+- 통합 시험: 튜닝 대기 중 SHIFT 로 고른다(TUNE → IDEN → RPM → TOP → ALL). START 한 번으로 식별 시험 0\~6회,
   OPT 스윕(목록의 OPT 마다 왕복 2회, 식별 3·4회 속도, SL 정지·속도 계단 없음), 최고 속도 시험 1·2회(단계 1 의 L)를 잇는다.
   스윕 OPT 는 `param_set_ram` 으로 RAM 에만 넣고 회마다 조향 상태를 지운다. 끝·실패·끊김 모두 OPT 를 시험 전 값으로 돌린다.
   결과 `agv_all`(스윕 칸 `sw[]`)·`agv_ident`·`agv_top`. 실패 코드 = 단계 × 1000 + 회 × 10 + 순서. FND `A`+단계·회·순서, `ALOK`/`F`+코드.
@@ -58,21 +58,21 @@
   리플, 90% 오름 시간을 `agv_rpmt` 에 남긴다. STOP·E-STOP·오류·패널 키는 바로 DAC 0. FND `RPOK`, UP·DOWN 으로 좌·우 최대 rpm.
 - `motor_dac_force`, `motor_dac_release`, `motor_raw_rpm`.
 - 식별 시험: 튜닝 대기 중 SHIFT 로 고르는 자동 직진 시험. 결과 구조체 `agv_ident`. 조향 옆 계단 지령 `p_test`.
-  교차선 두 개 사이를 혼자 오간다: 0회에 선 간격 L 을 재고, 1~6회는 속도 세 단계를 두 번씩(방향이 번갈아) 잰다.
+  교차선 두 개 사이를 혼자 오간다: 0회에 선 간격 L 을 재고, 1\~6회는 속도 세 단계를 두 번씩(방향이 번갈아) 잰다.
   짝수 회는 SL 정지 뒤, 홀수 회는 서지 않고 감속해 최저 속도로 다음 선까지 가서 정렬 180도 회전. 정속·옆 계단 창은 남은 거리로 정하고, 1 s 가 안 되면 그 단계 속도를 4/5 로 낮춰 다시 잰다. 회별 결과는 `lv[6]`.
-- `P_OPT_FLAGS` b4: 조향 이득을 휠 간격에 비례 (600 mm 기준). 범위 0~31.
+- `P_OPT_FLAGS` b4: 조향 이득을 휠 간격에 비례 (600 mm 기준). 범위 0\~31.
 - 2단계 HAL: `hal/f2808` (PLL, 워치독, 플래시 대기, PIE, Timer0, GPIO, 버스, SPI DAC, eCAP, SCI, Microwire EEPROM, ADC, codestart), `hal/host`. TI 헤더 없음.
 - 3단계 조립: `src/sys` (메인 스케줄러, `run`, `comm`, `guide_poll`, `tagact`, `ui`, `storage`, `io`, `link`, `log`), 빈 예제 사이트, `tools/build_target.ps1`, `tests/test_sys.c`.
 - SCI 를 16단 FIFO 로 바꿨다 (원본은 FIFO 꺼짐). 수신 오버런과 오류를 실제로 복구한다.
 - 기존 모듈 추가: `seq_pick_profile`, `seq_call_once`, `param_limit`, `param_store_set`, `acs_cross_release`, `acs_cross_clear`, ACT 슬롯 부족·재전송 포기 로그.
 - 1단계 코어 구현: `motor`(rpm 피드백, 속도 PI, S커브, 주행 단계, 테이프 회전 정렬), `stop`(MotorStop), `steer`, `branch`, `guide`, `frame`, `acs`, `seq`, `param`과 호스트 단위 시험.
 - `guide`: `'a'`·`'h'` 해석, 바이트 파서, LED 덩어리 추적, 필터(기본 꺼짐), 센서 전환 초기화, 두절(255) 판정. `P_GUIDE_CURVE_DETECT` = 2 로 위치 소스 선택.
-- 고친 결함: `curve_now` 반전, 테이프 회전 Step 2, `nGuide_Risk_Stop_Flag` 잔류, `'h'` 자리표 (`P_LEGACY_QUIRKS` b0~b3 으로 구동작 재현), 재전송 CT²·선두 대기, `set[40]` 곱 넘침, `DA_EST_cnt` 잔류, 스테이션 큐 상한, 부팅 직후 교차로 판정.
+- 고친 결함: `curve_now` 반전, 테이프 회전 Step 2, `nGuide_Risk_Stop_Flag` 잔류, `'h'` 자리표 (`P_LEGACY_QUIRKS` b0\~b3 으로 구동작 재현), 재전송 CT²·선두 대기, `set[40]` 곱 넘침, `DA_EST_cnt` 잔류, 스테이션 큐 상한, 부팅 직후 교차로 판정.
 - 설계 문서 초안.
 - 공개 헤더 초안: `types.h`, `seq.h`, `tagact.h`, `io.h`, `mgmt.h`.
 - 시퀀스 표를 YAML에서 C 매크로(`seq_dsl.h`)로 변경. 생성기 제거. 시간 단위는 1/100초.
 - 조건 `IN(ON/OFF)`, 가지 수 제한 없는 `SELECT`/`WHEN`, 라벨, `BELT_ON(n, CW/CCW)`와 사이트 배선 마스크 추가.
 - 주행 중 병렬 동작 ACT와 태그 액션 `A_ACT`, 태그 상태 조건 `IF_STATION` 추가.
-- 논리 I/O ID 재배치: 표에서 쓰는 신호 0~31, 앰프 신호 32 이상.
+- 논리 I/O ID 재배치: 표에서 쓰는 신호 0\~31, 앰프 신호 32 이상.
 - `tests/test_dsl.c`: gcc 실행, cl2000 컴파일, 컴파일 오류 시험.
 - OTA 앱 영역 링커 명령 파일 초안 `cmd/F2808_app_ota.cmd` (`AGV_Wifi_Bridge/dsp/app/F2808_app_example.cmd` 사본, 실기 검증 전 잠정).
