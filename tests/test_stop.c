@@ -1,5 +1,6 @@
 /* test_stop.c - MotorStop 상태기계. 원본과 같은 궤적인지는 앱 저장소 비교 시험이 맡는다 */
 #include <assert.h>
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 #include "agv/acs.h"
@@ -14,6 +15,8 @@
 
 static long s_left_acc[2];
 static long s_travel;          /* 주행 바퀴 누적 펄스 */
+static int s_friction;         /* 1 = 제동 토크 없음: 지령보다 빨리 줄지 못하고 dv/dt = -(3000 + 0.1 v) rpm/s 로 준다 */
+static float s_fv[2];
 
 static void setup(int16_t rpm)
 {
@@ -25,6 +28,8 @@ static void setup(int16_t rpm)
     steer_reset();
     memset(s_left_acc, 0, sizeof(s_left_acc));
     s_travel = 0;
+    s_friction = 0;
+    s_fv[0] = s_fv[1] = (float)rpm;
     acs_reset();
     D.ui_mode = UI_AUTO;
     D.control = RUN_DRIVE;
@@ -40,6 +45,11 @@ static void plant(int16_t stiction)
 {
     for (uint16_t i = 0; i < 2; i++) {
         int32_t rpm = D.w_cmd[i] > stiction ? D.w_cmd[i] : 0;
+        if (s_friction) {
+            float lo = s_fv[i] - (3000.0f + 0.1f * s_fv[i]) * 0.01f;
+            s_fv[i] = ((float)rpm > lo) ? (float)rpm : ((lo > 0.0f) ? lo : 0.0f);
+            rpm = (int32_t)s_fv[i];
+        }
         s_left_acc[i] += rpm * 12;
         while (s_left_acc[i] >= 6000) {
             s_left_acc[i] -= 6000;
@@ -151,7 +161,10 @@ static void test_traffic(void)
         assert(D.action_err == ERR_CROSS_WAIT && D.cross_in_on && !D.cross_in_flag);
         { float err = travel_mm(from) - 600.0f;
           printf("  traffic %d rpm: %.1f mm\n", speeds[k], travel_mm(from));
-          assert(err > -3.0f && err < 3.0f); }
+          assert(err > -3.0f && err < 3.0f);
+          assert(stop_last.reason == STOP_REASON_TRAFFIC_POSITION);      /* 유지가 조용해질 때 쓴다 */
+          assert(fabsf(stop_last.overshoot_mm - err) <= 0.5f / P.one_length_pulse + 0.01f);
+          assert(stop_last.target_mm > 0.0f && stop_last.target_mm < 600.0f); }   /* 제동점에서 남은 거리 */
         assert(s_jump == 0 && s_flip == 0);
         for (t = 0; t < 200; t++) { tick(0); assert(D.last_input == 0); }   /* 허가까지 선다 */
         acs_cross_release(ACS_CROSS_IN);                          /* 선 뒤 허가: 오늘처럼 다시 출발 */
@@ -238,8 +251,61 @@ static void test_traffic(void)
     for (t = 0; (t < 3000) && (stop_phase() != STOP_PHASE_COMPLETE); t++) { tick(0); }
     assert(D.cross_in_flag && D.cross_pulses > 0);
     D.ext_sen_on = 0;
-    assert(run_until_hold(3000) < 3000);
-    { float err = travel_mm(from) - 600.0f; assert(err > -3.0f && err < 3.0f); }
+    { uint16_t n0 = stop_last.n;
+      assert(run_until_hold(3000) < 3000);
+      float err = travel_mm(from) - 600.0f; assert(err > -3.0f && err < 3.0f);
+      assert(stop_last.n == n0 + 1 && stop_last.reason == STOP_REASON_TRAFFIC_POSITION);   /* 장애물 정지는 쓰지 않는다 */
+      assert(fabsf(stop_last.overshoot_mm - err) <= 0.5f / P.one_length_pulse + 0.01f); }
+}
+
+/* 위치 정지 넘침 기록. 제동 토크가 없는 바퀴로 잰다 */
+static void test_stop_last(void)
+{
+    long from;
+    uint16_t n0;
+
+    /* 거리가 넉넉한 태그 정지: 지령대로 서는 바퀴면 목표에 선다 */
+    setup(2000);
+    n0 = stop_last.n;
+    from = s_travel;
+    D.stop_pulses = 600;
+    D.flag_stopping = 1;
+    stop_request_tag();
+    assert(run_until_idle(0, 3000) < 3000);
+    printf("  stop_last 600 p: %.1f mm, %.0f rpm/s, %d\n", stop_last.overshoot_mm, stop_last.required_decel,
+           stop_last.rate_limited);
+    assert(stop_last.n == n0 + 1 && stop_last.reason == STOP_REASON_TAG_DOCKING && stop_last.entry_rpm == 2000);
+    assert(stop_last.rate_limited == 0 && stop_last.required_decel > 0.0f);
+    assert(stop_last.target_mm <= 600.0f / P.one_length_pulse + 0.01f && stop_last.target_mm > 590.0f / P.one_length_pulse);
+    assert(fabsf(stop_last.overshoot_mm - (travel_mm(from) - 600.0f / P.one_length_pulse)) < 0.01f);   /* 목표 = 걸 때 자리 + 600 */
+    assert(fabsf(stop_last.overshoot_mm) < STOP_DISTANCE_TOL_MM);
+    assert(stop_last.stop_ticks > 0);
+
+    /* 짧은 목표: dcc 로 묶이고, 지령이 0 이 돼도 마찰로만 서서 지나친다 */
+    setup(3000);
+    s_friction = 1;
+    from = s_travel;
+    D.stop_pulses = 20;
+    D.flag_stopping = 1;
+    stop_request_tag();
+    assert(run_until_idle(0, 3000) < 3000);
+    printf("  stop_last 20 p: %.1f mm, %.0f rpm/s, %d, max %.1f\n", stop_last.overshoot_mm, stop_last.required_decel,
+           stop_last.rate_limited, stop_last.max_overshoot_mm);
+    assert(stop_last.n == n0 + 2 && stop_last.rate_limited == 1);
+    assert(stop_last.required_decel > (float)P.dcc * 100.0f);
+    assert(stop_last.overshoot_mm > 100.0f / P.one_length_pulse);
+    assert(fabsf(stop_last.overshoot_mm - (travel_mm(from) - 20.0f / P.one_length_pulse)) < 0.01f);
+    assert(stop_last.max_overshoot_mm >= stop_last.overshoot_mm);
+
+    /* 명령 정지가 끊으면 쓰지 않는다 */
+    setup(2000);
+    D.stop_pulses = 600;
+    D.flag_stopping = 1;
+    stop_request_tag();
+    tick(0);
+    stop_request_rapid(STOP_REASON_COMMAND);
+    assert(run_until_idle(0, 3000) < 3000);
+    assert(stop_last.n == n0 + 2);
 }
 
 /* OPT_PAUSE_RESUME_SMOOTH: 감속 중 원인이 풀리면 0 까지 가지 않는다 */
@@ -562,6 +628,7 @@ int main(void)
     test_ramp_continuity();
     test_traffic();
     test_smooth_resume();
+    test_stop_last();
     puts("test_stop ok");
     return 0;
 }

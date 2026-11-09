@@ -19,6 +19,15 @@ static int16_t s_command_sign = 1;
 static int16_t s_pause_alarm;
 static int16_t s_clear_ticks;            /* 일시정지 감속 중 원인이 비어 있던 연속 틱 */
 
+stop_last_t stop_last;
+/* 기록 중인 위치 정지. reason 0 = 없음. 목표는 seq0 에서 target 펄스 앞이다 */
+static struct {
+    int16_t  reason, entry, limited, ticks;
+    uint16_t seq0;
+    int32_t  target;
+    float    target_mm, decel;
+} s_lt;
+
 /* ---- 제어기 ---- */
 
 int16_t stop_is_position(int16_t reason)
@@ -318,6 +327,74 @@ int16_t stop_ctrl_update(stop_ctrl_t *c, const stop_feedback_t *fb)
     return c->command_rpm;
 }
 
+/* ---- 정지 기록 ---- */
+
+static uint16_t lt_wheel(void) { return D.backward ? 1u : 0u; }   /* ISR 이 정지 거리를 세는 바퀴 */
+
+static int32_t lt_since(void) { return (int32_t)(uint16_t)(motor_pulse_seq(lt_wheel()) - s_lt.seq0); }
+
+/* 남은 거리와 누적 펄스를 한 쌍으로 읽는다. 사이에 펄스가 들면 다시 읽는다 */
+static int32_t lt_remaining(int16_t reason, int32_t *since)
+{
+    volatile int16_t *r = (reason == STOP_REASON_TRAFFIC_POSITION) ? &D.cross_pulses : &D.stop_pulses;
+    int16_t a;
+    do {
+        a = *r;
+        *since = lt_since();
+    } while (a != *r);
+    return a;
+}
+
+/* 정지 시작. 위치 정지면 기록을 새로 걸고, 일시정지는 그대로 두고, 나머지는 거둔다 */
+static void lt_arm(int16_t reason)
+{
+    int32_t since;
+
+    if (!stop_is_position(reason) || (reason == STOP_REASON_TURN_ANGLE)) {
+        if (!stop_is_pause(reason)) { s_lt.reason = STOP_REASON_NONE; }
+        return;
+    }
+    s_lt.reason = reason;
+    s_lt.entry = s_ctrl.command_rpm;
+    s_lt.seq0 = motor_pulse_seq(lt_wheel());
+    s_lt.target = lt_remaining(reason, &since) + since;
+    s_lt.target_mm = (P.one_length_pulse > 0.0f) ? (float)s_lt.target / P.one_length_pulse : 0.0f;
+    s_lt.decel = 0.0f;
+    s_lt.limited = 0;
+    s_lt.ticks = 0;
+}
+
+/* 매 틱 제어 뒤. 목표 지점을 따라가다 조용해지면 기록한다 */
+static void lt_tick(void)
+{
+    int32_t since;
+    float d;
+
+    if (s_lt.reason == STOP_REASON_NONE) { return; }
+    if (s_lt.ticks < 32767) { s_lt.ticks++; }
+    if (s_ctrl.reason == s_lt.reason) {
+        int32_t rem = lt_remaining(s_lt.reason, &since);
+        if (rem > 0) { s_lt.target = since + rem; }   /* 보상으로 줄어든 목표도 따라간다 */
+        if (s_ctrl.required_decel > s_lt.decel) { s_lt.decel = s_ctrl.required_decel; }
+        s_lt.limited |= s_ctrl.braking_rate_limited;
+    }
+    else if (!((s_lt.reason == STOP_REASON_TRAFFIC_POSITION) && (s_ctrl.reason == STOP_REASON_TRAFFIC))) {
+        return;                  /* 일시정지 중. 재개를 기다린다 */
+    }
+    if (s_ctrl.phase != STOP_PHASE_COMPLETE) { return; }
+    d = (P.one_length_pulse > 0.0f) ? (float)(lt_since() - s_lt.target) / P.one_length_pulse : 0.0f;
+    stop_last.reason = s_lt.reason;
+    stop_last.entry_rpm = s_lt.entry;
+    stop_last.target_mm = s_lt.target_mm;
+    stop_last.overshoot_mm = d;
+    stop_last.required_decel = s_lt.decel * 100.0f;
+    stop_last.rate_limited = s_lt.limited;
+    stop_last.stop_ticks = s_lt.ticks;
+    if (d > stop_last.max_overshoot_mm) { stop_last.max_overshoot_mm = d; }
+    stop_last.n++;
+    s_lt.reason = STOP_REASON_NONE;
+}
+
 /* ---- 런타임 ---- */
 
 int16_t stop_is_braking(void)
@@ -335,6 +412,7 @@ void stop_clear(void)
     stop_ctrl_reset(&s_ctrl);
     s_paused_valid = 0;
     s_clear_ticks = 0;
+    s_lt.reason = STOP_REASON_NONE;
 }
 
 void stop_clear_request(void)     { s_request = STOP_REASON_NONE; }
@@ -405,6 +483,7 @@ void stop_begin_runtime(int16_t reason)
     stop_ctrl_begin(&s_ctrl, reason, entry, maximum, P.acc, P.dcc, fb.remaining_pulses, fb.pulses_per_rpm_tick);
     D.vin_out = D.last_input;
     D.scv_accel = 0;
+    lt_arm(reason);
 }
 
 int16_t stop_blocking_reason(void)
@@ -474,6 +553,7 @@ static void resume_at(int16_t entry, int16_t accel)
         D.scv_accel = 0;
         s_ctrl.floor_rpm = saved_floor;
         s_ctrl.candidate_floor_rpm = saved_floor;
+        if (s_lt.reason != s_paused.reason) { lt_arm(s_paused.reason); }   /* 교차로 기록이 덮은 정지를 다시 건다 */
         /* 기존은 0 에서 바닥 속도까지만 올려 남은 거리를 기어간다. 남은 거리가 길면 최대 속도로 가속했다가
          * 거리 제동으로 들어간다 (회전 각 제어와 같은 경로) */
         if (param_opt(OPT_RESUME_CRUISE) && stop_is_position(s_paused.reason)
@@ -490,6 +570,7 @@ static void resume_at(int16_t entry, int16_t accel)
         /* 주행 램프가 지금 지령·가속도에서 이어받는다. 램프는 가속 쪽 저크(acc/8)로 감속도를 풀므로
          * 제동 감속도를 그대로 넘기면 한참 더 떨어지고 저속에서는 0 을 넘는다. acc 안으로 묶어 넘긴다 */
         stop_ctrl_reset(&s_ctrl);
+        s_lt.reason = STOP_REASON_NONE;
         D.vin_out = (int16_t)(s_command_sign * entry);
         D.scv_accel = (int16_t)(s_command_sign * stop_clamp(accel, (int16_t)(-P.acc), P.acc));
         D.step = DRIVE_CHANGE_SPEED;
@@ -617,6 +698,7 @@ int16_t stop_run(void)
     D.cur_speed = (int16_t)(s_command_sign * stop_ctrl_update(&s_ctrl, &fb));
     D.vin_out = D.cur_speed;
     motor_velocity(D.cur_speed);
+    lt_tick();                   /* finish 가 stop_pulses 를 지우기 전에 */
     if (s_ctrl.phase == STOP_PHASE_FAILED) {
         D.stop_err = ERR_STOP_APPROACH;
         D.wait_start = D.run_restart = 0;

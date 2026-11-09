@@ -34,5 +34,6 @@ SECTIONS
    .ebss       : > RAML1,      PAGE = 1
    .sysmem     : > RAMH0,      PAGE = 1
    .esysmem    : > RAMH0,      PAGE = 1
-   test_keep   : > RAMH0,      PAGE = 1      /* 시험 결과. codestart 가 지우지 않아 리셋에 남는다 */
+   test_keep   : { *(test_keep) *(test_keep_add) } > RAMH0, PAGE = 1   /* 시험 결과. codestart 가 지우지 않아 리셋에 남는다.
+                                                                       뒤에 붙인 결과(test_keep_add)는 앞 주소를 옮기지 않는다 */
 }

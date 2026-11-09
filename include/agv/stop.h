@@ -75,6 +75,24 @@ typedef struct {
     int16_t fresh_left, fresh_right;
 } stop_feedback_t;
 
+/* 마지막 위치 정지 기록. 위치 정지(회전 각 제외)가 두 바퀴 조용(COMPLETE)이 되면 쓴다.
+ * 교차로 대기는 뒤이은 유지(STOP_REASON_TRAFFIC)가 조용해질 때 쓴다. 명령·스위치·비상이 끊으면 쓰지 않는다.
+ * 넘침 = 목표 지점부터 선 자리까지 진행 방향 거리. 남은 거리 카운터는 0 에서 멈추니 바퀴 누적 펄스로 잰다.
+ * CCS Expressions 에 stop_last 를 넣고 본다 */
+typedef struct {
+    int16_t  reason;            /* 1~5 */
+    int16_t  entry_rpm;         /* 시작 때 지령 */
+    float    target_mm;         /* 시작 때 남은 거리 */
+    float    overshoot_mm;      /* + 지나침, - 못 미침 */
+    float    required_decel;    /* 계획 감속도 rpm/s. dcc × 100 과 견준다. 0 = 거리 제동 없음 */
+    float    max_overshoot_mm;  /* 부팅 뒤 최대 */
+    int16_t  rate_limited;      /* 1 = 계획 감속도가 dcc 를 넘어 묶였다 */
+    int16_t  stop_ticks;        /* 시작부터 끝까지 10 ms 틱. 일시정지 포함 */
+    uint16_t n;                 /* 기록 수 */
+} stop_last_t;
+
+extern stop_last_t stop_last;
+
 /* 제어기 본체. 하드웨어 접근 없음 */
 void    stop_ctrl_reset(stop_ctrl_t *c);
 void    stop_ctrl_begin(stop_ctrl_t *c, int16_t reason, int16_t entry_rpm, int16_t maximum_rpm,

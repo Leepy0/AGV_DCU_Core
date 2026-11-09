@@ -130,7 +130,7 @@ typedef struct {
 typedef struct {
     int16_t state;           /* 1 진행, 2 끝, 3 실패 */
     int16_t fail;            /* 단계 × 1000 + 회 × 10 + 순서. 0 = 없음 */
-    int16_t stage;           /* 1 식별, 2 OPT 스윕, 3 최고 속도 */
+    int16_t stage;           /* 1 식별, 2 OPT 스윕, 3 최고 속도. 지정 시험은 3 타력, 4 정지 정확도 */
     int16_t pass, phase;     /* 단계 2 의 회(스윕 칸 × 2 + 0·1 + 1)와 순서. 단계 1·3 은 agv_ident·agv_top 쪽을 본다 */
     int16_t sweep_n;         /* 스윕 칸 수 */
     int16_t sweep_k;         /* 지금(또는 마지막) 스윕 칸 */
@@ -148,7 +148,7 @@ extern all_result_t agv_all;
 void ident_sweep_set(const int16_t *opts, uint16_t n);
 void ident_start_all(void);  /* 이후 ident_run, ident_pass, ident_phase, ident_abort, ident_want_h 를 같이 쓴다 */
 int  ident_all_mode(void);   /* 1 = 지금 돌고 있는(또는 마지막) 시험이 통합 시험이나 지정 시험 */
-uint16_t ident_stage(void);  /* 통합(지정) 시험 단계 1~3. 통합 시험이 아니면 0 */
+uint16_t ident_stage(void);  /* 통합 시험 단계 1~3, 지정 시험 1~4. 통합 시험이 아니면 0 */
 
 /* ---- 지정 시험 (튜닝 모드 TEMP) ----
  * 통합 시험을 줄인 것. 단계 1 은 0회만(선 찾기, L 측정, 회전 두 번). 식별 1~6회와 최고 속도 시험은 없다.
@@ -160,14 +160,14 @@ uint16_t ident_stage(void);  /* 통합(지정) 시험 단계 1~3. 통합 시험�
  *  3 s 가 지나거나 감속 끝점(L - GD - 100 mm)에 닿거나 가이드가 크게 벗어나면 풀고, 지령을 실제 속도(최저 속도 상한)에서
  *  최저 속도로 이어 8 선 찾기 → 9 회전. 순서 7(SL 정지)은 지정 시험에 없어 타력에 쓴다.
  *  타력 시작은 늦어도 L - GD - 100 mm - (v² - 최저²) / (2 × 1000 rpm/s). 안정 창이 안 들어가면 4/5 로 다시(cut 2).
- * 결과는 agv_all(stage 3 에서 끝난다)과 agv_coast. agv_ident 에는 0회 값(L 등)만 남는다(state 2, pass 0).
- * 단계 3 의 agv_all.pass·phase 는 타력 회(1~4)와 순서. 마지막 타력 회전 뒤 agv_all.state = 2.
+ * 결과는 agv_all 과 agv_coast. agv_ident 에는 0회 값(L 등)만 남는다(state 2, pass 0).
+ * 단계 3·4 의 agv_all.pass·phase 는 그 단계 회와 순서. 마지막 타력 회전 뒤 단계 4(아래 agv_stopt).
  * 끝, 실패, 끊김 모두 OPT 를 되돌린다. STOP·E-STOP·오류·패널 키는 타력 중이면 바로 고정을 푼다. 실패 코드는 통합 시험과 같다 */
 /* TEMP 목록. 기본 {0,3,19,26,0,3,19,26}. n 은 SWEEP_MAX 에서 자른다. 0..31 밖의 값은 건너뛴다 */
 void ident_temp_set(const int16_t *opts, uint16_t n);
 void ident_start_temp(void); /* 이후 ident_run, ident_pass, ident_phase, ident_abort, ident_want_h 를 같이 쓴다 */
 int  ident_temp_mode(void);  /* 1 = 지금 돌고 있는(또는 마지막) 시험이 지정 시험 */
-int  ident_coast_key(void);  /* 패널 키. 타력 중이면 고정을 풀고 실패시켜 1 */
+int  ident_coast_key(void);  /* 패널 키. 타력 중이면 고정을 풀고, 단계 4 정지 중이면 대기를 풀고 실패시켜 1 */
 
 #define COAST_PASSES 4
 #define COAST_CURVE  64            /* 20 ms 간격 평균 rpm */
@@ -194,8 +194,44 @@ typedef struct {
 
 extern coast_result_t agv_coast;
 
+/* ---- 지정 시험 단계 4: 정지 정확도 ----
+ * 마지막 타력 회전 뒤 STOPT_PASSES 회(방향 번갈아), 선에서 출발한다. 사용자 OPT, 조향 켬.
+ * 회 1·2 는 최고 속도의 1/3, 3·4 는 2/3, 5·6 은 최고 속도(앞 단계에서 낮춘 상한 그대로).
+ * 홀수 회 목표 = CID(35번, 0 이면 STOPT_CID_MM), 짝수 회 = STOPT_SHORT_MM.
+ * 1 가속 → 2 안정 0.5 s → 7 정지: 그 자리에서 교차로 대기 목표(cross_pulses)를 직접 건다(ACS 를 거치지 않는다).
+ *  주행 단계가 제동점까지 달리고 교차로 위치 정지(사유 5)가 선다. 조용해지면(stop_last 기록) 대기를 풀고
+ *  8 최저 속도로 선 찾기 → 9 회전. 제동 토크가 없어 목표가 가까우면 지나친다. 그 거리를 잰다.
+ * 트리거는 늦어도 L - GD - 100 mm - max(목표, v² / (2 × 1000 rpm/s)). 안 들어가면 4/5 로 다시(cut 2).
+ * STOP·E-STOP·오류·패널 키·가이드 이탈(10칸)·정지 중 교차선은 실패 = 4000 + 회 × 10 + 순서. 30 s 안에 안 서도 실패.
+ * 마지막 회전 뒤 agv_all.state = 2, stage 4 */
+#define STOPT_PASSES   6
+#define STOPT_SHORT_MM 200
+#define STOPT_CID_MM   600         /* 35번이 0 일 때 */
+
+typedef struct {
+    int16_t v0_rpm;                /* 트리거 직전 0.1 s 좌우 평균 rpm */
+    int16_t rate_limited;          /* 1 = 계획 감속도가 dcc 를 넘었다 */
+    float   v0_mpm;
+    float   target_mm;             /* 건 목표 */
+    float   travel_mm;             /* 트리거부터 선 자리까지 (엔코더) */
+    float   overshoot_mm;          /* stop_last 값. + 지나침, - 못 미침. ≈ travel - target */
+    float   required_decel;        /* 계획 감속도 최대 rpm/s. dcc × 100 과 견준다 */
+    float   stop_ms;               /* 트리거부터 조용해질 때까지 */
+    int16_t cut;                   /* 2 = 속도를 낮췄다 */
+    int16_t reason;                /* stop_last.reason. 5 여야 한다 */
+} stopt_pass_t;
+
+typedef struct {
+    int16_t state;                 /* 1 진행, 2 끝, 3 실패 */
+    int16_t fail;                  /* 회 × 10 + 순서 */
+    int16_t pass, phase;
+    stopt_pass_t p[STOPT_PASSES];
+} stopt_result_t;
+
+extern stopt_result_t agv_stopt;
+
 /* ---- 리셋에 남는 결과 ----
- * agv_ident·agv_top·agv_all·agv_coast·agv_rpmt 는 codestart 가 지우지 않는 RAM 구역 test_keep 에 둔다.
+ * agv_ident·agv_top·agv_all·agv_coast·agv_rpmt·agv_stopt 는 codestart 가 지우지 않는 RAM 구역 test_keep 에 둔다.
  * CCS 연결로 워치독 리셋이 나도 남는다. 부팅 때 ident_keep_boot 를 한 번 부른다.
  * 표시가 틀리면(전원 투입) 모두 지우고 표시를 쓴다. 진행 중(state 1)이던 결과는 state 3, fail 이 0 이면 -1 */
 extern uint16_t test_keep_mark;

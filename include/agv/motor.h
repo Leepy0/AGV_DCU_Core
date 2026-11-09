@@ -16,6 +16,7 @@ void    motor_reset(void);
 void    motor_encoder_pulse(uint16_t wheel);    /* eCAP ISR */
 int16_t motor_idle_ticks(uint16_t wheel);       /* 마지막 펄스 뒤 틱 */
 int16_t motor_fresh_pulse(uint16_t wheel);      /* 이번 틱에 펄스가 있었으면 1 */
+uint16_t motor_pulse_seq(uint16_t wheel);       /* 누적 펄스. 16비트로 돈다. 차로만 쓴다 */
 void    motor_stall_check(void);                /* P_ENC_STALL_TICKS. 한쪽 엔코더 고착이면 202·203 */
 
 void    motor_feedback_update(void);            /* MotorFeedback_Update */

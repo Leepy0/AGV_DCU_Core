@@ -37,7 +37,8 @@ SECTIONS
    .bss        : > RAMM1,      PAGE = 1
    .const      : > FLASHAPP,   PAGE = 0
    .sysmem     : > RAMH0,      PAGE = 1
-   test_keep   : > RAMH0,      PAGE = 1      /* 시험 결과. codestart 가 지우지 않아 리셋에 남는다 */
+   test_keep   : { *(test_keep) *(test_keep_add) } > RAMH0, PAGE = 1   /* 시험 결과. codestart 가 지우지 않아 리셋에 남는다.
+                                                                       뒤에 붙인 결과(test_keep_add)는 앞 주소를 옮기지 않는다 */
 
    /* PIE 벡터 등 기존 DSP280x_Headers_nonBIOS.cmd 의 레지스터 섹션은 그대로 둔다 */
 }

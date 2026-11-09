@@ -81,6 +81,7 @@ int16_t motor_spike(void)                   { return (s_motor.spike > 0) ? s_mot
 void    motor_encoder_pulse(uint16_t wheel) { s_motor.pulse_seq[wheel]++; }
 int16_t motor_idle_ticks(uint16_t wheel)    { return s_motor.idle[wheel]; }
 int16_t motor_fresh_pulse(uint16_t wheel)   { return s_motor.fresh[wheel]; }
+uint16_t motor_pulse_seq(uint16_t wheel)    { return s_motor.pulse_seq[wheel]; }
 
 /* ---- rpm 피드백 ---- */
 
