@@ -1,5 +1,10 @@
 # 변경 이력
 
+## v0.24.2 (2026-11-10, 빌드 스크립트)
+- `tools/build_target.ps1`: `-CoreLib <경로>` 는 코어 오브젝트를 lib 로 묶고 현장 오브젝트를 그 lib 와 링크한다
+  (IDE 프로젝트가 코어 lib 를 링크하는 것과 같다). `-CoreOnly` 는 lib 까지만 만든다. lib 는 코어 오브젝트가 바뀐 때만 다시 묶는다.
+  lib 링크는 오브젝트 링크와 코드·데이터가 같고 `.cinit` 레코드 순서만 다르다.
+
 ## v0.24.1 (2026-11-10, 빌드 스크립트)
 - `tools/build_target.ps1`: 코어 오브젝트는 `<ObjDir>/core`, 현장 오브젝트는 `<ObjDir>/site` 에 둔다. `-ObjDir`, `-CoreCache` 추가.
   `-CoreCache` 는 있는 코어 오브젝트를 다시 쓴다(코어가 바뀌지 않는 ObjDir 에서만). 현장 파일은 늘 컴파일한다.
