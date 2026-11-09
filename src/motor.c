@@ -538,7 +538,7 @@ void motor_run(void)
         uint16_t i;
         int16_t ok = (int16_t)(!D.system_err && !D.estop);
         D.amp_run = ok;
-        D.motion = D.amp_dir = (D.control == RUN_DRIVE) ? D.backward : MOTION_FWD;   /* 주행 중 타력은 방향을 둔다 */
+        D.motion = D.amp_dir = D.backward;   /* 폐루프 주행(RUN_DRIVE)이 낼 방향 그대로. 제어 상태로 바꾸지 않는다 */
         D.vin_out = 0;
         for (i = 0; i < 2; i++) {
             D.w_cmd[i] = 0;

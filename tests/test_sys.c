@@ -1380,6 +1380,41 @@ static void test_tune_t2_compare(void)
     printf("  tune t2 compare ok\n");
 }
 
+/* t2.4 앰프 쪽: 기준 앰프가 0(모름. t1 은 1회를 안 한다)이면 견주지 않고, 기준이 있으면 다를 때만 깜박인다 */
+static void t24_amp(uint16_t base_amp, int16_t now, uint16_t flick)
+{
+    uint16_t a = tune_base_addr[TUNE_BASE_AMP_SE], old;
+    char want[6] = "A    ";
+    int k;
+
+    test_tune_t1_save();             /* 기준 앰프 'S' */
+    old = host.ee[a];
+    host.ee[a] = (uint16_t)((base_amp << 8) | (old & 0xFFu));
+    host.ee[TUNE_EE_CHECK] = (uint16_t)(TUNE_BASE_MARK ^ (uint16_t)(((uint16_t)(host.ee[TUNE_EE_CHECK] ^ TUNE_BASE_MARK)) - old + host.ee[a]));
+    boot_keys(KEY_MODE + KEY_SET, 1);
+    key(KEY_MODE);
+    key(KEY_SET);
+    for (k = 0; k < 3; k++) { key(KEY_MODE); }   /* t2.4 */
+    assert(tune_base_valid() && tune_menu() == 240);
+    drive_up();
+    run_scan(3);
+    assert(tune_state() == TUNE_BLD);
+    agv_build.amp = now;
+    fake_build_done();
+    want[4] = now ? (char)now : '-';
+    for (k = 0; (k < 30) && !shows(want); k++) { key(KEY_UP); }
+    assert(shows(want) && tune_flick() == flick);
+}
+
+static void test_tune_t24_amp(void)
+{
+    t24_amp(0, 'S', 0);
+    t24_amp(0, 'T', 0);
+    t24_amp('S', 'S', 0);
+    t24_amp('S', 'T', 0x03u);
+    printf("  tune t2.4 amp ok\n");
+}
+
 /* 연속 시험 중 가이드 측정: 'h' 부호가 반대이고 배율이 2 이면 저장 뒤 되살아난다. 튜닝 중 저전압은 보이지 않는다 */
 static void test_tune_guide(void)
 {
@@ -1599,6 +1634,7 @@ int main(void)
     test_tune_inputs();
     test_tune_ee_layout();
     test_tune_t2_compare();
+    test_tune_t24_amp();
     test_tune_guide();
     test_guide_h_only();
     test_tape_turn();

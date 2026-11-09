@@ -1,6 +1,9 @@
 /* rpmtest.c - 바닥 rpm 시험의 회 안 측정. rpmtest.h 참고.
  * 선 찾기·회전·재출발·먼 선까지 이동·실패 처리는 ident.c 가 한다. 여기는 선에서 출발한 뒤 측정만 한다.
- * 개루프 회(1~3)는 매 틱 motor_dac_force 로 낸다. 풀기는 ident.c 가 한다 */
+ * 개루프 회(1~3)는 매 틱 motor_dac_force 로 낸다. 풀기는 ident.c 가 한다.
+ * 개루프 회는 먼저 최저 속도 폐루프로 APPR_MM 간다(접근). 엔코더에 방향이 없어 방향은 이 폐루프 구간이 정한다:
+ * 고정은 그 폐루프가 RUN_DRIVE 로 달리는 중에만 걸고, motor.c 는 고정 중에도 같은 D.backward 방향을 낸다.
+ * 정지 마찰로 한 바퀴만 먼저 풀려 차가 도는 일도 없앤다. 3회는 접근 뒤 DAC 0 으로 서고 나서 오름을 시작한다 */
 #include <math.h>
 #include "agv/rpmtest.h"
 #include "agv/drive.h"
@@ -36,6 +39,12 @@
 #define CUT_MM        300.0f   /* 먼 선까지 감속 거리 + 이만큼은 남긴다 */
 #define DEC_EVERY     4        /* 감속 거리는 4 틱마다 잰다. CPU 를 아낀다 */
 #define RING          64u      /* 2의 거듭제곱 */
+#define APPR_MM       200.0f   /* 개루프 회 앞 폐루프 접근 거리. 남은 거리 guard 는 회 시작부터 재므로 이 거리도 든다 */
+#define APPR_LIMIT    1000     /* 10 s 안에 접근을 못 끝내면 실패 */
+#define ASYM_LO_RPM   20       /* 개루프: 한 바퀴가 이보다 느리고 */
+#define ASYM_HI_RPM   100      /* 다른 바퀴가 이보다 빠르게 */
+#define ASYM_TICKS    30       /* 0.3 s 넘게 가면 한 바퀴 멈춤(차가 그 바퀴를 축으로 돈다) */
+#define ASYM_GUIDE    5        /* 개루프: 가이드가 이만큼 벗어나거나 라인을 잃으면 끊는다(실패 문턱 10 보다 먼저) */
 
 static const int16_t s_up[RPMT_UP]   = { 200, 400, 600, 800, 1200, 1600, 2000 };
 static const int16_t s_dn[RPMT_DN]   = { 2000, 1200, 600, 0 };
@@ -49,6 +58,8 @@ rpmt_result_t agv_rpmt;
 
 static struct {
     int16_t  t, n, y0, dac, dw[2], stopping, cruise;
+    int16_t  appr, at;       /* 접근: 1 폐루프로 가는 중, 2 DAC 0 으로 서기 기다림(3회). at = 접근 틱 */
+    int16_t  aw, as;         /* 한 바퀴 멈춤: 멈춘 바퀴(-1 없음), 이어진 틱 */
     uint16_t rn;
     uint32_t pass0, step0, trig;
     float    dec;
@@ -73,6 +84,28 @@ static int16_t guard(void)
     if ((D.rpm_avg[0] > agv_rpmt.lim_rpm) || (D.rpm_avg[1] > agv_rpmt.lim_rpm)) { return 2; }
     return (rem < s_rt.dec + CUT_MM) ? 1 : 0;
 }
+
+/* 개루프 좌우 어긋남. 0 계속, RPMT_CUT_STALL_L·R 한 바퀴 멈춤 0.3 s, RPMT_CUT_GUIDE 가이드 5칸 이상이나 라인 잃음.
+ * c = 지금 공통 DAC. 0(내림·대기)이면 바퀴 멈춤은 안 본다 */
+static int16_t asym(int16_t c)
+{
+    int16_t w = -1;
+
+    if (D.guide_all_off || (D.guide_pos >= ASYM_GUIDE) || (D.guide_pos <= -ASYM_GUIDE)) { return RPMT_CUT_GUIDE; }
+    if (c > 0) {
+        if ((D.rpm[0] < ASYM_LO_RPM) && (D.rpm[1] > ASYM_HI_RPM))      { w = 0; }
+        else if ((D.rpm[1] < ASYM_LO_RPM) && (D.rpm[0] > ASYM_HI_RPM)) { w = 1; }
+    }
+    if (w != s_rt.aw) {
+        s_rt.aw = w;
+        s_rt.as = 0;
+    }
+    if ((w < 0) || (++s_rt.as <= ASYM_TICKS)) { return 0; }
+    return (w == 0) ? RPMT_CUT_STALL_L : RPMT_CUT_STALL_R;
+}
+
+/* 회 끝 반환값. 어긋남으로 끊었으면 2(세운다) */
+static int pass_end(int16_t cut) { return (cut >= RPMT_CUT_STALL_L) ? 2 : 1; }
 
 /* 공통 DAC 에 가이드 편차 비례 좌우 차. 조향과 같은 부호: 진행 방향 기준 + 편차면 우를 높인다 */
 static void dac_out(int16_t c)
@@ -155,6 +188,8 @@ static void step_end(rpmt_step_t *s, int16_t cut)
     s->cut = cut;
     s->ms = (int16_t)(s_rt.t * TICK_MS);
     s->dist_mm = (int16_t)mm_from(s_rt.step0);
+    s->dw[0] = s_rt.dw[0];
+    s->dw[1] = s_rt.dw[1];
     if (m <= 0) { return; }
     for (i = 0; i < 2u; i++) {
         int32_t sum = 0;
@@ -192,6 +227,8 @@ static int stair(rpmt_step_t *tab, const int16_t *dac, uint16_t n, int16_t len)
     rpmt_step_t *s = &tab[STEP - 1u];
     int16_t g = guard(), c;
 
+    if (g == 0) { g = asym(s_rt.dac); }
+
     dac_out(s_rt.dac);
     if (s_rt.t < BUF_TICKS) {
         s_rt.u.w[0][s_rt.t] = D.rpm[0];
@@ -209,7 +246,7 @@ static int stair(rpmt_step_t *tab, const int16_t *dac, uint16_t n, int16_t len)
     }
     if ((g != 0) || (STEP >= n)) {
         summary();
-        return 1;
+        return pass_end(g);
     }
     agv_rpmt.phase++;
     step_begin(&tab[STEP - 1u], dac[STEP - 1u]);
@@ -223,6 +260,8 @@ static int brk_run(void)
     rpmt_brk_t *b = &agv_rpmt.brk;
     int16_t g = guard(), c;
     uint16_t i;
+
+    if (g == 0) { g = asym((STEP == 1u) ? 1 : 0); }
 
     for (i = 0; i < 2u; i++) {      /* dw 는 앞 틱에 낸 DAC */
         if (motor_fresh_pulse(i)) {
@@ -248,7 +287,7 @@ static int brk_run(void)
     }
     b->dist_mm = (int16_t)mm_from(s_rt.pass0);
     summary();
-    return 1;
+    return pass_end(b->cut);
 }
 
 /* ---- 4회 저속 폐루프 ---- */
@@ -393,6 +432,56 @@ static int stop_pass(void)
     return 0;
 }
 
+/* ---- 개루프 회 앞 접근 ---- */
+
+static int16_t idle_min(void)
+{
+    int16_t i0 = motor_idle_ticks(0), i1 = motor_idle_ticks(1);
+    return (i0 < i1) ? i0 : i1;
+}
+
+/* 접근 끝. 고정은 폐루프가 RUN_DRIVE 로 달리고 있을 때만 건다. 1 = 3회 서기 대기로, -1 = 실패 */
+static int open_begin(void)
+{
+    if (!D.flag_run || (D.control != RUN_DRIVE)) { return -1; }
+    s_rt.aw = -1;
+    s_rt.as = 0;
+    switch (agv_rpmt.pass) {
+    case 1: step_begin(&agv_rpmt.up[0], s_up[0]); break;
+    case 2: step_begin(&agv_rpmt.dn[0], s_dn[0]); break;
+    default:
+        s_rt.appr = 2;
+        s_rt.at = 0;
+        dac_out(0);
+        return 1;
+    }
+    s_rt.appr = 0;
+    return 0;
+}
+
+/* 0 진행, 1 회 끝(cut), -1 실패 */
+static int approach(void)
+{
+    int16_t g = guard();
+
+    if (++s_rt.at > APPR_LIMIT) { return -1; }
+    if (s_rt.appr == 1) {
+        ident_speed(P.min_speed, 1);
+        if ((g == 0) && (mm_from(s_rt.pass0) < APPR_MM)) { return 0; }
+        return (open_begin() < 0) ? -1 : 0;      /* guard 가 걸렸으면 첫 단계 첫 틱에 끊는다 */
+    }
+    dac_out(0);                      /* 3회: 섰다(두 바퀴 200 ms 조용) */
+    if (idle_min() >= STILL_TICKS) {
+        s_rt.appr = 0;
+        s_rt.t = 0;
+        return 0;
+    }
+    if ((g == 0) && (s_rt.at < STOPW_TICKS)) { return 0; }
+    agv_rpmt.brk.cut = (g != 0) ? g : 1;
+    summary();
+    return 1;
+}
+
 /* ---- ident.c 가 부른다 ---- */
 
 void rpmt_pass_begin(void)
@@ -401,28 +490,41 @@ void rpmt_pass_begin(void)
     uint16_t i;
 
     agv_rpmt.pass++;
-    if (ident_build_mode() && (agv_rpmt.pass == 2)) { agv_rpmt.pass = 4; }   /* 연속 시험은 1·4회만 */
+    /* 연속 시험은 4회만. 점검(t2.4)은 앰프 형식을 보려고 1회도 한다 */
+    if (ident_build_mode() && ((agv_rpmt.pass > 1) || !(agv_build.mask & BLD_CHECK))) { agv_rpmt.pass = 4; }
     agv_rpmt.phase = 1;
     s_rt.n = 0;
     s_rt.t = 0;
     s_rt.rn = 0;
     s_rt.stopping = s_rt.cruise = 0;
-    s_rt.pass0 = s_rt.trig = travel();
+    s_rt.pass0 = s_rt.trig = s_rt.step0 = travel();
     s_rt.dw[0] = s_rt.dw[1] = 0;
-    switch (agv_rpmt.pass) {
-    case 1: step_begin(&agv_rpmt.up[0], s_up[0]); break;
-    case 2: step_begin(&agv_rpmt.dn[0], s_dn[0]); break;
-    case 3:
+    s_rt.appr = (agv_rpmt.pass <= 3) ? 1 : 0;
+    s_rt.at = 0;
+    if (agv_rpmt.pass == 3) {
         for (i = 0; i < 2u; i++) { b->move_dac[i] = b->stop_dac[i] = -1; }
-        dac_out(0);
-        break;
-    case 4: low_begin(0); break;
+    }
+    if (agv_rpmt.pass == 4) { low_begin(0); }
+}
+
+/* 측정 중 교차선. 지금 단계를 why 로 끊고 회를 끝낸다 */
+void rpmt_pass_cut(int16_t why)
+{
+    switch (agv_rpmt.pass) {
+    case 1:  step_end(&agv_rpmt.up[STEP - 1u], why); break;
+    case 2:  step_end(&agv_rpmt.dn[STEP - 1u], why); break;
+    case 3:  agv_rpmt.brk.cut = why; break;
+    case 4:  low_end(&agv_rpmt.low[STEP - 1u], why); break;
+    case 5:  agv_rpmt.stp[STEP - 1u].cut |= why; break;
     default: break;
     }
+    s_rt.appr = 0;
+    summary();
 }
 
 int rpmt_pass_run(void)
 {
+    if (s_rt.appr) { return approach(); }
     switch (agv_rpmt.pass) {
     case 1:  return stair(agv_rpmt.up, s_up, RPMT_UP, UP_TICKS);
     case 2:  return stair(agv_rpmt.dn, s_dn, RPMT_DN, DN_TICKS);

@@ -360,8 +360,9 @@ static void build_pages(void)
         add(PK_GA, F_GA, 0, 0, 0);
     }
     add(PK_VAL, N_BA, b->bat_dv, 0, 0);
-    if (m & BLD_RPM) {
-        add(PK_VAL, N_A, b->amp, 0, chk && tune_base_valid() && (b->amp != (int16_t)((uint16_t)tune_base(TUNE_BASE_AMP_SE) >> 8)));
+    if ((m & BLD_RPM) && chk) {      /* 앰프 형식은 점검(t2.4)만 잰다(1회). t1 기준값은 0(모름)이고 그때는 견주지 않는다 */
+        int16_t base = (int16_t)((uint16_t)tune_base(TUNE_BASE_AMP_SE) >> 8);
+        add(PK_VAL, N_A, b->amp, 0, tune_base_valid() && (base != 0) && (b->amp != base));
     }
     add(PK_SAVE, 0, 0, 0, 0);
 }

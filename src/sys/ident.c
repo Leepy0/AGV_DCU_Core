@@ -17,7 +17,8 @@
  * 타력은 1 가속, 2 안정, 7 타력(DAC 0 고정), 8, 9. 7 은 지정 시험에 SL 정지가 없어 다시 쓴다. 결과는 agv_coast
  * 단계 4 정지 정확도는 타력과 같은 1, 2 뒤 7 교차로 위치 정지, 8, 9. 결과는 agv_stopt
  * 바닥 rpm 시험(RPM)은 같은 0회 뒤 1~5회. 회 안(순서 = 단계 1~7)은 rpmtest.c 가 하고, 끝나면 실제 속도에서 이어
- * 1번 최고 속도의 1/2 로 먼 선 쪽으로 가다 감속해 선을 찾는다(8). 결과는 agv_rpmt
+ * 1번 최고 속도의 1/2 로 먼 선 쪽으로 가다 감속해 선을 찾는다(8). 측정 중 교차선은 실패가 아니라 그 회를 끊고
+ * 그 선에서 GD 더 가서 돈다. 결과는 agv_rpmt
  * 연속 시험(튜닝 t1·t2)은 위 시험들을 단계로 잇는다(ident.h). 단계마다 s_r 과 s_top·s_rpm 을 그 단계로 돌린다 */
 #include <math.h>
 #include <string.h>
@@ -153,6 +154,7 @@ typedef struct {
 static struct {
     int16_t  t, want, risk_prev, hold_n, lat_n, restart, turn_seen, legs;
     int16_t  go;                      /* 바닥 rpm 시험: 먼 선까지 갈 속도. 0 = 최저 속도로 선 찾기 */
+    int16_t  rstop;                   /* 바닥 rpm 시험: 비뚤어져 끊은 회. 보통 정지 뒤 먼 선으로 재출발 */
     float    go_dec;
     int16_t  cap[IDENT_LEVELS], retry;   /* 직선이 짧으면 그 단계 속도를 낮춰 같은 회를 다시 한다 */
     uint32_t start, begin, ticks;     /* ticks: 통합 시험 경과 */
@@ -284,6 +286,7 @@ static void start_common(void)
     s_id.risk_prev = D.risk_stop;
     s_id.begin = travel();
     s_id.go = 0;
+    s_id.rstop = 0;
     D.p_test = 0;
     seek_begin();
 }
@@ -1150,18 +1153,28 @@ static void rpm_go(void)
     if (mm_since(s_id.begin) + s_id.go_dec >= s_id.budget) { s_id.go = 0; }
 }
 
+static int rpm_line(void);
+
 static int rpm_run(int stopped)
 {
     int r;
 
     if (stopped || D.flag_stopping || D.stop_sw || D.estop || (D.system_err != 0)) { return fail_now(); }
-    if ((D.guide_pos >= COAST_GUIDE_OFF) || (D.guide_pos <= -COAST_GUIDE_OFF)) { return fail_now(); }
+    if (D.guide_all_on) { return rpm_line(); }
+    /* 개루프 중 편차는 rpmtest 가 5칸에서 끊고 세운다 */
+    if (!motor_dac_forced() && ((D.guide_pos >= COAST_GUIDE_OFF) || (D.guide_pos <= -COAST_GUIDE_OFF))) { return fail_now(); }
     r = rpmt_pass_run();
     if (r < 0) { return fail_now(); }
     if (r > 0) {                     /* 회 끝. 최고 속도 1/2 로 먼 선까지 */
         int16_t v = (int16_t)(P.target_speed / 2);
         rpm_release();
         s_id.go = (v > P.min_speed) ? v : P.min_speed;
+        if (r == 2) {                /* 비뚤어졌다. 충격 없이 푼 지령에서 보통 정지하고 재출발한다 */
+            tagact_stop();
+            s_id.rstop = 1;
+            s_id.t = 0;
+            return 0;
+        }
         seek_begin();
     }
     return 0;
@@ -1198,10 +1211,10 @@ static int bld_leg2(float leg)
     return 1;
 }
 
-/* 선을 봤다. 회전 중심이 선 위에 오도록 GD 만큼 더 가서 돈다 */
-static int cross_seen(void)
+/* 선을 봤다(line = 그때 펄스). 회전 중심이 선 위에 오도록 GD 만큼 더 가서 돈다 */
+static int cross_at(uint32_t line)
 {
-    float leg = (float)(tune_line_at(0) - s_id.begin) / P.one_length_pulse + P.guide_dist_mm;
+    float leg = (float)(line - s_id.begin) / P.one_length_pulse + P.guide_dist_mm;
 
     if (!s_top && !sweep() && !coast() && !s_rpm) { agv_ident.total_m += leg / 1000.0f; }
     if (s_all) { agv_all.total_m += leg / 1000.0f; }
@@ -1221,6 +1234,18 @@ static int cross_seen(void)
     if (!D.tape_align) { return fail_now(); }
     enter(PH_TURN);
     return 0;
+}
+
+static int cross_seen(void) { return cross_at(tune_line_at(0)); }
+
+/* 바닥 rpm 시험 측정 중 교차선. 실패가 아니다: 그 단계를 끊고(cut 4) 고정을 풀어 실제 속도에서 잇고,
+ * 회 끝에 선 찾기가 선을 본 것처럼 GD 더 가서 서고 돈다 */
+static int rpm_line(void)
+{
+    rpmt_pass_cut(RPMT_CUT_LINE);
+    rpm_release();
+    s_id.go = 0;
+    return cross_at(travel());
 }
 
 /* 통합(지정) 시험 끝. 51·39번을 되돌리고 선 위에서 기다린다 */
@@ -1542,7 +1567,11 @@ int ident_run(void)
     if (s_id.restart) {
         if (!D.flag_run) { return (D.run_restart || D.flag_ready) ? 0 : fail_now(); }   /* STOP·오류가 지웠다 */
         s_id.restart = 0;
-        if (ph == PH_STOP) { seek_begin(); return 0; }
+        if ((ph == PH_STOP) || s_id.rstop) {
+            s_id.rstop = 0;
+            seek_begin();
+            return 0;
+        }
         s_id.begin = travel();
         if ((PASS == 0u) && (s_id.legs == 1)) {                   /* L 을 잰다 */
             s_bld.l0 = run_pulses(0);
@@ -1556,15 +1585,21 @@ int ident_run(void)
         else                                  { pass_begin(); }
         return 0;
     }
+    if (s_id.rstop) {                /* 바닥 rpm: 끊은 회 뒤 보통 정지 */
+        if (!stopped) { return (++s_id.t > STOP_LIMIT) ? fail_now() : 0; }
+        run_restart_now();
+        s_id.restart = 1;
+        return 0;
+    }
     if (ph == PH_TURN) {
         if (D.flag_turn) { s_id.turn_seen = 1; }
         else if (s_id.turn_seen && !D.tape_align && !D.flag_stopping && (D.turn_motion == 0)) { return turn_done(); }
         return 0;
     }
     if (s_bld.ga) { return bld_ga_wait(stopped); }               /* 선 위에서 선다 */
+    if (s_rpm && (ph < PH_SEEK)) { return rpm_run(stopped); }   /* 교차선은 rpm_run 이 본다 */
     if ((ph <= PH_STOP) && D.guide_all_on) { return fail_now(); }   /* 측정 중 교차선 */
     if (coast() && (ph <= PH_COAST)) { return coast_run(stopped); }
-    if (s_rpm && (ph < PH_SEEK)) { return rpm_run(stopped); }
     if (ph == PH_STOP) {
         if (stopped) {
             lv->stop_mm = mm_since(s_id.start);

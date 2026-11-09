@@ -259,7 +259,7 @@ void  ident_speed(int16_t v, int ramp);   /* 주행 지령. ramp 0 = 바로 */
  *  1 기구: 0회(선 찾기, 회전, L 측정, 회전). 둘째 직선 끝에서 입력 L 로 휠 지름을 고친다(BLD_DIA, ±10% 넘으면 실패 1008).
  *          둘째 회전으로 휠 간격, 선 찾기 중 'a'·'h' 짝으로 가이드 부호·배율, 둘째 직선 좌우 펄스 비를 잰다.
  *          BLD_GA 면 둘째 회전 대신 선을 보자마자 서서 미끄러진 거리(ov_mm)를 재고 끝낸다.
- *  2 rpm: 바닥 rpm 시험 1·4회만(앰프 형식, 안정 최저 rpm). 28번 추천 = 올림(max(low_rpm × 1.2, 정지 바닥 350) ÷ 1 m/min 당 rpm),
+ *  2 rpm: 바닥 rpm 시험 4회(안정 최저 rpm)만. 점검(BLD_CHECK, t2.4)은 1회(앰프 형식)도 한다. 제작의 앰프 형식은 0(모름). 28번 추천 = 올림(max(low_rpm × 1.2, 정지 바닥 350) ÷ 1 m/min 당 rpm),
  *         4 미만은 4. low_rpm 이 0(300 rpm 도 불안정)이면 추천 없음. 28번은 RAM 최저 속도를 바로 안 바꾼다(다시 켜면 적용).
  *  3 최고 속도: TOP 1·2회. 1번 추천 = min(내림(max_mpm × 0.85), 상한). 뒤 단계는 이 값(RAM)으로 달린다.
  *  4 타력: 최고 속도로 BLD_COAST_PASSES 회. 13번 추천 = 내림(감속도 평균 × 0.8 ÷ 100), 20~60 으로 자른다. 뒤 단계는 이 값(RAM).
@@ -301,7 +301,7 @@ typedef struct {
     int16_t dec_rpm_s;       /* 타력 감속도 평균. 0 = 없음 */
     int16_t over_mm;         /* 정지 단계 마지막 회 지나친 거리 */
     int16_t ov_mm;           /* BLD_GA: 선을 본 뒤 미끄러진 거리 */
-    int16_t amp;             /* agv_rpmt.amp */
+    int16_t amp;             /* agv_rpmt.amp. 1회를 안 하는 제작(t1)은 0 */
     int16_t min_rec, high_rec, dcc_rec, cid_rec;   /* 28·1·13·35번 추천. -1 = 없음 */
     int16_t guide_k100;      /* 기구 단계 끝 'a' = k × 'h' 의 k × 100. TUNE_NO_DATA = 측정 부족 */
     int16_t se_x10;          /* 편차 단계 정속 편차 RMS × 10. TUNE_NO_DATA = 없음 */

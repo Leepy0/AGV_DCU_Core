@@ -385,6 +385,16 @@ int main(void)
     D.vin_out = 100;
     motor_run();
     assert(D.amp_dir == MOTION_BACK && D.sound_on == 1);
+    /* DAC 고정(바닥 rpm·타력 시험)은 제어 상태와 상관없이 폐루프 주행과 같은 D.backward 방향이다 */
+    D.control = RUN_READY;
+    motor_dac_force(300, 300);
+    motor_run();
+    assert(D.amp_dir == MOTION_BACK && D.motion == MOTION_BACK && D.tq_cmd[0] == 300 && D.tq_cmd[1] == 300);
+    D.backward = 0;
+    D.control = RUN_DRIVE;
+    motor_run();
+    assert(D.amp_dir == MOTION_FWD);
+    motor_dac_release();
 
     /* 조향 주기: 기본은 motor_run 마다(10 ms), QUIRK_STEER_20MS 는 두 번에 한 번 */
     setup();
