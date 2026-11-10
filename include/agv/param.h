@@ -12,7 +12,10 @@
 enum {
     P_SPEED_HIGH = 1, P_SPEED_LOW, P_SPEED_TURN, P_AUTO_DRIVE_MODE, P_INTERFACE_MODE, P_SOUND,
     P_BUMPER_USE, P_OBS_USE, P_DISPLAY_MODE, P_BAT_OFFSET_DV, P_SPEED_JOG, P_ACC, P_DCC,
-    P_AUTO_START_SEC, P_STATION_NO, P_BRANCH_MODE, P_TURN_FORBACK,
+    P_AUTO_START_SEC, P_STATION_NO,
+    P_BRANCH_MODE,          /* BRM: 미사용. 값이 남아 있어도 무시한다. 번호·EEPROM 자리는 유지.
+                               레거시에서는 스테이션 태그의 정지/분기 방식이었다. 그런 사이트를 옮길 때 사이트 코드가 읽는다 */
+    P_TURN_FORBACK,
     P_TAG_DIGITS,           /* TAG: 미사용. 값이 남아 있어도 무시한다. 번호·EEPROM 자리는 유지 */
     P_STOP_LEN_MM,
     P_STEER_KP, P_STEER_KI, P_WHEEL_DIA_MM, P_GEAR_RATIO, P_WHEEL_BASE_MM, P_AGV_ID, P_AGV_TYPE,
