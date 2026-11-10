@@ -194,7 +194,12 @@ int main(void)
     assert(r.led_lo == 0xDCBAUL);
     parse("hABCD", &r);
     assert(r.led_lo == 0xDCBAUL);
-    parse("h123456789", &r);
+    parse("h12345678", &r);                                   /* wide 사양: 16진 8자리, 세로 없음 */
+    assert(r.wide && r.led_lo == 0x87654321UL && r.led_hi == 0);
+    parse("h6735a49d", &r);                                   /* 사양서 예시 */
+    assert(r.wide && r.led_lo == 0xD94A5376UL && guide_vertical(&r) == 0);
+    assert(guide_lateral(&r) == 0xD94A5376UL);
+    parse("h123456789", &r);                                  /* 세로 4비트 변종 */
     assert(r.wide && r.led_lo == 0x87654321UL && r.led_hi == 9);
     parse("h12345", &r);
     assert(r.kind == GUIDE_RX_BAD_FORMAT);                    /* 길이가 둘 다 아니다 */

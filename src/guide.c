@@ -11,7 +11,8 @@
 #define POS_ON_WIDE        32
 #define LEN_A_NARROW       7       /* STX a 부호 십 일 BCC ETX */
 #define LEN_H_NARROW       8       /* STX h 16진×4 BCC ETX */
-#define LEN_H_WIDE         13      /* STX h 16진×9 BCC ETX */
+#define LEN_H_WIDE         12      /* STX h 16진×8 BCC ETX. 세로 LED 는 'h' 에 없다 */
+#define LEN_H_WIDE_VERT    13      /* 세로 4비트까지 보내는 변종 (16진×9) */
 #define LEN_S              4       /* 'S' 의 최소 길이: STX S BCC ETX */
 
 #define RX_BUF_SIZE        16      /* 가장 긴 응답 13 바이트 */
@@ -126,12 +127,12 @@ static void parse_led(const uint16_t *buf, uint16_t len, guide_rx_t *rx)
     uint16_t i, digits;
 
     rx->kind = GUIDE_RX_LED;
-    rx->wide = (len == LEN_H_WIDE);
-    if ((len != LEN_H_NARROW) && (len != LEN_H_WIDE)) {
+    rx->wide = (len != LEN_H_NARROW);
+    if ((len != LEN_H_NARROW) && (len != LEN_H_WIDE) && (len != LEN_H_WIDE_VERT)) {
         rx->kind = GUIDE_RX_BAD_FORMAT;
         return;
     }
-    digits = rx->wide ? 9 : 4;
+    digits = (uint16_t)(len - 4);     /* STX h ... BCC ETX */
     for (i = 0; i < digits; i++) {
         int16_t v = hex_value(buf[2 + i]);
         if (v < 0) {
