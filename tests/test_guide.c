@@ -34,14 +34,13 @@ static guide_rx_t rx_narrow(uint16_t led)
     return r;
 }
 
-static guide_rx_t rx_wide(uint32_t lo, uint16_t hi)
+static guide_rx_t rx_wide(uint32_t lo)
 {
     guide_rx_t r;
     memset(&r, 0, sizeof(r));
     r.kind = GUIDE_RX_LED;
     r.wide = 1;
     r.led_lo = lo;
-    r.led_hi = hi;
     return r;
 }
 
@@ -49,73 +48,68 @@ typedef struct {
     const char *name;
     int16_t  wide;
     uint32_t lo;
-    uint16_t hi;
     int16_t  prev_set;      /* 먼저 이 패턴을 추적시켜 이전 위치를 만든다 */
     uint32_t prev_lo;
     int16_t  branch, backward, invert;
     uint16_t min_w, max_w, max_step;
     int16_t  pos, status;
-    uint16_t width, blobs, vert;
+    uint16_t width, blobs;
 } track_case_t;
 
 #define BITS(a, b)  ((uint32_t)(((b) >= 31 ? 0xFFFFFFFFUL : ((1UL << ((b) + 1)) - 1UL)) & ~((1UL << (a)) - 1UL)))  /* 비트 a~b */
 
 static const track_case_t s_cases[] = {
     /* 일반: 단일 덩어리. LED7~9 = 7+9-17 = -1 */
-    { "n single",     0, BITS(6, 8),                0, 0, 0,            0, 0, 0, 1, 32, 0,  -1, GUIDE_NORMAL, 3, 1, 0 },
-    { "n left edge",  0, BITS(0, 0),                0, 0, 0,            0, 0, 0, 1, 32, 0, -15, GUIDE_NORMAL, 1, 1, 0 },
-    { "n right edge", 0, BITS(15, 15),              0, 0, 0,            0, 0, 0, 1, 32, 0,  15, GUIDE_NORMAL, 1, 1, 0 },
+    { "n single",     0, BITS(6, 8), 0, 0,            0, 0, 0, 1, 32, 0,  -1, GUIDE_NORMAL, 3, 1 },
+    { "n left edge",  0, BITS(0, 0), 0, 0,            0, 0, 0, 1, 32, 0, -15, GUIDE_NORMAL, 1, 1 },
+    { "n right edge", 0, BITS(15, 15), 0, 0,            0, 0, 0, 1, 32, 0,  15, GUIDE_NORMAL, 1, 1 },
     /* 일반: 두 덩어리 추적. 이전 위치가 왼쪽이면 왼쪽을 잡는다 */
-    { "n two track L", 0, BITS(1, 2) | BITS(12, 13), 0, 1, BITS(2, 3),  0, 0, 0, 1, 32, 0, -12, GUIDE_NORMAL, 2, 2, 0 },
-    { "n two track R", 0, BITS(1, 2) | BITS(12, 13), 0, 1, BITS(11, 12), 0, 0, 0, 1, 32, 0, 10, GUIDE_NORMAL, 2, 2, 0 },
+    { "n two track L", 0, BITS(1, 2) | BITS(12, 13), 1, BITS(2, 3),  0, 0, 0, 1, 32, 0, -12, GUIDE_NORMAL, 2, 2 },
+    { "n two track R", 0, BITS(1, 2) | BITS(12, 13), 1, BITS(11, 12), 0, 0, 0, 1, 32, 0, 10, GUIDE_NORMAL, 2, 2 },
     /* 일반: 두 덩어리 분기 좌우. 이전 위치를 무시한다 */
-    { "n branch L",   0, BITS(1, 2) | BITS(12, 13), 0, 1, BITS(11, 12), BRANCH_LEFT, 0, 0, 1, 32, 0, -12, GUIDE_NORMAL, 2, 2, 0 },
-    { "n branch R",   0, BITS(1, 2) | BITS(12, 13), 0, 1, BITS(2, 3),  BRANCH_RIGHT, 0, 0, 1, 32, 0, 10, GUIDE_NORMAL, 2, 2, 0 },
+    { "n branch L",   0, BITS(1, 2) | BITS(12, 13), 1, BITS(11, 12), BRANCH_LEFT, 0, 0, 1, 32, 0, -12, GUIDE_NORMAL, 2, 2 },
+    { "n branch R",   0, BITS(1, 2) | BITS(12, 13), 1, BITS(2, 3),  BRANCH_RIGHT, 0, 0, 1, 32, 0, 10, GUIDE_NORMAL, 2, 2 },
     /* 후진은 진행 방향 좌우가 센서 좌우와 반대다 */
-    { "n back L",     0, BITS(1, 2) | BITS(12, 13), 0, 0, 0, BRANCH_LEFT, 1, 0, 1, 32, 0,  10, GUIDE_NORMAL, 2, 2, 0 },
-    { "n back R",     0, BITS(1, 2) | BITS(12, 13), 0, 0, 0, BRANCH_RIGHT, 1, 0, 1, 32, 0, -12, GUIDE_NORMAL, 2, 2, 0 },
+    { "n back L",     0, BITS(1, 2) | BITS(12, 13), 0, 0, BRANCH_LEFT, 1, 0, 1, 32, 0,  10, GUIDE_NORMAL, 2, 2 },
+    { "n back R",     0, BITS(1, 2) | BITS(12, 13), 0, 0, BRANCH_RIGHT, 1, 0, 1, 32, 0, -12, GUIDE_NORMAL, 2, 2 },
     /* 1칸 노이즈: 필터 끔이면 덩어리이고 가까우면 잡힌다. 켜면 버린다 */
-    { "n noise off",  0, BITS(6, 8) | BITS(8 + 3, 8 + 3), 0, 1, BITS(11, 11), 0, 0, 0, 1, 32, 0, 7, GUIDE_NORMAL, 1, 2, 0 },
-    { "n noise on",   0, BITS(6, 8) | BITS(8 + 3, 8 + 3), 0, 1, BITS(11, 11), 0, 0, 0, 2, 32, 0, -1, GUIDE_NORMAL, 3, 2, 0 },
+    { "n noise off",  0, BITS(6, 8) | BITS(8 + 3, 8 + 3), 1, BITS(11, 11), 0, 0, 0, 1, 32, 0, 7, GUIDE_NORMAL, 1, 2 },
+    { "n noise on",   0, BITS(6, 8) | BITS(8 + 3, 8 + 3), 1, BITS(11, 11), 0, 0, 0, 2, 32, 0, -1, GUIDE_NORMAL, 3, 2 },
     /* 전부 켜짐·꺼짐: 위치 유지 */
-    { "n all on",     0, 0xFFFFUL,                  0, 1, BITS(9, 10), 0, 0, 0, 1, 32, 0, 4, GUIDE_ALL_ON, 16, 1, 0 },
-    { "n all off",    0, 0,                         0, 1, BITS(9, 10), 0, 0, 0, 1, 32, 0, 4, GUIDE_LOST, 0, 0, 0 },
+    { "n all on",     0, 0xFFFFUL, 1, BITS(9, 10), 0, 0, 0, 1, 32, 0, 4, GUIDE_ALL_ON, 16, 1 },
+    { "n all off",    0, 0, 1, BITS(9, 10), 0, 0, 0, 1, 32, 0, 4, GUIDE_LOST, 0, 0 },
     /* 일반은 상위 비트를 보지 않는다 */
-    { "n ignore hi",  0, BITS(6, 8) | 0xFFFF0000UL, 0xF, 0, 0,         0, 0, 0, 1, 32, 0, -1, GUIDE_NORMAL, 3, 1, 0 },
+    { "n ignore hi",  0, BITS(6, 8) | 0xFFFF0000UL, 0, 0,         0, 0, 0, 1, 32, 0, -1, GUIDE_NORMAL, 3, 1 },
 
     /* wide: 단일 덩어리. LED15~18 = 15+18-33 = 0 */
-    { "w single",     1, BITS(14, 17),              0, 0, 0,            0, 0, 0, 1, 32, 0,   0, GUIDE_NORMAL, 4, 1, 0 },
-    { "w left edge",  1, BITS(0, 0),                0, 0, 0,            0, 0, 0, 1, 32, 0, -31, GUIDE_NORMAL, 1, 1, 0 },
-    { "w right edge", 1, BITS(31, 31),              0, 0, 0,            0, 0, 0, 1, 32, 0,  31, GUIDE_NORMAL, 1, 1, 0 },
+    { "w single",     1, BITS(14, 17), 0, 0,            0, 0, 0, 1, 32, 0,   0, GUIDE_NORMAL, 4, 1 },
+    { "w left edge",  1, BITS(0, 0), 0, 0,            0, 0, 0, 1, 32, 0, -31, GUIDE_NORMAL, 1, 1 },
+    { "w right edge", 1, BITS(31, 31), 0, 0,            0, 0, 0, 1, 32, 0,  31, GUIDE_NORMAL, 1, 1 },
     /* wide: 두 덩어리 추적·분기 */
-    { "w two track",  1, BITS(2, 3) | BITS(26, 27), 0, 1, BITS(25, 26), 0, 0, 0, 1, 32, 0, 22, GUIDE_NORMAL, 2, 2, 0 },
-    { "w branch L",   1, BITS(2, 3) | BITS(26, 27), 0, 1, BITS(25, 26), BRANCH_LEFT, 0, 0, 1, 32, 0, -26, GUIDE_NORMAL, 2, 2, 0 },
-    { "w branch R",   1, BITS(2, 3) | BITS(26, 27), 0, 1, BITS(2, 3),  BRANCH_RIGHT, 0, 0, 1, 32, 0, 22, GUIDE_NORMAL, 2, 2, 0 },
-    { "w back L",     1, BITS(2, 3) | BITS(26, 27), 0, 0, 0, BRANCH_LEFT, 1, 0, 1, 32, 0, 22, GUIDE_NORMAL, 2, 2, 0 },
+    { "w two track",  1, BITS(2, 3) | BITS(26, 27), 1, BITS(25, 26), 0, 0, 0, 1, 32, 0, 22, GUIDE_NORMAL, 2, 2 },
+    { "w branch L",   1, BITS(2, 3) | BITS(26, 27), 1, BITS(25, 26), BRANCH_LEFT, 0, 0, 1, 32, 0, -26, GUIDE_NORMAL, 2, 2 },
+    { "w branch R",   1, BITS(2, 3) | BITS(26, 27), 1, BITS(2, 3),  BRANCH_RIGHT, 0, 0, 1, 32, 0, 22, GUIDE_NORMAL, 2, 2 },
+    { "w back L",     1, BITS(2, 3) | BITS(26, 27), 0, 0, BRANCH_LEFT, 1, 0, 1, 32, 0, 22, GUIDE_NORMAL, 2, 2 },
     /* wide: 1칸 노이즈, 필터 */
-    { "w noise off",  1, BITS(14, 17) | BITS(20, 20), 0, 1, BITS(20, 20), 0, 0, 0, 1, 32, 0, 9, GUIDE_NORMAL, 1, 2, 0 },
-    { "w noise on",   1, BITS(14, 17) | BITS(20, 20), 0, 1, BITS(20, 20), 0, 0, 0, 2, 32, 0, 0, GUIDE_NORMAL, 4, 2, 0 },
+    { "w noise off",  1, BITS(14, 17) | BITS(20, 20), 1, BITS(20, 20), 0, 0, 0, 1, 32, 0, 9, GUIDE_NORMAL, 1, 2 },
+    { "w noise on",   1, BITS(14, 17) | BITS(20, 20), 1, BITS(20, 20), 0, 0, 0, 2, 32, 0, 0, GUIDE_NORMAL, 4, 2 },
     /* wide: 전부 켜짐·꺼짐 */
-    { "w all on 32",  1, 0xFFFFFFFFUL,              0, 1, BITS(18, 19), 0, 0, 0, 1, 32, 0, 6, GUIDE_ALL_ON, 32, 1, 0 },
-    { "w all on 36",  1, 0xFFFFFFFFUL,              0xF, 1, BITS(18, 19), 0, 0, 0, 1, 32, 0, 6, GUIDE_ALL_ON, 32, 1, 0xF },
-    { "w all off",    1, 0,                         0, 1, BITS(18, 19), 0, 0, 0, 1, 32, 0, 6, GUIDE_LOST, 0, 0, 0 },
-    /* 세로 비트만 켜짐: 위치에 영향 없음 */
-    { "w vert only",  1, 0,                         0xA, 1, BITS(18, 19), 0, 0, 0, 1, 32, 0, 6, GUIDE_LOST, 0, 0, 0xA },
-    { "w vert+blob",  1, BITS(14, 17),              0x5, 0, 0,          0, 0, 0, 1, 32, 0,   0, GUIDE_NORMAL, 4, 1, 0x5 },
+    { "w all on 32",  1, 0xFFFFFFFFUL, 1, BITS(18, 19), 0, 0, 0, 1, 32, 0, 6, GUIDE_ALL_ON, 32, 1 },
+    { "w all off",    1, 0, 1, BITS(18, 19), 0, 0, 0, 1, 32, 0, 6, GUIDE_LOST, 0, 0 },
     /* 최대 폭 필터: 넓은 덩어리를 버려 LOST */
-    { "w max width",  1, BITS(5, 20),               0, 1, BITS(13, 14), 0, 0, 0, 1, 8, 0,  -4, GUIDE_LOST, 0, 1, 0 },
-    { "n max width",  0, BITS(2, 9),                0, 1, BITS(3, 4),   0, 0, 0, 1, 7, 0, -8, GUIDE_LOST, 0, 1, 0 },
+    { "w max width",  1, BITS(5, 20), 1, BITS(13, 14), 0, 0, 0, 1, 8, 0,  -4, GUIDE_LOST, 0, 1 },
+    { "n max width",  0, BITS(2, 9), 1, BITS(3, 4),   0, 0, 0, 1, 7, 0, -8, GUIDE_LOST, 0, 1 },
     /* 변화량 필터: 멀리 튄 덩어리를 버리고, 끄면 따라간다 */
-    { "n step on",    0, BITS(12, 13),              0, 1, BITS(3, 4),   0, 0, 0, 1, 32, 4, -8, GUIDE_LOST, 0, 1, 0 },
-    { "n step off",   0, BITS(12, 13),              0, 1, BITS(3, 4),   0, 0, 0, 1, 32, 0, 10, GUIDE_NORMAL, 2, 1, 0 },
-    { "n step near",  0, BITS(4, 5),                0, 1, BITS(3, 4),   0, 0, 0, 1, 32, 4, -6, GUIDE_NORMAL, 2, 1, 0 },
+    { "n step on",    0, BITS(12, 13), 1, BITS(3, 4),   0, 0, 0, 1, 32, 4, -8, GUIDE_LOST, 0, 1 },
+    { "n step off",   0, BITS(12, 13), 1, BITS(3, 4),   0, 0, 0, 1, 32, 0, 10, GUIDE_NORMAL, 2, 1 },
+    { "n step near",  0, BITS(4, 5), 1, BITS(3, 4),   0, 0, 0, 1, 32, 4, -6, GUIDE_NORMAL, 2, 1 },
     /* 분기는 변화량 제한을 받지 않는다 */
-    { "n step branch", 0, BITS(1, 2) | BITS(12, 13), 0, 1, BITS(3, 4),  BRANCH_RIGHT, 0, 0, 1, 32, 4, 10, GUIDE_NORMAL, 2, 2, 0 },
+    { "n step branch", 0, BITS(1, 2) | BITS(12, 13), 1, BITS(3, 4),  BRANCH_RIGHT, 0, 0, 1, 32, 4, 10, GUIDE_NORMAL, 2, 2 },
     /* invert: 위치 부호와 분기 끝이 함께 뒤집힌다. 이전 위치 추적은 그대로 */
-    { "n invert",     0, BITS(1, 2),                0, 0, 0,            0, 0, 1, 1, 32, 0,  12, GUIDE_NORMAL, 2, 1, 0 },
-    { "n inv branch L", 0, BITS(1, 2) | BITS(12, 13), 0, 0, 0, BRANCH_LEFT, 0, 1, 1, 32, 0, -10, GUIDE_NORMAL, 2, 2, 0 },
-    { "n inv back L", 0, BITS(1, 2) | BITS(12, 13), 0, 0, 0, BRANCH_LEFT, 1, 1, 1, 32, 0,  12, GUIDE_NORMAL, 2, 2, 0 },
-    { "w invert",     1, BITS(26, 27),              0, 0, 0,            0, 0, 1, 1, 32, 0, -22, GUIDE_NORMAL, 2, 1, 0 },
+    { "n invert",     0, BITS(1, 2), 0, 0,            0, 0, 1, 1, 32, 0,  12, GUIDE_NORMAL, 2, 1 },
+    { "n inv branch L", 0, BITS(1, 2) | BITS(12, 13), 0, 0, BRANCH_LEFT, 0, 1, 1, 32, 0, -10, GUIDE_NORMAL, 2, 2 },
+    { "n inv back L", 0, BITS(1, 2) | BITS(12, 13), 0, 0, BRANCH_LEFT, 1, 1, 1, 32, 0,  12, GUIDE_NORMAL, 2, 2 },
+    { "w invert",     1, BITS(26, 27), 0, 0,            0, 0, 1, 1, 32, 0, -22, GUIDE_NORMAL, 2, 1 },
 };
 
 /* LED i(1부터)의 감지 구간 [i-0.5, i+0.5] 를 테이프가 0.35 넘게 덮으면 켜진다. 단위 = 칸(6.89 mm) */
@@ -146,7 +140,7 @@ static int cross_sim(int leds, float tape_mm, float main_c, float step, int *nai
         for (i = 1; i <= leds; i++) {
             if (cover(main_c, w, i) + cover(xc, wx, i) > 0.35f) { bits |= 1UL << (i - 1); }
         }
-        r = (leds == 32) ? rx_wide(bits, 0) : rx_narrow((uint16_t)bits);
+        r = (leds == 32) ? rx_wide(bits) : rx_narrow((uint16_t)bits);
         guide_track(&r, 0, 0, &o);
         assert(o.status == GUIDE_NORMAL);
         e = (int)((float)o.pos - truth);
@@ -224,7 +218,7 @@ static void run_table(void)
         cfg.invert_back = c->invert;
         guide_configure(&cfg);
         if (c->prev_set) {
-            r = c->wide ? rx_wide(c->prev_lo, 0) : rx_narrow((uint16_t)c->prev_lo);
+            r = c->wide ? rx_wide(c->prev_lo) : rx_narrow((uint16_t)c->prev_lo);
             guide_track(&r, 0, 0, &o);
             assert(o.status == GUIDE_NORMAL);
         }
@@ -232,12 +226,12 @@ static void run_table(void)
         cfg.max_width = c->max_w;
         cfg.max_step = c->max_step;
         guide_configure(&cfg);
-        r = c->wide ? rx_wide(c->lo, c->hi) : rx_narrow(0);
-        if (!c->wide) { r.led_lo = c->lo; r.led_hi = c->hi; }
+        r = c->wide ? rx_wide(c->lo) : rx_narrow(0);
+        if (!c->wide) { r.led_lo = c->lo; }
         guide_track(&r, c->branch, c->backward, &o);
         if ((o.pos != c->pos) || (o.status != c->status) || (o.width != c->width)
-            || (o.blobs != c->blobs) || (o.vert != c->vert)) {
-            printf("%s: pos %d status %d width %u blobs %u vert %u\n", c->name, o.pos, o.status, o.width, o.blobs, o.vert);
+            || (o.blobs != c->blobs)) {
+            printf("%s: pos %d status %d width %u blobs %u\n", c->name, o.pos, o.status, o.width, o.blobs);
             assert(0);
         }
     }
@@ -266,14 +260,26 @@ int main(void)
     assert(r.status == GUIDE_ALL_ON && r.pos == 0);
     parse("a-16", &r);
     assert(r.status == GUIDE_ALL_ON && r.pos == 0);
-    parse("a+21x", &r);
+    assert(r.vert == 0);
+    /* wide 'a': 부호 십 일 V(세로 센서). 사양서 예시 */
+    parse("a+050", &r);
+    assert(r.kind == GUIDE_RX_POSITION && r.wide && r.pos == 5 && r.status == GUIDE_NORMAL && r.vert == 0);
+    parse("a+051", &r);
+    assert(r.kind == GUIDE_RX_POSITION && r.wide && r.pos == 5 && r.vert == 1);
+    parse("a-120", &r);
+    assert(r.kind == GUIDE_RX_POSITION && r.pos == -12 && r.status == GUIDE_NORMAL);
+    parse("a+320", &r);
+    assert(r.kind == GUIDE_RX_POSITION && r.status == GUIDE_ALL_ON && r.pos == 0);
+    parse("a+210", &r);
     assert(r.wide && r.pos == 21 && r.status == GUIDE_NORMAL);
-    parse("a+33x", &r);
+    parse("a+330", &r);
     assert(r.wide && r.status == GUIDE_LOST);
-    parse("a-31x", &r);
-    assert(r.status == GUIDE_NORMAL && r.pos == -31);
-    parse("a+32x", &r);
-    assert(r.status == GUIDE_ALL_ON);
+    parse("a-311", &r);
+    assert(r.status == GUIDE_NORMAL && r.pos == -31 && r.vert == 1);
+    parse("a+05x", &r);
+    assert(r.kind == GUIDE_RX_BAD_FORMAT);                    /* V 는 '0'·'1' 만 */
+    parse("a+0501", &r);
+    assert(r.kind == GUIDE_RX_BAD_FORMAT);                    /* 7·8 바이트가 아니다 */
     parse("a*05", &r);
     assert(r.kind == GUIDE_RX_BAD_FORMAT);
     parse("a+0x", &r);
@@ -281,18 +287,25 @@ int main(void)
 
     /* 'h': 글자 순서와 비트 순서가 반대다. [2] 가 비트 0~3 */
     parse("h1234", &r);
-    assert(r.kind == GUIDE_RX_LED && !r.wide && r.led_lo == 0x4321UL && r.led_hi == 0);
+    assert(r.kind == GUIDE_RX_LED && !r.wide && r.led_lo == 0x4321UL);
     parse("habcd", &r);
     assert(r.led_lo == 0xDCBAUL);
     parse("hABCD", &r);
     assert(r.led_lo == 0xDCBAUL);
     parse("h12345678", &r);                                   /* wide 사양: 16진 8자리, 세로 없음 */
-    assert(r.wide && r.led_lo == 0x87654321UL && r.led_hi == 0);
-    parse("h6735a49d", &r);                                   /* 사양서 예시 */
-    assert(r.wide && r.led_lo == 0xD94A5376UL && guide_vertical(&r) == 0);
-    assert(guide_lateral(&r) == 0xD94A5376UL);
-    parse("h123456789", &r);                                  /* 세로 4비트 변종 */
-    assert(r.wide && r.led_lo == 0x87654321UL && r.led_hi == 9);
+    assert(r.wide && r.led_lo == 0x87654321UL);
+    n = make(raw, "hd945a376", 0);                            /* 사양서 예시: 체크섬 'f' */
+    assert(n == 12 && raw[n - 2] == 'f');
+    guide_parse(raw, n, &r);
+    assert(r.kind == GUIDE_RX_LED && r.wide && r.led_lo == 0x673A549DUL);
+    {   /* 켜진 LED 1,3,4,5,8,11,13,15,18,20,21,22,25,26,27,30,31 */
+        static const uint16_t on[] = { 1, 3, 4, 5, 8, 11, 13, 15, 18, 20, 21, 22, 25, 26, 27, 30, 31 };
+        uint32_t want = 0;
+        for (n = 0; n < sizeof(on) / sizeof(on[0]); n++) { want |= 1UL << (on[n] - 1u); }
+        assert(guide_lateral(&r) == want);
+    }
+    parse("h123456789", &r);                                  /* 9자리는 없다 */
+    assert(r.kind == GUIDE_RX_BAD_FORMAT);
     parse("h12345", &r);
     assert(r.kind == GUIDE_RX_BAD_FORMAT);                    /* 길이가 둘 다 아니다 */
     parse("h12x4", &r);
@@ -327,20 +340,6 @@ int main(void)
     run_table();
     test_cross();
 
-    /* 세로 비트 위치 설정: 좌우 사이에 끼어 있어도 칸이 밀려 이어진다 */
-    guide_reset();
-    guide_cfg_default(&cfg);
-    cfg.vert_bit[0] = 16; cfg.vert_bit[1] = 17; cfg.vert_bit[2] = 18; cfg.vert_bit[3] = 19;
-    guide_configure(&cfg);
-    r = rx_wide(0x000F0000UL, 0);
-    assert(guide_lateral(&r) == 0 && guide_vertical(&r) == 0xF);
-    r = rx_wide(0x00300000UL, 0);                              /* 비트 20·21 = LED17·18 */
-    assert(guide_lateral(&r) == 0x00030000UL);
-    r = rx_wide(0, 0xF);                                       /* 비트 32~35 = LED29~32 */
-    assert(guide_lateral(&r) == 0xF0000000UL && guide_vertical(&r) == 0);
-    guide_track(&r, 0, 0, &o);
-    assert(o.status == GUIDE_NORMAL && o.pos == 29 + 32 - 33 && o.vert == 0);
-
     /* LOST 뒤에는 변화량 제한 없이 다시 잡는다 */
     guide_reset();
     guide_cfg_default(&cfg);
@@ -374,9 +373,9 @@ int main(void)
     assert(guide_h_position(&r, 5) == 17);
     r = rx_narrow(0xFFFF);
     assert(guide_h_position(&r, 5) == 16);
-    r = rx_wide(0, 0xF);
+    r = rx_wide(0);
     assert(guide_h_position(&r, 5) == 33);
-    r = rx_wide(0xFFFFFFFFUL, 0xF);
+    r = rx_wide(0xFFFFFFFFUL);
     assert(guide_h_position(&r, 5) == 32);
     r = rx_narrow(0x0FF0);
     (void)param_set(P_LEGACY_QUIRKS, QUIRK_H_POSITION);

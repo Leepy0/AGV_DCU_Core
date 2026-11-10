@@ -140,6 +140,7 @@ static void on_rx(const guide_rx_t *rx)
     }
     switch (rx->kind) {
     case GUIDE_RX_POSITION:
+        D.guide_vert = rx->vert;
         if (!a_pair_only) { apply_status(rx->status, rx->pos); }
         if (tune_active()) { tune_on_a(rx->status, rx->pos); }
         break;

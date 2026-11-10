@@ -10,12 +10,12 @@
 #define POS_ON_NARROW      16      /* 'a' 전부 켜짐 표시 */
 #define POS_ON_WIDE        32
 #define LEN_A_NARROW       7       /* STX a 부호 십 일 BCC ETX */
+#define LEN_A_WIDE         8       /* STX a 부호 십 일 V BCC ETX. V = 세로 센서 '1'/'0' */
 #define LEN_H_NARROW       8       /* STX h 16진×4 BCC ETX */
 #define LEN_H_WIDE         12      /* STX h 16진×8 BCC ETX. 세로 LED 는 'h' 에 없다 */
-#define LEN_H_WIDE_VERT    13      /* 세로 4비트까지 보내는 변종 (16진×9) */
 #define LEN_S              4       /* 'S' 의 최소 길이: STX S BCC ETX */
 
-#define RX_BUF_SIZE        16      /* 가장 긴 응답 13 바이트 */
+#define RX_BUF_SIZE        16      /* 가장 긴 응답 12 바이트 */
 #define ASCII_STX          0x02
 #define ASCII_ETX          0x03
 #define ASCII_ACK          0x06
@@ -43,11 +43,9 @@ static uint16_t    s_release;
 
 void guide_cfg_default(guide_cfg_t *cfg)
 {
-    uint16_t i;
     cfg->invert_fwd = 0;
     cfg->h_scale = 1.0f;
     cfg->invert_back = 0;
-    for (i = 0; i < GUIDE_VERT_COUNT; i++) { cfg->vert_bit[i] = (uint16_t)(GUIDE_LED_WIDE + i); }
     cfg->min_width = 1;
     cfg->max_width = GUIDE_LED_WIDE;
     cfg->max_step = 0;
@@ -109,11 +107,13 @@ static void parse_position(const uint16_t *buf, uint16_t len, guide_rx_t *rx)
 
     rx->kind = GUIDE_RX_POSITION;
     rx->wide = (len != LEN_A_NARROW);
-    if ((len < LEN_A_NARROW) || ((buf[2] != '-') && (buf[2] != '+'))
-        || (buf[3] < '0') || (buf[3] > '9') || (buf[4] < '0') || (buf[4] > '9')) {
+    if (((len != LEN_A_NARROW) && (len != LEN_A_WIDE)) || ((buf[2] != '-') && (buf[2] != '+'))
+        || (buf[3] < '0') || (buf[3] > '9') || (buf[4] < '0') || (buf[4] > '9')
+        || (rx->wide && (buf[5] != '0') && (buf[5] != '1'))) {
         rx->kind = GUIDE_RX_BAD_FORMAT;
         return;
     }
+    if (rx->wide) { rx->vert = (int16_t)(buf[5] - '0'); }
     rx->pos = (int16_t)((buf[3] - '0') * 10 + (buf[4] - '0'));
     if (buf[2] == '-') { rx->pos = (int16_t)(-rx->pos); }
     off = rx->wide ? POS_OFF_WIDE : POS_OFF_NARROW;
@@ -135,7 +135,7 @@ static void parse_led(const uint16_t *buf, uint16_t len, guide_rx_t *rx)
 
     rx->kind = GUIDE_RX_LED;
     rx->wide = (len != LEN_H_NARROW);
-    if ((len != LEN_H_NARROW) && (len != LEN_H_WIDE) && (len != LEN_H_WIDE_VERT)) {
+    if ((len != LEN_H_NARROW) && (len != LEN_H_WIDE)) {
         rx->kind = GUIDE_RX_BAD_FORMAT;
         return;
     }
@@ -146,8 +146,7 @@ static void parse_led(const uint16_t *buf, uint16_t len, guide_rx_t *rx)
             rx->kind = GUIDE_RX_BAD_FORMAT;
             return;
         }
-        if (i < 8) { rx->led_lo |= (uint32_t)v << (i * 4); }
-        else       { rx->led_hi = (uint16_t)v; }
+        rx->led_lo |= (uint32_t)v << (i * 4);
     }
 }
 
@@ -157,8 +156,8 @@ void guide_parse(const uint16_t *buf, uint16_t len, guide_rx_t *rx)
     rx->wide = 0;
     rx->pos = 0;
     rx->status = GUIDE_NORMAL;
+    rx->vert = 0;
     rx->led_lo = 0;
-    rx->led_hi = 0;
 
     if (len < LEN_S) {
         rx->kind = GUIDE_RX_BAD_FORMAT;
@@ -241,43 +240,9 @@ void guide_comm_clear(void)
     s_comm.error = 0;
 }
 
-static uint16_t raw_bit(const guide_rx_t *rx, uint16_t n)
-{
-    if (n < 32) { return (uint16_t)((rx->led_lo >> n) & 1UL); }
-    return (uint16_t)((rx->led_hi >> (n - 32)) & 1u);
-}
-
-static uint16_t is_vert_bit(uint16_t n)
-{
-    uint16_t i;
-    for (i = 0; i < GUIDE_VERT_COUNT; i++) {
-        if (s_cfg.vert_bit[i] == n) { return 1; }
-    }
-    return 0;
-}
-
 uint32_t guide_lateral(const guide_rx_t *rx)
 {
-    uint32_t lat = 0;
-    uint16_t n, led = 0;
-
-    if (!rx->wide) { return rx->led_lo & 0xFFFFUL; }
-    for (n = 0; n < GUIDE_BITS_WIDE; n++) {
-        if (is_vert_bit(n)) { continue; }
-        if (raw_bit(rx, n)) { lat |= 1UL << led; }
-        led++;
-    }
-    return lat;
-}
-
-uint16_t guide_vertical(const guide_rx_t *rx)
-{
-    uint16_t i, v = 0;
-    if (!rx->wide) { return 0; }
-    for (i = 0; i < GUIDE_VERT_COUNT; i++) {
-        if (raw_bit(rx, s_cfg.vert_bit[i])) { v |= (uint16_t)(1u << i); }
-    }
-    return v;
+    return rx->wide ? rx->led_lo : (rx->led_lo & 0xFFFFUL);
 }
 
 uint16_t guide_blobs(uint32_t lateral, uint16_t leds, guide_blob_t *out)
@@ -399,7 +364,6 @@ void guide_track(const guide_rx_t *rx, int16_t branch, int16_t backward, guide_o
     int16_t  invert = backward ? s_cfg.invert_back : s_cfg.invert_fwd;
     int16_t  chosen;
 
-    out->vert = guide_vertical(rx);
     out->blobs = guide_blobs(lat, leds, blob);
     out->track = GUIDE_TRK_NORMAL;
     if (lat == all) {

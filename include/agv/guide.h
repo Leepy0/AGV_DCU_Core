@@ -1,14 +1,13 @@
 /*
  * guide.h - 가이드센서 응답 해석과 LED 패턴 위치 추적. HAL 없이 값만 받는다.
  *
- * 일반 센서: 좌우 16 LED, 'h' 응답 16비트.
- * wide 센서: 좌우 32 LED + 세로 4 LED (T자 배치), 'h' 응답 32비트(16진 8자리, 사양서 기준).
- * 세로 LED 는 'h' 응답에 없다. 16진 9자리 변종이 오면 비트 32~35 를 세로로 본다.
- * 세로 LED 는 좌우 위치 계산에 절대 넣지 않는다.
+ * 일반 센서: 좌우 16 LED, 'a' 응답 7바이트(STX a 부호 십 일 CS ETX), 'h' 응답 16비트(16진 4자리).
+ * wide 센서: 좌우 32 LED + 세로 LED (T자 배치). 'a' 응답 8바이트(STX a 부호 십 일 V CS ETX),
+ * 'h' 응답 32비트(16진 8자리, 12바이트)뿐이다.
  *
- * 실측 필요
- *  - 세로 LED 를 어떤 응답으로 읽는지. vert_bit 는 9자리 변종에서만 쓰인다.
- *  - LED 패턴 위치가 'a' 위치와 같은 값인지, 부호가 같은지. 다르면 invert 로 맞춘다.
+ * 제조사 사양 확인
+ *  - 세로 센서는 wide 'a' 의 V('1' 켜짐, '0' 꺼짐)로 읽는다. 'h' 에는 세로가 없다.
+ *  - 'h' LED 패턴 위치는 'a' 와 부호·단위가 같다. 단 'a' 는 가운데 세 칸 점등 상태를 0 으로 보낸다.
  *
  * 필터는 기본값이 전부 꺼짐이다. 실측 없이 켜면 정상 테이프를 버려 정지할 수 있다.
  * 분기 동작은 여기 없다. 이 모듈은 위치와 상태 계산까지만 한다.
@@ -23,8 +22,6 @@
 
 #define GUIDE_LED_NARROW   16
 #define GUIDE_LED_WIDE     32
-#define GUIDE_BITS_WIDE    36
-#define GUIDE_VERT_COUNT   4
 #define GUIDE_BLOB_MAX     16      /* 32칸에 번갈아 켜진 경우 */
 #define GUIDE_CROSS_LED_MIN 10     /* 이만큼 켜지면 교차선 */
 
@@ -60,13 +57,12 @@ typedef struct {
     int16_t  wide;
     int16_t  pos;          /* 'a' 위치. 전부 켜짐이면 0 */
     int16_t  status;       /* 'a' 상태. 'h' 상태는 guide_track 이 낸다 */
+    int16_t  vert;         /* wide 'a' 의 세로 센서 V. 1 켜짐. 일반·'h' 는 0 */
     uint32_t led_lo;       /* 'h' 비트 0~31 */
-    uint16_t led_hi;       /* 'h' 비트 32~35 */
 } guide_rx_t;
 
 typedef struct {
     int16_t  invert_fwd, invert_back;    /* 1 = 위치 부호 반전. 센서별로 둔다. 분기 끝 해석도 함께 뒤집힌다 */
-    uint16_t vert_bit[GUIDE_VERT_COUNT]; /* wide 세로 LED 의 응답 비트 번호. 나머지 32비트가 좌우다 */
     uint16_t min_width;                  /* 이보다 좁은 덩어리를 버린다. 기본 1 */
     uint16_t max_width;                  /* 이보다 넓은 덩어리를 버린다. 기본 전체 */
     uint16_t max_step;                   /* 추적 중 스캔당 최대 위치 변화. 0 = 무제한 */
@@ -82,7 +78,6 @@ typedef struct {
     int16_t  status;       /* guide_status_t */
     uint16_t width;        /* 선택한 덩어리 폭. 조향의 커브 판정 span 입력으로 쓸 수 있다 */
     uint16_t blobs;        /* 필터 전 덩어리 수 */
-    uint16_t vert;         /* 세로 4비트 원시값 */
     int16_t  track;        /* guide_track_t */
 } guide_out_t;
 
@@ -108,7 +103,6 @@ void     guide_comm_clear(void);          /* STOP 리셋에서 호출 */
 
 /* 좌우 비트만 칸 순서로 모은다 */
 uint32_t guide_lateral(const guide_rx_t *rx);
-uint16_t guide_vertical(const guide_rx_t *rx);
 uint16_t guide_blobs(uint32_t lateral, uint16_t leds, guide_blob_t *out);
 
 /* branch: 0 없음, BRANCH_LEFT, BRANCH_RIGHT. 진행 방향 기준이고 backward 로 센서 좌우로 바꾼다 */
