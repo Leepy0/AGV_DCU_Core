@@ -29,9 +29,6 @@
 #define GUIDE_MISS_LIMIT    3          /* 무응답 연속 3회 = 30 ms. P_GUIDE_TIMEOUT 이 0 일 때 */
 #define GUIDE_BAD_LIMIT     10         /* 체크섬 실패 연속 10회 */
 
-/* P_GUIDE_CURVE_DETECT 값. 빈 파라미터 번호가 없어 이 번호를 확장해 소스 선택을 겸한다 */
-enum { GUIDE_SRC_POSITION = 0, GUIDE_SRC_MIXED = 1, GUIDE_SRC_LED_ONLY = 2 };
-
 typedef enum { GUIDE_NORMAL = 0, GUIDE_ALL_ON, GUIDE_LOST } guide_status_t;
 
 /* 'h' 추적이 위치를 얻은 방법. 조향이 적분과 칼만 갱신을 여기에 맞춘다 */
@@ -111,7 +108,7 @@ void     guide_track(const guide_rx_t *rx, int16_t branch, int16_t backward, gui
 /* 'a' 소스에서 'h' 응답이 왔을 때의 위치값. 전부 꺼짐·켜짐 표시만 넣고 그 밖에는 이전 값을 둔다 */
 int16_t  guide_h_position(const guide_rx_t *rx, int16_t prev);
 
-int16_t  guide_source_led(void);                                  /* 위치를 'h' 로 얻는가 */
+int16_t  guide_source_led(void);                                  /* 위치를 'h' 로 얻는가. QUIRK_SRC_A 이면 0 */
 uint16_t guide_curve_span(void);                                  /* 설정값과 (배운 테이프 폭 + 2) 중 큰 쪽 */
 uint16_t guide_tape_width(void);                                  /* 배운 테이프 폭(칸). 0 = 아직 모름 */
 /* 가장자리 고정·유지가 상한 거리를 넘었을 때 부른다. 다음 응답은 덩어리 가운데를 받고 폭을 다시 배운다 */

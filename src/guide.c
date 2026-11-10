@@ -407,7 +407,7 @@ int16_t guide_h_position(const guide_rx_t *rx, int16_t prev)
 
 int16_t guide_source_led(void)
 {
-    return param_get(P_GUIDE_CURVE_DETECT) == GUIDE_SRC_LED_ONLY;
+    return !param_quirk(QUIRK_SRC_A);
 }
 
 uint16_t guide_curve_span(void)

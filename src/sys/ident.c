@@ -125,10 +125,10 @@ stopt_result_t agv_stopt;
 build_result_t agv_build;
 uint16_t       test_keep_mark;
 
-/* 예전 OPT 값 o(b0 10 ms, b1 감쇠 부호, b3 칼만 위치, b4 휠 간격)와 같은 조향 칸. 위치 소스는 시작 때 값 */
+/* 예전 OPT 값 o(b0 10 ms, b1 감쇠 부호, b3 칼만 위치, b4 휠 간격)와 같은 조향 칸. 위치 소스는 'h'(표준) */
 #define OLD_OPT(o) { (int16_t)((o) & OPT_KF_POSITION), \
                      (int16_t)((((o) & 1) ? 0 : QUIRK_STEER_20MS) | (((o) & 2) ? 0 : QUIRK_DAMP_SIGN_OLD) \
-                               | (((o) & 16) ? 0 : QUIRK_NO_WB_GAIN)), SWEEP_SRC_NOW }
+                               | (((o) & 16) ? 0 : QUIRK_NO_WB_GAIN)) }
 static const sweep_cand_t s_sweep_def[SWEEP_MAX] = {
     OLD_OPT(0), OLD_OPT(1), OLD_OPT(2), OLD_OPT(3), OLD_OPT(8), OLD_OPT(9), OLD_OPT(10), OLD_OPT(11),
     OLD_OPT(16), OLD_OPT(17), OLD_OPT(18), OLD_OPT(19), OLD_OPT(24), OLD_OPT(25), OLD_OPT(26), OLD_OPT(27)
@@ -140,12 +140,12 @@ static const sweep_cand_t s_temp_def[8] = {
 };
 static sweep_cand_t s_temp_l[SWEEP_MAX];
 static uint16_t s_temp_n = 0xFFFFu;
-/* 고속 스윕 후보 {51번, 39번, 38번}. 줄을 바꾸면 후보가 바뀐다(HS_CANDS 줄) */
+/* 고속 스윕 후보 {OPT, LG}. 줄을 바꾸면 후보가 바뀐다(HS_CANDS 줄) */
 static const sweep_cand_t s_hs_cand[HS_CANDS] = {
-    { 0,               0,                  GUIDE_SRC_LED_ONLY },   /* 1 새 기본, 'h' 만 (기준) */
-    { 0,               0,                  GUIDE_SRC_POSITION },   /* 2 새 기본, 'a' */
-    { OPT_KF_POSITION, 0,                  GUIDE_SRC_LED_ONLY },   /* 3 새 기본 + 칼만 위치, 'h' 만 */
-    { 0,               QUIRK_STEER_LEGACY, GUIDE_SRC_POSITION }    /* 4 예전 OPT 0, 'a' (예전 현장 동작) */
+    { 0,               0 },                                  /* 1 새 조향, 'h' (기준) */
+    { OPT_KF_POSITION, 0 },                                  /* 2 새 조향 + 칼만 위치, 'h' */
+    { 0,               QUIRK_STEER_LEGACY },                 /* 3 예전 조향, 'h' */
+    { 0,               QUIRK_STEER_LEGACY | QUIRK_SRC_A }    /* 4 예전 조향, 'a' (예전 현장 동작) */
 };
 
 /* 지금 시험의 진행 칸. 식별 시험이면 agv_ident, 최고 속도 시험이면 agv_top, 통합 시험 단계 2 는 agv_all */
@@ -452,27 +452,24 @@ int ident_rpm_mode(void) { return s_rpm; }
 static void list_set(sweep_cand_t *dst, uint16_t *dn, const sweep_cand_t *c, uint16_t n)
 {
     uint16_t i;
-    int16_t olo, oup, qlo, qup, slo, sup;
+    int16_t olo, oup, qlo, qup;
 
     param_limit(P_OPT_FLAGS, &olo, &oup);
     param_limit(P_LEGACY_QUIRKS, &qlo, &qup);
-    param_limit(P_GUIDE_CURVE_DETECT, &slo, &sup);
     *dn = 0;
     for (i = 0; (i < n) && (*dn < SWEEP_MAX); i++) {
-        if ((c[i].opt >= olo) && (c[i].opt <= oup) && (c[i].quirk >= qlo) && (c[i].quirk <= qup)
-            && ((c[i].src == SWEEP_SRC_NOW) || ((c[i].src >= slo) && (c[i].src <= sup)))) { dst[(*dn)++] = c[i]; }
+        if ((c[i].opt >= olo) && (c[i].opt <= oup) && (c[i].quirk >= qlo) && (c[i].quirk <= qup)) { dst[(*dn)++] = c[i]; }
     }
 }
 
 void ident_sweep_set(const sweep_cand_t *c, uint16_t n) { list_set(s_sweep, &s_sweep_n, c, n); }
 void ident_temp_set(const sweep_cand_t *c, uint16_t n)  { list_set(s_temp_l, &s_temp_n, c, n); }
 
-/* 시험 전 51·39·38번으로 돌린다 */
+/* 시험 전 OPT·LG 로 돌린다 */
 static void opt_restore(void)
 {
     (void)param_set_ram(P_OPT_FLAGS, agv_all.opt_saved);
     (void)param_set_ram(P_LEGACY_QUIRKS, agv_all.quirk_saved);
-    (void)param_set_ram(P_GUIDE_CURVE_DETECT, agv_all.src_saved);
 }
 
 static void all_begin(const sweep_cand_t *list, uint16_t n)
@@ -484,12 +481,10 @@ static void all_begin(const sweep_cand_t *list, uint16_t n)
     agv_all.stage = 1;
     agv_all.opt_saved = param_get(P_OPT_FLAGS);
     agv_all.quirk_saved = param_get(P_LEGACY_QUIRKS);
-    agv_all.src_saved = param_get(P_GUIDE_CURVE_DETECT);
     agv_all.sweep_n = (int16_t)n;
     for (k = 0; k < n; k++) {
         agv_all.sw[k].opt = list[k].opt;
         agv_all.sw[k].quirk = list[k].quirk;
-        agv_all.sw[k].src = (list[k].src == SWEEP_SRC_NOW) ? agv_all.src_saved : list[k].src;
     }
     ident_start();
     s_all = 1;
@@ -763,8 +758,7 @@ static void pass_begin(void)
         if (sweep() && (((PASS - 1u) % SWEEP_PASSES) == 0u)) {
             agv_all.sweep_k = (int16_t)((PASS - 1u) / SWEEP_PASSES);
             (void)param_set_ram(P_OPT_FLAGS, agv_all.sw[agv_all.sweep_k].opt);
-            (void)param_set_ram(P_LEGACY_QUIRKS, agv_all.sw[agv_all.sweep_k].quirk);
-            (void)param_set_ram(P_GUIDE_CURVE_DETECT, agv_all.sw[agv_all.sweep_k].src);   /* 다음 요청부터 'A'/'H' 가 바뀐다 */
+            (void)param_set_ram(P_LEGACY_QUIRKS, agv_all.sw[agv_all.sweep_k].quirk);   /* QUIRK_SRC_A 가 바뀌면 다음 요청부터 'A'/'H' 가 바뀐다 */
         }
     }
     if (sweep()) { steer_reset(); }
@@ -1505,7 +1499,6 @@ void ident_start_build(uint16_t mask, int16_t track_in_mm, int16_t cap_mpm)
 
     now.opt = param_get(P_OPT_FLAGS);
     now.quirk = param_get(P_LEGACY_QUIRKS);
-    now.src = SWEEP_SRC_NOW;
     all_begin(&now, (mask & BLD_STEER) ? 1u : 0u);
     memset(&agv_coast, 0, sizeof(agv_coast));
     memset(&agv_stopt, 0, sizeof(agv_stopt));

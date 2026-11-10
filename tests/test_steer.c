@@ -17,6 +17,7 @@ static void setup(void)
     fake_params();
     memset(&D, 0, sizeof(D));
     motor_reset();
+    { guide_cfg_t c; guide_cfg_default(&c); guide_configure(&c); guide_reset(); }   /* 'h' 커브 임계 기본 4 */
     stop_reset();
     steer_reset();
     D.control = RUN_DRIVE;
@@ -116,17 +117,17 @@ int main(void)
     steer_run(1);
     assert(D.p_kp == 35.0f);
 
-    /* 커브: 점등 4개 이상이면 Kp ×1.3, 상한 169 */
+    /* 커브('h' 소스): 덩어리 폭 4칸 이상이면 Kp ×1.3, 상한 169 */
     setup();
-    D.guide_led = 0x000F;
+    D.guide_span = 4;
     steer_run(1);
     assert(D.p_kp == 35.0f * 1.3f);
     setup();
-    D.guide_led = 0x0007;
+    D.guide_span = 3;
     steer_run(1);
     assert(D.p_kp == 35.0f);
     setup();
-    D.guide_led = 0xFFFF;
+    D.guide_span = 16;
     D.guide_pos = 13;
     steer_run(1);
     assert(D.p_kp == 130.0f * 1.3f);
@@ -196,7 +197,7 @@ int main(void)
     setup();
     (void)param_set(P_LEGACY_QUIRKS, QUIRK_STEER_STEP);
     D.guide_pos = 3;                    /* 커브면 폭 ×0.3 → 0 */
-    D.guide_led = 0x000F;
+    D.guide_span = 4;
     steer_run(1);
     assert(D.p_err == -3);
     setup();
@@ -277,7 +278,7 @@ int main(void)
     setup();
     steer_run(1);
     D.guide_pos = 4;
-    D.guide_led = 0x00FF;
+    D.guide_span = 8;
     { float p00 = D.kf_p00;
       float p11 = D.kf_p11;
       float p00_pred = p00 + 0.0001f * p11 + 0.02f * 20.0f;
@@ -310,9 +311,10 @@ int main(void)
     assert(D.p_kp == 35.0f * 1.3f);
     (void)param_set(P_LEGACY_QUIRKS, 0);
 
-    /* 커브 판정: 'a' 소스는 설정과 무관하게 레거시 판정. 'h' 소스만 설정값을 쓴다 */
+    /* 커브 판정: 'a' 소스(QUIRK_SRC_A)는 설정과 무관하게 레거시 판정. 'h' 소스(기본)만 설정값을 쓴다 */
     setup();
     guide_reset();
+    (void)param_set(P_LEGACY_QUIRKS, QUIRK_SRC_A);
     { guide_cfg_t cfg;
       guide_cfg_default(&cfg);
       assert(cfg.curve_span == 4);
@@ -325,7 +327,7 @@ int main(void)
       D.guide_led = 0x000F;
       steer_run(1);
       assert(D.p_kp == 35.0f * 1.3f);
-      (void)param_set(P_GUIDE_CURVE_DETECT, GUIDE_SRC_LED_ONLY);
+      (void)param_set(P_LEGACY_QUIRKS, 0);
       D.guide_led = 0;
       steer_run(1);
       assert(D.p_kp == 35.0f * 1.3f);           /* 폭 3 >= 임계 2 */
@@ -340,7 +342,7 @@ int main(void)
       D.guide_span = 4;
       steer_run(1);
       assert(D.p_kp == 35.0f * 1.3f);
-      (void)param_set(P_GUIDE_CURVE_DETECT, 0); }
+      (void)param_set(P_GUIDE_CURVE_DETECT, 0); }   /* GSR 값은 무시: 위 결과와 같다 */
 
     /* 변화율 항 부호: 기본은 감쇠, QUIRK_DAMP_SIGN_OLD 는 예전 부호. 칼만 상태를 고정해 비교한다 */
     { float out_p, out_a, out_b;

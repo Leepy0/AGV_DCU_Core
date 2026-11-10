@@ -175,8 +175,9 @@ int main(void)
     assert(param_boot(&fake_store, 1) == 0);
     assert(param_get(P_LEGACY_QUIRKS) == 5);
     assert(param_quirk(QUIRK_RISK_FLAG) == 1 && param_quirk(QUIRK_H_POSITION) == 0);
-    /* 레거시 비트 b0~b8 까지 511. 512 는 넘는다 */
-    assert(param_set(P_LEGACY_QUIRKS, 512) == -1 && param_set(P_LEGACY_QUIRKS, QUIRK_STEER_LEGACY | 0x0F) == 0);
+    /* 레거시 비트 b0~b9 까지 1023. 1024 는 넘는다 */
+    assert(param_set(P_LEGACY_QUIRKS, 1024) == -1 && param_set(P_LEGACY_QUIRKS, 1023) == 0 && param_quirk(QUIRK_SRC_A));
+    assert(param_set(P_LEGACY_QUIRKS, QUIRK_STEER_LEGACY | 0x0F) == 0);
     assert(param_get(P_LEGACY_QUIRKS) == 383 && param_quirk(QUIRK_STEER_20MS) && param_quirk(QUIRK_NO_WB_GAIN));
     assert(param_set(P_LEGACY_QUIRKS, 5) == 0);
 

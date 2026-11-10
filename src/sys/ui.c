@@ -51,7 +51,7 @@ static const uint16_t s_seg[] = {
 #define SEG_DOT  10
 #define SEG_COUNT (sizeof(s_seg) / sizeof(s_seg[0]))
 
-/* 메뉴 순서 → 파라미터 번호. 묶음 다섯 개를 이어 둔다. 15·29·30·42번과 TAG(미사용)는 메뉴에 없다(값은 EEPROM 에 그대로) */
+/* 메뉴 순서 → 파라미터 번호. 묶음 다섯 개를 이어 둔다. 15·29·30·42번과 TAG·GSR(미사용)는 메뉴에 없다(값은 EEPROM 에 그대로) */
 static const uint16_t s_menu[] = {
     /* 1 속도 */
     P_SPEED_HIGH, P_SPEED_LOW, P_SPEED_TURN, P_EMPTY_SPEED, P_EMPTY_TURN, P_ACC, P_DCC, P_SPEED_JOG,
@@ -66,12 +66,12 @@ static const uint16_t s_menu[] = {
     P_ACS_RETRY_LEGACY, P_CROSS_RETRY_100MS, P_ACS_STANDBY, P_ACS_RETRY_SEC, P_COMM_LINK, P_INTERFACE_MODE,
     P_ACS_VERSION, P_ERR_REPORT_MIN, P_SOUND, P_DISPLAY_MODE, P_BAT_OFFSET_DV, P_LAMP_EXT_USE,
     UI_PARA_LAMP_FIRST, UI_PARA_LAMP_FIRST + 1, UI_PARA_LAMP_LAST,
-    /* 5 정보·개발. 뒤 넷은 숨김 */
+    /* 5 정보·개발. 뒤 셋은 숨김. GSR 는 미사용이라 없다 */
     P_BAT_DV, P_BAT_PERCENT, P_VERSION, P_PARA_INIT,
-    P_AUTO_DRIVE_MODE, P_STEER_RPM_OFFSET, P_GUIDE_CURVE_DETECT, P_LEGACY_QUIRKS
+    P_AUTO_DRIVE_MODE, P_STEER_RPM_OFFSET, P_LEGACY_QUIRKS
 };
 #define MENU_COUNT ((int16_t)(sizeof(s_menu) / sizeof(s_menu[0])))
-#define MENU_HIDDEN_FIRST (MENU_COUNT - 4)
+#define MENU_HIDDEN_FIRST (MENU_COUNT - 3)
 static const int16_t s_group_end[UI_GROUP_COUNT] = { 11, 24, 33, 48, MENU_COUNT };   /* 묶음 다음 첫 칸 */
 static const char s_group_name[UI_GROUP_COUNT][DISP_DIGITS] = {
     {'P','1','S','P','D'}, {'P','2','R','U','N'}, {'P','3','C','A','R'}, {'P','4','C','O','M'}, {'P','5','I','N','F'}
@@ -85,7 +85,7 @@ static const para_view_t s_view[P_COUNT] = {
     {"BO-", 2}, {"JSP", 2}, {"ACC", 2}, {"DCC", 2}, {"AS ", 3}, {"ST ", 3}, {"BRM", 1}, {"TFB", 2}, {"TAG", 1},
     {"SL ", 3}, {"K_P", 2}, {"K_I", 2}, {"WS ", 3}, {"RG ", 3}, {"WW ", 3}, {"ID_", 2}, {"AT ", 3}, {"LO ", 3},
     {"SPN", 2}, {"SSN", 2}, {"TTY", 1}, {"CML", 2}, {"FL ", 3}, {"ASS", 2}, {"BGO", 2}, {"CD ", 3}, {"WRT", 2},
-    {"CT ", 3}, {"GSR", 2}, {"LG ", 3}, {"EST", 2}, {"RCI", 2}, {"LUS", 2}, {"SR ", 3}, {"GTO", 2}, {"AV-", 2},
+    {"CT ", 3}, {"GSR", 2}, {"L  ", 4}, {"EST", 2}, {"RCI", 2}, {"LUS", 2}, {"SR ", 3}, {"GTO", 2}, {"AV-", 2},
     {"INT", 2}, {"V_ ", 3}, {"VT ", 3}, {"CR ", 3},
     {"GD ", 3}, {"OPT", 2}, {"FF ", 3}, {"ES ", 2},
     {"EDS", 2}, {"ETN", 2}, {"EAC", 2}, {"EDC", 2}, {"LDS", 0}

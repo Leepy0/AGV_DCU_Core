@@ -60,7 +60,7 @@ static int16_t popcount16(uint16_t v)
     return n;
 }
 
-/* 'a' 소스는 레거시 동작 그대로다. 'h' 소스만 테이프 폭에 맞춘 임계를 쓴다 */
+/* 'a' 소스(QUIRK_SRC_A)는 레거시 동작 그대로다. 'h' 소스(기본)는 테이프 폭에 맞춘 임계를 쓴다 */
 static int16_t curve_detected(void)
 {
     if (guide_source_led()) { return D.guide_span >= guide_curve_span(); }

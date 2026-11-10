@@ -509,12 +509,14 @@ int main(void)
       assert(guide_comm_error() == ERR_GUIDE_COMM); }
     guide_reset();
 
-    /* 소스 선택 */
+    /* 소스 선택: 기본 'h' 전용, GSR 값은 무시, QUIRK_SRC_A 로 예전 'a' */
+    assert(guide_source_led() && guide_want_h(0, 0) && guide_want_h(1, 3));
+    assert(param_set(P_GUIDE_CURVE_DETECT, 0) == 0 && guide_source_led());
+    assert(param_set(P_GUIDE_CURVE_DETECT, 3) == -1);     /* 범위표는 그대로 */
+    assert(param_set(P_LEGACY_QUIRKS, QUIRK_SRC_A) == 0);
     assert(!guide_source_led());
     assert(!guide_want_h(0, 0) && guide_want_h(1, 0) && !guide_want_h(1, 3));
-    assert(param_set(P_GUIDE_CURVE_DETECT, GUIDE_SRC_LED_ONLY) == 0);
-    assert(guide_source_led() && guide_want_h(0, 0) && guide_want_h(1, 3));
-    assert(param_set(P_GUIDE_CURVE_DETECT, 3) == -1);
+    assert(param_set(P_LEGACY_QUIRKS, 0) == 0);
 
     puts("test_guide ok");
     return 0;

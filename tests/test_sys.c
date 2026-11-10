@@ -131,6 +131,8 @@ static void boot(void)
     host.adc = 300u << 4;            /* 24.4 V 부근 */
     ticks(60);                       /* 전원 안정 */
     assert(sys_power_on());
+    /* 이 시험의 모의 센서는 'a' 로 답한다. 기본 'h' 전용은 test_guide_h_only 가 본다 */
+    (void)param_set_ram(P_LEGACY_QUIRKS, QUIRK_SRC_A);
 }
 
 static void raw_a(uint16_t clear_bits, uint16_t set_bits)
@@ -856,23 +858,23 @@ static void test_menu5(void)
         P_ACS_RETRY_LEGACY, P_CROSS_RETRY_100MS, P_ACS_STANDBY, P_ACS_RETRY_SEC, P_COMM_LINK, P_INTERFACE_MODE,
         P_ACS_VERSION, P_ERR_REPORT_MIN, P_SOUND, P_DISPLAY_MODE, P_BAT_OFFSET_DV, P_LAMP_EXT_USE, UI_PARA_LAMP_FIRST, UI_PARA_LAMP_FIRST + 1, UI_PARA_LAMP_LAST,
         P_BAT_DV, P_BAT_PERCENT, P_VERSION, P_PARA_INIT,
-        P_AUTO_DRIVE_MODE, P_STEER_RPM_OFFSET, P_GUIDE_CURVE_DETECT, P_LEGACY_QUIRKS
+        P_AUTO_DRIVE_MODE, P_STEER_RPM_OFFSET, P_LEGACY_QUIRKS
     };
-    static const int ends[5] = { 11, 24, 33, 48, 56 };
+    static const int ends[5] = { 11, 24, 33, 48, 55 };
     static const struct { uint16_t idx; char c[4]; } names[] = {
         { P_SPEED_MIN, "SPN" }, { P_GUIDE_TIMEOUT, "GTO" }, { P_COMM_LINK, "CML" }, { P_STEER_RPM_OFFSET, "SR " },
-        { P_GUIDE_CURVE_DETECT, "GSR" }, { P_LEGACY_QUIRKS, "LG " }, { P_EMPTY_SPEED, "EDS" }, { P_EMPTY_TURN, "ETN" },
+        { P_GUIDE_CURVE_DETECT, "GSR" }, { P_LEGACY_QUIRKS, "L  " }, { P_EMPTY_SPEED, "EDS" }, { P_EMPTY_TURN, "ETN" },
         { P_EMPTY_ACC, "EAC" }, { P_EMPTY_DCC, "EDC" }, { P_LOAD_DETECT, "LDS" }, { P_AUTO_DRIVE_MODE, "ATD" }
     };
     uint16_t d[5];
     char l[3];
     int g, i, k = 0, n;
 
-    assert(sizeof(want) / sizeof(want[0]) == 56u);
+    assert(sizeof(want) / sizeof(want[0]) == 55u);
     assert(ends[2] - ends[1] == 9);     /* P3CAR 9 항목 */
-    for (i = 0; i < 56; i++) {          /* 빠진 다섯. TAG 는 미사용 */
+    for (i = 0; i < 55; i++) {          /* 빠진 여섯. TAG·GSR 는 미사용 */
         assert(want[i] != P_STATION_NO && want[i] != P_SWITCH_START_NUM && want[i] != P_TAG_TYPE && want[i] != P_CROSS_MODE);
-        assert(want[i] != P_TAG_DIGITS);
+        assert(want[i] != P_TAG_DIGITS && want[i] != P_GUIDE_CURVE_DETECT);
     }
     for (i = 0; i < (int)(sizeof(names) / sizeof(names[0])); i++) {
         (void)ui_param_label(names[i].idx, l);
@@ -916,7 +918,7 @@ static void test_menu5(void)
             assert(!shows("OPEN "));                          /* 계속 눌러도 다시 안 뜬다 */
             host.key = 0;
             ticks(10);
-            for (i = 0; i < 8; i++) {
+            for (i = 0; i < 7; i++) {           /* 숨김 3개 */
                 assert(ui_para_number() == (int16_t)want[k + i]);
                 key(KEY_UP);
             }
@@ -1596,6 +1598,8 @@ static void test_fnd_fit(void)
     assert(memcmp(c, "CD060", 5) == 0);
     ui_param_text(P_SPEED_MIN, 7, c);
     assert(memcmp(c, "SPN07", 5) == 0);
+    ui_param_text(P_LEGACY_QUIRKS, 1023, c);   /* LG 는 b9 까지라 네 자리: L + 값 */
+    assert(memcmp(c, "L1023", 5) == 0);
     ui_param_text(P_LOAD_DETECT, 1, c);
     assert(memcmp(c, "LDSON", 5) == 0);
     tune_value_text(c, 'D', 'E', 5414, 1);
@@ -1882,7 +1886,7 @@ static void test_tune_guide(void)
     printf("  tune guide ok\n");
 }
 
-/* 위치 소스 'h' 만(38번 2): 연속 시험 선 찾기 중에는 'a' 소스처럼 'A'·'H' 를 번갈아 보내 배율 짝을 모은다.
+/* 위치 소스 'h' 만(기본. GSR 미사용): 연속 시험 선 찾기 중에는 'a' 소스처럼 'A'·'H' 를 번갈아 보내 배율 짝을 모은다.
  * 'a' 응답은 짝에만 쓰고 위치는 'h' 그대로다. 위치는 LED 덩어리에 h_scale 을 곱해 'a' 단위로 쓰고,
  * 덩어리 폭이 커브 판정 입력이다. 측정 구간이 아니면 매 틱 'H' 만 보낸다 */
 static void test_guide_h_only(void)
@@ -1901,7 +1905,7 @@ static void test_guide_h_only(void)
         if (host.sci[HAL_SCI_B].tx[1] == 'A') { a++; } else { h++; }
     }
     assert(a == 3 && h == 3);
-    assert(param_set_ram(P_GUIDE_CURVE_DETECT, GUIDE_SRC_LED_ONLY) == 0);   /* 주행 중 바꾼다 */
+    assert(param_set_ram(P_GUIDE_CURVE_DETECT, 0) == 0);   /* GSR 값은 무시한다 */
     assert(tune_guide_k100() == TUNE_NO_DATA);
     a = h = 0;
     for (k = 0; k < 40; k++) {                      /* 'h' 위치 0(가운데), 'a' 는 +5: 짝은 쌓이되 위치는 'h' */
@@ -1941,10 +1945,9 @@ static void test_guide_h_only(void)
     assert(D.guide_pos == -9);
     cfg.h_scale = 1.0f;
     guide_configure(&cfg);
-    assert(param_set_ram(P_GUIDE_CURVE_DETECT, GUIDE_SRC_POSITION) == 0);
     /* 튜닝이 아닌 주행: 'H' 만 */
     boot();
-    assert(param_set_ram(P_GUIDE_CURVE_DETECT, GUIDE_SRC_LED_ONLY) == 0);
+    assert(param_set_ram(P_LEGACY_QUIRKS, 0) == 0);
     press_start();
     for (k = 0; k < 6; k++) {
         host.sci[HAL_SCI_B].tx_len = 0;
@@ -1953,7 +1956,18 @@ static void test_guide_h_only(void)
         assert(host.sci[HAL_SCI_B].tx_len == 4 && host.sci[HAL_SCI_B].tx[1] == 'H');
     }
     assert(D.flag_run && D.guide_pos == 0 && D.guide_span == 2);
-    assert(param_set_ram(P_GUIDE_CURVE_DETECT, GUIDE_SRC_POSITION) == 0);
+    /* LG 512(QUIRK_SRC_A): 예전 'a' 소스. 분기·테이프가 없으면 'A' 만 */
+    boot();
+    assert(param_set_ram(P_LEGACY_QUIRKS, QUIRK_SRC_A) == 0);
+    press_start();
+    for (k = 0; k < 6; k++) {
+        host.sci[HAL_SCI_B].tx_len = 0;
+        guide_reply(4);
+        tick();
+        assert(host.sci[HAL_SCI_B].tx_len == 4 && host.sci[HAL_SCI_B].tx[1] == 'A');
+    }
+    assert(D.flag_run && D.guide_pos == 4);
+    assert(param_set_ram(P_LEGACY_QUIRKS, 0) == 0);
     printf("  guide h only ok\n");
 }
 

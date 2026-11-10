@@ -116,25 +116,23 @@ int  ident_top_mode(void);   /* 1 = 지금 돌고 있는(또는 마지막) 시�
 /* ---- 통합 시험 (튜닝 모드 t3.4 ALL) ----
  * START 한 번으로 단계 1 → 2 → 3 을 잇는다. 사람 없이 끝까지 가서 기다린다.
  *  단계 1: 식별 시험 0~6회 그대로 (지금 51·39번). 결과는 agv_ident.
- *  단계 2: 조향 스윕. 목록 칸(51번 OPT, 39번 레거시 비트, 38번 위치 소스)마다 2회(왕복 한 번).
+ *  단계 2: 조향 스윕. 목록 칸(OPT, LG 레거시 비트. 위치 소스는 LG 의 QUIRK_SRC_A)마다 2회(왕복 한 번).
  *          세 값은 RAM 에만 바꾸고 회 시작 전에 조향 상태를 지운다.
  *          속도는 식별 3·4회와 같은 단계(최고 속도의 2/3, 단계 1 에서 낮춘 상한 그대로).
  *          회마다 가속 → 안정 → 정속 측정 → 옆 계단 → 감속하며 선 찾기 → 회전. SL 정지와 속도 계단은 없다.
  *          창이 안 들어가면 식별 시험처럼 속도를 4/5 로 낮춰 같은 회를 다시 한다. 결과는 agv_all.sw[k].lv[0..1].
  *  단계 3: 최고 속도 시험 1·2회. 0회는 다시 하지 않고 단계 1 의 L 을 쓴다. 결과는 agv_top.
- * 끝, 실패, 끊김 어느 쪽이든 51·39·38번을 시험 전 값으로 되돌린다. EEPROM 은 쓰지 않는다.
+ * 끝, 실패, 끊김 어느 쪽이든 OPT·LG 를 시험 전 값으로 되돌린다. EEPROM 은 쓰지 않는다.
  * 실패 코드 = 단계 × 1000 + 회 × 10 + 순서. 회는 단계 1·3 은 0~6, 단계 2 는 스윕 칸 × 2 + (0 또는 1) + 1 */
 #define SWEEP_MAX     16
 #define SWEEP_PASSES  2
 
-/* 스윕 칸: 51번 OPT, 39번 레거시 비트, 38번 위치 소스(GUIDE_SRC_*, SWEEP_SRC_NOW = 시작 때 값) */
-typedef struct { int16_t opt, quirk, src; } sweep_cand_t;
-#define SWEEP_SRC_NOW (-1)
+/* 스윕 칸: OPT, LG(레거시 비트). 위치 소스는 LG 의 QUIRK_SRC_A('a', 없으면 'h') */
+typedef struct { int16_t opt, quirk; } sweep_cand_t;
 
 typedef struct {
     int16_t       opt;               /* 이 칸의 OPT(51번) 값 */
     int16_t       quirk;             /* 이 칸의 레거시 비트(39번) 값 */
-    int16_t       src;               /* 이 칸의 위치 소스(38번) 값. 0 'a', 2 'h' 만 */
     int16_t       done;              /* 끝낸 회 수 0~2 */
     ident_level_t lv[SWEEP_PASSES];  /* 식별 시험과 같은 칸. 속도 계단·SL 정지 칸은 0 */
 } sweep_t;
@@ -148,7 +146,6 @@ typedef struct {
     int16_t sweep_k;         /* 지금(또는 마지막) 스윕 칸 */
     int16_t opt_saved;       /* 시험 전 51번. 끝나면 이 값으로 돌린다 */
     int16_t quirk_saved;     /* 시험 전 39번 */
-    int16_t src_saved;       /* 시험 전 38번 */
     int16_t hs_mpm;          /* 고속 스윕 속도 m/min. 0 = 고속 스윕 아님 */
     float   track_mm;        /* 단계 1 의 L */
     float   total_m;         /* 시험 전체 직진 거리 */
@@ -161,7 +158,7 @@ extern all_result_t agv_all;
 
 /* 스윕 목록. 기본은 조향 스위치 넷(QUIRK_STEER_20MS, QUIRK_DAMP_SIGN_OLD, QUIRK_NO_WB_GAIN, OPT_KF_POSITION)의
  * 16 조합. 예전 OPT 값 0,1,2,3,8,9,10,11,16,17,18,19,24,25,26,27 의 조향과 같은 차례다. 위치 소스는 시작 때 값.
- * 사이트가 바꿀 때 부팅 때 한 번 부른다. n 은 SWEEP_MAX 에서 자른다. 51·39·38번 한계 밖의 칸은 건너뛴다 */
+ * 사이트가 바꿀 때 부팅 때 한 번 부른다. n 은 SWEEP_MAX 에서 자른다. OPT·LG 한계 밖의 칸은 건너뛴다 */
 void ident_sweep_set(const sweep_cand_t *c, uint16_t n);
 void ident_start_all(void);  /* 이후 ident_run, ident_pass, ident_phase, ident_abort, ident_want_h 를 같이 쓴다 */
 int  ident_all_mode(void);   /* 1 = 지금 돌고 있는(또는 마지막) 시험이 통합 시험이나 지정 시험 */
@@ -170,7 +167,7 @@ uint16_t ident_stage(void);  /* 통합 시험 단계 1~3, 지정 시험 1·2·4(
 /* ---- 지정 시험 (튜닝 모드 t3.5 TEMP) ----
  * 통합 시험을 줄인 것. 단계 1 은 0회만(선 찾기, L 측정, 회전 두 번). 식별 1~6회와 최고 속도 시험은 없다.
  * 0회 두 번째 회전이 끝나면 바로 단계 2. 통합 시험 단계 2 와 같이 선에서 출발해 TEMP 목록 칸마다 2회 잰다
- * (속도 단계 2, 같은 회 순서, 51·39·38번은 RAM 에만, 회마다 조향 상태를 지움, 창이 안 들어가면 4/5 로 다시).
+ * (속도 단계 2, 같은 회 순서, OPT·LG 는 RAM 에만, 회마다 조향 상태를 지움, 창이 안 들어가면 4/5 로 다시).
  * 마지막 스윕 회전 뒤 스윕 칸이 RAM 에 건 조향 스위치·가이드 소스를 시험 전 값으로 돌리고 바로 단계 4(아래 agv_stopt)로 간다. 단계 3 은 비워 두고 건너뛴다.
  * 결과는 agv_all 과 agv_stopt. agv_ident 에는 0회 값(L 등)만 남는다(state 2, pass 0).
  * 단계 4 의 agv_all.pass·phase 는 그 단계 회와 순서.
@@ -192,7 +189,7 @@ typedef struct {
 extern coast_result_t agv_coast;
 
 /* ---- 지정 시험 단계 4: 정지 정확도 ----
- * 마지막 스윕 회전 뒤 STOPT_PASSES 회(방향 번갈아), 선에서 출발한다. 사용자 51·39·38번, 조향 켬.
+ * 마지막 스윕 회전 뒤 STOPT_PASSES 회(방향 번갈아), 선에서 출발한다. 사용자 OPT·LG, 조향 켬.
  * 회 1·2 는 최고 속도의 1/3, 3·4 는 2/3, 5·6 은 최고 속도(앞 단계에서 낮춘 상한 그대로).
  * 홀수 회 목표 = CID(35번, 0 이면 STOPT_CID_MM), 짝수 회 = STOPT_SHORT_MM.
  * 1 가속 → 2 안정 0.5 s → 7 정지: 그 자리에서 교차로 대기 목표(cross_pulses)를 직접 건다(ACS 를 거치지 않는다).
@@ -262,7 +259,7 @@ void  ident_speed(int16_t v, int ramp);   /* 주행 지령. ramp 0 = 바로 */
  *  ACC: 단계 3 부터 최고 속도·가감속 찾기·편차 회의 출발 램프를 후보 ACC(12번, RAM)로 달려 실제 가속이 따라오는지 본다(이분 찾기,
  *          첫 후보 = acc_cap). 탈락한 후보는 바로 같은 값으로 한 번 더 보고, 두 번 다 탈락해야 위쪽을 줄인다
  *          (재시험 합격이면 합격). 합격은 한 번으로 인정. DCC 찾기도 같다. 판정마다 agv_build.acc_hist·dcc_hist 에 남긴다. 정지 단계는 시작 때 ACC. 12번 추천 = min(깨끗한 가장 큰 값, acc_cap). 끝나면 12번 RAM 을 되돌린다.
- *  6 편차: 지금 설정(51·39·38번 그대로)으로 직진 BLD_DEV_PASSES 회. 통합 시험 단계 2 의 한 회와 같다(최고 속도의 2/3,
+ *  6 편차: 지금 설정(OPT·LG 그대로)으로 직진 BLD_DEV_PASSES 회. 통합 시험 단계 2 의 한 회와 같다(최고 속도의 2/3,
  *          앞 단계에서 RAM 에 넣은 1번 추천 기준). 정속 편차 RMS × 10 이 se_x10(기준값 125 아래 바이트, t2 판정)이다.
  *  후진 점검(t1, TFB 일의 자리 > 0): 편차 단계 전진 회 뒤 그 자리에서 회전 대신 방향 전환(run_dir_change, 0도 회전과 같다)을 하고
  *          같은 회를 후진으로 한 번 더 한다. 결과는 agv_all.sw[0].lv[1](전진은 lv[0] 그대로), 판정은 agv_build.bk_*.
@@ -342,9 +339,9 @@ int  ident_build_mode(void); /* 1 = 지금 돌고 있는(또는 마지막) 시�
 
 /* ---- 고속 스윕 (튜닝 모드 t3.6 HS) ----
  * 지정 시험처럼 0회(선 찾기, L 측정, 회전 두 번)만 한 뒤 바로 단계 2 조향 스윕을 하고 끝에 직선 위에서 기다린다.
- * 다른 점: 속도는 입력 mpm(1번 이하) 그대로, 후보 표(ident.c s_hs_cand: 51·39·38번)를 HS_REPS 번 차례로 돈다
+ * 다른 점: 속도는 입력 mpm(1번 이하) 그대로, 후보 표(ident.c s_hs_cand: OPT·LG)를 HS_REPS 번 차례로 돈다
  * (칸 k 와 k + HS_CANDS 가 같은 후보, 칸마다 왕복 2회). 기준은 'h' 만 쓰는 새 기본이다.
- * 51·39·38번은 RAM 에만, 끝·실패·끊김 때 되돌린다. 위치 소스는 회전을 마치고 선 위에 선 뒤 회 시작 때 바뀐다.
+ * OPT·LG 는 RAM 에만, 끝·실패·끊김 때 되돌린다. 위치 소스는 회전을 마치고 선 위에 선 뒤 회 시작 때 바뀐다.
  * 0회가 끝나면 잰 L 이 need_mm(ident_hs_need_mm) 보다 짧은지 본다. 짧으면 달리지 않고 실패 HS_FAIL_SHORT
  * (단계 2, 회 0, 순서 0). need = GD + 100 mm + 가속 거리 + (안정 0.5 s + 정속·옆 계단 창 1 s 씩) ÷ 0.95 + 감속 거리.
  * 가속·감속 거리는 주행 램프(12·13번)를 그대로 돌려 본다. 결과 agv_all(hs_mpm, need_mm, sw[k].opt·quirk) */

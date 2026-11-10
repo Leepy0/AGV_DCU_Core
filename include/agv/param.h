@@ -22,7 +22,7 @@ enum {
     P_CROSS_IN_CM,          /* 35: 교차로 대기 정지 위치, 'I' 태그 뒤 cm. 0 = 태그에서 바로 정지. 'O' 태그는 서지 않는다 */
     P_ACS_RETRY_LEGACY,     /* 36: 0 이면 ACS 통신 미사용 */
     P_ACS_RETRY_SEC,
-    P_GUIDE_CURVE_DETECT,   /* 38: guide.h 의 GUIDE_SRC_*. 위치 소스 선택을 겸한다 */
+    P_GUIDE_CURVE_DETECT,   /* 38 GSR: 미사용. 값이 남아 있어도 무시한다. 번호·EEPROM 자리는 유지. 위치 소스는 'h' 고정, 예전 'a' 는 QUIRK_SRC_A */
     P_LEGACY_QUIRKS,        /* 39: 비트를 켜면 고치기 전 동작을 재현한다 */
     P_ERR_REPORT_MIN, P_CROSS_RETRY_100MS, P_CROSS_MODE, P_STEER_RPM_OFFSET,
     P_GUIDE_TIMEOUT,        /* 44 */
@@ -52,6 +52,7 @@ enum {
 #define QUIRK_DAMP_SIGN_OLD 0x20u  /* b5 변화율 항을 예전 부호로 더한다 (기본은 감쇠) */
 #define QUIRK_NO_WB_GAIN    0x40u  /* b6 조향 이득을 휠 간격에 비례시키지 않는다 (기본 60 cm 기준 비례) */
 #define QUIRK_STEER_STEP     0x100u /* b8 예전 조향을 되살린다: 속도 연동 불감대(안쪽 0, 선형 구간 안에서만 폭을 뺀다), 편차 문턱에서 Kp 가 한 번에 최대가 된다 */
+#define QUIRK_SRC_A         0x200u /* b9 위치 소스를 예전 'a' 로 되살린다(기본 'h' 전용). 조향 비트와 별개 */
 #define QUIRK_STEER_LEGACY  (QUIRK_STEER_20MS | QUIRK_DAMP_SIGN_OLD | QUIRK_NO_WB_GAIN | QUIRK_STEER_STEP)
 #define QUIRK_PAUSE_FULL_STOP 0x80u /* b7 일시정지(장애물·PAUSE) 감속 중 원인이 풀려도 0 까지 서고 다시 출발한다(예전 동작) */
 
