@@ -841,7 +841,7 @@ static void test_ui(void)
     printf("  ui ok\n");
 }
 
-/* 파라미터 메뉴 5묶음: MODE 로 묶음, SET 들어가기, UP 항목, RESET 나오기. 5번 묶음 SHIFT 2 s 숨김 */
+/* 파라미터 메뉴 5묶음: 상하키로 묶음, SET 들어가기, UP 항목, RESET 나오기. 5번 묶음 SHIFT 2 s 숨김 */
 static void test_menu5(void)
 {
     static const uint16_t want[] = {
@@ -884,7 +884,7 @@ static void test_menu5(void)
     for (g = 0; g < 5; g++) {
         ui_digits(d);
         assert(d[0] == 26 && d[1] == (uint16_t)(g + 1));       /* P1 ~ P5 */
-        key(KEY_UP);                                          /* 묶음 화면에서 UP 은 아무 일 없다 */
+        key(KEY_MODE);                                        /* MODE 는 묶음을 안 바꾼다 */
         ui_digits(d);
         assert(d[1] == (uint16_t)(g + 1));
         key(KEY_SET);
@@ -913,13 +913,23 @@ static void test_menu5(void)
         }
         key(KEY_RESET);
         k = ends[g];
-        key(KEY_MODE);
+        key(KEY_UP);                                          /* 다음 묶음, 5 다음은 1 */
     }
     ui_digits(d);
     assert(d[1] == 1 && d[2] == 29 && d[3] == 26 && d[4] == 14);   /* P1SPD */
+    key(KEY_DOWN);                                            /* 1 이전은 5 */
+    ui_digits(d);
+    assert(d[1] == 5);
+    key(KEY_DOWN);
+    ui_digits(d);
+    assert(d[1] == 4);
+    key(KEY_UP);
+    key(KEY_UP);
+    ui_digits(d);
+    assert(d[1] == 1);
     /* 27번 0 이면 램프 셋이 없다 */
     (void)param_set(P_LAMP_EXT_USE, 0);
-    for (i = 0; i < 3; i++) { key(KEY_MODE); }
+    for (i = 0; i < 3; i++) { key(KEY_UP); }
     key(KEY_SET);
     for (i = 0; i < 12; i++) { key(KEY_UP); }
     assert(ui_para_number() == P_ACS_RETRY_LEGACY);
@@ -1049,7 +1059,7 @@ static void test_para_init(void)
     ticks(40);
     assert(D.ui_mode == UI_PARAM);
     key(KEY_SET);
-    for (i = 0; i < 4; i++) { key(KEY_MODE); }        /* P5INF */
+    for (i = 0; i < 4; i++) { key(KEY_UP); }          /* P5INF */
     key(KEY_SET);
     for (i = 0; (i < 40) && (ui_para_number() != P_PARA_INIT); i++) { key(KEY_UP); }
     assert(ui_para_number() == P_PARA_INIT);

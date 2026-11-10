@@ -370,6 +370,9 @@ static void up_down(int16_t sign)
         P.display_mode = v;
     }
     if (D.ui_mode != UI_PARAM) { return; }
+    if ((s_ui.screen > 0) && (s_ui.screen < SCREEN_LIST)) {   /* 묶음 전환: UP 다음, DOWN 이전 */
+        s_ui.screen = (int16_t)((s_ui.screen - 1 + sign + UI_GROUP_COUNT) % UI_GROUP_COUNT + 1);
+    }
     if (s_ui.screen > SCREEN_LIST) {
         if (s_ui.edit == 1) {
             if (para_digits(s_ui.para) != 0u) { value_step(sign); }
@@ -412,9 +415,6 @@ static void key_mode(void)
         D.control = RUN_DRIVE;
         link_select();
         link_guide_init();
-    }
-    else if ((D.ui_mode == UI_PARAM) && (s_ui.screen < SCREEN_LIST)) {   /* 다음 묶음 */
-        s_ui.screen = (int16_t)((s_ui.screen % UI_GROUP_COUNT) + 1);
     }
 }
 
