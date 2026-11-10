@@ -51,7 +51,7 @@ static const uint16_t s_seg[] = {
 #define SEG_DOT  10
 #define SEG_COUNT (sizeof(s_seg) / sizeof(s_seg[0]))
 
-/* 메뉴 순서 → 파라미터 번호. 묶음 다섯 개를 이어 둔다. 15·29·30·42번은 메뉴에 없다(값은 EEPROM 에 그대로) */
+/* 메뉴 순서 → 파라미터 번호. 묶음 다섯 개를 이어 둔다. 15·29·30·42번과 TAG(미사용)는 메뉴에 없다(값은 EEPROM 에 그대로) */
 static const uint16_t s_menu[] = {
     /* 1 속도 */
     P_SPEED_HIGH, P_SPEED_LOW, P_SPEED_TURN, P_EMPTY_SPEED, P_EMPTY_TURN, P_ACC, P_DCC, P_SPEED_JOG,
@@ -60,7 +60,7 @@ static const uint16_t s_menu[] = {
     P_STOP_LEN_MM, P_CROSS_IN_CM, P_AUTO_START_SEC, P_OBS_USE, P_BUMPER_USE, P_STOP_LEN_FWD_MM, P_LOAD_DETECT,
     P_GUIDE_DIST_MM, P_TURN_FORBACK, P_BRANCH_MODE, P_BRANCH_OFFSET, P_ENC_STALL_TICKS, P_GUIDE_TIMEOUT,
     /* 3 차량·튜닝 */
-    P_AGV_ID, P_WHEEL_DIA_MM, P_WHEEL_BASE_MM, P_GEAR_RATIO, P_AGV_TYPE, P_TAG_DIGITS, P_OPT_FLAGS,
+    P_AGV_ID, P_WHEEL_DIA_MM, P_WHEEL_BASE_MM, P_GEAR_RATIO, P_AGV_TYPE, P_OPT_FLAGS,
     P_STEER_KP, P_STEER_KI, P_SPEED_FF,
     /* 4 통신·표시. 램프 셋은 27번(LO)이 켜졌을 때만 */
     P_ACS_RETRY_LEGACY, P_CROSS_RETRY_100MS, P_ACS_STANDBY, P_ACS_RETRY_SEC, P_COMM_LINK, P_INTERFACE_MODE,
@@ -72,7 +72,7 @@ static const uint16_t s_menu[] = {
 };
 #define MENU_COUNT ((int16_t)(sizeof(s_menu) / sizeof(s_menu[0])))
 #define MENU_HIDDEN_FIRST (MENU_COUNT - 4)
-static const int16_t s_group_end[UI_GROUP_COUNT] = { 11, 24, 34, 49, MENU_COUNT };   /* 묶음 다음 첫 칸 */
+static const int16_t s_group_end[UI_GROUP_COUNT] = { 11, 24, 33, 48, MENU_COUNT };   /* 묶음 다음 첫 칸 */
 static const char s_group_name[UI_GROUP_COUNT][DISP_DIGITS] = {
     {'P','1','S','P','D'}, {'P','2','R','U','N'}, {'P','3','C','A','R'}, {'P','4','C','O','M'}, {'P','5','I','N','F'}
 };

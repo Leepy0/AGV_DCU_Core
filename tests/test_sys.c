@@ -849,14 +849,14 @@ static void test_menu5(void)
         P_EMPTY_ACC, P_EMPTY_DCC, P_SPEED_MIN,
         P_STOP_LEN_MM, P_CROSS_IN_CM, P_AUTO_START_SEC, P_OBS_USE, P_BUMPER_USE, P_STOP_LEN_FWD_MM, P_LOAD_DETECT,
         P_GUIDE_DIST_MM, P_TURN_FORBACK, P_BRANCH_MODE, P_BRANCH_OFFSET, P_ENC_STALL_TICKS, P_GUIDE_TIMEOUT,
-        P_AGV_ID, P_WHEEL_DIA_MM, P_WHEEL_BASE_MM, P_GEAR_RATIO, P_AGV_TYPE, P_TAG_DIGITS, P_OPT_FLAGS,
+        P_AGV_ID, P_WHEEL_DIA_MM, P_WHEEL_BASE_MM, P_GEAR_RATIO, P_AGV_TYPE, P_OPT_FLAGS,
         P_STEER_KP, P_STEER_KI, P_SPEED_FF,
         P_ACS_RETRY_LEGACY, P_CROSS_RETRY_100MS, P_ACS_STANDBY, P_ACS_RETRY_SEC, P_COMM_LINK, P_INTERFACE_MODE,
         P_ACS_VERSION, P_ERR_REPORT_MIN, P_SOUND, P_DISPLAY_MODE, P_BAT_OFFSET_DV, P_LAMP_EXT_USE, UI_PARA_LAMP_FIRST, UI_PARA_LAMP_FIRST + 1, UI_PARA_LAMP_LAST,
         P_BAT_DV, P_BAT_PERCENT, P_VERSION, P_PARA_INIT,
         P_AUTO_DRIVE_MODE, P_STEER_RPM_OFFSET, P_GUIDE_CURVE_DETECT, P_LEGACY_QUIRKS
     };
-    static const int ends[5] = { 11, 24, 34, 49, 57 };
+    static const int ends[5] = { 11, 24, 33, 48, 56 };
     static const struct { uint16_t idx; char c[4]; } names[] = {
         { P_SPEED_MIN, "SPN" }, { P_GUIDE_TIMEOUT, "GTO" }, { P_COMM_LINK, "CML" }, { P_STEER_RPM_OFFSET, "SR " },
         { P_GUIDE_CURVE_DETECT, "GSR" }, { P_LEGACY_QUIRKS, "LG " }, { P_EMPTY_SPEED, "EDS" }, { P_EMPTY_TURN, "ETN" },
@@ -866,9 +866,11 @@ static void test_menu5(void)
     char l[3];
     int g, i, k = 0, n;
 
-    assert(sizeof(want) / sizeof(want[0]) == 57u);
-    for (i = 0; i < 57; i++) {          /* 빠진 넷 */
+    assert(sizeof(want) / sizeof(want[0]) == 56u);
+    assert(ends[2] - ends[1] == 9);     /* P3CAR 9 항목 */
+    for (i = 0; i < 56; i++) {          /* 빠진 다섯. TAG 는 미사용 */
         assert(want[i] != P_STATION_NO && want[i] != P_SWITCH_START_NUM && want[i] != P_TAG_TYPE && want[i] != P_CROSS_MODE);
+        assert(want[i] != P_TAG_DIGITS);
     }
     for (i = 0; i < (int)(sizeof(names) / sizeof(names[0])); i++) {
         (void)ui_param_label(names[i].idx, l);
@@ -1360,20 +1362,24 @@ static void test_tune_menu(void)
     assert(tune_menu() == 3000 && shows("T3   "));
     key(KEY_MODE);
     assert(tune_menu() == 1000);
-    key(KEY_SET);                                     /* t1 입력: 시험 전에 확정할 값 15칸 */
-    {
-        static const char names[15][3] = { "ID", "DI", "WW", "RG", "TG", "GD", "TF", "LO", "TN", "AC", "AU", "TP",
-                                           "OB", "BP", "L " };
-        char t[5];
-        for (k = 0; k < 15; k++) {
+    key(KEY_SET);                                     /* t1 입력: 시험 전에 확정할 값 14칸 */
+    {   /* 파라미터 칸은 파라미터 화면과 같은 이름·자릿수·글자. 0 = t1 전용(AU, L) */
+        static const uint16_t want[14] = { P_SPEED_HIGH, P_SPEED_LOW, P_SPEED_TURN, 0, P_ACC, P_OBS_USE, P_BUMPER_USE,
+                                           P_GUIDE_DIST_MM, P_TURN_FORBACK, P_AGV_ID, P_WHEEL_DIA_MM, P_WHEEL_BASE_MM,
+                                           P_GEAR_RATIO, 0 };
+        char t[5], u[5];
+        for (k = 0; k < 14; k++) {
             assert(tune_menu() == (uint16_t)(1000 + (k + 1) * 10));
             (void)tune_text(t);
-            assert(t[0] == names[k][0] && ((k == 14) || (t[1] == names[k][1])));
-            if (k == 1)  { assert(shows("DI202")); }
-            if (k == 5)  { assert(shows("GD250")); }
-            if (k == 11) { assert(shows("TP060")); }  /* 빈 EEPROM 상한 60 */
-            if (k == 14) { assert(shows("L0000")); }
-            if (k == 10) {                            /* ACC 상한. 빈 EEPROM 은 12번 지금 값 */
+            if (want[k] != 0u) {
+                ui_param_text(want[k], param_get(want[k]), u);
+                assert(memcmp(t, u, 5) == 0);
+            }
+            if (k == 0)  { assert(shows("DRS30")); }
+            if (k == 7)  { assert(shows("GD250")); }
+            if (k == 10) { assert(shows("WS202")); }
+            if (k == 13) { assert(shows("L0000")); }
+            if (k == 3) {                             /* ACC 상한. 빈 EEPROM 은 ACC 지금 값 */
                 char want[6] = "AU0  ";
                 want[3] = (char)('0' + param_get(P_ACC) / 10);
                 want[4] = (char)('0' + param_get(P_ACC) % 10);
@@ -1383,9 +1389,8 @@ static void test_tune_menu(void)
         }
     }
     assert(tune_menu() == 1010);
-    key(KEY_MODE);                                    /* WW 를 고치면 그 파라미터가 바로 바뀐다 */
-    key(KEY_MODE);
-    assert(tune_menu() == 1030);
+    for (k = 0; k < 11; k++) { key(KEY_MODE); }       /* WW 를 고치면 그 파라미터가 바로 바뀐다 */
+    assert(tune_menu() == 1120);
     {
         int16_t ww = param_get(P_WHEEL_BASE_MM);
         key(KEY_SET);
@@ -1394,7 +1399,7 @@ static void test_tune_menu(void)
         assert(param_get(P_WHEEL_BASE_MM) == ww + 1);
         (void)param_set(P_WHEEL_BASE_MM, ww);
     }
-    for (k = 0; k < 13; k++) { key(KEY_MODE); }
+    for (k = 0; k < 3; k++) { key(KEY_MODE); }
     assert(tune_menu() == 1010);
     key(KEY_RESET);
     assert(tune_menu() == 1000);
@@ -1443,7 +1448,7 @@ static void test_tune_menu(void)
     printf("  tune menu ok\n");
 }
 
-/* t1 입력 칸 번호(1~15)로 MODE 를 눌러 간다. 2 지름, 11 ACC 상한, 12 속도 상한, 15 L */
+/* t1 입력 칸 번호(1~14)로 MODE 를 눌러 간다. 1 DRS, 4 ACC 상한(AU), 11 지름(WS), 14 L */
 static void t1_to(int item)
 {
     int k;
@@ -1451,21 +1456,23 @@ static void t1_to(int item)
     assert(tune_menu() == (uint16_t)(1000 + item * 10));
 }
 
-/* 입력: SET 수정, SHIFT 자리, UP·DOWN 값, SET 확정 즉시 저장, RESET 취소. L·상한은 다시 켜도 남는다 */
+/* 입력: SET 수정, SHIFT 자리, UP·DOWN 값, SET 확정 즉시 저장, RESET 취소. L·ACC 상한은 다시 켜도 남는다 */
 static void test_tune_inputs(void)
 {
     int k;
+    uint16_t cap_ee;
 
     boot_keys(KEY_MODE + KEY_SET, 0);
+    cap_ee = host.ee[TUNE_EE_CAP];
     key(KEY_SET);                                     /* t1 */
-    t1_to(2);                                         /* 지름 */
+    t1_to(11);                                        /* 지름 WS */
     key(KEY_SET);
     assert(tune_editing() && tune_flick() == 0x10u);
     key(KEY_UP);
     key(KEY_SHIFT);
     assert(tune_flick() == 0x08u);
     key(KEY_UP);
-    assert(shows("DI213") && param_get(P_WHEEL_DIA_MM) == 202);   /* 확정 전 */
+    assert(shows("WS213") && param_get(P_WHEEL_DIA_MM) == 202);   /* 확정 전 */
     key(KEY_SET);
     assert(!tune_editing() && param_get(P_WHEEL_DIA_MM) == 213);
     ticks(10);
@@ -1473,18 +1480,20 @@ static void test_tune_inputs(void)
     key(KEY_SET);
     key(KEY_UP);
     key(KEY_RESET);                                   /* 취소 */
-    assert(!tune_editing() && param_get(P_WHEEL_DIA_MM) == 213 && tune_menu() == 1020);
-    t1_to(12);                                        /* 상한 */
+    assert(!tune_editing() && param_get(P_WHEEL_DIA_MM) == 213 && tune_menu() == 1110);
+    t1_to(1);                                         /* DRS: 최고 속도 상한 = DRS 파라미터 */
+    assert(param_get(P_SPEED_HIGH) == 30);
     key(KEY_SET);
     key(KEY_SHIFT);
-    key(KEY_DOWN);                                    /* 50 */
+    key(KEY_DOWN);                                    /* 20 */
     key(KEY_SHIFT);                                   /* 두 자리 칸은 1 → 2 → 1 */
     for (k = 0; k < 5; k++) { key(KEY_UP); }
     key(KEY_SET);
     assert(shows("SAVE "));                           /* 저장 알림 1 s */
+    assert(param_get(P_SPEED_HIGH) == 25);            /* 확정하는 순간 DRS */
     ticks(100);
-    assert(shows("TP055"));
-    t1_to(15);                                        /* L 네 자리 */
+    assert(shows("DRS25") && host.ee[P_SPEED_HIGH] == 25);
+    t1_to(14);                                        /* L 네 자리 */
     key(KEY_SET);
     for (k = 0; k < 3; k++) { key(KEY_SHIFT); }
     assert(tune_flick() == 0x02u);
@@ -1495,21 +1504,20 @@ static void test_tune_inputs(void)
     ticks(100);
     assert(shows("L7005"));
     ticks(20);
-    assert(host.ee[TUNE_EE_TRACK] == 7005 && (host.ee[TUNE_EE_CAP] & 0xFFu) == 55u);
-    assert((host.ee[TUNE_EE_CAP] >> 8) == (uint16_t)param_get(P_ACC));   /* ACC 상한은 위 바이트 */
-    t1_to(11);                                        /* ACC 상한 12 → 위 바이트, 속도 상한은 그대로 */
+    assert(host.ee[TUNE_EE_TRACK] == 7005 && host.ee[TUNE_EE_CAP] == cap_ee);   /* DRS 는 상한 칸을 안 쓴다 */
+    t1_to(4);                                         /* ACC 상한 12 → 위 바이트 */
     key(KEY_SET);
     for (k = 0; (k < 10) && !shows("AU012"); k++) { key((param_get(P_ACC) < 12) ? KEY_UP : KEY_DOWN); }
     key(KEY_SET);
     ticks(120);
-    assert(shows("AU012") && host.ee[TUNE_EE_CAP] == (uint16_t)((12u << 8) | 55u));
+    assert(shows("AU012") && host.ee[TUNE_EE_CAP] == (uint16_t)(12u << 8));
     boot_keys(KEY_MODE + KEY_SET, 1);
     key(KEY_SET);
-    t1_to(12);
-    assert(shows("TP055"));
-    t1_to(15);
+    t1_to(1);
+    assert(shows("DRS25"));
+    t1_to(14);
     assert(shows("L7005"));
-    t1_to(11);
+    t1_to(4);
     assert(shows("AU012"));
     printf("  tune inputs ok\n");
 }
@@ -1588,6 +1596,7 @@ static void test_tune_t1_save(void)
     drive_up();                      /* t1 에서 START */
     run_scan(3);
     assert(tune_state() == TUNE_BLD && ident_build_mode() && agv_build.mask != 0);
+    assert(agv_build.cap_mpm == param_get(P_SPEED_HIGH));   /* 최고 속도 상한 = DRS */
     assert(shows("B1008"));          /* 단계 1, 0회, 선 찾기 */
     agv_build.high_rec = 25;
     agv_build.dcc_rec = 35;

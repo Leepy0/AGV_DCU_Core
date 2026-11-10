@@ -2,7 +2,7 @@
  * 주행은 ident.c(연속 시험 ident_start_build, 개발 시험)와 rpmtest.c 가 한다.
  * 여기는 선 찾기 중 'a' 와 'h' 를 번갈아 받아 교차선 수, 가이드 부호·배율, 직진 편차도 잰다.
  * 저장 구분:
- *  바로 저장    입력 확정(22·50번, L, 상한), 연속 시험 중 22·28번·회전 보정비·'h' 부호·배율(ident.c), 점검 GA 확정(50번)
+ *  바로 저장    입력 확정(t1 파라미터 칸, L, ACC 상한), 연속 시험 중 22·28번·회전 보정비·'h' 부호·배율(ident.c), 점검 GA 확정(50번)
  *  채택 저장    결과 쪽 1·13·35번(점검은 28·1·13번). SET 채택, RESET 건너뛰기, SAVE 에서 쓴다
  *  기준값       t1 SAVE 때 EEPROM 110~114·119·125. t2 가 견준다
  *  안 건드림    20·21번(KP·KI) */
@@ -23,7 +23,6 @@
 #define GAP_INPUT_LOW     (-200)
 #define GAP_INPUT_UP      999
 #define TRACK_UP          9999
-#define CAP_DEFAULT       60
 #define GUIDE_PAIRS_MIN   20       /* 'a'·'h' 짝이 이만큼 모여야 부호·배율을 믿는다 */
 #define GUIDE_SCALE_MIN   0.5f
 #define GUIDE_SCALE_MAX   2.0f
@@ -35,19 +34,20 @@
 const uint16_t tune_base_addr[TUNE_BASE_N] = { 111, 112, 113, 114, 119, 125 };
 
 /* 입력 칸. t1 아래 확정 목록, t2.x 아래 L, 점검 결과의 GA, t3.6 아래 속도.
- * param 이 0 이 아니면 그 파라미터를 바로 보이고 고친다(확정하는 순간 저장) */
-enum { F_DIA = 0, F_GD, F_CAP, F_TRACK, F_ACC, F_GA, F_HS,
-       F_ID, F_WW, F_RG, F_TAG, F_TFB, F_LOS, F_TNS, F_ACCP, F_OBS, F_BPS };
+ * param 이 0 이 아니면 그 파라미터를 바로 보이고 고친다(확정하는 순간 저장).
+ * 파라미터 칸의 이름·자릿수·표시는 파라미터 화면(ui.c s_view)을 그대로 쓴다. name·digits 는 전용 칸만 */
+enum { F_WS = 0, F_GD, F_DRS, F_TRACK, F_ACC, F_GA, F_HS,
+       F_ID, F_WW, F_RG, F_TFB, F_LOS, F_TNS, F_ACCP, F_OBS, F_BPS };
 static const struct { char name[2]; int16_t digits; uint16_t param; } s_field[] = {
-    { {'D', 'I'}, 3, P_WHEEL_DIA_MM }, { {'G', 'D'}, 3, P_GUIDE_DIST_MM }, { {'T', 'P'}, 2, 0 }, { {'L', ' '}, 4, 0 },
+    { {0}, 0, P_WHEEL_DIA_MM }, { {0}, 0, P_GUIDE_DIST_MM }, { {0}, 0, P_SPEED_HIGH }, { {'L', ' '}, 4, 0 },
     { {'A', 'U'}, 2, 0 }, { {'G', 'A'}, 3, 0 }, { {'S', 'P'}, 2, 0 },
-    { {'I', 'D'}, 2, P_AGV_ID }, { {'W', 'W'}, 3, P_WHEEL_BASE_MM }, { {'R', 'G'}, 3, P_GEAR_RATIO },
-    { {'T', 'G'}, 1, P_TAG_DIGITS }, { {'T', 'F'}, 2, P_TURN_FORBACK }, { {'L', 'O'}, 2, P_SPEED_LOW },
-    { {'T', 'N'}, 2, P_SPEED_TURN }, { {'A', 'C'}, 2, P_ACC }, { {'O', 'B'}, 2, P_OBS_USE }, { {'B', 'P'}, 2, P_BUMPER_USE }
+    { {0}, 0, P_AGV_ID }, { {0}, 0, P_WHEEL_BASE_MM }, { {0}, 0, P_GEAR_RATIO },
+    { {0}, 0, P_TURN_FORBACK }, { {0}, 0, P_SPEED_LOW },
+    { {0}, 0, P_SPEED_TURN }, { {0}, 0, P_ACC }, { {0}, 0, P_OBS_USE }, { {0}, 0, P_BUMPER_USE }
 };
-/* t1 에 들어가면 차례로 보이는 칸: 시험 전에 확정할 값 모두. 차량 → 위치 → 속도 → 안전 → 주로 */
+/* t1 에 들어가면 차례로 보이는 칸: 시험 전에 확정할 값 모두. 파라미터 화면 순서, AU 는 ACC 앞, L 은 끝 */
 static const int16_t s_t1[] = {
-    F_ID, F_DIA, F_WW, F_RG, F_TAG, F_GD, F_TFB, F_LOS, F_TNS, F_ACCP, F_ACC, F_CAP, F_OBS, F_BPS, F_TRACK
+    F_DRS, F_LOS, F_TNS, F_ACC, F_ACCP, F_OBS, F_BPS, F_GD, F_TFB, F_ID, F_WS, F_WW, F_RG, F_TRACK
 };
 #define T1_INPUTS ((uint16_t)(sizeof(s_t1) / sizeof(s_t1[0])))
 
@@ -85,7 +85,7 @@ typedef struct { int16_t kind, id, v, old, flag; } page_t;   /* flag: PK_SET 채
 
 static struct {
     uint16_t state, cat, item, sub, page, n_page, toggle, alt, splash;
-    int16_t  editing, place, edit_value, track, cap, acc_cap;
+    int16_t  editing, place, edit_value, track, acc_cap;
     int16_t  hs, hs_up;           /* t3.6 속도(0 = 1번), 입력 상한 */
     page_t   pg[PAGE_MAX];
     /* 교차선 */
@@ -273,7 +273,7 @@ void tune_turn_scale_set(int16_t x1000)
 
 static uint16_t ee(uint16_t addr) { return storage_queued.read(addr); }
 
-/* 부팅: 가이드 부호·배율, 입력 L·상한. 빈 칸이나 한계 밖은 0·60 */
+/* 부팅: 가이드 부호·배율, 입력 L·ACC 상한. 빈 칸이나 한계 밖은 0·ACC 지금 값 */
 void tune_load(void)
 {
     guide_cfg_t cfg;
@@ -281,9 +281,6 @@ void tune_load(void)
 
     s_tune.track = (int16_t)ee(TUNE_EE_TRACK);
     if ((s_tune.track < 0) || (s_tune.track > TRACK_UP)) { s_tune.track = 0; }
-    param_limit(P_SPEED_HIGH, &lo, &up);
-    s_tune.cap = (int16_t)(ee(TUNE_EE_CAP) & 0xFFu);
-    if ((s_tune.cap < lo) || (s_tune.cap > up)) { s_tune.cap = CAP_DEFAULT; }
     param_limit(P_ACC, &lo, &up);
     s_tune.acc_cap = (int16_t)(ee(TUNE_EE_CAP) >> 8);
     if ((s_tune.acc_cap < lo) || (s_tune.acc_cap > up) || (s_tune.acc_cap == 0)) { s_tune.acc_cap = param_get(P_ACC); }
@@ -442,7 +439,6 @@ static int16_t field_get(int16_t f)
 {
     if (s_field[f].param != 0u) { return param_get(s_field[f].param); }
     switch (f) {
-    case F_CAP:   return s_tune.cap;
     case F_TRACK: return s_tune.track;
     case F_ACC:   return s_tune.acc_cap;
     case F_HS:    return s_tune.hs;
@@ -454,7 +450,6 @@ static void field_limits(int16_t f, int16_t *lo, int16_t *up)
 {
     if (s_field[f].param != 0u) { param_limit(s_field[f].param, lo, up); return; }
     switch (f) {
-    case F_CAP:   param_limit(P_SPEED_HIGH, lo, up); break;
     case F_TRACK: *lo = 0; *up = TRACK_UP; break;
     case F_ACC:   param_limit(P_ACC, lo, up); break;
     case F_HS:    param_limit(P_SPEED_HIGH, lo, up); *up = s_tune.hs_up; break;
@@ -469,11 +464,9 @@ static int field_set(int16_t f, int16_t v)
 
     if (s_field[f].param != 0u) { return (param_set(s_field[f].param, v) == 0) ? 2 : 1; }
     switch (f) {
-    case F_CAP:
-    case F_ACC:                /* 한 칸에 둘: 아래 바이트 최고 속도 상한, 위 바이트 ACC 상한 */
-        if (f == F_CAP) { s_tune.cap = v; }
-        else            { s_tune.acc_cap = v; }
-        storage_request(TUNE_EE_CAP, (uint16_t)(((uint16_t)s_tune.acc_cap << 8) | ((uint16_t)s_tune.cap & 0xFFu)));
+    case F_ACC:                /* 위 바이트 ACC 상한. 아래 바이트는 쓰지 않는다(최고 속도 상한은 DRS) */
+        s_tune.acc_cap = v;
+        storage_request(TUNE_EE_CAP, (uint16_t)((uint16_t)s_tune.acc_cap << 8));
         return 2;
     case F_TRACK:
         s_tune.track = v;
@@ -502,13 +495,24 @@ static int16_t cur_field(void)
     return -1;
 }
 
+/* 고칠 자리 수. 파라미터 칸은 파라미터 화면 자릿수(ON/OFF 는 한 자리) */
+static int16_t field_digits(int16_t f)
+{
+    char c3[3];
+    if (s_field[f].param != 0u) {
+        uint16_t n = ui_param_label(s_field[f].param, c3);
+        return (int16_t)((n == 0u) ? 1u : n);
+    }
+    return s_field[f].digits;
+}
+
 static int edit_key(uint16_t key)
 {
     int16_t f = cur_field(), lo, up, step;
 
     switch (key) {
     case KEY_SHIFT:
-        s_tune.place = (int16_t)((s_tune.place >= s_field[f].digits) ? 1 : s_tune.place + 1);
+        s_tune.place = (int16_t)((s_tune.place >= field_digits(f)) ? 1 : s_tune.place + 1);
         return 1;
     case KEY_UP:
     case KEY_DOWN:
@@ -654,7 +658,7 @@ static void start(void)
     if ((s_tune.cat == 1u) || ((s_tune.cat == 2u) && (s_tune.item > 0u))) {
         uint16_t m = (s_tune.cat == 1u) ? T1_MASK : s_check[s_tune.item - 1u].mask;
         clear_measure();
-        ident_start_build(m, (m & BLD_DIA) ? s_tune.track : 0, s_tune.cap);
+        ident_start_build(m, (m & BLD_DIA) ? s_tune.track : 0, param_get(P_SPEED_HIGH));   /* 최고 속도 상한 = DRS */
         agv_build.acc_cap = s_tune.acc_cap;
         s_tune.state = TUNE_BLD;
     }
@@ -728,7 +732,8 @@ void tune_value_text(char *c, char n0, char n1, int16_t v, int wide)
 static void show_field(char *c, int16_t f)
 {
     int16_t v = s_tune.editing ? s_tune.edit_value : field_get(f);
-    if (s_field[f].digits == 4) {
+    if (s_field[f].param != 0u) { ui_param_text(s_field[f].param, v, c); }   /* 파라미터 화면과 같은 글자 */
+    else if (s_field[f].digits == 4) {
         c[0] = s_field[f].name[0];
         put(c, 1, v, 4);
     }

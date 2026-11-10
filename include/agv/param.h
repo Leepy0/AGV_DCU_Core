@@ -12,7 +12,9 @@
 enum {
     P_SPEED_HIGH = 1, P_SPEED_LOW, P_SPEED_TURN, P_AUTO_DRIVE_MODE, P_INTERFACE_MODE, P_SOUND,
     P_BUMPER_USE, P_OBS_USE, P_DISPLAY_MODE, P_BAT_OFFSET_DV, P_SPEED_JOG, P_ACC, P_DCC,
-    P_AUTO_START_SEC, P_STATION_NO, P_BRANCH_MODE, P_TURN_FORBACK, P_TAG_DIGITS, P_STOP_LEN_MM,
+    P_AUTO_START_SEC, P_STATION_NO, P_BRANCH_MODE, P_TURN_FORBACK,
+    P_TAG_DIGITS,           /* TAG: 미사용. 값이 남아 있어도 무시한다. 번호·EEPROM 자리는 유지 */
+    P_STOP_LEN_MM,
     P_STEER_KP, P_STEER_KI, P_WHEEL_DIA_MM, P_GEAR_RATIO, P_WHEEL_BASE_MM, P_AGV_ID, P_AGV_TYPE,
     P_LAMP_EXT_USE, P_SPEED_MIN, P_SWITCH_START_NUM, P_TAG_TYPE,
     P_COMM_LINK,            /* 31: 0 지그비, 1 WiFi 브릿지 */
@@ -88,7 +90,6 @@ typedef struct {
     int16_t stall_ticks;                            /* P_ENC_STALL_TICKS */
     int16_t turn_16, turn_32, turn_90, turn_180;
     int16_t tag_pulse[12];                          /* const_Tag_Num_Pulse */
-    int16_t tag_number, tag_total_pulse;            /* gTag_Number, Tag_Total_Pulse. Tag_nea 는 tag_pulse[n] */
     int32_t straight_len;                           /* gStraight_Langth */
     int16_t acc, dcc;                               /* gDelta_ACC, gDelta_DCC */
     int16_t stop_len, fwd_stop_len;                 /* gStop_length, gFoward_Stop_length */

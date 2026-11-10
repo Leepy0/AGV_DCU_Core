@@ -99,7 +99,6 @@ int main(void)
       assert(P.stop_len == (int16_t)(35.0f * P.one_length_pulse * 10.0f));
       assert(P.tag_pulse[10] == (int16_t)(10.0f * (50.0f * P.one_length_pulse)));
       assert(P.straight_len == 3L * P.tag_pulse[10]);
-      assert(P.tag_total_pulse == P.tag_pulse[7]);
       assert(P.for_obs == 1 && P.back_obs == 1 && P.turn_mode == 2 && P.forback_mode == 2); }
 
     /* 기본값 세 벌 */

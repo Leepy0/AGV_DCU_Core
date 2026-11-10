@@ -150,12 +150,6 @@ static void recalc_low(void)
     param_dv.low_speed = (low < param_dv.target_speed) ? low : param_dv.target_speed;
 }
 
-static void recalc_tag(void)
-{
-    param_dv.tag_number = s_set[P_TAG_DIGITS];
-    param_dv.tag_total_pulse = param_dv.tag_pulse[s_set[P_TAG_DIGITS] + 2];
-}
-
 /* init_AGV_Scale 대응 */
 static void recalc_all(void)
 {
@@ -186,7 +180,6 @@ static void recalc_all(void)
     for (k = 1; k <= 11; k++) {
         param_dv.tag_pulse[k] = (int16_t)((float)k * (50.0f * param_dv.one_length_pulse));
     }
-    recalc_tag();
     param_dv.straight_len = 3L * param_dv.tag_pulse[10];
 
     param_dv.display_mode = s_set[P_DISPLAY_MODE];
@@ -260,7 +253,6 @@ static void recalc_one(uint16_t i)
         param_dv.turn_mode = param_digit(s_set[P_TURN_FORBACK], 10);
         param_dv.forback_mode = param_digit(s_set[P_TURN_FORBACK], 1);
         break;
-    case P_TAG_DIGITS:    recalc_tag(); break;
     case P_STOP_LEN_MM:   recalc_stop_len(); break;
     case P_STEER_KP:      D.p_kp = (float)s_set[P_STEER_KP]; break;
     case P_STEER_KI:      D.p_ki = (float)s_set[P_STEER_KI] * 0.1f; break;
