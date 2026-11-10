@@ -335,13 +335,30 @@ void curvelog_feed(const curvelog_in_t *in)
     }
 }
 
+/* 파라미터 모드에서 자동 모드로 돌아왔다. LG·OPT 가 그대로면 묶음을 잇는다(값 확인만 하고 나온 경우).
+ * 바뀌었으면 빈 묶음은 번호를 두고 값만 고치고, 곡선이 있으면 다음 묶음으로 넘어간다 */
+static void param_back(void)
+{
+    curve_group_t *g = &agv_curvelog.g[agv_curvelog.group - 1];
+    int16_t lg = param_get(P_LEGACY_QUIRKS), opt = param_get(P_OPT_FLAGS);
+
+    if ((g->lg == lg) && (g->opt == opt)) { return; }
+    if (g->n == 0) {
+        g->lg = lg;
+        g->opt = opt;
+        state_clear();
+        return;
+    }
+    curvelog_next_group();
+}
+
 void curvelog_tick(void)
 {
     curvelog_in_t in;
     uint32_t p0 = run_pulses(0), p1 = run_pulses(1);
     float k = (P.one_length_pulse > 0.0f) ? (1.0f / P.one_length_pulse) : 0.0f;
 
-    if ((s_cl.prev_mode == UI_PARAM) && (D.ui_mode == UI_AUTO)) { curvelog_next_group(); }
+    if ((s_cl.prev_mode == UI_PARAM) && (D.ui_mode == UI_AUTO)) { param_back(); }
     s_cl.prev_mode = D.ui_mode;
     in.dl_mm = (float)(p0 - s_cl.last_p[0]) * k;
     in.dr_mm = (float)(p1 - s_cl.last_p[1]) * k;

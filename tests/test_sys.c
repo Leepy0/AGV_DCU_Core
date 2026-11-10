@@ -2018,7 +2018,7 @@ static void test_curvelog(void)
     curvelog_next_group();
     assert(agv_curvelog.group == 1 && agv_curvelog.g[0].n == 0 && agv_curvelog.g[1].n == 1);
     assert(param_set_ram(P_LEGACY_QUIRKS, lg0) == 0 && param_set_ram(P_OPT_FLAGS, 0) == 0);
-    /* curvelog_tick: 자동 주행에서만 기록. 파라미터 모드 → 자동이면 다음 묶음. 튜닝 모드·회전 중은 기록 없음 */
+    /* curvelog_tick: 자동 주행에서만 기록. 파라미터 모드 → 자동이면 LG·OPT 가 바뀌었을 때만 다음 묶음. 튜닝 모드·회전 중은 기록 없음 */
     boot();
     curvelog_reset();
     D.flag_run = 1;
@@ -2027,11 +2027,41 @@ static void test_curvelog(void)
     assert(agv_curvelog.g[0].n == 1);
     cl_drive(rb, 1521.0f, 1);           /* 곡선 가운데 회전 표시: 앞 반은 버리고 회전 뒤 남은 부분만 */
     assert(agv_curvelog.g[0].n == 2 && agv_curvelog.g[0].c[1].len_mm < 800);
-    D.ui_mode = UI_PARAM;
+    D.ui_mode = UI_PARAM;               /* 값 확인만: 묶음을 잇는다 */
     curvelog_tick();
     D.ui_mode = UI_AUTO;
     curvelog_tick();
-    assert(agv_curvelog.group == 2 && agv_curvelog.g[1].n == 0);
+    assert(agv_curvelog.group == 1 && agv_curvelog.g[0].n == 2);
+    cl_drive(rb, 1521.0f, 0);
+    assert(agv_curvelog.group == 1 && agv_curvelog.g[0].n == 3);
+    D.ui_mode = UI_PARAM;               /* 기록 있는 묶음에서 값을 바꿨다: 다음 묶음 */
+    curvelog_tick();
+    assert(param_set_ram(P_LEGACY_QUIRKS, 368) == 0);
+    D.ui_mode = UI_AUTO;
+    curvelog_tick();
+    assert(agv_curvelog.group == 2 && agv_curvelog.g[1].n == 0 && agv_curvelog.g[1].lg == 368 && agv_curvelog.g[0].n == 3);
+    D.ui_mode = UI_PARAM;               /* 빈 묶음에서 값을 바꿨다: 같은 번호에 새 값 */
+    curvelog_tick();
+    assert(param_set_ram(P_LEGACY_QUIRKS, 880) == 0 && param_set_ram(P_OPT_FLAGS, 8) == 0);
+    D.ui_mode = UI_AUTO;
+    curvelog_tick();
+    assert(agv_curvelog.group == 2 && agv_curvelog.g[1].lg == 880 && agv_curvelog.g[1].opt == 8);
+    cl_drive(rb, 1521.0f, 0);
+    assert(agv_curvelog.g[1].n == 1);
+    {   /* 기록하고 값을 바꾸며 넘기면 3, 4, 그다음 1 */
+        static const int16_t lgv[3] = { 0, 512, 368 };
+        for (int k = 0; k < 3; k++) {
+            D.ui_mode = UI_PARAM;
+            curvelog_tick();
+            assert(param_set_ram(P_LEGACY_QUIRKS, lgv[k]) == 0);
+            D.ui_mode = UI_AUTO;
+            curvelog_tick();
+            assert(agv_curvelog.group == ((k < 2) ? k + 3 : 1) && agv_curvelog.g[agv_curvelog.group - 1].lg == lgv[k]);
+            cl_drive(rb, 1521.0f, 0);
+        }
+        assert(agv_curvelog.g[0].n == 1 && agv_curvelog.g[1].n == 1);
+    }
+    assert(param_set_ram(P_LEGACY_QUIRKS, lg0) == 0 && param_set_ram(P_OPT_FLAGS, 0) == 0);
     D.flag_run = 0;
     boot_keys(KEY_MODE + KEY_SET, 0);   /* 튜닝 모드 */
     assert(tune_active());
