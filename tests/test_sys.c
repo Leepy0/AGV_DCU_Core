@@ -1347,7 +1347,7 @@ static void test_tune_entry(void)
     ticks(100);
     assert(shows("T1   "));
     boot_keys(KEY_MODE + KEY_SET, 0);
-    key(KEY_MODE);                   /* 키를 누르면 바로 메뉴 */
+    key(KEY_UP);                   /* 키를 누르면 바로 메뉴 */
     assert(shows("T2   "));
     printf("  tune entry ok\n");
 }
@@ -1377,11 +1377,11 @@ static void test_tune_menu(void)
     int k;
 
     boot_keys(KEY_MODE + KEY_SET, 0);
-    key(KEY_MODE);
+    key(KEY_UP);
     assert(tune_menu() == 2000 && shows("T2   "));
-    key(KEY_MODE);
+    key(KEY_UP);
     assert(tune_menu() == 3000 && shows("T3   "));
-    key(KEY_MODE);
+    key(KEY_UP);
     assert(tune_menu() == 1000);
     key(KEY_SET);                                     /* t1 입력: 시험 전에 확정할 값 14칸 */
     {   /* 파라미터 칸은 파라미터 화면과 같은 이름·자릿수·글자. 0 = t1 전용(AU, L) */
@@ -1406,11 +1406,11 @@ static void test_tune_menu(void)
                 want[4] = (char)('0' + param_get(P_ACC) % 10);
                 assert(shows(want));
             }
-            key(KEY_MODE);
+            key(KEY_UP);
         }
     }
     assert(tune_menu() == 1010);
-    for (k = 0; k < 11; k++) { key(KEY_MODE); }       /* WW 를 고치면 그 파라미터가 바로 바뀐다 */
+    for (k = 0; k < 11; k++) { key(KEY_UP); }       /* WW 를 고치면 그 파라미터가 바로 바뀐다 */
     assert(tune_menu() == 1120);
     {
         int16_t ww = param_get(P_WHEEL_BASE_MM);
@@ -1420,36 +1420,36 @@ static void test_tune_menu(void)
         assert(param_get(P_WHEEL_BASE_MM) == ww + 1);
         (void)param_set(P_WHEEL_BASE_MM, ww);
     }
-    for (k = 0; k < 3; k++) { key(KEY_MODE); }
+    for (k = 0; k < 3; k++) { key(KEY_UP); }
     assert(tune_menu() == 1010);
     key(KEY_RESET);
     assert(tune_menu() == 1000);
-    key(KEY_MODE);
+    key(KEY_UP);
     key(KEY_SET);
     assert(tune_menu() == 2010 && shows("T21CH"));
     ui_digits(d);
-    for (k = 0; k < 3; k++) { key(KEY_MODE); }
+    for (k = 0; k < 3; k++) { key(KEY_UP); }
     assert(tune_menu() == 2040 && shows("T24AP"));
     key(KEY_SET);                                     /* L 입력 */
     assert(tune_menu() == 2041 && shows("L0000"));
-    key(KEY_MODE);
+    key(KEY_UP);
     assert(tune_menu() == 2041);                       /* 한 칸뿐 */
     key(KEY_RESET);
-    key(KEY_MODE);
+    key(KEY_UP);
     assert(tune_menu() == 2010);
-    key(KEY_MODE);
-    key(KEY_MODE);
+    key(KEY_UP);
+    key(KEY_UP);
     key(KEY_SET);                                     /* t2.3 은 L 이 없다 */
     assert(tune_menu() == 2030 && shows("T23GS"));
     key(KEY_RESET);
     key(KEY_RESET);
     assert(tune_menu() == 2000);
-    key(KEY_MODE);
+    key(KEY_UP);
     key(KEY_SET);
     assert(tune_menu() == 3010 && tune_ident_mode() && shows("T31ID"));
-    for (k = 0; k < 4; k++) { key(KEY_MODE); }
+    for (k = 0; k < 4; k++) { key(KEY_UP); }
     assert(tune_temp_mode() && !tune_all_mode() && shows("T35TE"));
-    key(KEY_MODE);
+    key(KEY_UP);
     assert(tune_hs_mode() && shows("T36HS"));
     key(KEY_SET);                                     /* 속도 입력. 기본 1번(30), 1번 위로는 못 간다 */
     assert(tune_menu() == 3061 && shows("SP030"));
@@ -1463,17 +1463,53 @@ static void test_tune_menu(void)
     assert(shows("SP029") && tune_hs_mpm() == 29 && host.ee[TUNE_EE_CAP] != 29);   /* RAM 에만 */
     key(KEY_RESET);
     assert(tune_menu() == 3060);
-    key(KEY_MODE);
+    key(KEY_UP);
     assert(tune_ident_mode());
     assert(D.ui_mode == UI_AUTO && tune_active() && !D.flag_jog_on);
     printf("  tune menu ok\n");
+}
+
+/* 튜닝 메뉴 이동은 UP 다음·DOWN 이전, MODE 는 넘기지 않는다 */
+static void test_tune_nav(void)
+{
+    int k;
+
+    boot_keys(KEY_MODE + KEY_SET, 0);
+    key(KEY_MODE);                                    /* 단계 선택에서도 MODE 는 그대로 */
+    assert(tune_menu() == 1000);
+    key(KEY_DOWN);
+    assert(tune_menu() == 3000);                      /* 처음 → 끝 */
+    key(KEY_DOWN);
+    assert(tune_menu() == 2000);
+    key(KEY_UP);
+    key(KEY_UP);
+    assert(tune_menu() == 1000);
+    key(KEY_SET);                                     /* t1 입력 14칸 */
+    key(KEY_DOWN);
+    assert(tune_menu() == 1140);                      /* 처음 → 끝 */
+    key(KEY_UP);
+    assert(tune_menu() == 1010);                      /* 끝 → 처음 */
+    key(KEY_MODE);
+    assert(tune_menu() == 1010);                      /* MODE 는 칸을 안 넘긴다 */
+    for (k = 0; k < 13; k++) { key(KEY_UP); }
+    assert(tune_menu() == 1140);
+    for (k = 0; k < 13; k++) { key(KEY_DOWN); }
+    assert(tune_menu() == 1010);
+    key(KEY_SET);                                     /* 수정 중 UP·DOWN 은 값 증감 */
+    key(KEY_UP);
+    key(KEY_DOWN);
+    key(KEY_DOWN);
+    assert(tune_menu() == 1010 && tune_editing());
+    key(KEY_RESET);
+    assert(!tune_editing() && tune_menu() == 1010);
+    printf("  tune nav ok\n");
 }
 
 /* t1 입력 칸 번호(1~14)로 MODE 를 눌러 간다. 1 DRS, 4 ACC 상한(AU), 11 지름(WS), 14 L */
 static void t1_to(int item)
 {
     int k;
-    for (k = 0; (k < 16) && (tune_menu() != (uint16_t)(1000 + item * 10)); k++) { key(KEY_MODE); }
+    for (k = 0; (k < 16) && (tune_menu() != (uint16_t)(1000 + item * 10)); k++) { key(KEY_UP); }
     assert(tune_menu() == (uint16_t)(1000 + item * 10));
 }
 
@@ -1729,7 +1765,7 @@ static void test_tune_t2_compare(void)
 
     test_tune_t1_save();             /* 기준값 TOP 3000 */
     boot_keys(KEY_MODE + KEY_SET, 1);
-    key(KEY_MODE);
+    key(KEY_UP);
     key(KEY_SET);                    /* t2.1 */
     assert(tune_base_valid());
     drive_up();
@@ -1779,9 +1815,9 @@ static void t24_amp(uint16_t base_amp, int16_t now, uint16_t flick)
     host.ee[a] = (uint16_t)((base_amp << 8) | (old & 0xFFu));
     host.ee[TUNE_EE_CHECK] = (uint16_t)(TUNE_BASE_MARK ^ (uint16_t)(((uint16_t)(host.ee[TUNE_EE_CHECK] ^ TUNE_BASE_MARK)) - old + host.ee[a]));
     boot_keys(KEY_MODE + KEY_SET, 1);
-    key(KEY_MODE);
+    key(KEY_UP);
     key(KEY_SET);
-    for (k = 0; k < 3; k++) { key(KEY_MODE); }   /* t2.4 */
+    for (k = 0; k < 3; k++) { key(KEY_UP); }   /* t2.4 */
     assert(tune_base_valid() && tune_menu() == 2040);
     drive_up();
     run_scan(3);
@@ -2085,6 +2121,7 @@ int main(void)
     test_tune_entry();
     test_ee_probe();
     test_tune_menu();
+    test_tune_nav();
     test_tune_inputs();
     test_fnd_fit();
     test_tune_ee_layout();

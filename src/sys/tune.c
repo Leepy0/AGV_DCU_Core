@@ -557,9 +557,13 @@ static uint16_t items(void)
 static int menu_key(uint16_t key)
 {
     switch (key) {
-    case KEY_MODE:             /* 같은 단계 다음 칸 */
+    case KEY_UP:               /* 같은 단계 다음 칸 (MODE 는 넘기지 않는다) */
         if (s_tune.item == 0u)     { s_tune.cat = (uint16_t)(s_tune.cat % 3u + 1u); }
         else if (s_tune.sub == 0u) { s_tune.item = (uint16_t)(s_tune.item % items() + 1u); }
+        return 1;
+    case KEY_DOWN:             /* 이전 칸 */
+        if (s_tune.item == 0u)     { s_tune.cat = (uint16_t)((s_tune.cat + 1u) % 3u + 1u); }
+        else if (s_tune.sub == 0u) { s_tune.item = (uint16_t)((s_tune.item + items() - 2u) % items() + 1u); }
         return 1;
     case KEY_SET:
         if (s_tune.item == 0u) { s_tune.item = 1; return 1; }
