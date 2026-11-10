@@ -107,7 +107,7 @@ static struct {
     int16_t  para;                /* para_number */
     int16_t  value;               /* Para_value_temp */
     int16_t  lamp_ext[UI_LAMP_EXT_COUNT];
-    volatile int16_t msg_save, msg_init;
+    volatile int16_t msg_save, msg_init, msg_open;   /* msg_open: 숨김 항목이 열렸다 */
     /* 표시 */
     volatile uint16_t digit[DISP_DIGITS], dot, flick;   /* dot·flick 는 자리별 비트 */
     uint16_t cursor;
@@ -205,11 +205,12 @@ static void blink_step(void)
         s_ui.blink_on = 1;
         s_ui.blink_cnt = (s_ui.blink_cnt == 2u * BLINK_TIMING) ? 0u : (uint16_t)(s_ui.blink_cnt + 1u);
     }
-    if (s_ui.msg_save || s_ui.msg_init) {
+    if (s_ui.msg_save || s_ui.msg_init || s_ui.msg_open) {
         if (++s_ui.msg_ticks > BACKUP_MSG_TICKS) {
             s_ui.msg_ticks = 0;
             s_ui.msg_save = 0;
             s_ui.msg_init = 0;
+            s_ui.msg_open = 0;
         }
     }
 }
@@ -353,7 +354,11 @@ static void list_step(int16_t sign)
 static void hidden_hold(void)
 {
     if ((D.ui_mode == UI_PARAM) && (s_ui.screen == SCREEN_LIST + UI_GROUP_INFO) && !s_ui.edit && (s_ui.buffer == KEY_SHIFT)) {
-        if (++s_ui.shift_hold >= HIDDEN_HOLD_TICKS) { s_ui.show_hidden = 1; }
+        if ((++s_ui.shift_hold >= HIDDEN_HOLD_TICKS) && !s_ui.show_hidden) {
+            s_ui.show_hidden = 1;
+            s_ui.msg_open = 1;      /* 열린 순간 한 번만 알린다 */
+            s_ui.msg_ticks = 0;
+        }
     }
     else {
         s_ui.shift_hold = 0;
@@ -771,6 +776,9 @@ static void show_param(void)
     }
     else if (s_ui.msg_init) {
         show(letter('I'), letter('N'), letter('I'), letter('T'), DIGIT_NONE);
+    }
+    else if (s_ui.msg_open) {
+        show(letter('O'), letter('P'), letter('E'), letter('N'), DIGIT_NONE);
     }
     else if ((s_ui.screen > 0) && (s_ui.screen < SCREEN_LIST)) {
         const char *c = s_group_name[s_ui.screen - 1];

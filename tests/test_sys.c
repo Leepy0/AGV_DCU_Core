@@ -841,6 +841,8 @@ static void test_ui(void)
     printf("  ui ok\n");
 }
 
+static int shows(const char *t);
+
 /* 파라미터 메뉴 5묶음: 상하키로 묶음, SET 들어가기, UP 항목, RESET 나오기. 5번 묶음 SHIFT 2 s 숨김 */
 static void test_menu5(void)
 {
@@ -904,7 +906,14 @@ static void test_menu5(void)
             for (i = 0; i < 4; i++) { key(KEY_UP); }
             assert(ui_para_number() == P_BAT_DV);
             host.key = KEY_SHIFT;
-            ticks(210);
+            ticks(150);
+            assert(!shows("OPEN "));                          /* 2 s 전에는 메시지 없음 */
+            ticks(80);
+            assert(shows("OPEN "));                           /* 열리면 1 s */
+            ticks(120);
+            assert(!shows("OPEN ") && ui_para_number() == P_BAT_DV);   /* 목록으로 돌아온다 */
+            ticks(300);
+            assert(!shows("OPEN "));                          /* 계속 눌러도 다시 안 뜬다 */
             host.key = 0;
             ticks(10);
             for (i = 0; i < 8; i++) {
