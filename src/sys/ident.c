@@ -132,6 +132,7 @@ uint16_t       test_keep_mark;
 #define OLD_OPT(o) { (int16_t)((o) & OPT_KF_POSITION), \
                      (int16_t)((((o) & 1) ? 0 : QUIRK_STEER_20MS) | (((o) & 2) ? 0 : QUIRK_DAMP_SIGN_OLD) \
                                | (((o) & 16) ? 0 : QUIRK_NO_WB_GAIN)) }
+#if AGV_DEV_TESTS
 static const sweep_cand_t s_sweep_def[SWEEP_MAX] = {
     OLD_OPT(0), OLD_OPT(1), OLD_OPT(2), OLD_OPT(3), OLD_OPT(8), OLD_OPT(9), OLD_OPT(10), OLD_OPT(11),
     OLD_OPT(16), OLD_OPT(17), OLD_OPT(18), OLD_OPT(19), OLD_OPT(24), OLD_OPT(25), OLD_OPT(26), OLD_OPT(27)
@@ -150,13 +151,20 @@ static const sweep_cand_t s_hs_cand[HS_CANDS] = {
     { 0,               QUIRK_STEER_LEGACY },                 /* 3 예전 조향, 'h' */
     { 0,               QUIRK_STEER_LEGACY | QUIRK_SRC_A }    /* 4 예전 조향, 'a' (예전 현장 동작) */
 };
+#endif
 
 /* 지금 시험의 진행 칸. 식별 시험이면 agv_ident, 최고 속도 시험이면 agv_top, 통합 시험 단계 2 는 agv_all */
 static struct { int16_t *state, *fail, *pass, *phase; float *track; } s_r = {
     &agv_ident.state, &agv_ident.fail, &agv_ident.pass, &agv_ident.phase, &agv_ident.track_mm
 };
+#if AGV_DEV_TESTS
 static int16_t s_top, s_all, s_temp, s_rpm;
 static int16_t s_hs;              /* 고속 스윕 속도 rpm. 0 = 아님 */
+#else
+static int16_t s_top, s_all, s_rpm;
+#define s_temp 0                  /* 지정 시험·고속 스윕은 t3 에만 있다 */
+#define s_hs   0
+#endif
 static uint16_t s_build;          /* 연속 시험 mask. 0 = 아님 */
 static struct {
     uint32_t l0, r0, line;        /* 둘째 직선 시작 펄스, BLD_GA 선을 본 펄스 */
@@ -402,10 +410,14 @@ static void point_top(void)
 void ident_start(void)
 {
     s_build = 0;
+#if AGV_DEV_TESTS
     s_hs = 0;
+#endif
     s_top = 0;
     s_all = 0;
+#if AGV_DEV_TESTS
     s_temp = 0;
+#endif
     s_rpm = 0;
     point(&agv_ident.state, &agv_ident.fail, &agv_ident.pass, &agv_ident.phase, &agv_ident.track_mm);
     memset(&agv_ident, 0, sizeof(agv_ident));
@@ -417,6 +429,7 @@ void ident_start(void)
     start_common();
 }
 
+#if AGV_DEV_TESTS
 void ident_start_top(void)
 {
     s_build = 0;
@@ -427,6 +440,7 @@ void ident_start_top(void)
     point_top();
     start_common();
 }
+#endif
 
 int ident_top_mode(void) { return s_top; }
 
@@ -440,6 +454,7 @@ static void rpm_point(void)
     agv_rpmt.steer_k = RPMT_STEER_K;
 }
 
+#if AGV_DEV_TESTS
 void ident_start_rpm(void)
 {
     s_build = 0;
@@ -450,9 +465,11 @@ void ident_start_rpm(void)
     rpm_point();
     start_common();
 }
+#endif
 
 int ident_rpm_mode(void) { return s_rpm; }
 
+#if AGV_DEV_TESTS
 static void list_set(sweep_cand_t *dst, uint16_t *dn, const sweep_cand_t *c, uint16_t n)
 {
     uint16_t i;
@@ -468,6 +485,7 @@ static void list_set(sweep_cand_t *dst, uint16_t *dn, const sweep_cand_t *c, uin
 
 void ident_sweep_set(const sweep_cand_t *c, uint16_t n) { list_set(s_sweep, &s_sweep_n, c, n); }
 void ident_temp_set(const sweep_cand_t *c, uint16_t n)  { list_set(s_temp_l, &s_temp_n, c, n); }
+#endif
 
 /* 시험 전 OPT·LG 로 돌린다 */
 static void opt_restore(void)
@@ -495,6 +513,7 @@ static void all_begin(const sweep_cand_t *list, uint16_t n)
     s_id.ticks = 0;
 }
 
+#if AGV_DEV_TESTS
 void ident_start_all(void)
 {
     if (s_sweep_n == 0xFFFFu) { all_begin(s_sweep_def, SWEEP_MAX); }
@@ -511,9 +530,11 @@ void ident_start_temp(void)
 }
 
 int      ident_temp_mode(void) { return s_temp && !s_hs; }
+#endif
 int      ident_all_mode(void) { return s_all; }
 uint16_t ident_stage(void)    { return s_all ? (uint16_t)agv_all.stage : 0u; }
 
+#if AGV_DEV_TESTS
 /* 단계 1 끝(식별)이나 단계 2 끝(스윕). 다음 단계로 s_r 을 돌린다. 차는 선 위에 서 있다 */
 static void all_next(void)
 {
@@ -543,6 +564,7 @@ static void stopt_next(void)
     point(&agv_stopt.state, &agv_stopt.fail, &agv_stopt.pass, &agv_stopt.phase, &agv_all.track_mm);
     agv_stopt.state = 1;
 }
+#endif
 
 static int16_t clamp_p(uint16_t idx, int32_t v)
 {
@@ -710,6 +732,7 @@ static void lat_finish(ident_level_t *lv)
     lv->lat_err_mm = (s->end_sum / (float)s->end - 1.0f) * s->step * GUIDE_UNIT_MM;
 }
 
+#if AGV_DEV_TESTS
 /* 정속 토크 = 마찰 + 기울기 × rpm. 기울기 × 1000 이 52번 단위다. 정속 측정 전에 끊긴 회는 뺀다 */
 static void fit_ff(void)
 {
@@ -728,6 +751,7 @@ static void fit_ff(void)
     agv_ident.ff_suggest = ((n * sxy - sx * sy) / den) * 1000.0f;
     agv_ident.tq_offset = (sy - (agv_ident.ff_suggest / 1000.0f) * sx) / n;
 }
+#endif
 
 /* 지금 속도에서 최저 속도까지 감속하는 거리. 주행 램프를 그대로 돌려 본다 */
 static float decel_mm(int16_t from)
@@ -1447,6 +1471,7 @@ static float bk_need(void)
     return BK_CREEP_MM + run_need(v, SETTLE_TICKS + 2 * WIN_TICKS, DEC_MARGIN_MM + decel_mm(v));
 }
 
+#if AGV_DEV_TESTS
 float ident_hs_need_mm(int16_t mpm)
 {
     int16_t v = param_rpm(mpm);
@@ -1495,6 +1520,7 @@ uint16_t ident_hs_best(void)
     }
     return best;
 }
+#endif
 
 /* ---- 연속 시험 (튜닝 t1·t2) ---- */
 
@@ -1871,6 +1897,7 @@ static int16_t next_kind(uint16_t *np, int16_t *free)
         if (st == 2u) { *np = (s_build & BLD_CHECK) ? 1u : 4u; return NX_RPM; }
         return (st == 0u) ? NX_END : (st == 3u) ? NX_LINE : (st == 4u) ? NX_COAST : (st == 5u) ? NX_STOPT : NX_SWEEP;
     }
+#if AGV_DEV_TESTS                  /* 여기부터는 t3 시험(연속 시험이 아님) */
     if (sweep()) {
         *free = ((p % SWEEP_PASSES) == 0u);
         if (p < (uint16_t)(agv_all.sweep_n * SWEEP_PASSES)) { return NX_SWEEP; }
@@ -1887,6 +1914,9 @@ static int16_t next_kind(uint16_t *np, int16_t *free)
     *free = 1;
     *np = 1u;
     return !s_all ? NX_END : ((agv_all.sweep_n > 0) ? NX_SWEEP : NX_LINE);
+#else
+    return NX_END;
+#endif
 }
 
 /* 다음 회가 서 있다 출발해 측정을 다 하는 데 필요한 앞 거리. 0 = 다음 회 없음, NEED_LINE = 선에서 출발 */
@@ -2039,6 +2069,7 @@ static int turn_done(void)
     D.tape_slow = 0;
     if ((D.system_err != 0) || (D.stop_err != 0)) { return fail_now(); }
     if (s_build) { return build_turn(); }
+#if AGV_DEV_TESTS                  /* 여기부터는 t3 시험 */
     if (sweep()) {
         if (!s_id.retry) {
             agv_all.sw[agv_all.sweep_k].done++;
@@ -2079,6 +2110,7 @@ static int turn_done(void)
             return 1;
         }
     }
+#endif
     run_restart_now();
     s_id.restart = 1;
     return 0;

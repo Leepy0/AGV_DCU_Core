@@ -10,26 +10,32 @@ $failed = 0
 & gcc -std=c99 -DAGV_HOST_BUILD -Iinclude tests/test_dsl.c -o build/t/test_dsl.exe
 if ($LASTEXITCODE -ne 0) { $failed++ } else { & build/t/test_dsl.exe; if ($LASTEXITCODE -ne 0) { $failed++ } }
 
-foreach ($t in 'frame', 'acs', 'param', 'seq', 'motor', 'stop', 'steer', 'guide') {
-    & gcc @flags "tests/test_$t.c" tests/fakes.c @src -o "build/t/test_$t.exe" -lm
-    if ($LASTEXITCODE -ne 0) { Write-Output "BUILD FAIL $t"; $failed++; continue }
-    & "build/t/test_$t.exe"
-    if ($LASTEXITCODE -ne 0) { Write-Output "FAIL $t"; $failed++ }
-}
-# Assembly test: real upper modules on the host HAL, without fakes
-$sys = @($src) + (Get-ChildItem src/sys/*.c, hal/host/*.c | ForEach-Object { $_.FullName })
-& gcc -std=gnu99 -Wall -DAGV_HOST_BUILD -Iinclude -Ihal/host tests/test_sys.c @sys -o build/t/test_system.exe -lm
-if ($LASTEXITCODE -ne 0) { Write-Output 'BUILD FAIL sys'; $failed++ }
-else {
-    & build/t/test_system.exe
-    if ($LASTEXITCODE -ne 0) { Write-Output 'FAIL sys'; $failed++ }
-}
-# Closed-loop curve simulation on the same full stack
-& gcc -std=gnu99 -Wall -DAGV_HOST_BUILD -Iinclude -Ihal/host tests/test_curve.c @sys -o build/t/test_curve.exe -lm
-if ($LASTEXITCODE -ne 0) { Write-Output 'BUILD FAIL curve'; $failed++ }
-else {
-    & build/t/test_curve.exe
-    if ($LASTEXITCODE -ne 0) { Write-Output 'FAIL curve'; $failed++ }
+# Both builds: with the tuning t3 dev tests (default) and without (AGV_DEV_TESTS=0, site images)
+foreach ($dv in 1, 0) {
+    $dev = "-DAGV_DEV_TESTS=$dv"
+    $sfx = if ($dv -eq 0) { '_dev0' } else { '' }
+    if ($dv -eq 0) { Write-Output '-- AGV_DEV_TESTS=0' }
+    foreach ($t in 'frame', 'acs', 'param', 'seq', 'motor', 'stop', 'steer', 'guide') {
+        & gcc @flags $dev "tests/test_$t.c" tests/fakes.c @src -o "build/t/test_$t$sfx.exe" -lm
+        if ($LASTEXITCODE -ne 0) { Write-Output "BUILD FAIL $t$sfx"; $failed++; continue }
+        & "build/t/test_$t$sfx.exe"
+        if ($LASTEXITCODE -ne 0) { Write-Output "FAIL $t$sfx"; $failed++ }
+    }
+    # Assembly test: real upper modules on the host HAL, without fakes
+    $sys = @($src) + (Get-ChildItem src/sys/*.c, hal/host/*.c | ForEach-Object { $_.FullName })
+    & gcc -std=gnu99 -Wall -DAGV_HOST_BUILD $dev -Iinclude -Ihal/host tests/test_sys.c @sys -o "build/t/test_system$sfx.exe" -lm
+    if ($LASTEXITCODE -ne 0) { Write-Output "BUILD FAIL sys$sfx"; $failed++ }
+    else {
+        & "build/t/test_system$sfx.exe"
+        if ($LASTEXITCODE -ne 0) { Write-Output "FAIL sys$sfx"; $failed++ }
+    }
+    # Closed-loop curve simulation on the same full stack
+    & gcc -std=gnu99 -Wall -DAGV_HOST_BUILD $dev -Iinclude -Ihal/host tests/test_curve.c @sys -o "build/t/test_curve$sfx.exe" -lm
+    if ($LASTEXITCODE -ne 0) { Write-Output "BUILD FAIL curve$sfx"; $failed++ }
+    else {
+        & "build/t/test_curve$sfx.exe"
+        if ($LASTEXITCODE -ne 0) { Write-Output "FAIL curve$sfx"; $failed++ }
+    }
 }
 if ($failed -ne 0) { Write-Output "FAILED: $failed"; exit 1 }
 Write-Output 'ALL PASSED'

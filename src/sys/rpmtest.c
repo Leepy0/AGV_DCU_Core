@@ -12,6 +12,7 @@
 #include "agv/param.h"
 #include "agv/run.h"
 #include "agv/stop.h"
+#include "agv/tune.h"
 
 #define D agv_drive
 #define P param_dv
@@ -47,9 +48,13 @@
 #define ASYM_GUIDE    5        /* 개루프: 가이드가 이만큼 벗어나거나 라인을 잃으면 끊는다(실패 문턱 10 보다 먼저) */
 
 static const int16_t s_up[RPMT_UP]   = { 200, 400, 600, 800, 1200, 1600, 2000 };
+#if AGV_DEV_TESTS                 /* 2·3·5회는 t3 바닥 rpm 시험에만 있다. t1 은 4회, t2.4 는 1·4회 */
 static const int16_t s_dn[RPMT_DN]   = { 2000, 1200, 600, 0 };
+#endif
 static const int16_t s_low[RPMT_LOW] = { 300, 250, 200, 150, 100 };
+#if AGV_DEV_TESTS
 static const float   s_ramp_mm[4]    = { 0.0f, 0.0f, 30.0f, 60.0f };   /* 방법 1~3 */
+#endif
 
 #ifdef __TMS320C2000__
 #pragma DATA_SECTION(agv_rpmt, "test_keep_rpm")   /* 리셋에 남는다. 링커가 test_keep_add 뒤에 둔다 */
@@ -237,6 +242,7 @@ static int stair(rpmt_step_t *tab, const int16_t *dac, uint16_t n, int16_t len)
     s_rt.t++;
     if ((g == 0) && (s_rt.t < len)) { return 0; }
     step_end(s, g);
+#if AGV_DEV_TESTS
     if ((agv_rpmt.pass == 2) && (STEP >= 2u)) {    /* 내린 뒤 20 ms 마다 */
         int16_t *cv = agv_rpmt.dn_curve[STEP - 2u];
         for (c = 0; c < RPMT_DN_CURVE; c++) {
@@ -244,6 +250,9 @@ static int stair(rpmt_step_t *tab, const int16_t *dac, uint16_t n, int16_t len)
             cv[c] = (k < s_rt.t) ? y_at(k) : 0;
         }
     }
+#else
+    (void)c;
+#endif
     if ((g != 0) || (STEP >= n)) {
         summary();
         return pass_end(g);
@@ -253,6 +262,7 @@ static int stair(rpmt_step_t *tab, const int16_t *dac, uint16_t n, int16_t len)
     return 0;
 }
 
+#if AGV_DEV_TESTS
 /* ---- 3회 출발·정지 문턱 ---- */
 
 static int brk_run(void)
@@ -289,6 +299,7 @@ static int brk_run(void)
     summary();
     return pass_end(b->cut);
 }
+#endif
 
 /* ---- 4회 저속 폐루프 ---- */
 
@@ -352,6 +363,7 @@ static int low_run(void)
     return 0;
 }
 
+#if AGV_DEV_TESTS
 /* ---- 5회 350 rpm 아래 정지 ---- */
 
 static int16_t ring_at(uint16_t back) { return s_rt.u.ring[(uint16_t)(s_rt.rn - 1u - back) & (RING - 1u)]; }
@@ -431,6 +443,7 @@ static int stop_pass(void)
     }
     return 0;
 }
+#endif
 
 /* ---- 개루프 회 앞 접근 ---- */
 
@@ -448,7 +461,9 @@ static int open_begin(void)
     s_rt.as = 0;
     switch (agv_rpmt.pass) {
     case 1: step_begin(&agv_rpmt.up[0], s_up[0]); break;
+#if AGV_DEV_TESTS
     case 2: step_begin(&agv_rpmt.dn[0], s_dn[0]); break;
+#endif
     default:
         s_rt.appr = 2;
         s_rt.at = 0;
@@ -493,7 +508,9 @@ float rpmt_need_mm(uint16_t pass)
 
     switch (pass) {
     case 4:  for (i = 0; i < RPMT_LOW; i++) { run += (float)s_low[i] * (float)LOW_TICKS * k; } break;
+#if AGV_DEV_TESTS
     case 5:  run = (float)RPMT_STOPS * GAP_MM; break;
+#endif
     default: return 0.0f;
     }
     return P.guide_dist_mm + CUT_MM + ident_decel_mm(STOP_MIN_RPM) + APPR_MM + run;   /* APPR_MM: 가속·정속 여유 */
@@ -527,10 +544,12 @@ void rpmt_pass_cut(int16_t why)
 {
     switch (agv_rpmt.pass) {
     case 1:  step_end(&agv_rpmt.up[STEP - 1u], why); break;
+#if AGV_DEV_TESTS
     case 2:  step_end(&agv_rpmt.dn[STEP - 1u], why); break;
     case 3:  agv_rpmt.brk.cut = why; break;
-    case 4:  low_end(&agv_rpmt.low[STEP - 1u], why); break;
     case 5:  agv_rpmt.stp[STEP - 1u].cut |= why; break;
+#endif
+    case 4:  low_end(&agv_rpmt.low[STEP - 1u], why); break;
     default: break;
     }
     s_rt.appr = 0;
@@ -542,10 +561,12 @@ int rpmt_pass_run(void)
     if (s_rt.appr) { return approach(); }
     switch (agv_rpmt.pass) {
     case 1:  return stair(agv_rpmt.up, s_up, RPMT_UP, UP_TICKS);
+#if AGV_DEV_TESTS
     case 2:  return stair(agv_rpmt.dn, s_dn, RPMT_DN, DN_TICKS);
     case 3:  return brk_run();
-    case 4:  return low_run();
     case 5:  return stop_pass();
+#endif
+    case 4:  return low_run();
     default: return -1;
     }
 }

@@ -824,12 +824,14 @@ static void show_tune_text(void)
     s_ui.flick = tune_flick();
 }
 
+#if AGV_DEV_TESTS
 /* 이름 한 글자 + 네 자리. 9999 를 넘으면 자르지 않고 OVER */
 static void show_wide(char name, int16_t v)
 {
     if (v > 9999) { show(letter(name), letter('O'), letter('V'), letter('E'), letter('R')); }
     else { show(letter(name), digit_of(v, 1000), digit_of(v, 100), digit_of(v, 10), digit_of(v, 1)); }
 }
+#endif
 
 static void show_tune(void)
 {
@@ -840,6 +842,7 @@ static void show_tune(void)
     case TUNE_SAVED:
         show_tune_text();
         break;
+#if AGV_DEV_TESTS                  /* t3 시험 진행·결과 */
     case TUNE_IDENT:    /* 회, 순서 */
         show(letter('I'), letter('D'), DIGIT_NONE, ident_pass(), ident_phase());
         break;
@@ -912,6 +915,7 @@ static void show_tune(void)
             if (v <= 0) { s_ui.digit[1] = s_ui.digit[2] = s_ui.digit[3] = s_ui.digit[4] = DIGIT_MINUS; }
         }
         break;
+#endif
     default:
         break;
     }

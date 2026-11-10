@@ -93,6 +93,42 @@ static const tag_rule_t s_rules[] = {
     TAG_IF( 23, 0, IF_X( X_NOT(X_CROSS_IN) ), A_OBS_OFF )
 };
 
+/* 위 20~23 과 같은 규칙의 압축 표. 앞 줄은 다른 프로파일이라 건너뛴다 */
+TAG_X_BEGIN( s_px )
+    TAG_X( X_ID(AGV_ID, AGV_ID) )            /* 1 */
+    TAG_X( X_STATION(1, 42, 42) )            /* 2 */
+    TAG_X( X_ID(8, 9) )                      /* 3 */
+    TAG_X( X_TAG_MINUS_EQ_STATION(0, 10) )   /* 4 */
+    TAG_X( X_TAG_EQ_STATION(0) )             /* 5 */
+    TAG_X( X_STATION_MOD(0, 10, 3) )         /* 6 */
+    TAG_X( X_STATION_DIV(0, 10, 4) )         /* 7 */
+    TAG_X( X_NOT(X_CROSS_IN) )               /* 8 */
+TAG_POOL_END
+TAG_IN_BEGIN( s_pin )
+    TAG_IN( IN( ON(IN_START_SW) ) )                  /* 1 */
+    TAG_IN( IN( ANY_ON(IN_EXT_16, IN_START_SW) ) )   /* 2 */
+TAG_POOL_END
+TAG_ACT_BEGIN( s_pact )
+    TAG_ACTS( A_SPEED_LOW )    /* 1 */
+    TAG_ACTS( A_SPEED_MIN )    /* 2 */
+    TAG_ACTS( A_SPEED_HIGH )   /* 3 */
+    TAG_ACTS( A_OBS_ON )       /* 4 */
+    TAG_ACTS( A_OBS_OFF )      /* 5 */
+TAG_POOL_END
+TAGP_BEGIN( s_prules )
+    TAGP( 20, 63, 0, 0, 0, 3 )
+    TAGP( 20, 0, 1, 2, 1, 1 )
+    TAGP( 20, 0, 1, 2, 0, 2 )
+    TAGP( 20, 0, 3, 0, 0, 3 )
+    TAGP( 21, 0, 4, 0, 0, 4 )
+    TAGP( 21, 0, 5, 0, 0, 5 )
+    TAGP( 22, 0, 6, 0, 0, 4 )
+    TAGP( 22, 0, 7, 0, 0, 5 )
+    TAGP( 23, 0, 0, 0, 2, 4 )
+    TAGP( 23, 0, 8, 0, 0, 5 )
+TAG_POOL_END
+TAG_PACKED( s_tag_pk, s_prules, s_px, s_pin, s_pact )
+
 static int s_manual_count;
 void site_register(void)
 {
@@ -559,11 +595,10 @@ static void test_tag(void)
 }
 
 /* 태그 규칙의 확장 조건·입력 조건 */
-static void test_tag_cond(void)
+static void tag_cond_checks(void)
 {
     uint16_t a[4];
 
-    boot();
     acs_station_set(1, 42, 2);
     assert((tagact_dry_run(20, a, 4) == 1) && (a[0] == A_SPEED_MIN));
     raw_a(RAW_START, 0);                        /* START 누름 */
@@ -595,6 +630,15 @@ static void test_tag_cond(void)
     acs_station_set(0, 55, 2);
     assert(tagact_dry_run(22, a, 4) == 0);
     acs_station_reset();
+}
+
+static void test_tag_cond(void)
+{
+    boot();
+    tag_cond_checks();
+    tagact_bind_packed(&s_tag_pk, 0);         /* 압축 표도 같은 답 */
+    tag_cond_checks();
+    boot();
     printf("  tag cond ok\n");
 }
 
@@ -1439,9 +1483,17 @@ static void test_tune_menu(void)
     key(KEY_UP);
     assert(tune_menu() == 2000 && shows("T2   "));
     key(KEY_UP);
+#if AGV_DEV_TESTS
     assert(tune_menu() == 3000 && shows("T3   "));
     key(KEY_UP);
+#endif
     assert(tune_menu() == 1000);
+#if !AGV_DEV_TESTS
+    key(KEY_DOWN);                                    /* t3 없음: t1 앞은 t2, t2 다음은 t1 */
+    assert(tune_menu() == 2000 && shows("T2   "));
+    key(KEY_UP);
+    assert(tune_menu() == 1000);
+#endif
     key(KEY_SET);                                     /* t1 입력: 시험 전에 확정할 값 14칸 */
     {   /* 파라미터 칸은 파라미터 화면과 같은 이름·자릿수·글자. 0 = t1 전용(AU, L) */
         static const uint16_t want[14] = { P_SPEED_HIGH, P_SPEED_LOW, P_SPEED_TURN, 0, P_ACC, P_OBS_USE, P_BUMPER_USE,
@@ -1503,6 +1555,7 @@ static void test_tune_menu(void)
     key(KEY_RESET);
     key(KEY_RESET);
     assert(tune_menu() == 2000);
+#if AGV_DEV_TESTS
     key(KEY_UP);
     key(KEY_SET);
     assert(tune_menu() == 3010 && tune_ident_mode() && shows("T31ID"));
@@ -1524,6 +1577,7 @@ static void test_tune_menu(void)
     assert(tune_menu() == 3060);
     key(KEY_UP);
     assert(tune_ident_mode());
+#endif
     assert(D.ui_mode == UI_AUTO && tune_active() && !D.flag_jog_on);
     printf("  tune menu ok\n");
 }
@@ -1537,11 +1591,15 @@ static void test_tune_nav(void)
     key(KEY_MODE);                                    /* 단계 선택에서도 MODE 는 그대로 */
     assert(tune_menu() == 1000);
     key(KEY_DOWN);
+#if AGV_DEV_TESTS
     assert(tune_menu() == 3000);                      /* 처음 → 끝 */
     key(KEY_DOWN);
+#endif
     assert(tune_menu() == 2000);
     key(KEY_UP);
+#if AGV_DEV_TESTS
     key(KEY_UP);
+#endif
     assert(tune_menu() == 1000);
     key(KEY_SET);                                     /* t1 입력 14칸 */
     key(KEY_DOWN);

@@ -18,13 +18,47 @@
 #define TAPE_WINDOW_DEG   20.0f /* 정렬 회전이 새 라인을 찾는 목표각 앞뒤 범위 */
 
 static const tag_rule_t *s_rules;
+static const tag_packed_t *s_pk;   /* 압축 표. 0 = s_rules */
+static tag_rule_t s_hit;           /* 압축 표에서 맞춰 보는 규칙을 펼친 칸 */
 static uint16_t s_nrules, s_profile, s_display_tag;
 
 void tagact_bind(const tag_rule_t *rules, uint16_t n, uint16_t profile)
 {
     s_rules = rules;
+    s_pk = 0;
     s_nrules = n;
     s_profile = profile;
+}
+
+void tagact_bind_packed(const tag_packed_t *t, uint16_t profile)
+{
+    s_rules = 0;
+    s_pk = t;
+    s_nrules = t->n;
+    s_profile = profile;
+}
+
+/* 압축 규칙 i 를 s_hit 에 펼친다 */
+static const tag_rule_t *pk_rule(uint16_t i)
+{
+    const tag_pack_t *p = &s_pk->rules[i];
+    const tag_x_t *x1 = &s_pk->x[p->x & 0xFFu], *x2 = &s_pk->x[p->x >> 8];
+    const tag_in_t *in = &s_pk->in[p->ai >> 8];
+    const tag_act_t *a = &s_pk->act[p->ai & 0xFFu];
+    uint16_t k;
+
+    s_hit.tag = (uint16_t)(p->tp & 0x3FFu);
+    s_hit.profile = (uint16_t)(p->tp >> 10);
+    s_hit.cond = x1->cond;
+    s_hit.cond_a = x1->a;
+    s_hit.cond_b = x1->b;
+    s_hit.cond2 = x2->cond;
+    s_hit.cond2_a = x2->a;
+    s_hit.cond2_b = x2->b;
+    s_hit.in_on = in->on;
+    s_hit.in_off = in->off;
+    for (k = 0; k < 4u; k++) { s_hit.act[k] = a->act[k]; }
+    return &s_hit;
 }
 
 /* ---- 개별 액션 ---- */
@@ -199,7 +233,13 @@ static const tag_rule_t *rule_find(uint16_t tag)
     uint16_t profile = (s_profile != 0u) ? s_profile : seq_profile();
 
     for (i = 0; i < s_nrules; i++) {
-        const tag_rule_t *r = &s_rules[i];
+        const tag_rule_t *r;
+        if (s_pk != 0) {
+            uint16_t tp = s_pk->rules[i].tp, pf = (uint16_t)(tp >> 10);
+            if (((tp & 0x3FFu) != tag) || ((pf != 0u) && (pf != profile))) { continue; }
+            r = pk_rule(i);
+        }
+        else { r = &s_rules[i]; }
         if ((r->tag == tag) && ((r->profile == 0u) || (r->profile == profile)) && cond_ok(r)) { return r; }
     }
     return 0;

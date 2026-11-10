@@ -6,12 +6,18 @@
  *  t1 제작   t1 아래 입력 5칸(지름 22번, GD 50번, 최고 속도 상한, 교차선 간격 L, ACC·DCC 상한 AU). START = 연속 시험 전체
  *  t2 점검   t2.1 빠른 점검, t2.2 바퀴 교체, t2.3 가이드 센서 교체, t2.4 모터·앰프 교체. 2.1·2.2·2.4 는 SET 으로 L 입력
  *  t3 개발   t3.1 IDEN, t3.2 RPM, t3.3 TOP, t3.4 ALL, t3.5 TEMP, t3.6 HS(SET 으로 속도 입력). 결과는 RAM 에만.
- *            시험 추가는 tune.c s_dev 표 한 줄
+ *            시험 추가는 tune.c s_dev 표 한 줄. AGV_DEV_TESTS 0 이면 t3 가 없고 t2 다음은 t1 이다
  * FND(tune_text): 켠 뒤 1 s(또는 첫 키까지) EEPROM 칩 크기 EE128·EE256(storage.h ee_probe),
  *  메뉴 't' + 번호(점으로 나눔) + 두 글자 이름, 입력 이름 + 값, 연속 시험 진행 'B'(t1)·'C'(t2) + 단계 + 회 2자리
  *  + 순서, 실패 'F' + 코드, 결과 쪽, 저장 뒤 RBOT */
 #ifndef AGV_TUNE_H
 #define AGV_TUNE_H
+
+/* 1 = 튜닝 t3(개발 시험)를 넣는다. 현장 이미지는 0 으로 빌드해 t3 와 t3 만 쓰는 코드·데이터를 뺀다(플래시).
+ * t1·t2 가 쓰는 코드는 그대로다. 사이트는 site.h 에 #define AGV_DEV_TESTS 0 을 두고, 빌드 스크립트가 코어에도 넘긴다 */
+#ifndef AGV_DEV_TESTS
+#define AGV_DEV_TESTS 1
+#endif
 #include "agv/types.h"
 #include "agv/guide.h"
 

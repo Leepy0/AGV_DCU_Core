@@ -1,5 +1,18 @@
 # 변경 이력
 
+## v0.33.0 (2026-11-10, 개발 시험 빌드 옵션, 태그 규칙 압축)
+
+- 컴파일 플래그 `AGV_DEV_TESTS`(기본 1, `include/agv/tune.h`). 0 이면 튜닝 t3(개발 시험: IDEN·RPM·TOP·ALL·TEMP·HS)를 메뉴에서 빼고 t3 에서만 쓰는 코드·데이터를 컴파일에서 뺀다.
+  - 메뉴는 t1·t2 둘이다(t2 다음 t1). t1·t2(제작·점검)가 쓰는 코드는 그대로다.
+  - 빠지는 것: t3 시작 함수(`ident_start_top`·`_rpm`·`_all`·`_temp`·`_hs`), 스윕·지정·고속 스윕 후보 표, 통합·지정 시험 단계 넘김(`all_next`·`stopt_next`), FF 맞춤(`fit_ff`), 고속 스윕 결과(`ident_hs_*`), 바닥 rpm 시험 2·3·5회(t1 은 4회, t2.4 는 1·4회만 쓴다), t3 진행·결과 화면, t3 메뉴 표.
+  - 연속 시험이 아닌 회 넘김(`next_kind`·`turn_done` 의 뒷부분)도 뺀다. 0 이면 `ident_run` 은 t1·t2 에서만 돌고 그때는 늘 연속 시험이다.
+  - 1 이면 이미지가 전과 같다(초기화된 영역 비교).
+  - 사이트는 `site.h` 에 `#define AGV_DEV_TESTS 0` 을 둔다. `tools/build_target.ps1` 이 이 줄을 읽어 코어를 `-DAGV_DEV_TESTS=0` 으로 `<ObjDir>/core_dev0` 에 따로 빌드하고 코어 lib 이름에 `_dev0` 을 붙인다(캐시가 섞이지 않는다).
+  - 호스트 시험(`tests/run_host.ps1`)은 두 값으로 다 빌드·실행한다. 0 이면 t3 메뉴가 없음을 본다.
+- 태그 규칙 압축 표(`tag_packed_t`, `tagact_bind_packed`, `seq_dsl.h` 의 `TAG_X`·`TAG_IN`·`TAG_ACTS`·`TAGP`·`TAG_PACKED`): 규칙 3워드 + 중복 없는 확장 조건(3워드)·입력 조건(4워드)·동작(4워드) 표. 규칙 16워드 표는 그대로 쓸 수 있다.
+  - 맞춰 보는 규칙은 16워드 규칙으로 펼쳐 같은 길로 돈다. 표 번호 0\~255, 태그 0\~1023, 프로파일 0\~63.
+  - 시험: 같은 규칙을 16워드 표와 압축 표로 묶어 확장·입력 조건 결과가 같은지 본다(`test_sys` tag cond).
+
 ## v0.32.4 (2026-11-10, 저속 구간 가속 한계 완화)
 
 - S커브(`src/motor.c` `motor_scv_core`): 가속 때 저속 구간(`LOS`/2, 최소 7 m/min 아래) 가속 한계를 5 에서 max(5, `ACC`/2) 로 올렸다(`SCV_LOW_ACC_DIV` 2, `SCV_LOW_ACC_MIN` 5).

@@ -24,6 +24,24 @@ typedef struct {
     uint32_t in_off;
 } tag_rule_t;            /* C28x 16워드 */
 
+/* 압축 표(생성기용). 규칙은 3워드이고 조건·입력·동작은 중복을 없앤 표의 번호다. 번호 0 = 없음(조건 없음, 입력 없음, 동작 없음).
+ * 표 번호는 0~255, 태그 0~1023, 프로파일 0~63. 맞은 규칙은 tag_rule_t 로 펼쳐 같은 길로 돈다 */
+typedef struct { uint16_t cond, a, b; } tag_x_t;           /* 확장 조건 하나 (3워드) */
+typedef struct { uint32_t on, off; } tag_in_t;              /* 입력 조건 (4워드) */
+typedef struct { uint16_t act[4]; } tag_act_t;              /* 동작 칸 (4워드) */
+typedef struct {
+    uint16_t tp;         /* 태그 | 프로파일 << 10 */
+    uint16_t x;          /* 확장 조건 1 번호 | 확장 조건 2 번호 << 8 */
+    uint16_t ai;         /* 동작 번호 | 입력 조건 번호 << 8 */
+} tag_pack_t;
+typedef struct {
+    const tag_pack_t *rules;
+    const tag_x_t    *x;
+    const tag_in_t   *in;
+    const tag_act_t  *act;
+    uint16_t          n;
+} tag_packed_t;
+
 /* 예전 이름 */
 #define TAG_COND_NONE            XC_NONE
 #define TAG_COND_FORBACK_MODE    XC_FORBACK_MODE
@@ -55,6 +73,7 @@ typedef struct {
 #define TA_TURN_TAPE      0x1100   /* TA_TURN_ALIGN 과 같다. 교차 테이프를 찾은 뒤 시작 */
 
 void     tagact_bind(const tag_rule_t *rules, uint16_t n, uint16_t profile);
+void     tagact_bind_packed(const tag_packed_t *t, uint16_t profile);   /* 압축 표 */
 uint16_t tagact_display_tag(void);
 int      tagact_run(uint16_t tag);     /* DA_Tag_Selection 대체. 반환 1 = 이 태그로 새 정지가 시작됨 */
 uint16_t tagact_dry_run(uint16_t tag, uint16_t *acts, uint16_t cap);  /* 실행하지 않고 액션 열거 (관리 TT/TR) */

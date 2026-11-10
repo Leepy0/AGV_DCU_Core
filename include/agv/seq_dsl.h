@@ -247,6 +247,19 @@ typedef unsigned long long dsl_cond_t;
     { (uint16_t)(t), (uint16_t)(p), (uint16_t)(k1), (uint16_t)(a1), (uint16_t)(b1), { DSL_UNPAREN acts }, \
       (uint16_t)(k2), (uint16_t)(a2), (uint16_t)(b2), (uint32_t)(on), (uint32_t)(off) },
 
+/* 압축 표 (생성기용, tagact.h tag_packed_t). 번호 0 칸(없음)은 BEGIN 이 넣는다.
+ * TAGP(태그, 프로파일, 확장 조건 1 번호, 확장 조건 2 번호, 입력 번호, 동작 번호) */
+#define TAG_X_BEGIN(name)      static const tag_x_t name[] = { { X_ALWAYS },
+#define TAG_X(x)               { x },
+#define TAG_IN_BEGIN(name)     static const tag_in_t name[] = { { 0UL, 0UL },
+#define TAG_IN(c)              { DSL_COND_ON(c), DSL_COND_OFF(c) },
+#define TAG_ACT_BEGIN(name)    static const tag_act_t name[] = { { { 0 } },
+#define TAG_ACTS(...)          { { __VA_ARGS__ } },
+#define TAGP_BEGIN(name)       static const tag_pack_t name[] = {
+#define TAGP(tag, profile, x1, x2, in, act)     { (uint16_t)((tag) | ((profile) << 10)), (uint16_t)((x1) | ((x2) << 8)), (uint16_t)((act) | ((in) << 8)) },
+#define TAG_POOL_END           };
+#define TAG_PACKED(name, rules, x, in, act)     const tag_packed_t name = { rules, x, in, act, (uint16_t)(sizeof(rules) / sizeof(rules[0])) };
+
 #define IF_X(x)                x, X_ALWAYS, 0UL, 0UL
 #define IF_X2(x1, x2)          x1, x2, 0UL, 0UL
 #define IF_IN(c)               X_ALWAYS, X_ALWAYS, DSL_COND_ON(c), DSL_COND_OFF(c)

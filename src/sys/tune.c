@@ -60,6 +60,7 @@ static const struct { char tag[2]; uint16_t mask; } s_check[] = {
 };
 #define CHECK_N ((uint16_t)(sizeof(s_check) / sizeof(s_check[0])))
 
+#if AGV_DEV_TESTS
 static void hs_start(void);
 
 /* t3 개발 시험. 줄을 더하면 t3.n 이 는다. run 다음 상태가 끝 상태이고 ui.c 가 둘을 그린다 */
@@ -72,6 +73,10 @@ static const struct { char tag[2]; void (*start)(void); uint16_t run; } s_dev[] 
     { {'H', 'S'}, hs_start,         TUNE_HS }
 };
 #define DEV_N ((uint16_t)(sizeof(s_dev) / sizeof(s_dev[0])))
+#define TUNE_CATS 3u
+#else
+#define TUNE_CATS 2u               /* t3 없음: t1·t2 만 */
+#endif
 
 /* 결과 쪽. PK_SET 채택(파라미터 화면과 같은 이름·자릿수), PK_PAR 파라미터 값(같은 이름, 채택 없음), PK_VAL 잰 값.
  * 잰 값 이름은 파라미터 화면 이름(ui.c s_view)과 겹치지 않는다 */
@@ -130,9 +135,12 @@ void tune_arm(void)
     clear_measure();
 }
 
+#if AGV_DEV_TESTS
 static int dev_pick(uint16_t n) { return (s_tune.cat == 3u) && (s_tune.item == n); }
 
+#endif
 int      tune_active(void)     { return s_tune.state != TUNE_OFF; }
+#if AGV_DEV_TESTS
 int      tune_ident_mode(void) { return dev_pick(TUNE_DEV_IDENT); }
 int      tune_rpm_mode(void)   { return dev_pick(TUNE_DEV_RPM); }
 int      tune_top_mode(void)   { return dev_pick(TUNE_DEV_TOP); }
@@ -154,6 +162,7 @@ static void hs_enter(void)
     s_tune.hs_up = up;
     if ((s_tune.hs == 0) || (s_tune.hs > up)) { s_tune.hs = up; }
 }
+#endif
 int      tune_editing(void)    { return s_tune.editing; }
 uint16_t tune_state(void)      { return s_tune.state; }
 uint16_t tune_page(void)       { return s_tune.page; }
@@ -163,7 +172,11 @@ uint32_t tune_line_at(uint16_t i) { return s_tune.line_at[(i < 2u) ? i : 1u]; }
 void     tune_cross_clear(void)  { s_tune.lines = 0; s_tune.led_prev = 0; }
 
 /* t3 시험 진행 상태 */
+#if AGV_DEV_TESTS
 static int dev_running(uint16_t st) { return (st >= TUNE_IDENT) && (((st - TUNE_IDENT) & 1u) == 0u); }
+#else
+#define dev_running(st) 0
+#endif
 
 static int measuring(void)
 {
@@ -502,7 +515,9 @@ static int16_t cur_field(void)
     if (s_tune.state != TUNE_WAIT) { return -1; }
     if ((s_tune.cat == 1u) && (s_tune.item > 0u)) { return s_t1[s_tune.item - 1u]; }
     if ((s_tune.cat == 2u) && (s_tune.sub > 0u))  { return F_TRACK; }
+#if AGV_DEV_TESTS
     if ((s_tune.cat == 3u) && (s_tune.sub > 0u))  { return F_HS; }
+#endif
     return -1;
 }
 
@@ -556,28 +571,34 @@ static int edit_begin(void)
 
 static uint16_t items(void)
 {
+#if AGV_DEV_TESTS
     return (s_tune.cat == 1u) ? T1_INPUTS : ((s_tune.cat == 2u) ? CHECK_N : DEV_N);
+#else
+    return (s_tune.cat == 1u) ? T1_INPUTS : CHECK_N;
+#endif
 }
 
 static int menu_key(uint16_t key)
 {
     switch (key) {
     case KEY_UP:               /* 같은 단계 다음 칸 (MODE 는 넘기지 않는다) */
-        if (s_tune.item == 0u)     { s_tune.cat = (uint16_t)(s_tune.cat % 3u + 1u); }
+        if (s_tune.item == 0u)     { s_tune.cat = (uint16_t)(s_tune.cat % TUNE_CATS + 1u); }
         else if (s_tune.sub == 0u) { s_tune.item = (uint16_t)(s_tune.item % items() + 1u); }
         return 1;
     case KEY_DOWN:             /* 이전 칸 */
-        if (s_tune.item == 0u)     { s_tune.cat = (uint16_t)((s_tune.cat + 1u) % 3u + 1u); }
+        if (s_tune.item == 0u)     { s_tune.cat = (uint16_t)((s_tune.cat + TUNE_CATS - 2u) % TUNE_CATS + 1u); }
         else if (s_tune.sub == 0u) { s_tune.item = (uint16_t)((s_tune.item + items() - 2u) % items() + 1u); }
         return 1;
     case KEY_SET:
         if (s_tune.item == 0u) { s_tune.item = 1; return 1; }
         if (cur_field() >= 0) { return edit_begin(); }
         if ((s_tune.cat == 2u) && (s_check[s_tune.item - 1u].mask & BLD_DIA)) { s_tune.sub = 1; }
+#if AGV_DEV_TESTS
         if ((s_tune.cat == 3u) && (s_tune.item == TUNE_DEV_HS)) {
             s_tune.sub = 1;
             hs_enter();
         }
+#endif
         return 1;
     case KEY_RESET:
         if (s_tune.sub > 0u)       { s_tune.sub = 0; }
@@ -628,11 +649,15 @@ int tune_key(uint16_t key)
 
     if (key == 0u) { return 0; }
     if ((key & (key - 1u)) == 0u) { s_tune.splash = 0; }   /* 키 하나. 켤 때 누른 MODE + SET 은 아니다 */
+#if AGV_DEV_TESTS
     if (st == TUNE_RPM) {               /* 시험 중 아무 키나 누르면 끊고 보통 정지 */
         (void)ident_rpm_key();
         return 1;
     }
     if (((st == TUNE_TEMP) || (st == TUNE_BLD)) && ident_coast_key()) { return 1; }   /* 가감속 찾기·정지 중 아무 키 */
+#else
+    if ((st == TUNE_BLD) && ident_coast_key()) { return 1; }
+#endif
     if ((st == TUNE_BLD) && ident_rpm_key()) { return 1; }
     if (D.flag_run || D.flag_stopping) { return 0; }
     if (s_tune.editing) { return edit_key(key); }
@@ -640,6 +665,7 @@ int tune_key(uint16_t key)
     case TUNE_WAIT:     return menu_key(key);
     case TUNE_BLD_DONE: return result_key(key);
     case TUNE_SAVED:    return 1;      /* 전원을 다시 켠다 */
+#if AGV_DEV_TESTS
     case TUNE_RPM_DONE:
     case TUNE_TOP_DONE:
     case TUNE_ALL_DONE:
@@ -658,6 +684,7 @@ int tune_key(uint16_t key)
         if (key != KEY_RESET) { return 0; }
         s_tune.state = TUNE_WAIT;
         return 1;
+#endif
     default:
         return 0;
     }
@@ -677,10 +704,12 @@ static void start(void)
         agv_build.acc_cap = s_tune.acc_cap;
         s_tune.state = TUNE_BLD;
     }
+#if AGV_DEV_TESTS
     else if ((s_tune.cat == 3u) && (s_tune.item > 0u)) {
         s_dev[s_tune.item - 1u].start();
         s_tune.state = s_dev[s_tune.item - 1u].run;
     }
+#endif
     else {
         tagact_stop();         /* 고른 시험이 없다 */
     }
@@ -702,9 +731,11 @@ void tune_run(void)
         int r = ident_run();
         if (r != 0) { bld_finish(r); }
     }
+#if AGV_DEV_TESTS
     else if (dev_running(st)) {
         if (ident_run() != 0) { s_tune.state = (uint16_t)(st + 1u); }
     }
+#endif
 }
 
 /* ---- 표시 ---- */
@@ -805,7 +836,11 @@ uint16_t tune_text(char *c)
         c[0] = 'T';
         c[1] = (char)('0' + s_tune.cat);
         if (s_tune.item > 0u) {        /* t2.1CH */
+#if AGV_DEV_TESTS
             const char *tag = (s_tune.cat == 2u) ? s_check[s_tune.item - 1u].tag : s_dev[s_tune.item - 1u].tag;
+#else
+            const char *tag = s_check[s_tune.item - 1u].tag;
+#endif
             dot = 2u;
             c[2] = (char)('0' + s_tune.item);
             c[3] = tag[0];

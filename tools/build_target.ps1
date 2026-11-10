@@ -3,6 +3,8 @@
 # Core objects go to <ObjDir>/core, site objects to <ObjDir>/site.
 # -CoreCache reuses existing core objects. Use it only when the core tree cannot change for that ObjDir
 #   (for example an app keys ObjDir by the hash of its vendored core). Site files are always compiled.
+# A site turns off the tuning t3 dev tests with '#define AGV_DEV_TESTS 0' in its site.h. The core is then compiled
+#   with -DAGV_DEV_TESTS=0 into <ObjDir>/core_dev0 and the library name gets '_dev0', so a cache never mixes the two.
 # -CoreLib archives the core objects into that library and links the site objects against it
 #   (the same way an IDE project that links the core library does). -CoreOnly stops after the library.
 param([string]$Site = 'examples/empty_site', [string]$Out = 'build/c28/agv_empty',
@@ -14,7 +16,19 @@ $cgt = 'C:\ti\ti-cgt-c2000_18.12.2.LTS\ti-cgt-c2000_18.12.2.LTS'
 $cl = "$cgt\bin\cl2000.exe"
 $flags = '-v28', '-ml', '-mt', '--c99', '--float_support=softlib', '-O2', '--opt_for_speed=2', '-g',
          '--diag_warning=225', '--display_error_number', "-I$cgt\include", '-Iinclude', '-Ihal/f2808'
+$devTests = 1
+$siteH = Join-Path $Site 'site.h'
+if (Test-Path $siteH) {
+    $m = [regex]::Match([IO.File]::ReadAllText((Resolve-Path $siteH)), '(?m)^\s*#\s*define\s+AGV_DEV_TESTS\s+(\d+)')
+    if ($m.Success) { $devTests = [int]$m.Groups[1].Value }
+}
+$devFlag = @()
 $coreDir = Join-Path $ObjDir 'core'
+if ($devTests -eq 0) {
+    $devFlag = @('-DAGV_DEV_TESTS=0')
+    $coreDir = Join-Path $ObjDir 'core_dev0'
+    if ($CoreLib -ne '') { $CoreLib = [IO.Path]::Combine([IO.Path]::GetDirectoryName($CoreLib), [IO.Path]::GetFileNameWithoutExtension($CoreLib) + '_dev0' + [IO.Path]::GetExtension($CoreLib)) }
+}
 $siteDir = Join-Path $ObjDir 'site'
 New-Item -ItemType Directory -Force $coreDir, $siteDir | Out-Null
 
@@ -34,7 +48,7 @@ $coreObjs = @()
 foreach ($f in @(Get-ChildItem src/*.c, src/sys/*.c, hal/f2808/*.c, hal/f2808/*.asm)) {
     $o = Join-Path $coreDir ($f.BaseName + '.obj')
     if ($CoreCache -and (Test-Path $o)) { $coreObjs += $o; continue }
-    $coreObjs += Compile $f $coreDir @()
+    $coreObjs += Compile $f $coreDir $devFlag
 }
 if ($failed -ne 0) { Write-Output "COMPILE FAILED: $failed"; exit 1 }
 
@@ -56,7 +70,7 @@ if ($CoreLib -ne '') {
 
 $siteObjs = @()
 foreach ($f in @(Get-ChildItem "$Site/*.c")) {
-    $siteObjs += Compile $f $siteDir @("-I$Site")
+    $siteObjs += Compile $f $siteDir (@("-I$Site") + $devFlag)
 }
 if ($failed -ne 0) { Write-Output "COMPILE FAILED: $failed"; exit 1 }
 
