@@ -76,10 +76,10 @@ static const struct { char tag[2]; void (*start)(void); uint16_t run; } s_dev[] 
 /* 결과 쪽. PK_SET 채택(파라미터 화면과 같은 이름·자릿수), PK_PAR 파라미터 값(같은 이름, 채택 없음), PK_VAL 잰 값.
  * 잰 값 이름은 파라미터 화면 이름(ui.c s_view)과 겹치지 않는다 */
 enum { PK_SET = 0, PK_VAL, PK_PAR, PK_GA, PK_SAVE };
-enum { N_G = 0, N_TP, N_DM, N_FR, N_OS, N_SE, N_LR, N_OV, N_A, N_AM, N_RT };
+enum { N_G = 0, N_TP, N_DM, N_FR, N_OS, N_SE, N_LR, N_OV, N_A, N_AM, N_RT, N_BK };
 static const char s_name[][2] = {
     {'G', ' '}, {'T', 'P'}, {'D', 'M'}, {'F', 'R'}, {'O', 'S'}, {'S', 'E'}, {'L', 'R'}, {'O', 'V'}, {'A', ' '}, {'A', 'M'},
-    {'R', 'T'}
+    {'R', 'T'}, {'B', 'K'}
 };
 typedef struct { int16_t kind, id, v, old, flag; } page_t;   /* flag: PK_SET 채택, PK_VAL NG. PK_VAL old 1 = 이름 한 글자 + 네 자리 */
 
@@ -395,6 +395,9 @@ static void build_pages(void)
         int16_t base = (int16_t)((uint16_t)tune_base(TUNE_BASE_AMP_SE) & 0xFFu);
         add(PK_VAL, N_SE, b->se_x10, 0, chk && tune_base_valid() && (base > 0) && (b->se_x10 != TUNE_NO_DATA)
                                         && ((int32_t)b->se_x10 * 100L > (int32_t)base * (100L + TUNE_NG_SE_PCT)));
+    }
+    if ((m & BLD_STEER) && !chk) {   /* 후진 점검 평균 편차 칸 × 10. 안 함 ---, 치우침 큼·발산은 깜박임 */
+        add(PK_VAL, N_BK, (b->bk_judge > 0) ? b->bk_dev_x10 : TUNE_NO_DATA, 0, b->bk_judge >= 2);
     }
     add(PK_VAL, N_LR, b->lr_permille, 0, chk && (lr > TUNE_NG_LR));
     if (m & BLD_GA) {

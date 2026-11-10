@@ -20,7 +20,9 @@
  * 바닥 rpm 시험(RPM)은 같은 0회 뒤 1~5회. 회 안(순서 = 단계 1~7)은 rpmtest.c 가 하고, 끝나면 실제 속도에서 이어
  * 다음 회 자리로 간다(8). 측정 중 교차선은 위치 모델상 선 가까이면 실패가 아니라 그 회를 끊고
  * 그 선에서 GD 더 가서 돈다. 결과는 agv_rpmt
- * 연속 시험(튜닝 t1·t2)은 위 시험들을 단계로 잇는다(ident.h). 단계마다 s_r 과 s_top·s_rpm 을 그 단계로 돌린다 */
+ * 연속 시험(튜닝 t1·t2)은 위 시험들을 단계로 잇는다(ident.h). 단계마다 s_r 과 s_top·s_rpm 을 그 단계로 돌린다.
+ * t1 전후진 차의 후진 점검은 편차 단계 전진 회 뒤 회 사이 이동으로 뒤가 넉넉한 자리에 서서, 180도 회전 대신 방향만 바꿔
+ * (0도 회전과 같다) 같은 회를 후진으로 한 번 더 한다 */
 #include <math.h>
 #include <string.h>
 #include "agv/ident.h"
@@ -89,6 +91,13 @@
 #define ACC_SLIP_TICKS   5        /* 이만큼 이어지면 미끄럼 */
 #define DCC_WIN_HI       80       /* DCC 판정 창: 지령이 회 속도의 80% → 30% 사이(저속 감속 제한 최저 속도 × 2 위만) */
 #define DCC_WIN_LO       30
+#define BK_CREEP_MM      500.0f   /* 후진 점검: 출발 뒤 이만큼은 최저 속도로 가며 발산을 본다 */
+#define BK_LIM           10       /* 그동안 편차가 이 칸(wide 20칸)에 닿으면 발산 */
+#define BK_LIM_WIDE      20
+#define BK_GROW_TICKS    10       /* 편차 절대값을 0.1 s 마다 견준다 */
+#define BK_GROW_N        5        /* 연속 이만큼 커지고 */
+#define BK_GROW_MIN      4        /* 이 칸 이상이면 발산 */
+#define BK_BIAS_X10      30       /* 후진 평균이 전진 평균과 3칸 넘게 다르면 치우침 큼 */
 #define KEEP_MARK        ((uint16_t)(0x7E57u ^ (uint16_t)(sizeof(agv_ident) + sizeof(agv_top) + sizeof(agv_all) \
                                                            + sizeof(agv_coast) + sizeof(agv_rpmt) + sizeof(agv_stopt) \
                                                            + sizeof(agv_build))))
@@ -97,7 +106,7 @@ enum { PH_RAMP = 1, PH_SETTLE, PH_HOLD, PH_SPD_UP, PH_SPD_DOWN, PH_LAT, PH_STOP,
 /* 순서 8 안의 이동: 선까지(LOS 뒤 마지막 APPROACH_MM 만 최저 속도), 직선 위 회전 자리까지 LOS, 서기 기다림 */
 enum { MV_LINE = 0, MV_POS, MV_HALT };
 /* 다음 회의 종류 */
-enum { NX_END = 0, NX_LINE, NX_IDENT, NX_SWEEP, NX_COAST, NX_STOPT, NX_RPM };
+enum { NX_END = 0, NX_LINE, NX_IDENT, NX_SWEEP, NX_COAST, NX_STOPT, NX_RPM, NX_BACK };
 #define PH_COAST PH_STOP          /* 지정 시험 단계 3 */
 #define PH_STOPT PH_STOP          /* 지정 시험 단계 4 위치 정지 */
 
@@ -183,6 +192,11 @@ typedef struct {
     float   r1;
 } srch_t;
 static srch_t s_acc, s_dcc;
+
+/* 후진 점검. st: 0 안 함·아직, 1 바꿀 자리로 가서 후진으로 바꾸는 중, 2 후진 회, 3 전진으로 되돌리는 중, 4 끝.
+ * flip 1 = 릴레이가 to 가 되기를 기다린다. d0 = 시작 방향. creep 1 = 출발 뒤 최저 속도 구간, 2 = 발산으로 서는 중 */
+enum { BK_NONE = 0, BK_OUT, BK_RUN, BK_RET, BK_END };
+static struct { int16_t st, d0, to, flip, creep, grow, last; } s_bk;
 
 static struct {                  /* 타력(정지 정확도) 한 회 */
     int16_t  last[2];
@@ -554,6 +568,11 @@ static void build_restore(int16_t state)
     (void)param_set_ram(P_DCC, agv_build.cfg_dcc);
     if (s_acc.a0 > 0) { (void)param_set_ram(P_ACC, s_acc.a0); }   /* ACC 찾기 후보 */
     s_acc.a0 = -1;
+    if ((s_bk.st != BK_NONE) && (s_bk.st != BK_END)) {   /* 후진 점검 중 끊겼다. 서면 시작 방향으로(정식 경로) */
+        run_dir_change(s_bk.d0 ? 2 : 1);
+        s_bk.st = BK_END;
+        s_bk.flip = s_bk.creep = 0;
+    }
     agv_build.state = state;
 }
 
@@ -762,6 +781,8 @@ static void pass_begin(void)
     if (sl_pass()) { s_id.budget = ahead_mm() - P.guide_dist_mm - MARGIN_MM - sl_mm(); }
     else           { s_id.budget = ahead_mm() - P.guide_dist_mm - DEC_MARGIN_MM - decel_mm(pass_rpm()); }
     D.p_test = 0;
+    s_bk.creep = (int16_t)(s_bk.st == BK_RUN);
+    s_bk.grow = s_bk.last = 0;
     enter(PH_RAMP);
 }
 
@@ -839,6 +860,11 @@ static int fail_now(void)
 static int slow_down(void)
 {
     int16_t c = (int16_t)(((int32_t)s_id.want * 4) / 5);
+    if (s_bk.st == BK_RUN) {         /* 후진 점검은 다시 하지 않는다. 잰 만큼으로 끝낸다 */
+        cur_lv()->cut |= 1;
+        sl_stop();
+        return 0;
+    }
     if ((PASS == 0u) || (s_id.want <= P.min_speed)) { return fail_now(); }
     s_id.cap[lvl()] = (c < P.min_speed) ? P.min_speed : c;
     s_id.retry = 1;
@@ -1478,6 +1504,13 @@ static float run_need(int16_t v, int16_t ticks, float end)
     return P.guide_dist_mm + accel_mm(v) + (float)ticks * mm_tick(v) / PLAN_SLACK + end;
 }
 
+/* 후진 점검 회에 필요한 앞 거리: 처음 BK_CREEP_MM 최저 속도 + 편차 회(NX_SWEEP)와 같은 셈 */
+static float bk_need(void)
+{
+    int16_t v = rpm_at(SWEEP_LEVEL);
+    return BK_CREEP_MM + run_need(v, SETTLE_TICKS + 2 * WIN_TICKS, DEC_MARGIN_MM + decel_mm(v));
+}
+
 float ident_hs_need_mm(int16_t mpm)
 {
     int16_t v = param_rpm(mpm);
@@ -1554,7 +1587,9 @@ void ident_start_build(uint16_t mask, int16_t track_in_mm, int16_t cap_mpm)
     agv_build.acc_max = agv_build.acc_rec = agv_build.dcc_max = -1;
     memset(&s_acc, 0, sizeof(s_acc));
     memset(&s_dcc, 0, sizeof(s_dcc));
+    memset(&s_bk, 0, sizeof(s_bk));
     s_acc.a0 = -1;
+    agv_build.bk_dev_x10 = TUNE_NO_DATA;
     agv_build.se_x10 = TUNE_NO_DATA;
     s_build = mask;
 }
@@ -1708,6 +1743,88 @@ static float cid_next(void)
     return (d > CID_MAX_MM) ? CID_MAX_MM : d;
 }
 
+/* 후진 점검을 하는 시험: 제작(t1), 전후진 차(TFB 일의 자리 > 0), 편차 단계 */
+static int bk_want(void)
+{
+    return s_build && !(s_build & BLD_CHECK) && (P.forback_mode > 0) && (agv_all.stage == 6);
+}
+
+/* 방향 전환을 건다. 앞뒤 대칭이라 0도 회전과 같다: 회전 중심 자리 그대로, 방향만 뒤집는다(PH_TURN 이 잇는다) */
+static void bk_flip(void)
+{
+    s_pos.turn_at = pos_mm();
+    s_bk.to = (int16_t)!D.backward;
+    s_bk.flip = 1;
+    s_id.t = 0;
+    run_dir_change(D.backward ? 1 : 2);   /* run.c auto_run 이 서 있을 때 릴레이를 바꾸고 KEEP 에 쓴다 */
+    enter(PH_TURN);
+}
+
+/* 후진 회 끝. 발산(3)은 bk_creep 이 정했다. 정속 측정이 없으면 안 함(0) */
+static void bk_judge(void)
+{
+    const ident_level_t *f = &agv_all.sw[0].lv[0], *k = &agv_all.sw[0].lv[1];
+    float d;
+
+    if ((agv_build.bk_judge != 0) || (k->v_mpm == 0.0f)) { return; }
+    d = k->dev_mean_mm / GUIDE_MM * 10.0f;
+    agv_build.bk_dev_x10 = (int16_t)((d < 0.0f) ? d - 0.5f : d + 0.5f);
+    agv_build.bk_judge = (fabsf(k->dev_mean_mm - f->dev_mean_mm) * 10.0f > (float)BK_BIAS_X10 * GUIDE_MM) ? 2 : 1;
+}
+
+/* 편차 단계 회가 끝나 서 있다(방향 전환도 끝났다). 0 = 할 일 없음(단계 끝, 안 했으면 판정 0), 1 = 전진으로 되돌리는 방향 전환을
+ * 걸었다(릴레이를 기다린다), 2 = 후진 회로. 후진으로 바꾸는 것은 halt_run 이 바꿀 자리에서 건다 */
+static int bk_turn(void)
+{
+    if (s_bk.st == BK_OUT) {
+        s_bk.st = BK_RUN;
+        return 2;
+    }
+    if (s_bk.st == BK_RUN) {         /* 정상·발산 모두 서 있다. 그 자리에서 전진으로 되돌린다 */
+        bk_judge();
+        s_bk.st = BK_RET;
+        bk_flip();
+        return 1;
+    }
+    s_bk.st = BK_END;
+    return 0;
+}
+
+/* 후진 회 처음 BK_CREEP_MM: 최저 속도로 가며 편차가 문턱에 닿거나 계속 커지거나 선을 잃으면 바로 선다(발산, 판정 3).
+ * t1 실패가 아니다. 가이드 이탈 오류(전부 꺼짐 600 mm)보다 먼저 선다. 다 가면 회 속도로 올린다(PH_RAMP 그대로) */
+static int bk_creep(int stopped)
+{
+    int16_t g = (D.guide_pos < 0) ? (int16_t)-D.guide_pos : D.guide_pos;
+
+    if (D.stop_sw || D.estop || (D.system_err != 0) || (D.stop_err != 0)) { return fail_now(); }
+    if (s_bk.creep == 2) {
+        if (!stopped) { return (++s_id.t > STOP_LIMIT) ? fail_now() : 0; }
+        s_bk.creep = 0;
+        leave(1);                    /* 끝 회: 그 자리에서 다음(전진 되돌림)으로 */
+        return 0;
+    }
+    if (stopped || D.flag_stopping) { return fail_now(); }
+    set_speed(P.min_speed, 1);
+    if ((s_id.t++ % BK_GROW_TICKS) == 0) {
+        s_bk.grow = (int16_t)((g > s_bk.last) ? s_bk.grow + 1 : ((g < s_bk.last) ? 0 : s_bk.grow));
+        s_bk.last = g;
+    }
+    if (D.guide_all_off || (g >= (D.guide_wide ? BK_LIM_WIDE : BK_LIM)) || ((s_bk.grow >= BK_GROW_N) && (g >= BK_GROW_MIN))) {
+        agv_build.bk_judge = 3;
+        agv_build.bk_dev_x10 = (int16_t)(lateral() * 10.0f);
+        D.p_test = 0;
+        tagact_stop();
+        s_bk.creep = 2;
+        s_id.t = 0;
+        return 0;
+    }
+    if (mm_since(s_id.begin) >= BK_CREEP_MM) {
+        s_bk.creep = 0;
+        s_id.t = 0;
+    }
+    return 0;
+}
+
 /* 회전(또는 그 자리 정지)이 끝났다. 단계가 끝났으면 다음 단계로, 마지막이면 그 자리에서 기다린다 */
 static int build_turn(void)
 {
@@ -1732,8 +1849,12 @@ static int build_turn(void)
         if (!done) { s_bld.cid = cid_next(); }
     }
     else {
-        agv_all.sw[agv_all.sweep_k].done++;
+        int r = 0;
+        if (s_bk.st <= BK_OUT) { agv_all.sw[agv_all.sweep_k].done++; }   /* 전진 회. 후진 회는 세지 않는다 */
         done = (PASS >= BLD_DEV_PASSES);
+        if (done) { r = bk_turn(); }
+        if (r == 1) { return 0; }    /* 방향 전환을 걸었다 */
+        if (r == 2) { done = 0; }    /* 후진 회로 */
     }
     if (done) {
         *s_r.state = 2;
@@ -1788,6 +1909,11 @@ static int16_t next_kind(uint16_t *np, int16_t *free)
         if (!done) {
             if (st == 2u) { *np = 4u; *free = 1; return NX_RPM; }   /* 점검 1회 뒤 4회 */
             return (st == 4u) ? NX_COAST : (st == 5u) ? NX_STOPT : NX_SWEEP;
+        }
+        if ((st == 6u) && (s_bk.st == BK_NONE) && bk_want() && s_pos.ok
+            && (bk_need() <= s_pos.len - P.guide_dist_mm - MARGIN_MM)) {   /* 후진 회. 직선에 안 들어가면 안 한다 */
+            *free = 0;
+            return NX_BACK;
         }
         *free = 1;
         *np = 1u;
@@ -1852,6 +1978,10 @@ static float next_need(int16_t *free)
     case NX_RPM:
         c = rpmt_need_mm(p);
         return (c > 0.0f) ? c : NEED_LINE;
+    case NX_BACK:                    /* 뒤가 이만큼인 자리에 서서 회전 대신 방향을 바꾼다(halt_run) */
+        s_bk.st = BK_OUT;
+        s_bk.d0 = D.backward;
+        return bk_need();
     default:
         return NEED_LINE;
     }
@@ -1946,6 +2076,10 @@ static int halt_run(int stopped)
         s_pos.ref = travel();
         enter(PH_TURN);              /* 재출발이 다음 회를 연다 */
         return turn_done();
+    }
+    if (s_bk.st == BK_OUT) {         /* 후진 점검: 회전 대신 방향 전환 */
+        bk_flip();
+        return 0;
     }
     s_pos.turn_at = pos_mm();
     D.tape_slow = 0;
@@ -2053,6 +2187,14 @@ int ident_run(void)
         return 0;
     }
     if (ph == PH_TURN) {
+        if (s_bk.flip) {             /* 방향 전환: 릴레이가 바뀌면 0도 회전처럼 위치를 잇는다(ref 는 바뀐 쪽 카운터) */
+            if (D.backward != s_bk.to) { return (++s_id.t > STOP_LIMIT) ? fail_now() : 0; }
+            s_bk.flip = 0;
+            s_pos.at = s_pos.turn_at;
+            s_pos.ref = travel();
+            s_pos.dir = (int16_t)-s_pos.dir;
+            return turn_done();
+        }
         if (D.flag_turn) { s_id.turn_seen = 1; }
         else if (s_id.turn_seen && !D.tape_align && !D.flag_stopping && (D.turn_motion == 0)) {
             s_pos.at = s_pos.turn_at;
@@ -2066,6 +2208,7 @@ int ident_run(void)
     if ((ph == PH_SEEK) && (s_id.mv == MV_HALT)) { return halt_run(stopped); }
     if (s_rpm && (ph < PH_SEEK)) { return rpm_run(stopped); }   /* 교차선은 rpm_run 이 본다 */
     if ((ph <= PH_STOP) && D.guide_all_on) { return fail_now(); }   /* 측정 중 교차선 */
+    if (s_bk.creep) { return bk_creep(stopped); }
     if (coast() && (ph <= PH_COAST)) { return coast_run(stopped); }
     if (ph == PH_STOP) {
         if (stopped) {
