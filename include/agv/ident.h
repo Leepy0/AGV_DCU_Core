@@ -200,7 +200,8 @@ typedef struct {
     int16_t n;                     /* curve 칸 수 */
     int16_t curve[COAST_CURVE];    /* 고정부터 20 ms 마다 좌우 평균 원시 rpm */
     float   v0_mpm, dec_mps2;      /* dec_rpm_s 를 m/s². 닿지 않으면 -1 */
-    int16_t cut;                   /* 비트 합. 1 감속 끝점에서 풀었다, 2 속도를 낮췄다, 4 가이드가 벗어나 풀었다 */
+    int16_t cut;                   /* 비트 합. 1 감속 끝점에서 풀었다, 2 속도를 낮췄다, 4 가이드가 벗어나 풀었다,
+                                      8 감속이 2 m/s² 를 넘어 앰프 제동으로 보고 평균에서 뺐다 */
 } coast_pass_t;                    /* float 는 짝수 칸(72)에 온다 */
 
 typedef struct {
@@ -271,6 +272,7 @@ void  ident_speed(int16_t v, int ramp);   /* 주행 지령. ramp 0 = 바로 */
  *  3 최고 속도: TOP 1·2회. 1번 추천 = min(내림(max_mpm × 0.85), 상한). 뒤 단계는 이 값(RAM)으로 달린다.
  *          제작은 1회로 추천이 상한에 닿으면(top_capped) 2회를 건너뛴다.
  *  4 타력: 최고 속도로 BLD_COAST_PASSES 회. 13번 추천 = 내림(감속도 평균 × 0.8 ÷ 100), 20~60 으로 자른다. 뒤 단계는 이 값(RAM).
+ *          감속이 2 m/s² 를 넘은 회는 앰프 제동으로 보고 평균에서 뺀다(cut 8). 남은 회가 없으면 DCC 추천 없음, 뒤 단계는 지금 DCC.
  *  5 정지: 최고 속도에서 교차로 위치 정지. 제작은 목표 20 cm 부터, 다음 목표 = 올림(목표 + 지나침 - BLD_OVER_OK_MM, 10 cm),
  *          적어도 +10 cm, 많아야 60 cm. 지나침이 BLD_OVER_OK_MM 이하인 첫 목표에서 멈춘다(35번 추천).
  *          점검(BLD_CHECK)은 지금 35번(0 이면 60 cm)으로 한 번.
@@ -309,7 +311,7 @@ typedef struct {
     int16_t turn_x1000;      /* 잰 제자리 회전 보정비 × 1000(둘째 회전 펄스 ÷ 휠 간격 180도 펄스). 0 = 안 함 */
     int16_t lr_permille;     /* 둘째 직선 우/좌 펄스 비 - 1, 천분율 */
     int16_t top_rpm;         /* agv_top.max_rpm 좌우 평균. 0 = 없음 */
-    int16_t dec_rpm_s;       /* 타력 감속도 평균. 0 = 없음 */
+    int16_t dec_rpm_s;       /* 타력 감속도 평균(제동으로 보인 회는 뺀다). 0 = 없음 */
     int16_t over_mm;         /* 정지 단계 마지막 회 지나친 거리 */
     int16_t ov_mm;           /* BLD_GA: 선을 본 뒤 미끄러진 거리 */
     int16_t amp;             /* agv_rpmt.amp. 1회를 안 하는 제작(t1)은 0 */

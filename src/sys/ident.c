@@ -77,6 +77,8 @@
 #define COAST_TICKS      300      /* 3 s 안에 최저 속도가 안 되면 풀고 다음으로 */
 #define COAST_EST_RPM_T  10.0f    /* 타력 거리 어림 감속도 1000 rpm/s 를 틱으로 */
 #define COAST_GUIDE_OFF  10       /* 조향이 꺼져 있으니 가이드가 이만큼 벗어나면 푼다(위험 감속 문턱) */
+#define COAST_BRAKE_MPS2 2.0f    /* 타력 감속이 이보다 크면 굴러서 선 것이 아니라 앰프가 제동했다 */
+#define COAST_CUT_BRAKE  8        /* cut 비트: 제동으로 보여 평균에서 뺐다 */
 #define ACC_WIN_LO       30       /* ACC 판정 창: 지령이 목표의 30% → 80% 사이(저속 가속 제한 llow 위만) */
 #define ACC_WIN_HI       80
 #define ACC_FOLLOW_PCT   90       /* 창 안 실제 가속도가 지령 가속도의 이만큼 이상이어야 깨끗하다 */
@@ -1116,6 +1118,7 @@ static int coast_end(coast_pass_t *cp, int16_t act, int reached)
     cp->dec_lo_rpm_s = coast_dec(v0, 0.3f, 1u, 2u);
     cp->v0_mpm = v0 / P.one_meter_rpm;
     cp->dec_mps2 = (cp->dec_rpm_s < 0) ? -1.0f : (float)cp->dec_rpm_s / P.one_meter_rpm / 60.0f;
+    if (cp->dec_mps2 > COAST_BRAKE_MPS2) { cp->cut |= COAST_CUT_BRAKE; }
     for (i = 0; i < 2u; i++) { D.w_pi_out[i] = D.iref_it[i] = D.iref_fb[i] = 0.0f; }   /* 타력 전 정속 적분은 버린다 */
     steer_reset();
     D.vin_out = (act < P.min_speed) ? act : P.min_speed;
@@ -1564,8 +1567,9 @@ static void stage_end(uint16_t st)
     case 4: {
         int32_t sum = 0;
         for (i = k = 0; i < BLD_COAST_PASSES; i++) {
-            if (agv_coast.p[i].dec_rpm_s > 0) { sum += agv_coast.p[i].dec_rpm_s; k++; }
+            if ((agv_coast.p[i].dec_rpm_s > 0) && !(agv_coast.p[i].cut & COAST_CUT_BRAKE)) { sum += agv_coast.p[i].dec_rpm_s; k++; }
         }
+        /* 유효한 회가 없으면 추천 없음(-1)·감속 측정 없음(0). 뒤 단계는 지금 DCC 로 간다 */
         if (k > 0u) {                 /* 타력으로 낼 수 있는 감속의 0.8. DCC 1 = 100 rpm/s */
             b->dec_rpm_s = (int16_t)(sum / (int32_t)k);
             b->dcc_rec = clamp_p(P_DCC, ((int32_t)b->dec_rpm_s * 8L) / 1000L);
