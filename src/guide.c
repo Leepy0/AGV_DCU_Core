@@ -40,6 +40,11 @@ static uint16_t    s_tape_q4;     /* 배운 테이프 폭 × 16. 0 = 모름. 센
 static int16_t     s_edge_s, s_edge_e;   /* 정상 추적 때의 가장자리 칸. 붙어 있는 동안은 고치지 않는다.
                                             매 스캔 고치면 지나가는 교차선의 가장자리를 따라 끌려간다 */
 static uint16_t    s_release;
+/* 다시 잡을 때 지속 확인(주행 위치 경로만). 잡았다가 잃은 뒤 처음 보이는 덩어리는 후보로만 두고
+ * GUIDE_REACQ_N 응답을 이어 같은 자리에 있어야 받는다. 끊긴 자리의 바닥 반사 한두 칸을 주행선으로 받지 않는다 */
+static int16_t     s_reacq;       /* 이번 호출에 지속 확인을 건다 */
+static int16_t     s_ever;        /* 시작·센서 전환 뒤 선을 잡은 적이 있다. 첫 획득은 바로 받는다 */
+static int16_t     s_cand_pos, s_cand_n;
 
 void guide_cfg_default(guide_cfg_t *cfg)
 {
@@ -65,7 +70,12 @@ static void comm_clear(void)
     s_comm.error = 0;
 }
 
-void guide_on_run_start(void) { comm_clear(); }
+void guide_on_run_start(void)
+{
+    comm_clear();
+    s_ever = 0;
+    s_cand_n = 0;
+}
 
 void guide_on_sensor_switch(void)
 {
@@ -74,6 +84,8 @@ void guide_on_sensor_switch(void)
     s_prev = 0;           /* 앞 센서의 위치로 뒤 센서 덩어리를 고르면 안 된다 */
     s_prev_valid = 0;
     s_release = 0;
+    s_ever = 0;
+    s_cand_n = 0;
     comm_clear();
 }
 
@@ -355,6 +367,35 @@ static int16_t edge_fix(int16_t *s, int16_t *e, uint16_t leds, uint16_t blobs, i
     return GUIDE_TRK_NORMAL;
 }
 
+/* 잃은 뒤 다시 잡는 중인가. 1 = 아직 후보다(LOST 로 낸다). 후보 자리에 덩어리가 있으면 그것을, 없으면 고른 것을 새 후보로 */
+static int16_t reacq_wait(const guide_blob_t *b, uint16_t n, uint16_t leds, int16_t *chosen)
+{
+    uint16_t i;
+    int16_t pos;
+
+    if (s_cand_n > 0) {
+        for (i = 0; i < n; i++) {
+            int16_t d = (int16_t)(blob_pos(&b[i], leds) - s_cand_pos);
+            if (width_ok(&b[i]) && (d <= GUIDE_REACQ_TOL) && (d >= -GUIDE_REACQ_TOL)) { break; }
+        }
+        if (i < n) { *chosen = (int16_t)i; s_cand_n++; }
+        else       { s_cand_n = 1; }
+    }
+    else {
+        s_cand_n = 1;
+    }
+    pos = blob_pos(&b[*chosen], leds);
+    s_cand_pos = pos;
+    return s_cand_n < GUIDE_REACQ_N;
+}
+
+void guide_track_drive(const guide_rx_t *rx, int16_t branch, int16_t backward, guide_out_t *out)
+{
+    s_reacq = 1;
+    guide_track(rx, branch, backward, out);
+    s_reacq = 0;
+}
+
 void guide_track(const guide_rx_t *rx, int16_t branch, int16_t backward, guide_out_t *out)
 {
     guide_blob_t blob[GUIDE_BLOB_MAX];
@@ -372,7 +413,9 @@ void guide_track(const guide_rx_t *rx, int16_t branch, int16_t backward, guide_o
     }
     else {
         chosen = (out->blobs == 0) ? -1 : pick(blob, out->blobs, leds, branch, backward, invert);
-        if (chosen < 0) {
+        if (chosen < 0) { s_cand_n = 0; }
+        if ((chosen < 0)
+            || (s_reacq && (branch == 0) && s_ever && !s_prev_valid && reacq_wait(blob, out->blobs, leds, &chosen))) {
             out->status = GUIDE_LOST;
             out->width = 0;
             s_prev_valid = 0;
@@ -387,6 +430,8 @@ void guide_track(const guide_rx_t *rx, int16_t branch, int16_t backward, guide_o
             if (out->track != GUIDE_TRK_HOLD) {
                 s_prev = (int16_t)(s + e - (int16_t)(leds + 1));
                 s_prev_valid = 1;
+                s_ever = 1;
+                s_cand_n = 0;
             }
             if (out->track == GUIDE_TRK_NORMAL) {
                 s_edge_s = s;

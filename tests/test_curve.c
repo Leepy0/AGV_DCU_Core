@@ -53,7 +53,8 @@ typedef struct {
     int   v_mpm, los, drs;  /* 진입 속도, LOS, DRS (m/min) */
     float tau;              /* 속도 루프 시정수 s */
     int   lg;               /* LG */
-    int   mode;             /* 0 곡선, 1 옆 4단위 계단 지령, 2 편차 5단위에서 복귀 */
+    int   mode;             /* 0 곡선, 1 옆 4단위 계단 지령, 2 편차 5단위에서 복귀,
+                               3 테이프 100 mm 끊김 + 그 안 옆 8단위 자리에 길이 deg mm 인 점(바닥 반사) */
 } case_t;
 
 typedef struct {
@@ -64,6 +65,7 @@ typedef struct {
     float tail_pp;          /* 끝 1 m 의 편차 폭 mm. 지속 발진 지표 */
     int   lost, risk, err;  /* 선 잃음 틱, 위험 감속 틱, 정지 오류 */
     float over, steady;     /* 직선: 넘침(단위), 끝 1 m 평균 편차(단위) */
+    int   jump;             /* 직선: 계단·끊김 뒤 가이드 위치 절대값 최대(단위) */
     curve_rec_t rec;        /* 곡선 기록기 첫 기록 */
     int   rec_n;
 } res_t;
@@ -220,6 +222,11 @@ static void sim(const case_t *c, res_t *r)
 
         if (s_v.s >= end) { break; }
         if (seen && (fabsf(u) > (float)c->leds * PITCH_MM / 2.0f + TAPE_MM)) { seen = 0; }
+        if ((c->mode == 3) && (s_v.s > step_at) && (s_v.s <= step_at + 100.0f)) {
+            seen = (s_v.s > step_at + 45.0f) && (s_v.s <= step_at + 45.0f + c->deg);
+            u += 8.0f * GUIDE_UNIT_MM;
+            slant = 1.0f;
+        }
         sensor_reply(u, slant, seen);
         plant();
         scan();
@@ -228,6 +235,7 @@ static void sim(const case_t *c, res_t *r)
         if ((c->mode == 2) && (s_v.s > step_at) && !jog) { s_v.y -= c->deg * GUIDE_UNIT_MM; jog = 1; }   /* 테이프가 왼쪽으로 deg 단위 꺾였다 */
 
         dev = seen ? u : (float)c->leds * PITCH_MM / 2.0f;
+        if (c->mode == 3) { dev = -s_v.y - GD_MM * sinf(s_v.th); }   /* 끊긴 자리에서도 주행선 기준 */
         if (D.guide_all_off && D.flag_run) { r->lost++; }
         if (D.risk_stop) { r->risk++; }
         if (in_curve) {
@@ -241,6 +249,8 @@ static void sim(const case_t *c, res_t *r)
             r->body_r = (fabsf(s_v.th - th0) > 1e-4f) ? len / fabsf(s_v.th - th0) : 0.0f;
         }
         if (after) {
+            int a = (D.guide_pos >= 0) ? D.guide_pos : -D.guide_pos;
+            if (a > r->jump) { r->jump = a; }
             float e = (c->mode == 1) ? dev - 4.0f * GUIDE_UNIT_MM : dev;
             int sg = (e > GUIDE_UNIT_MM) ? 1 : ((e < -GUIDE_UNIT_MM) ? -1 : 0);
             if (fabsf(e) > r->exit_max) { r->exit_max = fabsf(e); }
@@ -341,6 +351,14 @@ int main(int argc, char **argv)
         assert((r.lost == 0) && (r.err == 0) && (r.risk == 0));
         assert(r.over < ((i == 1) ? 1.9f : 3.2f));              /* 고치기 전 2.03, 2.80 */
         assert((r.exit_flip <= 2) && (r.tail_pp < 5.0f) && (fabsf(r.steady) < 1.0f));
+    }
+    for (i = 10; i <= 40; i += 10) {     /* 끊긴 자리의 점. 31 m/min 은 응답당 5.2 mm: 10 mm 점은 2응답, 20 mm 는 3~4응답 */
+        case_t c = { 32, 0.0f, (float)i, 1, 31, 31, 31, 0.1f, 0, 3 };
+        sim(&c, &r);
+        printf("  끊김 100 mm + 점 %d mm: 위치 최대 %d 단위, 편차 최대 %.1f mm, 잃음 %d 틱\n", i, r.jump, r.exit_max, r.lost);
+        assert((r.err == 0) && (r.lost >= 15) && (r.exit_max < 20.0f));
+        if (i == 10) { assert((r.jump <= 1) && (r.exit_max < 1.0f)); }   /* GUIDE_REACQ_N 응답보다 짧은 점은 받지 않는다 */
+        if (i == 40) { assert(r.jump >= 8); }                            /* 긴 것은 받는다(지속 확인이 없으면 10 mm 도 이렇다) */
     }
     printf("test_curve ok\n");
     return 0;

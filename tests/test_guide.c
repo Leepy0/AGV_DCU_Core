@@ -121,6 +121,78 @@ static float cover(float c, float w, int i)
     return (b > a) ? (b - a) : 0.0f;
 }
 
+/* 다시 잡을 때 지속 확인. 주행 위치 경로(guide_track_drive)에서 잡았다가 잃은 뒤에만 건다 */
+static void test_reacq(void)
+{
+    guide_rx_t line = rx_narrow(BITS(7, 8)), none = rx_narrow(0), dot = rx_narrow(BITS(11, 12)), far = rx_narrow(BITS(2, 3));
+    guide_rx_t two = rx_narrow(BITS(2, 3) | BITS(11, 12)), all = rx_narrow(0xFFFF);
+    guide_out_t o;
+    int k;
+
+    /* (4) 첫 획득은 바로 */
+    guide_reset();
+    guide_track_drive(&dot, 0, 0, &o);
+    assert(o.status == GUIDE_NORMAL && o.pos == 8);
+    guide_track_drive(&line, 0, 0, &o);
+    assert(o.status == GUIDE_NORMAL && o.pos == 0);
+    /* (1) 잃은 뒤 다른 자리의 한 응답짜리 점: LOST 그대로, 위치 불변 */
+    guide_track_drive(&none, 0, 0, &o);
+    assert(o.status == GUIDE_LOST && o.pos == 0);
+    guide_track_drive(&dot, 0, 0, &o);
+    assert(o.status == GUIDE_LOST && o.pos == 0);
+    guide_track_drive(&none, 0, 0, &o);
+    assert(o.status == GUIDE_LOST && o.pos == 0);
+    /* (2) 같은 자리에 3응답 연속이면 받는다. 한 칸(2단위) 움직여도 같은 자리다 */
+    guide_track_drive(&dot, 0, 0, &o);
+    assert(o.status == GUIDE_LOST);
+    dot = rx_narrow(BITS(12, 13));
+    guide_track_drive(&dot, 0, 0, &o);
+    assert(o.status == GUIDE_LOST && o.pos == 0);
+    guide_track_drive(&dot, 0, 0, &o);
+    assert(o.status == GUIDE_NORMAL && o.pos == 10 && o.track == GUIDE_TRK_NORMAL);
+    /* (3) 점이 2응답 뒤 사라지고 진짜 선이 다른 자리에 3응답 */
+    guide_track_drive(&line, 0, 0, &o);
+    guide_track_drive(&none, 0, 0, &o);
+    dot = rx_narrow(BITS(11, 12));
+    guide_track_drive(&dot, 0, 0, &o);
+    guide_track_drive(&dot, 0, 0, &o);
+    assert(o.status == GUIDE_LOST && o.pos == 0);
+    for (k = 0; k < 3; k++) {
+        guide_track_drive(&far, 0, 0, &o);
+        assert((o.status == GUIDE_NORMAL) == (k == 2));
+    }
+    assert(o.pos == -10);
+    /* 후보(-10)가 이어지는 동안 믿던 위치에 더 가까운 점이 끼어도 후보를 바꾸지 않는다 */
+    guide_track_drive(&none, 0, 0, &o);
+    guide_track_drive(&far, 0, 0, &o);
+    guide_track_drive(&two, 0, 0, &o);
+    guide_track_drive(&two, 0, 0, &o);
+    assert(o.status == GUIDE_NORMAL && o.pos == -10);
+    /* 전부 켜짐(교차선) 뒤 복귀는 잃은 것이 아니다: 바로 */
+    guide_track_drive(&all, 0, 0, &o);
+    assert(o.status == GUIDE_ALL_ON);
+    guide_track_drive(&far, 0, 0, &o);
+    assert(o.status == GUIDE_NORMAL && o.pos == -10);
+    /* (5) 정렬 회전·튜닝 경로(guide_track)와 분기는 바로 */
+    guide_track_drive(&none, 0, 0, &o);
+    guide_track(&dot, 0, 0, &o);
+    assert(o.status == GUIDE_NORMAL && o.pos == 8);
+    guide_track_drive(&none, 0, 0, &o);
+    guide_track_drive(&two, BRANCH_LEFT, 0, &o);
+    assert(o.status == GUIDE_NORMAL && o.pos == -10);
+    /* (6) 센서 전환·주행 시작 뒤 첫 획득은 바로 */
+    guide_track_drive(&none, 0, 0, &o);
+    guide_on_sensor_switch();
+    guide_track_drive(&dot, 0, 0, &o);
+    assert(o.status == GUIDE_NORMAL && o.pos == 8);
+    guide_track_drive(&none, 0, 0, &o);
+    guide_on_run_start();
+    guide_track_drive(&far, 0, 0, &o);
+    assert(o.status == GUIDE_NORMAL && o.pos == -10);
+    guide_reset();
+    puts("  reacq ok");
+}
+
 /* 주행선은 가만히 있고 교차선이 센서를 왼쪽에서 오른쪽으로 지나간다. 반환: 참값과의 최대 오차(위치 단위) */
 static int cross_sim(int leds, float tape_mm, float main_c, float step, int *naive_worst)
 {
@@ -518,6 +590,7 @@ int main(void)
     assert(!guide_want_h(0, 0) && guide_want_h(1, 0) && !guide_want_h(1, 3));
     assert(param_set(P_LEGACY_QUIRKS, 0) == 0);
 
+    test_reacq();
     puts("test_guide ok");
     return 0;
 }

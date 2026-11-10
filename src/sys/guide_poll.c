@@ -86,7 +86,7 @@ static int on_led(const guide_rx_t *rx, guide_out_t *out)
     store_led(rx);
     if (guide_source_led()) {   /* 위치를 'a' 단위로 바꾼다. 배율은 튜닝 모드가 잰 h_scale(기본 1) */
         float v;
-        guide_track(rx, D.branch_start, D.backward, out);
+        guide_track_drive(rx, D.branch_start, D.backward, out);
         D.guide_track = out->track;
         if (out->track == GUIDE_TRK_NORMAL) { s_trk_mm6 = 0; }
         else {
