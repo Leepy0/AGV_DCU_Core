@@ -1309,7 +1309,7 @@ static void test_tune_entry(void)
     boot_keys(KEY_MODE + KEY_DOWN, 0);
     assert(!tune_active());
     boot_keys(KEY_MODE + KEY_SET, 0);
-    assert(tune_active() && (tune_state() == TUNE_WAIT) && (tune_menu() == 100));
+    assert(tune_active() && (tune_state() == TUNE_WAIT) && (tune_menu() == 1000));
     assert(shows("EE256") && (D.ui_mode == UI_AUTO));   /* 켠 뒤 1 s 칩 크기 */
     ticks(100);
     assert(shows("T1   "));
@@ -1345,59 +1345,78 @@ static void test_tune_menu(void)
 
     boot_keys(KEY_MODE + KEY_SET, 0);
     key(KEY_MODE);
-    assert(tune_menu() == 200 && shows("T2   "));
+    assert(tune_menu() == 2000 && shows("T2   "));
     key(KEY_MODE);
-    assert(tune_menu() == 300 && shows("T3   "));
+    assert(tune_menu() == 3000 && shows("T3   "));
     key(KEY_MODE);
-    assert(tune_menu() == 100);
-    key(KEY_SET);                                     /* t1 입력: 지름, GD, 상한, L */
-    assert(tune_menu() == 110 && shows("DI202"));
-    key(KEY_MODE);
-    assert(tune_menu() == 120 && shows("GD250"));
-    key(KEY_MODE);
-    assert(tune_menu() == 130 && shows("TP060"));     /* 빈 EEPROM 상한 60 */
-    key(KEY_MODE);
-    assert(tune_menu() == 140 && shows("L0000"));
-    key(KEY_MODE);                                    /* ACC 상한. 빈 EEPROM 은 12번 지금 값 */
+    assert(tune_menu() == 1000);
+    key(KEY_SET);                                     /* t1 입력: 시험 전에 확정할 값 15칸 */
     {
-        char want[6] = "AU0  ";
-        want[3] = (char)('0' + param_get(P_ACC) / 10);
-        want[4] = (char)('0' + param_get(P_ACC) % 10);
-        assert(tune_menu() == 150 && shows(want));
+        static const char names[15][3] = { "ID", "DI", "WW", "RG", "TG", "GD", "TF", "LO", "TN", "AC", "AU", "TP",
+                                           "OB", "BP", "L " };
+        char t[5];
+        for (k = 0; k < 15; k++) {
+            assert(tune_menu() == (uint16_t)(1000 + (k + 1) * 10));
+            (void)tune_text(t);
+            assert(t[0] == names[k][0] && ((k == 14) || (t[1] == names[k][1])));
+            if (k == 1)  { assert(shows("DI202")); }
+            if (k == 5)  { assert(shows("GD250")); }
+            if (k == 11) { assert(shows("TP060")); }  /* 빈 EEPROM 상한 60 */
+            if (k == 14) { assert(shows("L0000")); }
+            if (k == 10) {                            /* ACC 상한. 빈 EEPROM 은 12번 지금 값 */
+                char want[6] = "AU0  ";
+                want[3] = (char)('0' + param_get(P_ACC) / 10);
+                want[4] = (char)('0' + param_get(P_ACC) % 10);
+                assert(shows(want));
+            }
+            key(KEY_MODE);
+        }
     }
+    assert(tune_menu() == 1010);
+    key(KEY_MODE);                                    /* WW 를 고치면 그 파라미터가 바로 바뀐다 */
     key(KEY_MODE);
-    assert(tune_menu() == 110);
+    assert(tune_menu() == 1030);
+    {
+        int16_t ww = param_get(P_WHEEL_BASE_MM);
+        key(KEY_SET);
+        key(KEY_UP);
+        key(KEY_SET);
+        assert(param_get(P_WHEEL_BASE_MM) == ww + 1);
+        (void)param_set(P_WHEEL_BASE_MM, ww);
+    }
+    for (k = 0; k < 13; k++) { key(KEY_MODE); }
+    assert(tune_menu() == 1010);
     key(KEY_RESET);
-    assert(tune_menu() == 100);
+    assert(tune_menu() == 1000);
     key(KEY_MODE);
     key(KEY_SET);
-    assert(tune_menu() == 210 && shows("T21CH"));
+    assert(tune_menu() == 2010 && shows("T21CH"));
     ui_digits(d);
     for (k = 0; k < 3; k++) { key(KEY_MODE); }
-    assert(tune_menu() == 240 && shows("T24AP"));
+    assert(tune_menu() == 2040 && shows("T24AP"));
     key(KEY_SET);                                     /* L 입력 */
-    assert(tune_menu() == 241 && shows("L0000"));
+    assert(tune_menu() == 2041 && shows("L0000"));
     key(KEY_MODE);
-    assert(tune_menu() == 241);                       /* 한 칸뿐 */
+    assert(tune_menu() == 2041);                       /* 한 칸뿐 */
     key(KEY_RESET);
     key(KEY_MODE);
-    assert(tune_menu() == 210);
+    assert(tune_menu() == 2010);
     key(KEY_MODE);
     key(KEY_MODE);
     key(KEY_SET);                                     /* t2.3 은 L 이 없다 */
-    assert(tune_menu() == 230 && shows("T23GS"));
+    assert(tune_menu() == 2030 && shows("T23GS"));
     key(KEY_RESET);
     key(KEY_RESET);
-    assert(tune_menu() == 200);
+    assert(tune_menu() == 2000);
     key(KEY_MODE);
     key(KEY_SET);
-    assert(tune_menu() == 310 && tune_ident_mode() && shows("T31ID"));
+    assert(tune_menu() == 3010 && tune_ident_mode() && shows("T31ID"));
     for (k = 0; k < 4; k++) { key(KEY_MODE); }
     assert(tune_temp_mode() && !tune_all_mode() && shows("T35TE"));
     key(KEY_MODE);
     assert(tune_hs_mode() && shows("T36HS"));
     key(KEY_SET);                                     /* 속도 입력. 기본 1번(30), 1번 위로는 못 간다 */
-    assert(tune_menu() == 361 && shows("SP030"));
+    assert(tune_menu() == 3061 && shows("SP030"));
     key(KEY_SET);
     key(KEY_UP);
     key(KEY_SET);
@@ -1407,11 +1426,19 @@ static void test_tune_menu(void)
     key(KEY_SET);
     assert(shows("SP029") && tune_hs_mpm() == 29 && host.ee[TUNE_EE_CAP] != 29);   /* RAM 에만 */
     key(KEY_RESET);
-    assert(tune_menu() == 360);
+    assert(tune_menu() == 3060);
     key(KEY_MODE);
     assert(tune_ident_mode());
     assert(D.ui_mode == UI_AUTO && tune_active() && !D.flag_jog_on);
     printf("  tune menu ok\n");
+}
+
+/* t1 입력 칸 번호(1~15)로 MODE 를 눌러 간다. 2 지름, 11 ACC 상한, 12 속도 상한, 15 L */
+static void t1_to(int item)
+{
+    int k;
+    for (k = 0; (k < 16) && (tune_menu() != (uint16_t)(1000 + item * 10)); k++) { key(KEY_MODE); }
+    assert(tune_menu() == (uint16_t)(1000 + item * 10));
 }
 
 /* 입력: SET 수정, SHIFT 자리, UP·DOWN 값, SET 확정 즉시 저장, RESET 취소. L·상한은 다시 켜도 남는다 */
@@ -1420,7 +1447,8 @@ static void test_tune_inputs(void)
     int k;
 
     boot_keys(KEY_MODE + KEY_SET, 0);
-    key(KEY_SET);                                     /* t1 지름 */
+    key(KEY_SET);                                     /* t1 */
+    t1_to(2);                                         /* 지름 */
     key(KEY_SET);
     assert(tune_editing() && tune_flick() == 0x10u);
     key(KEY_UP);
@@ -1435,9 +1463,8 @@ static void test_tune_inputs(void)
     key(KEY_SET);
     key(KEY_UP);
     key(KEY_RESET);                                   /* 취소 */
-    assert(!tune_editing() && param_get(P_WHEEL_DIA_MM) == 213 && tune_menu() == 110);
-    key(KEY_MODE);
-    key(KEY_MODE);                                    /* 상한 */
+    assert(!tune_editing() && param_get(P_WHEEL_DIA_MM) == 213 && tune_menu() == 1020);
+    t1_to(12);                                        /* 상한 */
     key(KEY_SET);
     key(KEY_SHIFT);
     key(KEY_DOWN);                                    /* 50 */
@@ -1447,7 +1474,7 @@ static void test_tune_inputs(void)
     assert(shows("SAVE "));                           /* 저장 알림 1 s */
     ticks(100);
     assert(shows("TP055"));
-    key(KEY_MODE);                                    /* L 네 자리 */
+    t1_to(15);                                        /* L 네 자리 */
     key(KEY_SET);
     for (k = 0; k < 3; k++) { key(KEY_SHIFT); }
     assert(tune_flick() == 0x02u);
@@ -1460,7 +1487,7 @@ static void test_tune_inputs(void)
     ticks(20);
     assert(host.ee[TUNE_EE_TRACK] == 7005 && (host.ee[TUNE_EE_CAP] & 0xFFu) == 55u);
     assert((host.ee[TUNE_EE_CAP] >> 8) == (uint16_t)param_get(P_ACC));   /* ACC 상한은 위 바이트 */
-    key(KEY_MODE);                                    /* ACC 상한 12 → 위 바이트, 속도 상한은 그대로 */
+    t1_to(11);                                        /* ACC 상한 12 → 위 바이트, 속도 상한은 그대로 */
     key(KEY_SET);
     for (k = 0; (k < 10) && !shows("AU012"); k++) { key((param_get(P_ACC) < 12) ? KEY_UP : KEY_DOWN); }
     key(KEY_SET);
@@ -1468,12 +1495,11 @@ static void test_tune_inputs(void)
     assert(shows("AU012") && host.ee[TUNE_EE_CAP] == (uint16_t)((12u << 8) | 55u));
     boot_keys(KEY_MODE + KEY_SET, 1);
     key(KEY_SET);
-    key(KEY_MODE);
-    key(KEY_MODE);
+    t1_to(12);
     assert(shows("TP055"));
-    key(KEY_MODE);
+    t1_to(15);
     assert(shows("L7005"));
-    key(KEY_MODE);
+    t1_to(11);
     assert(shows("AU012"));
     printf("  tune inputs ok\n");
 }
@@ -1689,7 +1715,7 @@ static void test_tune_t2_compare(void)
     to_save();
     assert(shows("NONE "));          /* 1번을 건너뛰어 채택이 없다 */
     key(KEY_RESET);                  /* 저장 없이 메뉴로 */
-    assert(tune_state() == TUNE_WAIT && tune_menu() == 210);
+    assert(tune_state() == TUNE_WAIT && tune_menu() == 2010);
     ticks(50);
     assert(param_get(P_SPEED_HIGH) == 25 && host.ee[P_SPEED_HIGH] == 25);
     assert(tune_base(TUNE_BASE_TOP) == 3000);
@@ -1711,7 +1737,7 @@ static void t24_amp(uint16_t base_amp, int16_t now, uint16_t flick)
     key(KEY_MODE);
     key(KEY_SET);
     for (k = 0; k < 3; k++) { key(KEY_MODE); }   /* t2.4 */
-    assert(tune_base_valid() && tune_menu() == 240);
+    assert(tune_base_valid() && tune_menu() == 2040);
     drive_up();
     run_scan(3);
     assert(tune_state() == TUNE_BLD);

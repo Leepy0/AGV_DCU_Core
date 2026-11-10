@@ -426,13 +426,13 @@ static void test_smooth_resume(void)
     assert(D.stop_pulses == 0 && s_jump == 0 && s_flip == 0);
     { long n = s_travel; assert(n >= 2998 && n <= 3002); }
 
-    /* 비트 꺼짐: 기존대로 0 까지 서고 나서 다시 출발 */
+    /* 비트가 꺼져 있어도 같다(v0.26 부터 기본 동작): 짧은 장애물은 0 까지 서지 않고 이어 간다 */
     pause_begin(0);
     D.ext_sen_on = 1;
     for (t = 0; t < 5; t++) { watch_tick(); }
     D.ext_sen_on = 0;
     for (t = 0; (t < 3000) && (stop_phase() != STOP_PHASE_IDLE); t++) { watch_tick(); }
-    assert(s_zero > 0 && D.step == DRIVE_CHANGE_SPEED);
+    assert(s_zero == 0 && stop_phase() == STOP_PHASE_IDLE && D.step == DRIVE_CHANGE_SPEED);
     (void)param_set(P_OPT_FLAGS, 0);
 }
 

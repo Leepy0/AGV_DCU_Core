@@ -692,8 +692,7 @@ int16_t stop_run(void)
     else if (s_ctrl.phase == STOP_PHASE_COMPLETE) {
         resume_at(0, 0);
     }
-    else if (param_opt(OPT_PAUSE_RESUME_SMOOTH)
-             && ((s_ctrl.phase == STOP_PHASE_DECELERATE) || (s_ctrl.phase == STOP_PHASE_APPROACH))) {
+    else if ((s_ctrl.phase == STOP_PHASE_DECELERATE) || (s_ctrl.phase == STOP_PHASE_APPROACH)) {
         /* 서기 전에 원인이 풀렸다. 장애물은 잠깐 비는 깜빡임을 거른다 */
         if (s_clear_ticks < STOP_OBSTACLE_CLEAR_TICKS) { s_clear_ticks++; }
         if ((s_ctrl.reason != STOP_REASON_OBSTACLE) || (s_clear_ticks >= STOP_OBSTACLE_CLEAR_TICKS)) {

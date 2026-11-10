@@ -62,7 +62,7 @@ int16_t  tune_hs_mpm(void);       /* t3.6 입력 속도. 0 = 1번 */
 int      tune_editing(void);      /* 값을 고치는 중 */
 uint16_t tune_state(void);
 uint16_t tune_page(void);
-uint16_t tune_menu(void);         /* 지금 칸: 대 × 100 + 중 × 10 + 소. 예 t2.1.1 = 211, t3 = 300 */
+uint16_t tune_menu(void);         /* 지금 칸: 대 × 1000 + 중 × 10 + 소. 예 t2.1.1 = 2011, t3 = 3000, t1 15번째 칸 = 1150 */
 uint16_t tune_lines(void);        /* 이번 구간에서 본 교차선 수 */
 uint32_t tune_line_at(uint16_t i); /* i 번째 교차선을 본 때의 주행 펄스 */
 void     tune_cross_clear(void);  /* 교차선 수를 0 으로. 식별 시험이 선 찾기 전에 부른다 */

@@ -799,7 +799,9 @@ static uint16_t led_total(void)
     return n;
 }
 
-#define TAPE_LED_MIN GUIDE_CROSS_LED_MIN
+/* 레거시 DA_Tape_Turn·DA_Tape_Stop 과 같다: LED1~16(wide 는 좌우 32 중 앞 16) 합이 6 이상인 응답 두 번.
+ * 10 으로 올렸을 때 wide 센서가 교차 테이프를 못 보고 지나쳤다(5호기) */
+#define TAPE_LED_MIN 6
 #define TAPE_ID_TURN (-1)   /* 시퀀스 번호와 겹치지 않는 회전 탐색 표시 */
 
 static struct { int16_t prev_id; uint32_t start_len; int16_t hits; } s_tape;
