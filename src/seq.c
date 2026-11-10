@@ -39,6 +39,7 @@ static uint16_t      s_state[SEQ_STATE_COUNT];
 
 uint16_t seq_profile(void)      { return s_profile; }
 uint32_t seq_load_mask(void)    { return s_load_mask; }
+int16_t  seq_load_site(void)    { return ((s_site != 0) && (s_site->load_fn != 0)) ? s_site->load_fn() : -1; }
 int      seq_is_active(void)    { return s_seq.active != 0; }
 uint16_t seq_active_id(void)    { return s_seq.active ? s_seq.c.id : (uint16_t)SEQ_NONE; }
 uint16_t seq_active_step(void)  { return s_seq.c.step; }

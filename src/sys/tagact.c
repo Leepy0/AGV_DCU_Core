@@ -39,6 +39,19 @@ void tagact_stop_length(void)
     stop_request_tag();
 }
 
+/* 지금 자리에서 mm 만큼 더 가서 선다(태그 정지와 같은 정지). 이미 서는 중이면 거리를 바꾸지 않는다 */
+void tagact_stop_after_mm(int32_t mm)
+{
+    float p;
+
+    if (D.flag_stopping || (mm <= 0)) { return; }
+    p = (float)mm * P.one_length_pulse;
+    if (p > 32767.0f) { p = 32767.0f; }
+    D.flag_stopping = 1;
+    D.stop_pulses = (int16_t)p;
+    stop_request_tag();
+}
+
 void tagact_speed(uint16_t level)
 {
     switch (level) {

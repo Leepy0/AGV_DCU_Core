@@ -36,6 +36,7 @@ enum {
     P_EMPTY_ACC,            /* 56 EAC: 공차 가속 (적재 12번) */
     P_EMPTY_DCC,            /* 57 EDC: 공차 감속 (적재 13번) */
     P_LOAD_DETECT,          /* 58 LDS: 적재 감지 사용. 0 = 늘 적재(예전과 같다) */
+    P_CART_CENTER_CM,       /* 59 CC: 대차 중앙 정렬 거리 cm. 현장이 대차 감지 순간 이 거리만큼 가서 세운다. 0 = 끔. EEPROM 82 */
     P_COUNT
 };
 #define P_SAVED_LAST 45   /* 이 번호까지 EEPROM 에 저장한다 */
@@ -59,6 +60,7 @@ enum {
 #define PARAM_GUIDE_DIST_LOW     100
 #define PARAM_GUIDE_DIST_UP      999
 #define PARAM_EMPTY_ADDR0        77    /* 54~58 번 → 77~81 */
+#define PARAM_CART_CENTER_ADDR   82    /* 59 번 */
 
 /* P_OPT_FLAGS 비트. 기본 0 = 끔. 실차 A/B 뒤 기본값을 정한다.
  * b0·b1·b4 는 기본 동작이 되어 비었다(값이 남아 있어도 무시한다). 예전 동작은 QUIRK_STEER_LEGACY */

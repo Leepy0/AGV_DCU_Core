@@ -67,7 +67,10 @@ static const seq_call_fn s_calls[] = { stop_len_call };
 PROFILE_TABLE_BEGIN( s_profiles )
     PROFILE_LOAD( 1, 0, 77, 77, LOAD_SENSORS(IN_EXT_1, IN_EXT_2) )
 PROFILE_TABLE_END
-static const seq_site_t s_site = { s_seqs, 1, s_acts, 1, s_calls, 1, s_profiles, 1 };
+/* 현장 적재 판정 시험용. 음수 = 판정 없음(센서 묶음을 쓴다) */
+static int16_t s_load_site = -1;
+static int16_t site_load(void) { return s_load_site; }
+static const seq_site_t s_site = { s_seqs, 1, s_acts, 1, s_calls, 1, s_profiles, 1, site_load };
 
 /* 태그 표 */
 static const tag_rule_t s_rules[] = {
@@ -845,26 +848,26 @@ static void test_menu5(void)
         P_SPEED_HIGH, P_SPEED_LOW, P_SPEED_TURN, P_EMPTY_SPEED, P_EMPTY_TURN, P_ACC, P_DCC, P_SPEED_JOG,
         P_EMPTY_ACC, P_EMPTY_DCC, P_SPEED_MIN,
         P_STOP_LEN_MM, P_CROSS_IN_CM, P_AUTO_START_SEC, P_OBS_USE, P_BUMPER_USE, P_STOP_LEN_FWD_MM, P_LOAD_DETECT,
-        P_GUIDE_DIST_MM, P_TURN_FORBACK, P_BRANCH_MODE, P_BRANCH_OFFSET, P_ENC_STALL_TICKS, P_GUIDE_TIMEOUT,
+        P_CART_CENTER_CM, P_GUIDE_DIST_MM, P_TURN_FORBACK, P_BRANCH_MODE, P_BRANCH_OFFSET, P_ENC_STALL_TICKS, P_GUIDE_TIMEOUT,
         P_AGV_ID, P_WHEEL_DIA_MM, P_WHEEL_BASE_MM, P_GEAR_RATIO, P_AGV_TYPE, P_TAG_DIGITS, P_OPT_FLAGS,
         P_STEER_KP, P_STEER_KI, P_SPEED_FF,
         P_ACS_RETRY_LEGACY, P_CROSS_RETRY_100MS, P_ACS_STANDBY, P_ACS_RETRY_SEC, P_COMM_LINK, P_INTERFACE_MODE,
-        P_ACS_VERSION, P_ERR_REPORT_MIN, P_SOUND, P_DISPLAY_MODE, P_BAT_OFFSET_DV, P_LAMP_EXT_USE, 91, 92, 93,
+        P_ACS_VERSION, P_ERR_REPORT_MIN, P_SOUND, P_DISPLAY_MODE, P_BAT_OFFSET_DV, P_LAMP_EXT_USE, UI_PARA_LAMP_FIRST, UI_PARA_LAMP_FIRST + 1, UI_PARA_LAMP_LAST,
         P_BAT_DV, P_BAT_PERCENT, P_VERSION, P_PARA_INIT,
         P_AUTO_DRIVE_MODE, P_STEER_RPM_OFFSET, P_GUIDE_CURVE_DETECT, P_LEGACY_QUIRKS
     };
-    static const int ends[5] = { 11, 24, 34, 49, 57 };
+    static const int ends[5] = { 11, 25, 35, 50, 58 };
     static const struct { uint16_t idx; char c[4]; } names[] = {
         { P_SPEED_MIN, "SPN" }, { P_GUIDE_TIMEOUT, "GTO" }, { P_COMM_LINK, "CML" }, { P_STEER_RPM_OFFSET, "SR " },
         { P_GUIDE_CURVE_DETECT, "GSR" }, { P_LEGACY_QUIRKS, "LG " }, { P_EMPTY_SPEED, "EDS" }, { P_EMPTY_TURN, "ETN" },
-        { P_EMPTY_ACC, "EAC" }, { P_EMPTY_DCC, "EDC" }, { P_LOAD_DETECT, "LDS" }, { P_AUTO_DRIVE_MODE, "ATD" }
+        { P_EMPTY_ACC, "EAC" }, { P_EMPTY_DCC, "EDC" }, { P_LOAD_DETECT, "LDS" }, { P_AUTO_DRIVE_MODE, "ATD" }, { P_CART_CENTER_CM, "CC " }
     };
     uint16_t d[5];
     char l[3];
     int g, i, k = 0, n;
 
-    assert(sizeof(want) / sizeof(want[0]) == 57u);
-    for (i = 0; i < 57; i++) {          /* 빠진 넷 */
+    assert(sizeof(want) / sizeof(want[0]) == 58u);
+    for (i = 0; i < 58; i++) {          /* 빠진 넷 */
         assert(want[i] != P_STATION_NO && want[i] != P_SWITCH_START_NUM && want[i] != P_TAG_TYPE && want[i] != P_CROSS_MODE);
     }
     for (i = 0; i < (int)(sizeof(names) / sizeof(names[0])); i++) {
@@ -974,6 +977,30 @@ static void test_load_profile(void)
     drive_up();
     run_scan(700);
     assert(D.flag_run && (D.vin_out > 0) && !param_profile_empty());
+    run_command_stop();
+    ticks(300);
+
+    /* 현장 판정이 있으면 센서 묶음보다 앞선다 */
+    ext_in(0x03u, 1);
+    s_load_site = 0;
+    ticks(510);
+    assert(param_profile_empty());
+    s_load_site = 1;
+    ticks(2);
+    assert(!param_profile_empty());
+    s_load_site = -1;
+    ext_in(0x03u, 0);
+
+    /* 거리 정지: 지금 자리에서 mm 만큼. 서는 중에는 거리를 바꾸지 않는다 */
+    boot();
+    ticks(10);
+    drive_up();
+    run_scan(700);
+    assert(D.flag_run && (D.vin_out > 0) && !D.flag_stopping);
+    tagact_stop_after_mm(500);
+    assert(D.flag_stopping && D.stop_pulses == (int16_t)(500.0f * P.one_length_pulse));
+    tagact_stop_after_mm(100);
+    assert(D.stop_pulses == (int16_t)(500.0f * P.one_length_pulse));
     run_command_stop();
     ticks(300);
     s_ext_board = 0;

@@ -151,6 +151,8 @@ typedef struct {
     const seq_def_t *acts;          uint16_t nacts;
     const seq_call_fn *calls;       uint16_t ncalls;
     const profile_row_t *profiles;  uint16_t nprofiles;
+    /* 현장 적재 판정(선택). 1 적재, 0 공차, 음수 = 이 프로파일은 판정 없음(load_mask 를 쓴다). NULL 이면 load_mask 만 */
+    int16_t (*load_fn)(void);
 } seq_site_t;
 
 /* 부팅 시 등록. P_AGV_TYPE·P_AGV_ID 로 프로파일을 고르고, ACT 표의 금지 스텝을 검사한다.
@@ -158,6 +160,7 @@ typedef struct {
 uint16_t seq_bind(const seq_site_t *site);
 uint16_t seq_profile(void);
 uint32_t seq_load_mask(void);      /* 고른 프로파일의 적재 센서 비트. 0 = 없음 */
+int16_t  seq_load_site(void);      /* 현장 적재 판정 결과. 음수 = 판정 없음 */
 void     seq_pick_profile(void);   /* 파라미터를 읽은 뒤나 바꾼 뒤 프로파일을 다시 고른다 */
 int      seq_call_once(uint16_t idx);   /* 사용자 함수를 한 번 부른다. 태그 A_CALL */
 

@@ -860,7 +860,9 @@ static void tape_stop(void)
 static void load_tick(void)
 {
     uint32_t mask = seq_load_mask();
-    int16_t loaded = (param_get(P_LOAD_DETECT) == 0) || (mask == 0UL) || tune_active() || ((io_in_mask() & mask) != 0UL);
+    int16_t site = seq_load_site();      /* 현장 판정이 있으면 그것, 없으면 센서 묶음, 둘 다 없으면 적재 */
+    int16_t sensed = (site >= 0) ? (int16_t)(site != 0) : ((mask == 0UL) || ((io_in_mask() & mask) != 0UL));
+    int16_t loaded = (param_get(P_LOAD_DETECT) == 0) || tune_active() || sensed;
     int16_t stopped = !D.flag_run || (D.vin_out == 0);
 
     if (loaded || !stopped) { s_run.empty_cnt = 0; }

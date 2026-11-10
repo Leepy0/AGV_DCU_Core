@@ -57,7 +57,7 @@ static const uint16_t s_menu[] = {
     P_SPEED_HIGH, P_SPEED_LOW, P_SPEED_TURN, P_EMPTY_SPEED, P_EMPTY_TURN, P_ACC, P_DCC, P_SPEED_JOG,
     P_EMPTY_ACC, P_EMPTY_DCC, P_SPEED_MIN,
     /* 2 주행·안전 */
-    P_STOP_LEN_MM, P_CROSS_IN_CM, P_AUTO_START_SEC, P_OBS_USE, P_BUMPER_USE, P_STOP_LEN_FWD_MM, P_LOAD_DETECT,
+    P_STOP_LEN_MM, P_CROSS_IN_CM, P_AUTO_START_SEC, P_OBS_USE, P_BUMPER_USE, P_STOP_LEN_FWD_MM, P_LOAD_DETECT, P_CART_CENTER_CM,
     P_GUIDE_DIST_MM, P_TURN_FORBACK, P_BRANCH_MODE, P_BRANCH_OFFSET, P_ENC_STALL_TICKS, P_GUIDE_TIMEOUT,
     /* 3 차량·튜닝 */
     P_AGV_ID, P_WHEEL_DIA_MM, P_WHEEL_BASE_MM, P_GEAR_RATIO, P_AGV_TYPE, P_TAG_DIGITS, P_OPT_FLAGS,
@@ -72,7 +72,7 @@ static const uint16_t s_menu[] = {
 };
 #define MENU_COUNT ((int16_t)(sizeof(s_menu) / sizeof(s_menu[0])))
 #define MENU_HIDDEN_FIRST (MENU_COUNT - 4)
-static const int16_t s_group_end[UI_GROUP_COUNT] = { 11, 24, 34, 49, MENU_COUNT };   /* 묶음 다음 첫 칸 */
+static const int16_t s_group_end[UI_GROUP_COUNT] = { 11, 25, 35, 50, MENU_COUNT };   /* 묶음 다음 첫 칸 */
 static const char s_group_name[UI_GROUP_COUNT][DISP_DIGITS] = {
     {'P','1','S','P','D'}, {'P','2','R','U','N'}, {'P','3','C','A','R'}, {'P','4','C','O','M'}, {'P','5','I','N','F'}
 };
@@ -88,7 +88,7 @@ static const para_view_t s_view[P_COUNT] = {
     {"CT ", 3}, {"GSR", 2}, {"LG ", 3}, {"EST", 2}, {"RCI", 2}, {"LUS", 2}, {"SR ", 3}, {"GTO", 2}, {"AV-", 2},
     {"INT", 2}, {"V_ ", 3}, {"VT ", 3}, {"CR ", 3},
     {"GD ", 3}, {"OPT", 2}, {"FF ", 3}, {"ES ", 2},
-    {"EDS", 2}, {"ETN", 2}, {"EAC", 2}, {"EDC", 2}, {"LDS", 0}
+    {"EDS", 2}, {"ETN", 2}, {"EAC", 2}, {"EDC", 2}, {"LDS", 0}, {"CC ", 3}
 };
 static const char s_lamp_name[UI_LAMP_EXT_COUNT] = { 'G', 'R', 'Y' };
 
