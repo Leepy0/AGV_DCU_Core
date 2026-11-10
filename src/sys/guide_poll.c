@@ -18,6 +18,7 @@ enum { PREV_UNKNOWN = -1 };
 static int16_t s_prev_back = PREV_UNKNOWN;
 static int16_t s_ready_cnt;
 static int16_t s_err_cnt;       /* gComm_Error_Cnt */
+static int16_t s_trk_mm6;       /* 가장자리 고정·유지로 달린 거리 × 6 (m/min × 10 ms = 1/6 mm) */
 
 void guide_poll_reset(void)
 {
@@ -31,6 +32,8 @@ void guide_poll_start(void)
 {
     s_ready_cnt = 0;
     s_err_cnt = 0;
+    s_trk_mm6 = 0;
+    D.guide_track = GUIDE_TRK_NORMAL;
     D.guide_all_on = D.guide_all_off = 0;
     guide_on_run_start();
 }
@@ -85,6 +88,15 @@ static void on_led(const guide_rx_t *rx)
     if (guide_source_led()) {   /* 위치를 'a' 단위로 바꾼다. 배율은 튜닝 모드가 잰 h_scale(기본 1) */
         float v;
         guide_track(rx, D.branch_start, D.backward, &out);
+        D.guide_track = out.track;
+        if (out.track == GUIDE_TRK_NORMAL) { s_trk_mm6 = 0; }
+        else {
+            s_trk_mm6 = (int16_t)(s_trk_mm6 + ((D.vin_out >= 0) ? D.vin_out : -D.vin_out));
+            if (s_trk_mm6 >= 6 * ((out.track == GUIDE_TRK_HOLD) ? GUIDE_HOLD_LIMIT_MM : GUIDE_EDGE_LIMIT_MM)) {
+                s_trk_mm6 = 0;
+                guide_track_release();
+            }
+        }
         v = (float)out.pos * guide_h_scale();
         D.guide_span = out.width;
         apply_status(out.status, (int16_t)((v >= 0.0f) ? (v + 0.5f) : (v - 0.5f)));
@@ -116,6 +128,7 @@ static void on_turn_led(const guide_rx_t *rx)
 static void on_rx(const guide_rx_t *rx)
 {
     D.guide_wide = rx->wide;
+    if (rx->kind != GUIDE_RX_LED) { D.guide_track = GUIDE_TRK_NORMAL; }
     /* 정렬 회전 중 'S' 같은 응답은 오류로 세지 않는다. 라인이 없으면 회전이 258 로 끝난다 */
     if (D.tape_align && D.flag_turn) {
         if (rx->kind == GUIDE_RX_LED) { on_turn_led(rx); }

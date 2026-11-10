@@ -37,6 +37,15 @@ enum { GUIDE_SRC_POSITION = 0, GUIDE_SRC_MIXED = 1, GUIDE_SRC_LED_ONLY = 2 };
 
 typedef enum { GUIDE_NORMAL = 0, GUIDE_ALL_ON, GUIDE_LOST } guide_status_t;
 
+/* 'h' 추적이 위치를 얻은 방법. 조향이 적분과 칼만 갱신을 여기에 맞춘다 */
+typedef enum {
+    GUIDE_TRK_NORMAL = 0,  /* 덩어리 가운데 */
+    GUIDE_TRK_EDGE,        /* 다른 선과 붙었다. 안 움직인 가장자리에서 테이프 폭으로 잡은 위치 */
+    GUIDE_TRK_HOLD         /* 두 가장자리가 다 움직였다. 이전 위치를 유지한다 */
+} guide_track_t;
+#define GUIDE_HOLD_LIMIT_MM  100   /* 유지 주행 상한. 30도 교차·25 mm 테이프에서 덮이는 구간이 약 43 mm */
+#define GUIDE_EDGE_LIMIT_MM  300   /* 가장자리 고정 상한. 넘으면 테이프 폭이 바뀐 것으로 보고 다시 배운다 */
+
 typedef enum {
     GUIDE_RX_NONE = 0,     /* 처리할 내용 없음 (모르는 종류) */
     GUIDE_RX_POSITION,     /* 'a' */
@@ -74,6 +83,7 @@ typedef struct {
     uint16_t width;        /* 선택한 덩어리 폭. 조향의 커브 판정 span 입력으로 쓸 수 있다 */
     uint16_t blobs;        /* 필터 전 덩어리 수 */
     uint16_t vert;         /* 세로 4비트 원시값 */
+    int16_t  track;        /* guide_track_t */
 } guide_out_t;
 
 void     guide_reset(void);
@@ -108,7 +118,10 @@ void     guide_track(const guide_rx_t *rx, int16_t branch, int16_t backward, gui
 int16_t  guide_h_position(const guide_rx_t *rx, int16_t prev);
 
 int16_t  guide_source_led(void);                                  /* 위치를 'h' 로 얻는가 */
-uint16_t guide_curve_span(void);
+uint16_t guide_curve_span(void);                                  /* 설정값과 (배운 테이프 폭 + 2) 중 큰 쪽 */
+uint16_t guide_tape_width(void);                                  /* 배운 테이프 폭(칸). 0 = 아직 모름 */
+/* 가장자리 고정·유지가 상한 거리를 넘었을 때 부른다. 다음 응답은 덩어리 가운데를 받고 폭을 다시 배운다 */
+void     guide_track_release(void);
 int16_t  guide_want_h(int16_t branch_start, int16_t branch_step); /* 다음 요청이 'H' 인가 */
 
 /* SCI-B 입출력과 오류 판정. 10 ms (src/sys/guide_poll.c) */

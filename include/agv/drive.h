@@ -122,6 +122,7 @@ typedef struct {
     uint16_t guide_led;              /* GuideSensor_LED */
     uint32_t guide_led32;            /* GuideSensor_LED_32 하위 32비트 */
     uint16_t guide_span;             /* guide_track 이 고른 덩어리 폭. 'h' 소스의 커브 판정 입력 */
+    int16_t guide_track;             /* guide_track_t. 'a' 소스에서는 항상 0 */
     int16_t guide_kf_init;           /* gGuideKF_Init. 0 이면 다음 호출에서 필터 초기화 */
 
     /* 분기 */

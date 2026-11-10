@@ -35,6 +35,11 @@ static struct {
 } s_comm;
 static int16_t     s_prev;        /* 마지막 위치. invert 전 값 */
 static int16_t     s_prev_valid;  /* LOST 뒤에는 변화량 제한을 걸지 않는다. 걸면 다시 못 잡는다 */
+/* 테이프 폭 학습과 가장자리 고정. 비스듬한 교차선이 주행선과 붙으면 덩어리 가운데가 교차선 쪽으로 끌린다 */
+static uint16_t    s_tape_q4;     /* 배운 테이프 폭 × 16. 0 = 모름. 센서를 바꿔도 유지한다(같은 테이프) */
+static int16_t     s_edge_s, s_edge_e;   /* 정상 추적 때의 가장자리 칸. 붙어 있는 동안은 고치지 않는다.
+                                            매 스캔 고치면 지나가는 교차선의 가장자리를 따라 끌려간다 */
+static uint16_t    s_release;
 
 void guide_cfg_default(guide_cfg_t *cfg)
 {
@@ -70,12 +75,14 @@ void guide_on_sensor_switch(void)
     s_rx.in_packet = 0;
     s_prev = 0;           /* 앞 센서의 위치로 뒤 센서 덩어리를 고르면 안 된다 */
     s_prev_valid = 0;
+    s_release = 0;
     comm_clear();
 }
 
 void guide_reset(void)
 {
     guide_cfg_default(&s_cfg);
+    s_tape_q4 = 0;
     guide_on_sensor_switch();
 }
 
@@ -339,6 +346,50 @@ static int16_t pick(const guide_blob_t *b, uint16_t n, uint16_t leds, int16_t br
     return best;
 }
 
+/* 10 mm 테이프는 1칸·2칸을 오간다. 평균 1.5 를 2 로 올리고, 가끔 한 칸 넓어지는 것은 무시한다 */
+uint16_t guide_tape_width(void) { return (uint16_t)((s_tape_q4 + 11u) >> 4); }
+void     guide_track_release(void) { s_release = 1; }
+
+static void learn_width(uint16_t w)
+{
+    int16_t d = (int16_t)((int16_t)(w << 4) - (int16_t)s_tape_q4);
+    if (s_tape_q4 == 0) { s_tape_q4 = (uint16_t)(w << 4); }
+    else { s_tape_q4 = (uint16_t)((int16_t)s_tape_q4 + d / ((d < 0) ? 4 : 16)); }   /* 좁아지는 쪽은 빨리 따라간다 */
+}
+
+/* 고른 덩어리의 가장자리를 테이프 폭에 맞춰 고친다. 반환 guide_track_t */
+static int16_t edge_fix(int16_t *s, int16_t *e, uint16_t leds, uint16_t blobs, int16_t tracking)
+{
+    int16_t ref = (int16_t)guide_tape_width();
+    int16_t w = (int16_t)(*e - *s + 1);
+    int16_t ds = (int16_t)(*s - s_edge_s), de = (int16_t)(*e - s_edge_e);
+
+    if (ds < 0) { ds = (int16_t)(-ds); }
+    if (de < 0) { de = (int16_t)(-de); }
+    if ((ref == 0) || s_release) {                   /* 처음이거나 상한을 넘겼다: 보이는 대로 받고 폭을 다시 배운다 */
+        s_tape_q4 = 0;
+        s_release = 0;
+    }
+    else if (w < ref) {                              /* 센서 끝에 반만 걸렸다. 안쪽 가장자리가 기준이다 */
+        if (*s == 1)                  { *s = (int16_t)(*e - ref + 1); }
+        else if (*e == (int16_t)leds) { *e = (int16_t)(*s + ref - 1); }
+        return GUIDE_TRK_NORMAL;
+    }
+    else if (!tracking) {                            /* 다시 잡는 중: 견줄 가장자리가 없다 */
+    }
+    else if ((*e < s_edge_s - 1) || (*s > s_edge_e + 1)) {
+        return GUIDE_TRK_NORMAL;                     /* 떨어진 다른 덩어리로 옮겼다. 붙은 것이 아니다 */
+    }
+    else if (w > ref + 1) {
+        if ((ds == 1) && (de == 1)) { return GUIDE_TRK_NORMAL; }   /* 양쪽으로 한 칸씩: 커브 */
+        if ((ds == 0) || ((ds == 1) && (de > 1))) { *e = (int16_t)(*s + ref - 1); return GUIDE_TRK_EDGE; }
+        if ((de == 0) || ((de == 1) && (ds > 1))) { *s = (int16_t)(*e - ref + 1); return GUIDE_TRK_EDGE; }
+        return GUIDE_TRK_HOLD;
+    }
+    if ((blobs == 1) && (*s > 1) && (*e < (int16_t)leds)) { learn_width((uint16_t)w); }
+    return GUIDE_TRK_NORMAL;
+}
+
 void guide_track(const guide_rx_t *rx, int16_t branch, int16_t backward, guide_out_t *out)
 {
     guide_blob_t blob[GUIDE_BLOB_MAX];
@@ -350,6 +401,7 @@ void guide_track(const guide_rx_t *rx, int16_t branch, int16_t backward, guide_o
 
     out->vert = guide_vertical(rx);
     out->blobs = guide_blobs(lat, leds, blob);
+    out->track = GUIDE_TRK_NORMAL;
     if (lat == all) {
         out->status = GUIDE_ALL_ON;
         out->width = leds;
@@ -362,10 +414,20 @@ void guide_track(const guide_rx_t *rx, int16_t branch, int16_t backward, guide_o
             s_prev_valid = 0;
         }
         else {
+            int16_t s = (int16_t)blob[chosen].start, e = (int16_t)blob[chosen].end;
             out->status = GUIDE_NORMAL;
-            out->width = (uint16_t)(blob[chosen].end - blob[chosen].start + 1);
-            s_prev = blob_pos(&blob[chosen], leds);
-            s_prev_valid = 1;
+            out->width = (uint16_t)(e - s + 1);
+            /* 분기는 일부러 선을 갈아타는 동작이라 가장자리를 고치지 않는다 */
+            if (branch == 0) { out->track = edge_fix(&s, &e, leds, out->blobs, s_prev_valid); }
+            if (out->track != GUIDE_TRK_NORMAL) { out->width = guide_tape_width(); }   /* 붙은 폭을 커브로 보지 않는다 */
+            if (out->track != GUIDE_TRK_HOLD) {
+                s_prev = (int16_t)(s + e - (int16_t)(leds + 1));
+                s_prev_valid = 1;
+            }
+            if (out->track == GUIDE_TRK_NORMAL) {
+                s_edge_s = s;
+                s_edge_e = e;
+            }
         }
     }
     out->pos = invert ? (int16_t)(-s_prev) : s_prev;
@@ -384,7 +446,11 @@ int16_t guide_source_led(void)
     return param_get(P_GUIDE_CURVE_DETECT) == GUIDE_SRC_LED_ONLY;
 }
 
-uint16_t guide_curve_span(void) { return s_cfg.curve_span; }
+uint16_t guide_curve_span(void)
+{
+    uint16_t w = (uint16_t)(guide_tape_width() + 2u);   /* 25 mm 테이프는 직선에서도 4칸이 켜진다 */
+    return (w > s_cfg.curve_span) ? w : s_cfg.curve_span;
+}
 
 int16_t guide_want_h(int16_t branch_start, int16_t branch_step)
 {

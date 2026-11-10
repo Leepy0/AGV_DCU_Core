@@ -103,9 +103,10 @@ static void kalman_step(int16_t curve_now, float dt)
         float p01_pred = D.kf_p01 + (dt * D.kf_p11);
         float p11_pred = D.kf_p11 + q11;
 
-        if (!D.guide_all_off) {
+        if (!D.guide_all_off && (D.guide_track != GUIDE_TRK_HOLD)) {
             float y = (float)D.guide_pos - pos_pred;
-            float s = p00_pred + GUIDE_KF_R;
+            /* 가장자리로 잡은 위치는 한 칸쯤 떨린다. 덜 믿는다 */
+            float s = p00_pred + ((D.guide_track == GUIDE_TRK_EDGE) ? (GUIDE_KF_R * 4.0f) : GUIDE_KF_R);
             float k0 = p00_pred / s;
             float k1 = p01_pred / s;
             D.kf_pos = pos_pred + (k0 * y);
@@ -114,7 +115,7 @@ static void kalman_step(int16_t curve_now, float dt)
             D.kf_p01 = (1.0f - k0) * p01_pred;
             D.kf_p11 = p11_pred - (k1 * p01_pred);
         }
-        else {          /* 전 채널 소등: 예측만 반영하고 불확실성은 키운다 */
+        else {          /* 전 채널 소등·유지 주행: 예측만 반영하고 불확실성은 키운다 */
             D.kf_pos = pos_pred;
             D.kf_rate = rate_pred;
             D.kf_p00 = p00_pred;
@@ -135,8 +136,17 @@ static float gains_and_deadband(float pos, int16_t v_abs, float r, int16_t curve
         D.p_kp = (v_abs > 0) ? (GUIDE_KP_MIN + (GUIDE_KP_SPEED_GAIN * r)) : GUIDE_KP_MIN;
         if (D.p_kp > GUIDE_KP_MAX) { D.p_kp = GUIDE_KP_MAX; }
         /* 위험 감속 중에는 강제 최대 게인을 걸지 않는다 */
-        if (((D.guide_pos > dev_threshold) || (D.guide_pos < -dev_threshold)) && !D.risk_stop) {
-            D.p_kp = GUIDE_KP_MAX;
+        if (!D.risk_stop) {
+            int16_t a = (D.guide_pos >= 0) ? D.guide_pos : (int16_t)(-D.guide_pos);
+            int16_t lo = (int16_t)(dev_threshold * 2 / 3);
+            if (param_quirk(QUIRK_STEER_STEP)) {
+                if (a > dev_threshold) { D.p_kp = GUIDE_KP_MAX; }
+            }
+            else if (a > lo) {      /* 문턱의 2/3 부터 올려 예전과 같은 편차에서 최대가 된다 */
+                float k = (float)(a - lo) / (float)(dev_threshold + 1 - lo);
+                if (k > 1.0f) { k = 1.0f; }
+                if (D.p_kp < GUIDE_KP_MAX) { D.p_kp += (GUIDE_KP_MAX - D.p_kp) * k; }
+            }
         }
         if (curve_now) {
             D.p_kp *= GUIDE_KP_CURVE_BOOST;
@@ -152,8 +162,9 @@ static float gains_and_deadband(float pos, int16_t v_abs, float r, int16_t curve
     if (curve_now) { band = (int16_t)((float)band * GUIDE_DEADBAND_CURVE_SCALE); }
     if ((tuning_type == 1) || (tuning_type == 2)) {
         if ((sen <= (float)band) && (sen >= (float)-band))                { sen = 0.0f; }
-        else if ((sen > 0.0f) && (sen < (float)linear_zone))              { sen -= (float)band; }
-        else if ((sen < 0.0f) && (sen > (float)-linear_zone))             { sen += (float)band; }
+        /* 선형 구간 끝에서 입력이 불감대 폭만큼 뛰지 않게 전 구간에서 뺀다 */
+        else if ((sen > 0.0f) && ((sen < (float)linear_zone) || !param_quirk(QUIRK_STEER_STEP)))  { sen -= (float)band; }
+        else if ((sen < 0.0f) && ((sen > (float)-linear_zone) || !param_quirk(QUIRK_STEER_STEP))) { sen += (float)band; }
     }
     return sen;
 }
@@ -229,7 +240,8 @@ void steer_run(int16_t tuning_type)
         /* 오차 = 지령 - 위치 이므로 감쇠는 -Kd × 위치 변화율이다. 예전 부호는 반대다 */
         if (!param_quirk(QUIRK_DAMP_SIGN_OLD)) { rate_ff = -rate_ff; }
 
-        if (!clear_integral && !D.flag_stopping && !stop_is_braking()) {
+        /* 다른 선과 붙은 동안의 오차를 적분에 쌓지 않는다 */
+        if (!clear_integral && !D.flag_stopping && !stop_is_braking() && (D.guide_track == GUIDE_TRK_NORMAL)) {
             i_candidate = s_steer.i_out + (D.p_ki * (float)D.p_err * geom * i_scale);
             unsat = p_out + i_candidate + rate_ff;
             /* 이미 포화된 출력을 더 미는 방향일 때만 적분을 멈춘다 */

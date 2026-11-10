@@ -118,6 +118,98 @@ static const track_case_t s_cases[] = {
     { "w invert",     1, BITS(26, 27),              0, 0, 0,            0, 0, 1, 1, 32, 0, -22, GUIDE_NORMAL, 2, 1, 0 },
 };
 
+/* LED i(1부터)의 감지 구간 [i-0.5, i+0.5] 를 테이프가 0.35 넘게 덮으면 켜진다. 단위 = 칸(6.89 mm) */
+static float cover(float c, float w, int i)
+{
+    float lo = c - w / 2.0f, hi = c + w / 2.0f;
+    float a = (lo > (float)i - 0.5f) ? lo : (float)i - 0.5f;
+    float b = (hi < (float)i + 0.5f) ? hi : (float)i + 0.5f;
+    return (b > a) ? (b - a) : 0.0f;
+}
+
+/* 주행선은 가만히 있고 교차선이 센서를 왼쪽에서 오른쪽으로 지나간다. 반환: 참값과의 최대 오차(위치 단위) */
+static int cross_sim(int leds, float tape_mm, float main_c, float step, int *naive_worst)
+{
+    float w = tape_mm / 6.89f, wx = w * 2.0f;      /* 30도: 가로로 차지하는 폭 = 폭 / sin30 */
+    float truth = 2.0f * main_c - (float)(leds + 1);
+    int worst = 0, k;
+    guide_out_t o;
+    guide_rx_t r;
+
+    guide_reset();
+    *naive_worst = 0;
+    for (k = -40; ; k++) {
+        float xc = (k < 0) ? -100.0f : (-wx + step * (float)k);
+        uint32_t bits = 0;
+        int i, lo = 0, hi = 0, e;
+        if (xc > (float)leds + wx + 2.0f) { break; }
+        for (i = 1; i <= leds; i++) {
+            if (cover(main_c, w, i) + cover(xc, wx, i) > 0.35f) { bits |= 1UL << (i - 1); }
+        }
+        r = (leds == 32) ? rx_wide(bits, 0) : rx_narrow((uint16_t)bits);
+        guide_track(&r, 0, 0, &o);
+        assert(o.status == GUIDE_NORMAL);
+        e = (int)((float)o.pos - truth);
+        if (e < 0) { e = -e; }
+        if (e > worst) { worst = e; }
+        /* 대책 없는 값: 주행선을 포함한 덩어리의 가운데 */
+        for (i = (int)(main_c + 0.5f); (i >= 1) && ((bits >> (i - 1)) & 1UL); i--) { lo = i; }
+        for (i = (int)(main_c + 0.5f); (i <= leds) && ((bits >> (i - 1)) & 1UL); i++) { hi = i; }
+        e = (int)((float)(lo + hi - (leds + 1)) - truth);
+        if (e < 0) { e = -e; }
+        if ((lo != 0) && (e > *naive_worst)) { *naive_worst = e; }
+    }
+    return worst;
+}
+
+static void test_cross(void)
+{
+    static const float tape[2] = { 10.0f, 25.0f };
+    static const float step[3] = { 0.84f, 0.3f, 0.07f };    /* 60, 20, 5 m/min 쯤 */
+    int w, t, s, n;
+    for (w = 0; w < 2; w++) {
+        for (t = 0; t < 2; t++) {
+            for (s = 0; s < 3; s++) {
+                int leds = w ? 32 : 16;
+                float c[3];
+                int j;
+                c[0] = (float)leds / 2.0f + 0.5f; c[1] = c[0] + 0.3f; c[2] = c[0] - 3.0f;
+                for (j = 0; j < 3; j++) {
+                    int e = cross_sim(leds, tape[t], c[j], step[s], &n);
+                    if ((s == 0) && (j == 0)) { printf("  30도 교차 %s %.0f mm: 최대 오차 %d (대책 없으면 %d)\n", w ? "wide" : "일반", tape[t], e, n); }
+                    if (e > 3) { printf("  leds %d tape %.0f c %.1f step %.2f: %d\n", leds, tape[t], c[j], step[s], e); }
+                    assert(e <= 3);
+                }
+            }
+        }
+    }
+    /* 상한을 넘겨 풀어 주면 넓어진 덩어리를 그대로 받고 폭을 다시 배운다 */
+    { guide_out_t o;
+      guide_rx_t r;
+      int k;
+      guide_reset();
+      r = rx_narrow(BITS(7, 8));
+      for (k = 0; k < 5; k++) { guide_track(&r, 0, 0, &o); }
+      assert(guide_tape_width() == 2 && o.track == GUIDE_TRK_NORMAL && guide_curve_span() == 4);
+      r = rx_narrow(BITS(7, 11));
+      guide_track(&r, 0, 0, &o);
+      assert(o.track == GUIDE_TRK_EDGE && o.pos == 0 && o.width == 2);
+      r = rx_narrow(BITS(3, 12));
+      guide_track(&r, 0, 0, &o);
+      assert(o.track == GUIDE_TRK_HOLD && o.pos == 0);
+      guide_track_release();
+      guide_track(&r, 0, 0, &o);
+      assert(o.track == GUIDE_TRK_NORMAL && o.pos == 0 && guide_tape_width() == 10 && guide_curve_span() == 12);
+      /* 센서 끝에 반만 걸리면 안쪽 가장자리에서 폭만큼 잡는다 */
+      guide_reset();
+      r = rx_narrow(BITS(7, 10));
+      for (k = 0; k < 5; k++) { guide_track(&r, 0, 0, &o); }
+      r = rx_narrow(BITS(0, 1));
+      guide_track(&r, 0, 0, &o);
+      assert(o.pos == 0 + 2 - 17 - 1);     /* 칸 -1~2 로 본다 */
+    }
+}
+
 static void run_table(void)
 {
     for (size_t k = 0; k < sizeof(s_cases) / sizeof(s_cases[0]); k++) {
@@ -233,6 +325,7 @@ int main(void)
     assert(guide_blobs(0xFFFF0000UL, 16, b) == 0);
 
     run_table();
+    test_cross();
 
     /* 세로 비트 위치 설정: 좌우 사이에 끼어 있어도 칸이 밀려 이어진다 */
     guide_reset();

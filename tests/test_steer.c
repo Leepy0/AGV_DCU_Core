@@ -60,14 +60,53 @@ int main(void)
     steer_run(1);
     assert(D.p_kp == 130.0f);
     setup();
-    D.guide_pos = 12;
+    D.guide_pos = 8;                    /* 문턱 12 의 2/3 까지는 속도별 값 그대로 */
+    steer_run(1);
+    assert(D.p_kp == 35.0f);
+    setup();
+    D.guide_pos = 12;                   /* 8 → 13 사이를 곧게 올린다: 35 + 95 × 4/5 */
+    steer_run(1);
+    assert(near0(D.p_kp - 111.0f) < 0.01f);
+    setup();
+    D.guide_wide = 1;
+    D.guide_pos = 13;
     steer_run(1);
     assert(D.p_kp == 35.0f);
     setup();
     D.guide_wide = 1;
-    D.guide_pos = 20;
+    D.guide_pos = 20;                   /* 13 → 21: 35 + 95 × 7/8 */
+    steer_run(1);
+    assert(near0(D.p_kp - 118.125f) < 0.01f);
+    /* 예전 계단은 QUIRK_STEER_STEP */
+    setup();
+    (void)param_set(P_LEGACY_QUIRKS, QUIRK_STEER_STEP);
+    D.guide_pos = 12;
     steer_run(1);
     assert(D.p_kp == 35.0f);
+    D.guide_pos = 13;
+    steer_run(1);
+    assert(D.p_kp == 130.0f);
+    (void)param_set(P_LEGACY_QUIRKS, 0);
+    /* 편차를 한 칸씩 올릴 때 비례 출력이 한 번에 크게 뛰지 않는다. 최고 속도(불감대 4), 일반·wide */
+    { int16_t wide;
+      for (wide = 0; wide <= 1; wide++) {
+          int16_t p, max = wide ? 31 : 15;
+          float prev = 0.0f, worst = 0.0f;
+          for (p = 0; p <= max; p++) {
+              float out, d;
+              setup();
+              D.vin_out = D.v_cmd = P.target_speed;
+              D.guide_wide = wide;
+              D.guide_pos = p;
+              steer_run(1);
+              out = D.p_kp * (float)D.p_err;
+              d = near0(out - prev);
+              if (d > worst) { worst = d; }
+              prev = out;
+          }
+          printf("  조향 계단 %s: 한 칸 최대 변화 %.0f\n", wide ? "wide" : "일반", worst);
+          assert(worst < 400.0f);       /* 예전: 일반 4×50 → 8×50 → 13×130, 한 칸에 1000 넘게 뛴다 */
+      } }
     D.guide_pos = 21;
     steer_run(1);
     assert(D.p_kp == 130.0f);
@@ -100,7 +139,7 @@ int main(void)
     assert(D.p_kp == 40.0f);
     (void)param_set(P_STEER_KP, 0);
 
-    /* 불감대: 폭 2 (r=1), 안쪽 0, 8 미만은 폭만큼 빼고 8 이상은 그대로 */
+    /* 불감대: 폭 2 (r=1), 안쪽 0, 밖은 어디서나 폭만큼 뺀다. 예전(8 이상은 그대로)은 QUIRK_STEER_STEP */
     setup();
     D.guide_pos = 2;
     steer_run(1);
@@ -116,7 +155,13 @@ int main(void)
     setup();
     D.guide_pos = 8;
     steer_run(1);
+    assert(D.p_err == -6);
+    setup();
+    (void)param_set(P_LEGACY_QUIRKS, QUIRK_STEER_STEP);
+    D.guide_pos = 8;
+    steer_run(1);
     assert(D.p_err == -8);
+    (void)param_set(P_LEGACY_QUIRKS, 0);
     /* tuning 0 은 불감대를 건너뛴다 */
     setup();
     D.guide_pos = 2;

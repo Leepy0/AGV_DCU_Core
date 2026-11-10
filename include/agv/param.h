@@ -49,7 +49,8 @@ enum {
 #define QUIRK_STEER_20MS    0x10u  /* b4 조향을 20 ms 마다 돌린다 (기본 10 ms, 칼만 dt 0.01, 적분 이득 1/2) */
 #define QUIRK_DAMP_SIGN_OLD 0x20u  /* b5 변화율 항을 예전 부호로 더한다 (기본은 감쇠) */
 #define QUIRK_NO_WB_GAIN    0x40u  /* b6 조향 이득을 휠 간격에 비례시키지 않는다 (기본 60 cm 기준 비례) */
-#define QUIRK_STEER_LEGACY  (QUIRK_STEER_20MS | QUIRK_DAMP_SIGN_OLD | QUIRK_NO_WB_GAIN)
+#define QUIRK_STEER_STEP     0x100u /* b8 조향 계단을 되살린다: 선형 구간 밖에서 불감대를 빼지 않고, 편차 문턱에서 Kp 가 한 번에 최대가 된다 */
+#define QUIRK_STEER_LEGACY  (QUIRK_STEER_20MS | QUIRK_DAMP_SIGN_OLD | QUIRK_NO_WB_GAIN | QUIRK_STEER_STEP)
 #define QUIRK_PAUSE_FULL_STOP 0x80u /* b7 일시정지(장애물·PAUSE) 감속 중 원인이 풀려도 0 까지 서고 다시 출발한다(예전 동작) */
 
 /* 주소 50 표시. 31·38·39·44 의 1회 초기화가 끝나면 쓴다 */
