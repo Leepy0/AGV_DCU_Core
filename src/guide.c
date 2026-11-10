@@ -43,6 +43,8 @@ static uint16_t    s_release;
 /* 다시 잡을 때 지속 확인(주행 위치 경로만). 잡았다가 잃은 뒤 처음 보이는 덩어리는 후보로만 두고
  * GUIDE_REACQ_N 응답을 이어 같은 자리에 있어야 받는다. 끊긴 자리의 바닥 반사 한두 칸을 주행선으로 받지 않는다 */
 static int16_t     s_drive;       /* 이번 호출은 주행 위치 경로다: 가장자리 고정·폭 학습·지속 확인을 한다 */
+static int16_t     s_straight_n;  /* 직진 조건이 이어진 틱 수(포화) */
+static int16_t     s_straight;    /* 직진 중이다. 폭 학습은 이때만 한다 */
 static int16_t     s_relearn;     /* 가장자리 고정·유지 상한을 넘겨 폭을 다시 배우는 중 */
 static uint16_t    s_merge_age;   /* 필터 전 덩어리가 둘 이상이던 마지막 스캔 뒤 지난 스캔 수(포화). 붙어 있는 동안은 멈춘다 */
 static uint16_t    s_wide_n;      /* 붙음이 아닌데 배운 폭 + 1 보다 넓은 응답이 이어진 수(포화 = 올려 배우는 중) */
@@ -340,6 +342,21 @@ uint16_t guide_tape_width(void)
 }
 void     guide_track_release(void) { s_release = 1; }
 
+/* 후진도 크기로 본다. 차 ≤ 평균 × PCT / 100  ⇔  차 × 200 ≤ 합 × PCT */
+int16_t guide_straight_tick(int16_t rpm_l, int16_t rpm_r, int16_t min_rpm)
+{
+    int32_t l = (rpm_l < 0) ? -(int32_t)rpm_l : rpm_l;
+    int32_t r = (rpm_r < 0) ? -(int32_t)rpm_r : rpm_r;
+    int32_t d = (l > r) ? (l - r) : (r - l);
+
+    if (((l + r) >= 2L * min_rpm) && ((d * 200L) <= ((l + r) * GUIDE_STRAIGHT_PCT))) {
+        if (s_straight_n < GUIDE_STRAIGHT_TICKS) { s_straight_n++; }
+    }
+    else { s_straight_n = 0; }
+    s_straight = (int16_t)(s_straight_n >= GUIDE_STRAIGHT_TICKS);
+    return s_straight;
+}
+
 /* sure: 넓어진 테이프로 확인됐다. 느린 평균의 나머지(16 미만)도 한 응답에 1 씩 올려 끝까지 배운다 */
 static void learn_width(uint16_t w, int16_t sure)
 {
@@ -360,6 +377,7 @@ static int16_t edge_fix(int16_t *s, int16_t *e, uint16_t leds, uint16_t blobs, i
     if (de < 0) { de = (int16_t)(-de); }
     /* 상한을 넘겼다: 폭을 지우지 않고 다시 배운다. 넓은 덩어리를 가운데로 받으며 느린 평균으로 올린다 */
     if (s_release) { s_release = 0; s_relearn = 1; }
+    if (!s_straight) { s_wide_n = 0; }                /* 곡선의 넓어짐은 세지 않는다 */
     /* 세는 중에는 배운 폭 + 1 안으로 들어오면, 올려 배우는 중에는 배운 폭에 닿으면 끝낸다 */
     if (w <= ref + ((s_wide_n >= GUIDE_WIDE_LEARN_SCANS) ? 0 : 1)) { s_wide_n = 0; }
     if (ref == 0) {                                  /* 처음: 보이는 대로 받고 배운다 */
@@ -380,7 +398,7 @@ static int16_t edge_fix(int16_t *s, int16_t *e, uint16_t leds, uint16_t blobs, i
         /* 교차선·합류선은 붙기 전에 떨어진 덩어리로 먼저 보인다. 그런 적이 없이 넓어지면 커브다: 가운데, 폭 그대로 */
         if ((s_merge_age >= GUIDE_MERGE_SCANS) || ((ds == 1) && (de == 1))) {   /* 양쪽으로 한 칸씩: 커브 */
             /* 커브의 폭 증가는 잠깐이다. GUIDE_WIDE_LEARN_SCANS 이어지면 넓어진 테이프다: 아래에서 올려 배운다 */
-            if (s_wide_n < GUIDE_WIDE_LEARN_SCANS) { s_wide_n++; return GUIDE_TRK_NORMAL; }
+            if (s_wide_n < GUIDE_WIDE_LEARN_SCANS) { if (s_straight) { s_wide_n++; } return GUIDE_TRK_NORMAL; }
         }
         else {
             s_wide_n = 0;
@@ -389,7 +407,8 @@ static int16_t edge_fix(int16_t *s, int16_t *e, uint16_t leds, uint16_t blobs, i
             return GUIDE_TRK_HOLD;
         }
     }
-    if ((blobs == 1) && (*s > 1) && (*e < (int16_t)leds)) { learn_width((uint16_t)w, s_wide_n >= GUIDE_WIDE_LEARN_SCANS); }
+    /* 직진 중에만 배운다. 처음(ref 0)은 서 있을 때·출발 직선이 보통이고 좁아지는 학습이 곧 맞춘다 */
+    if ((blobs == 1) && (*s > 1) && (*e < (int16_t)leds) && (s_straight || (ref == 0))) { learn_width((uint16_t)w, s_wide_n >= GUIDE_WIDE_LEARN_SCANS); }
     return GUIDE_TRK_NORMAL;
 }
 

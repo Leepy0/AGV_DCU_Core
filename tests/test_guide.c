@@ -121,6 +121,90 @@ static float cover(float c, float w, int i)
     return (b > a) ? (b - a) : 0.0f;
 }
 
+/* 직진(1) 또는 곡선(0, 좌우 20% 차)을 GUIDE_STRAIGHT_TICKS 이어 준다 */
+static void straight_set(int on)
+{
+    int k;
+    for (k = 0; k < GUIDE_STRAIGHT_TICKS; k++) { (void)guide_straight_tick(1000, on ? 1000 : 800, 50); }
+}
+
+/* 직진 판정과 직진 중에만 하는 폭 학습 */
+static void test_straight(void)
+{
+    guide_out_t o;
+    guide_rx_t r;
+    int k;
+
+    /* 경계: 좌우 차가 평균의 4% 이하(1000/1040 은 3.9%, 1000/1042 는 4.1%)가 0.3 s 이어져야 직진 */
+    straight_set(0);
+    for (k = 1; k < GUIDE_STRAIGHT_TICKS; k++) { assert(guide_straight_tick(1000, 1040, 50) == 0); }
+    assert(guide_straight_tick(1000, 1040, 50) == 1);
+    assert(guide_straight_tick(1000, 1042, 50) == 0);
+    for (k = 0; k < 3 * GUIDE_STRAIGHT_TICKS; k++) { assert(guide_straight_tick(1042, 1000, 50) == 0); }
+    /* 한 틱이라도 벗어나면 처음부터 다시 센다 */
+    for (k = 1; k < GUIDE_STRAIGHT_TICKS; k++) { (void)guide_straight_tick(1000, 1000, 50); }
+    (void)guide_straight_tick(1000, 1100, 50);
+    for (k = 1; k < GUIDE_STRAIGHT_TICKS; k++) { assert(guide_straight_tick(1000, 1000, 50) == 0); }
+    /* 후진도 크기로 본다. 평균이 최저 속도 밑이면 직진 아님 */
+    straight_set(0);
+    for (k = 0; k < GUIDE_STRAIGHT_TICKS; k++) { (void)guide_straight_tick(-1000, -1040, 50); }
+    assert(guide_straight_tick(-1000, -1040, 50) == 1);
+    for (k = 0; k < 2 * GUIDE_STRAIGHT_TICKS; k++) { assert(guide_straight_tick(49, 49, 50) == 0); }
+    for (k = 0; k < GUIDE_STRAIGHT_TICKS; k++) { (void)guide_straight_tick(50, 50, 50); }
+    assert(guide_straight_tick(50, 50, 50) == 1);
+
+    /* 곡선에서 1 s 넘게 넓어져도 배운 폭 그대로. 위치는 그대로 낸다 */
+    guide_reset();
+    straight_set(1);
+    r = rx_narrow(BITS(7, 8));
+    for (k = 0; k < 5; k++) { guide_track_drive(&r, 0, 0, &o); }
+    straight_set(0);
+    r = rx_narrow(BITS(6, 9));
+    for (k = 0; k < 3 * GUIDE_WIDE_LEARN_SCANS; k++) { guide_track_drive(&r, 0, 0, &o); }
+    assert(guide_tape_width() == 2 && o.width == 4 && o.pos == 0 && o.track == GUIDE_TRK_NORMAL);
+    /* 직진에서 같은 넓어짐은 배운다 */
+    straight_set(1);
+    for (k = 0; k < GUIDE_WIDE_LEARN_SCANS + 40; k++) { guide_track_drive(&r, 0, 0, &o); }
+    assert(guide_tape_width() == 4);
+    /* 곡선 중 좁아짐도 배우지 않는다. 직진이 되면 배운다 */
+    straight_set(0);
+    r = rx_narrow(BITS(7, 8));
+    for (k = 0; k < 50; k++) { guide_track_drive(&r, 0, 0, &o); }
+    assert(guide_tape_width() == 4);
+    straight_set(1);
+    for (k = 0; k < 20; k++) { guide_track_drive(&r, 0, 0, &o); }
+    assert(guide_tape_width() == 2);
+    /* 넓어짐을 세던 중 곡선이 끼면 수를 버린다 */
+    r = rx_narrow(BITS(6, 9));
+    for (k = 0; k < GUIDE_WIDE_LEARN_SCANS - 10; k++) { guide_track_drive(&r, 0, 0, &o); }
+    straight_set(0);
+    guide_track_drive(&r, 0, 0, &o);
+    straight_set(1);
+    for (k = 0; k < GUIDE_WIDE_LEARN_SCANS - 10; k++) { guide_track_drive(&r, 0, 0, &o); }
+    assert(guide_tape_width() == 2);
+    /* 해제 뒤 다시 배우기도 곡선에서는 하지 않는다 */
+    r = rx_narrow(BITS(7, 8) | BITS(11, 12));
+    guide_track_drive(&r, 0, 0, &o);
+    r = rx_narrow(BITS(7, 11));
+    guide_track_drive(&r, 0, 0, &o);
+    assert(o.track == GUIDE_TRK_EDGE);
+    straight_set(0);
+    guide_track_release();
+    r = rx_narrow(BITS(3, 12));
+    for (k = 0; k < 70; k++) { guide_track_drive(&r, 0, 0, &o); }
+    assert(o.track == GUIDE_TRK_NORMAL && o.pos == 0 && guide_tape_width() == 2);
+    straight_set(1);
+    for (k = 0; k < 70; k++) { guide_track_drive(&r, 0, 0, &o); }
+    assert(guide_tape_width() >= 9);
+    /* 처음(배운 폭 없음)은 직진 판정 전이어도 첫 덩어리 폭으로 시작한다 */
+    guide_reset();
+    straight_set(0);
+    r = rx_narrow(BITS(7, 8));
+    guide_track_drive(&r, 0, 0, &o);
+    assert(guide_tape_width() == 2);
+    straight_set(1);
+}
+
 /* 다시 잡을 때 지속 확인. 주행 위치 경로(guide_track_drive)에서 잡았다가 잃은 뒤에만 건다 */
 static void test_reacq(void)
 {
@@ -401,6 +485,7 @@ int main(void)
     fake_reset();
     fake_params();
     guide_reset();
+    straight_set(1);    /* 아래 폭 학습 시험은 직진 중이다. 곡선은 test_straight */
 
     /* 'a' */
     parse("a+05", &r);
@@ -492,6 +577,7 @@ int main(void)
 
     run_table();
     test_cross();
+    test_straight();
 
     /* LOST 뒤에는 변화량 제한 없이 다시 잡는다(지속 확인 뒤) */
     guide_reset();

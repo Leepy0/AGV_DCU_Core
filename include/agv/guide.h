@@ -45,6 +45,10 @@ typedef enum {
 #define GUIDE_EDGE_LIMIT_MM  300   /* 가장자리 고정 상한. 넘으면 테이프 폭이 바뀐 것으로 보고 다시 배운다 */
 #define GUIDE_MERGE_SCANS    50    /* 이 스캔(0.5 s) 안에 떨어진 둘째 덩어리를 본 적이 있어야 붙은 것으로 본다 */
 #define GUIDE_WIDE_LEARN_SCANS 100 /* 붙음이 아닌데 배운 폭 + 1 보다 넓은 응답이 이만큼(1 s) 이어지면 넓어진 테이프로 보고 폭을 올려 배운다 */
+/* 직진 판정(guide_straight_tick). 테이프 폭은 직진 중에만 배운다: 곡선에서는 점등 폭이 넓어져 폭을 잘못 올려 배운다.
+ * 좌우 바퀴 rpm 차가 평균의 4% 이하: 휠 간격 600 mm 에서 반경 약 15 m 보다 완만하다. 실차 직진 좌우 차는 약 1.5% */
+#define GUIDE_STRAIGHT_PCT   4
+#define GUIDE_STRAIGHT_TICKS 30    /* 위 조건과 평균 rpm ≥ SPN 이 이만큼(0.3 s) 이어져야 직진이다 */
 #define GUIDE_REACQ_N        3     /* 잃은 뒤 다시 잡을 때 같은 자리에 이어져야 하는 응답 수(30 ms. 60 m/min 에서 30 mm) */
 #define GUIDE_REACQ_TOL      2     /* 같은 자리로 보는 위치 차(단위) */
 
@@ -125,6 +129,9 @@ uint16_t guide_curve_span(void);                                  /* 설정값�
 uint16_t guide_tape_width(void);                                  /* 배운 테이프 폭(칸). 0 = 아직 모름 */
 /* 가장자리 고정·유지가 상한 거리를 넘었을 때 부른다. 다음 응답은 덩어리 가운데를 받고 폭을 다시 배운다 */
 void     guide_track_release(void);
+/* 직진 판정. guide_poll 이 틱(10 ms)마다 실측 좌우 rpm 과 최저 속도(SPN, rpm)를 넘긴다. 반환 1 = 직진.
+ * 직진이 아니면 폭을 배우지 않는다(처음 배우는 폭 제외). 가장자리 고정·유지·위치는 그대로 */
+int16_t  guide_straight_tick(int16_t rpm_l, int16_t rpm_r, int16_t min_rpm);
 int16_t  guide_want_h(int16_t branch_start, int16_t branch_step); /* 다음 요청이 'H' 인가 */
 
 /* SCI-B 입출력과 오류 판정. 10 ms (src/sys/guide_poll.c) */

@@ -189,6 +189,8 @@ void guide_poll(void)
     uint16_t byte, n;
     guide_rx_t rx;
 
+    /* 정렬 회전은 좌우 크기가 같아 보인다. 직진으로 치지 않는다 */
+    (void)guide_straight_tick(D.rpm[0], D.rpm[1], D.flag_turn ? 0x7FFF : P.min_speed);
     if (D.backward != s_prev_back) {
         if (s_prev_back != PREV_UNKNOWN) { guide_on_sensor_switch(); }
         s_prev_back = D.backward;
