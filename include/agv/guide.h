@@ -44,6 +44,7 @@ typedef enum {
 #define GUIDE_HOLD_LIMIT_MM  100   /* 유지 주행 상한. 30도 교차·25 mm 테이프에서 덮이는 구간이 약 43 mm */
 #define GUIDE_EDGE_LIMIT_MM  300   /* 가장자리 고정 상한. 넘으면 테이프 폭이 바뀐 것으로 보고 다시 배운다 */
 #define GUIDE_MERGE_SCANS    50    /* 이 스캔(0.5 s) 안에 떨어진 둘째 덩어리를 본 적이 있어야 붙은 것으로 본다 */
+#define GUIDE_WIDE_LEARN_SCANS 100 /* 붙음이 아닌데 배운 폭 + 1 보다 넓은 응답이 이만큼(1 s) 이어지면 넓어진 테이프로 보고 폭을 올려 배운다 */
 #define GUIDE_REACQ_N        3     /* 잃은 뒤 다시 잡을 때 같은 자리에 이어져야 하는 응답 수(30 ms. 60 m/min 에서 30 mm) */
 #define GUIDE_REACQ_TOL      2     /* 같은 자리로 보는 위치 차(단위) */
 

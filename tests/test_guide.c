@@ -318,6 +318,35 @@ static void test_cross(void)
       r = rx_narrow(BITS(7, 7));
       for (k = 0; k < 50; k++) { guide_track_drive(&r, 0, 0, &o); }
       assert(guide_tape_width() == 2 && o.pos == -1);
+      /* 둘째 덩어리 없이 넓어진 테이프(2칸 → 4칸): 1 s 는 폭 그대로(커브 판정 가능), 그 뒤 올려 배워 커브 판정이 꺼진다 */
+      guide_reset();
+      r = rx_narrow(BITS(7, 8));
+      for (k = 0; k < 5; k++) { guide_track_drive(&r, 0, 0, &o); }
+      r = rx_narrow(BITS(6, 9));
+      for (k = 0; k < GUIDE_WIDE_LEARN_SCANS; k++) {
+          guide_track_drive(&r, 0, 0, &o);
+          assert(guide_tape_width() == 2 && o.width == 4 && o.width >= guide_curve_span() && o.track == GUIDE_TRK_NORMAL);
+      }
+      for (k = 0; k < 40; k++) { guide_track_drive(&r, 0, 0, &o); }
+      assert(guide_tape_width() == 4 && o.width == 4 && o.width < guide_curve_span() && o.pos == 0);
+      /* 다 배운 뒤 가끔 한 칸 넓어지는 것은 무시한다 */
+      r = rx_narrow(BITS(6, 10));
+      guide_track_drive(&r, 0, 0, &o);
+      r = rx_narrow(BITS(6, 9));
+      guide_track_drive(&r, 0, 0, &o);
+      assert(guide_tape_width() == 4);
+      /* 0.5 s 만 넓었다가 돌아오면(커브) 배우지 않는다. 세던 수도 버린다 */
+      guide_reset();
+      r = rx_narrow(BITS(7, 8));
+      for (k = 0; k < 5; k++) { guide_track_drive(&r, 0, 0, &o); }
+      { int j;
+        for (j = 0; j < 3; j++) {
+            r = rx_narrow(BITS(6, 9));
+            for (k = 0; k < GUIDE_WIDE_LEARN_SCANS / 2; k++) { guide_track_drive(&r, 0, 0, &o); }
+            r = rx_narrow(BITS(7, 8));
+            guide_track_drive(&r, 0, 0, &o);
+            assert(guide_tape_width() == 2 && guide_curve_span() == 4);
+        } }
       /* 센서 끝에 반만 걸리면 안쪽 가장자리에서 폭만큼 잡는다 */
       guide_reset();
       r = rx_narrow(BITS(7, 10));

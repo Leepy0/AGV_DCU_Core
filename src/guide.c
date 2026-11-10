@@ -45,6 +45,7 @@ static uint16_t    s_release;
 static int16_t     s_drive;       /* 이번 호출은 주행 위치 경로다: 가장자리 고정·폭 학습·지속 확인을 한다 */
 static int16_t     s_relearn;     /* 가장자리 고정·유지 상한을 넘겨 폭을 다시 배우는 중 */
 static uint16_t    s_merge_age;   /* 필터 전 덩어리가 둘 이상이던 마지막 스캔 뒤 지난 스캔 수(포화). 붙어 있는 동안은 멈춘다 */
+static uint16_t    s_wide_n;      /* 붙음이 아닌데 배운 폭 + 1 보다 넓은 응답이 이어진 수(포화 = 올려 배우는 중) */
 static int16_t     s_trk_last;    /* 지난 주행 위치 스캔의 guide_track_t */
 static int16_t     s_ever;        /* 시작·센서 전환 뒤 선을 잡은 적이 있다. 첫 획득은 바로 받는다 */
 static int16_t     s_cand_pos, s_cand_n;
@@ -90,6 +91,7 @@ void guide_on_sensor_switch(void)
     s_ever = 0;
     s_cand_n = 0;
     s_relearn = 0;
+    s_wide_n = 0;
     s_merge_age = GUIDE_MERGE_SCANS;
     s_trk_last = GUIDE_TRK_NORMAL;
     comm_clear();
@@ -338,10 +340,12 @@ uint16_t guide_tape_width(void)
 }
 void     guide_track_release(void) { s_release = 1; }
 
-static void learn_width(uint16_t w)
+/* sure: 넓어진 테이프로 확인됐다. 느린 평균의 나머지(16 미만)도 한 응답에 1 씩 올려 끝까지 배운다 */
+static void learn_width(uint16_t w, int16_t sure)
 {
     int16_t d = (int16_t)((int16_t)(w << 4) - (int16_t)s_tape_q4);
     if (s_tape_q4 == 0) { s_tape_q4 = (uint16_t)(w << 4); }
+    else if (sure && (d > 0) && (d < 16)) { s_tape_q4++; }
     else { s_tape_q4 = (uint16_t)((int16_t)s_tape_q4 + d / ((d < 0) ? 4 : 16)); }   /* 좁아지는 쪽은 빨리 따라간다 */
 }
 
@@ -356,6 +360,8 @@ static int16_t edge_fix(int16_t *s, int16_t *e, uint16_t leds, uint16_t blobs, i
     if (de < 0) { de = (int16_t)(-de); }
     /* 상한을 넘겼다: 폭을 지우지 않고 다시 배운다. 넓은 덩어리를 가운데로 받으며 느린 평균으로 올린다 */
     if (s_release) { s_release = 0; s_relearn = 1; }
+    /* 세는 중에는 배운 폭 + 1 안으로 들어오면, 올려 배우는 중에는 배운 폭에 닿으면 끝낸다 */
+    if (w <= ref + ((s_wide_n >= GUIDE_WIDE_LEARN_SCANS) ? 0 : 1)) { s_wide_n = 0; }
     if (ref == 0) {                                  /* 처음: 보이는 대로 받고 배운다 */
     }
     else if (w < ref) {                              /* 센서 끝에 반만 걸렸으면 안쪽 가장자리가 기준이다. 배우지 않는다 */
@@ -372,13 +378,18 @@ static int16_t edge_fix(int16_t *s, int16_t *e, uint16_t leds, uint16_t blobs, i
     }
     else if (w > ref + 1) {
         /* 교차선·합류선은 붙기 전에 떨어진 덩어리로 먼저 보인다. 그런 적이 없이 넓어지면 커브다: 가운데, 폭 그대로 */
-        if (s_merge_age >= GUIDE_MERGE_SCANS) { return GUIDE_TRK_NORMAL; }
-        if ((ds == 1) && (de == 1)) { return GUIDE_TRK_NORMAL; }   /* 양쪽으로 한 칸씩: 커브 */
-        if ((ds == 0) || ((ds == 1) && (de > 1))) { *e = (int16_t)(*s + ref - 1); return GUIDE_TRK_EDGE; }
-        if ((de == 0) || ((de == 1) && (ds > 1))) { *s = (int16_t)(*e - ref + 1); return GUIDE_TRK_EDGE; }
-        return GUIDE_TRK_HOLD;
+        if ((s_merge_age >= GUIDE_MERGE_SCANS) || ((ds == 1) && (de == 1))) {   /* 양쪽으로 한 칸씩: 커브 */
+            /* 커브의 폭 증가는 잠깐이다. GUIDE_WIDE_LEARN_SCANS 이어지면 넓어진 테이프다: 아래에서 올려 배운다 */
+            if (s_wide_n < GUIDE_WIDE_LEARN_SCANS) { s_wide_n++; return GUIDE_TRK_NORMAL; }
+        }
+        else {
+            s_wide_n = 0;
+            if ((ds == 0) || ((ds == 1) && (de > 1))) { *e = (int16_t)(*s + ref - 1); return GUIDE_TRK_EDGE; }
+            if ((de == 0) || ((de == 1) && (ds > 1))) { *s = (int16_t)(*e - ref + 1); return GUIDE_TRK_EDGE; }
+            return GUIDE_TRK_HOLD;
+        }
     }
-    if ((blobs == 1) && (*s > 1) && (*e < (int16_t)leds)) { learn_width((uint16_t)w); }
+    if ((blobs == 1) && (*s > 1) && (*e < (int16_t)leds)) { learn_width((uint16_t)w, s_wide_n >= GUIDE_WIDE_LEARN_SCANS); }
     return GUIDE_TRK_NORMAL;
 }
 
