@@ -7,6 +7,7 @@
 #include <string.h>
 #include "agv/acs.h"
 #include "agv/comm.h"
+#include "agv/curvelog.h"
 #include "agv/drive.h"
 #include "agv/frame.h"
 #include "agv/guide.h"
@@ -1901,6 +1902,126 @@ static void test_tune_guide(void)
     }
     printf("  tune guide ok\n");
 }
+/* 곡선 기록기: 합성 궤적. 휠 간격 600 mm, GD 250, 틱마다 5 mm */
+static void cl_feed(float ds, float r_mm, int16_t pos, int16_t active, int16_t back)
+{
+    curvelog_in_t in;
+    float k = (r_mm != 0.0f) ? (600.0f * 0.5f / r_mm) : 0.0f;   /* r < 0 = 오른쪽 */
+    float dl = ds * (1.0f - k), dr = ds * (1.0f + k);
+    if (back) { float t = dl; dl = dr; dr = t; }                  /* 후진: 진행 방향 기준 왼쪽 = 차체 오른쪽 바퀴 */
+    in.dl_mm = dl;
+    in.dr_mm = dr;
+    in.backward = back;
+    in.pos = pos;
+    in.lost = 0;
+    in.active = active;
+    in.wb_mm = 600.0f;
+    in.gd_mm = 250.0f;
+    curvelog_feed(&in);
+}
+
+/* 직선 1 m, 반경 r 원호 len, 직선 1 m */
+static void cl_route(float r_mm, float len, int16_t pos, int16_t back)
+{
+    float s;
+    for (s = 0.0f; s < 1000.0f; s += 5.0f) { cl_feed(5.0f, 0.0f, pos, 1, back); }
+    for (s = 0.0f; s < len; s += 5.0f)     { cl_feed(5.0f, r_mm, pos, 1, back); }
+    for (s = 0.0f; s < 1000.0f; s += 5.0f) { cl_feed(5.0f, 0.0f, pos, 1, back); }
+}
+
+static int16_t cl_in(int16_t v, int16_t lo, int16_t hi) { return (int16_t)((v >= lo) && (v <= hi)); }
+
+/* 바퀴 펄스로 달린다(curvelog_tick 경로). 반경 r 원호 len mm */
+static void cl_drive(float r_mm, float len, int turn_mid)
+{
+    float wb = (float)param_get(P_WHEEL_BASE_MM) * 10.0f, s, acc[2] = { 0.0f, 0.0f };
+    int i;
+    for (s = 0.0f; s < len + 2000.0f; s += 5.0f) {
+        float k = ((s >= 1000.0f) && (s < 1000.0f + len)) ? (wb * 0.5f / r_mm) : 0.0f;
+        acc[0] += 5.0f * (1.0f - k) * param_dv.one_length_pulse;
+        acc[1] += 5.0f * (1.0f + k) * param_dv.one_length_pulse;
+        for (i = 0; i < 2; i++) { while (acc[i] >= 1.0f) { run_encoder((uint16_t)i, 20000); acc[i] -= 1.0f; } }
+        D.flag_turn = (int16_t)(turn_mid && (s > 1000.0f + 0.5f * len) && (s < 1100.0f + 0.5f * len));
+        curvelog_tick();
+    }
+    D.flag_turn = 0;
+}
+
+static void test_curvelog(void)
+{
+    const float rb = 968.246f;          /* sqrt(1000² - 250²): 센서 점이 반경 1000 원 위 */
+    const curve_rec_t *c;
+    int16_t lg0;
+
+    boot();
+    curvelog_reset();
+    assert(agv_curvelog.group == 1 && agv_curvelog.g[0].n == 0);
+    cl_route(rb, 1521.0f, 0, 0);        /* 왼쪽 90도 */
+    c = &agv_curvelog.g[0].c[0];
+    printf("  곡선 1: 길이 %d 속도 %d 테이프 %d 차체 %d 이론 %d 최대 %d rms %d 넘침 %d 지연 %d 방향 %d\n", c->len_mm, c->v_x10,
+           c->r_tape_mm, c->r_body_mm, c->r_theory_mm, c->dev_max_x10, c->dev_rms_x10, c->exit_over_x10, c->entry_lag_mm, c->dir);
+    assert(agv_curvelog.g[0].n == 1 && c->seq == 1 && c->dir == 1 && c->lost == 0);
+    assert(cl_in(c->r_tape_mm, 980, 1020) && cl_in(c->r_body_mm, 948, 988) && cl_in(c->r_theory_mm, 948, 988));
+    assert(cl_in(c->len_mm, 1300, 1521) && c->v_x10 == 300);     /* 5 mm/10 ms = 30 m/min */
+    assert(c->dev_max_x10 == 0 && c->dev_rms_x10 == 0 && c->exit_over_x10 == 0);
+    cl_feed(5.0f, 0.0f, 0, 1, 0);
+    for (int i = 0; i < 1000; i++) { cl_feed(5.0f, 0.0f, 0, 1, 0); }   /* 직선 5 m: 기록 없음 */
+    assert(agv_curvelog.g[0].n == 1);
+    cl_route(-rb, 1521.0f, 4, 0);       /* 오른쪽, 편차 4단위 일정: 13.78 mm */
+    c = &agv_curvelog.g[0].c[1];
+    assert(agv_curvelog.g[0].n == 2 && c->seq == 2 && c->dir == -1);
+    assert(c->dev_max_x10 == 138 && c->dev_rms_x10 == 138 && c->exit_over_x10 == 0);
+    cl_route(rb, 1521.0f, 0, 1);        /* 후진도 진행 방향 기준 */
+    c = &agv_curvelog.g[0].c[2];
+    assert(agv_curvelog.g[0].n == 3 && c->dir == 1 && cl_in(c->r_tape_mm, 980, 1020) && cl_in(c->r_body_mm, 948, 988));
+    cl_route(rb, 250.0f, 0, 0);         /* 0.3 m 미만은 버린다 */
+    assert(agv_curvelog.g[0].n == 3);
+    /* 회전 중(비활성)이 끼면 그 구간을 버린다 */
+    { float s;
+      for (s = 0.0f; s < 1000.0f; s += 5.0f) { cl_feed(5.0f, 0.0f, 0, 1, 0); }
+      for (s = 0.0f; s < 1500.0f; s += 5.0f) { cl_feed(5.0f, rb, 0, (int16_t)((s < 700.0f) || (s > 720.0f)), 0); }
+      for (s = 0.0f; s < 1000.0f; s += 5.0f) { cl_feed(5.0f, 0.0f, 0, 1, 0); } }
+    assert(agv_curvelog.g[0].n == 4 && cl_in(agv_curvelog.g[0].c[3].len_mm, 300, 800));   /* 회전 뒤 남은 부분만 */
+    /* 묶음 넘김: 다음 묶음을 비우고 그때 LG·OPT 를 적는다. 4 다음은 1 */
+    lg0 = param_get(P_LEGACY_QUIRKS);
+    assert(agv_curvelog.g[0].lg == lg0);
+    assert(param_set_ram(P_LEGACY_QUIRKS, 368) == 0 && param_set_ram(P_OPT_FLAGS, 8) == 0);
+    curvelog_next_group();
+    assert(agv_curvelog.group == 2 && agv_curvelog.g[1].n == 0 && agv_curvelog.g[1].lg == 368 && agv_curvelog.g[1].opt == 8);
+    cl_route(rb, 1521.0f, 0, 0);
+    assert(agv_curvelog.g[1].n == 1 && agv_curvelog.g[0].n == 4);
+    curvelog_next_group();
+    curvelog_next_group();
+    curvelog_next_group();
+    assert(agv_curvelog.group == 1 && agv_curvelog.g[0].n == 0 && agv_curvelog.g[1].n == 1);
+    assert(param_set_ram(P_LEGACY_QUIRKS, lg0) == 0 && param_set_ram(P_OPT_FLAGS, 0) == 0);
+    /* curvelog_tick: 자동 주행에서만 기록. 파라미터 모드 → 자동이면 다음 묶음. 튜닝 모드·회전 중은 기록 없음 */
+    boot();
+    curvelog_reset();
+    D.flag_run = 1;
+    D.control = RUN_DRIVE;
+    cl_drive(rb, 1521.0f, 0);
+    assert(agv_curvelog.g[0].n == 1);
+    cl_drive(rb, 1521.0f, 1);           /* 곡선 가운데 회전 표시: 앞 반은 버리고 회전 뒤 남은 부분만 */
+    assert(agv_curvelog.g[0].n == 2 && agv_curvelog.g[0].c[1].len_mm < 800);
+    D.ui_mode = UI_PARAM;
+    curvelog_tick();
+    D.ui_mode = UI_AUTO;
+    curvelog_tick();
+    assert(agv_curvelog.group == 2 && agv_curvelog.g[1].n == 0);
+    D.flag_run = 0;
+    boot_keys(KEY_MODE + KEY_SET, 0);   /* 튜닝 모드 */
+    assert(tune_active());
+    curvelog_reset();
+    D.flag_run = 1;
+    D.control = RUN_DRIVE;
+    D.ui_mode = UI_AUTO;
+    cl_drive(rb, 1521.0f, 0);
+    assert(agv_curvelog.g[0].n == 0);
+    D.flag_run = 0;
+    printf("  curvelog ok\n");
+}
+
 
 /* 위치 소스 'h' 만(기본. GSR 미사용): 연속 시험 선 찾기 중에는 'a' 소스처럼 'A'·'H' 를 번갈아 보내 배율 짝을 모은다.
  * 'a' 응답은 짝에만 쓰고 위치는 'h' 그대로다. 위치는 LED 덩어리에 h_scale 을 곱해 'a' 단위로 쓰고,
@@ -2159,6 +2280,7 @@ int main(void)
     test_tune_t24_amp();
     test_tune_guide();
     test_guide_h_only();
+    test_curvelog();
     test_turn_scale();
     test_tape_turn();
     test_io_test();

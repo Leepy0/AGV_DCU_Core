@@ -3,6 +3,7 @@
 #include "agv/sys.h"
 #include "agv/acs.h"
 #include "agv/comm.h"
+#include "agv/curvelog.h"
 #include "agv/drive.h"
 #include "agv/frame.h"
 #include "agv/guide.h"
@@ -81,6 +82,7 @@ void sys_boot(void)
     storage_load();
     acs_out_boot(&storage_queued);
     tune_load();
+    curvelog_reset();              /* 곡선 기록기는 전원 투입마다 비운다 */
     seq_pick_profile();
     run_reset();
     run_boot_restore();
@@ -109,6 +111,7 @@ static void scan_10ms(void)
         run_seq();
         site_manual();
         run_after_motor();
+        curvelog_tick();
         ui_run();
     }
     else if (s_io_test == IO_TEST_WAIT) {
