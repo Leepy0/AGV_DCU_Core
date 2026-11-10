@@ -87,7 +87,8 @@ int      tune_guide_save(void);   /* 'h' 부호·배율 저장. 측정 부족이
 int16_t  tune_guide_k100(void);   /* 'a' = k × 'h' 의 k × 100. TUNE_NO_DATA = 측정 부족 */
 
 /* guide_poll 이 부른다 */
+int      tune_measuring(void);   /* 1 = 배율 짝을 모으는 구간(선 찾기). 위치 소스와 무관하게 'A'/'H' 를 번갈아 보낸다 */
 int      tune_want_h(void);
 void     tune_on_a(int16_t status, int16_t pos);
-void     tune_on_h(const guide_rx_t *rx);
+void     tune_on_h(const guide_rx_t *rx, const guide_out_t *trk);   /* trk: 이미 guide_track 한 결과. 0 이면 여기서 한다 */
 #endif

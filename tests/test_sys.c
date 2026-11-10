@@ -1794,7 +1794,7 @@ static void test_tune_guide(void)
         int cell = 8 - pos;                       /* 'h' 두 칸 c, c+1: 위치 = 2c - 16 = -2pos */
         tune_on_a(GUIDE_NORMAL, (int16_t)(2 * pos));
         rx.led_lo = 3UL << (cell - 1);            /* 부호 반대, 배율 1 */
-        tune_on_h(&rx);
+        tune_on_h(&rx, 0);
     }
     assert(tune_guide_k100() == -100);
     assert(tune_guide_save() == 1);
@@ -1820,8 +1820,9 @@ static void test_tune_guide(void)
     printf("  tune guide ok\n");
 }
 
-/* 위치 소스 'h' 만(38번 2): 연속 시험 선 찾기 중에도 매 틱 'H' 만 보낸다('a'·'h' 번갈음 없음).
- * 위치는 LED 덩어리에 h_scale 을 곱해 'a' 단위로 쓰고, 덩어리 폭이 커브 판정 입력이다 */
+/* 위치 소스 'h' 만(38번 2): 연속 시험 선 찾기 중에는 'a' 소스처럼 'A'·'H' 를 번갈아 보내 배율 짝을 모은다.
+ * 'a' 응답은 짝에만 쓰고 위치는 'h' 그대로다. 위치는 LED 덩어리에 h_scale 을 곱해 'a' 단위로 쓰고,
+ * 덩어리 폭이 커브 판정 입력이다. 측정 구간이 아니면 매 틱 'H' 만 보낸다 */
 static void test_guide_h_only(void)
 {
     guide_cfg_t cfg;
@@ -1839,15 +1840,37 @@ static void test_guide_h_only(void)
     }
     assert(a == 3 && h == 3);
     assert(param_set_ram(P_GUIDE_CURVE_DETECT, GUIDE_SRC_LED_ONLY) == 0);   /* 주행 중 바꾼다 */
-    for (k = 0; k < 6; k++) {
+    assert(tune_guide_k100() == TUNE_NO_DATA);
+    a = h = 0;
+    for (k = 0; k < 40; k++) {                      /* 'h' 위치 0(가운데), 'a' 는 +5: 짝은 쌓이되 위치는 'h' */
         host.sci[HAL_SCI_B].tx_len = 0;
-        guide_led_reply(LED_CENTER);
+        host.sci[HAL_SCI_B].rx_len = host.sci[HAL_SCI_B].rx_pos = 0;   /* 다 읽었다 */
+        if ((k & 1) == 0) { guide_led_reply(LED_CENTER); } else { guide_reply(5); }
         run_encoder(0, 20000);
         run_encoder(1, 20000);
         tick();
-        assert(host.sci[HAL_SCI_B].tx_len == 4 && host.sci[HAL_SCI_B].tx[1] == 'H');
+        assert(host.sci[HAL_SCI_B].tx_len == 4);
+        if (host.sci[HAL_SCI_B].tx[1] == 'A') { a++; } else { h++; }
+        assert(D.guide_pos == 0);
     }
-    assert(D.guide_pos == 0 && D.guide_span == 2 && D.stop_err == 0 && D.flag_run);
+    assert(a == 20 && h == 20);
+    for (k = 0; k < 40; k++) {                      /* 'a' -6 다음 'h' -6: 배율 1 */
+        host.sci[HAL_SCI_B].rx_len = host.sci[HAL_SCI_B].rx_pos = 0;   /* 다 읽었다 */
+        if ((k & 1) == 0) { guide_reply(-6); } else { guide_led_reply(LED_NEAR); }
+        run_encoder(0, 20000);
+        run_encoder(1, 20000);
+        tick();
+    }
+    printf("  'h' 전용 배율 k100 %d\n", tune_guide_k100());
+    assert(tune_guide_k100() == 100);
+    for (k = 0; k < 6; k++) {                       /* 'a' 가 와도 위치는 'h' 의 -6 그대로 */
+        host.sci[HAL_SCI_B].rx_len = host.sci[HAL_SCI_B].rx_pos = 0;   /* 다 읽었다 */
+        guide_reply(9);
+        run_encoder(0, 20000);
+        run_encoder(1, 20000);
+        tick();
+        assert(D.guide_pos == -6 && D.guide_track == GUIDE_TRK_NORMAL);
+    }
     guide_cfg_get(&cfg);
     cfg.h_scale = 1.5f;
     guide_configure(&cfg);
@@ -1856,6 +1879,18 @@ static void test_guide_h_only(void)
     assert(D.guide_pos == -9);
     cfg.h_scale = 1.0f;
     guide_configure(&cfg);
+    assert(param_set_ram(P_GUIDE_CURVE_DETECT, GUIDE_SRC_POSITION) == 0);
+    /* 튜닝이 아닌 주행: 'H' 만 */
+    boot();
+    assert(param_set_ram(P_GUIDE_CURVE_DETECT, GUIDE_SRC_LED_ONLY) == 0);
+    press_start();
+    for (k = 0; k < 6; k++) {
+        host.sci[HAL_SCI_B].tx_len = 0;
+        guide_led_reply(LED_CENTER);
+        tick();
+        assert(host.sci[HAL_SCI_B].tx_len == 4 && host.sci[HAL_SCI_B].tx[1] == 'H');
+    }
+    assert(D.flag_run && D.guide_pos == 0 && D.guide_span == 2);
     assert(param_set_ram(P_GUIDE_CURVE_DETECT, GUIDE_SRC_POSITION) == 0);
     printf("  guide h only ok\n");
 }

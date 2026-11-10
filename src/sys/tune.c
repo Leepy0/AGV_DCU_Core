@@ -172,6 +172,8 @@ static int measuring(void)
 
 /* ---- 가이드 측정 (guide_poll 이 부른다) ---- */
 
+int tune_measuring(void) { return measuring(); }
+
 int tune_want_h(void)
 {
     if (!measuring()) { return 0; }
@@ -198,7 +200,7 @@ void tune_on_a(int16_t status, int16_t pos)
     s_tune.a_fresh = 1;
 }
 
-void tune_on_h(const guide_rx_t *rx)
+void tune_on_h(const guide_rx_t *rx, const guide_out_t *trk)
 {
     guide_out_t out;
     uint32_t lat;
@@ -208,7 +210,8 @@ void tune_on_h(const guide_rx_t *rx)
     lat = guide_lateral(rx);
     while (lat != 0UL) { n = (uint16_t)(n + (uint16_t)(lat & 1UL)); lat >>= 1; }
     cross_edge((uint16_t)(n >= GUIDE_CROSS_LED_MIN));
-    guide_track(rx, 0, D.backward, &out);
+    if (trk != 0) { out = *trk; }                 /* guide_poll 이 이미 추적했다 */
+    else          { guide_track(rx, 0, D.backward, &out); }
     if ((out.status == GUIDE_NORMAL) && s_tune.a_fresh) {
         s_tune.ah += (float)s_tune.a_last * (float)out.pos;
         s_tune.hh += (float)out.pos * (float)out.pos;

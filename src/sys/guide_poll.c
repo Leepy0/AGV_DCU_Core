@@ -80,27 +80,26 @@ static void store_led(const guide_rx_t *rx)
     else          { D.guide_led = (uint16_t)rx->led_lo; }
 }
 
-static void on_led(const guide_rx_t *rx)
+/* 1 = guide_track 을 불러 out 을 채웠다('h' 전용 소스). 같은 응답에 다시 부르면 추적 상태가 두 번 바뀐다 */
+static int on_led(const guide_rx_t *rx, guide_out_t *out)
 {
-    guide_out_t out;
-
     store_led(rx);
     if (guide_source_led()) {   /* 위치를 'a' 단위로 바꾼다. 배율은 튜닝 모드가 잰 h_scale(기본 1) */
         float v;
-        guide_track(rx, D.branch_start, D.backward, &out);
-        D.guide_track = out.track;
-        if (out.track == GUIDE_TRK_NORMAL) { s_trk_mm6 = 0; }
+        guide_track(rx, D.branch_start, D.backward, out);
+        D.guide_track = out->track;
+        if (out->track == GUIDE_TRK_NORMAL) { s_trk_mm6 = 0; }
         else {
             s_trk_mm6 = (int16_t)(s_trk_mm6 + ((D.vin_out >= 0) ? D.vin_out : -D.vin_out));
-            if (s_trk_mm6 >= 6 * ((out.track == GUIDE_TRK_HOLD) ? GUIDE_HOLD_LIMIT_MM : GUIDE_EDGE_LIMIT_MM)) {
+            if (s_trk_mm6 >= 6 * ((out->track == GUIDE_TRK_HOLD) ? GUIDE_HOLD_LIMIT_MM : GUIDE_EDGE_LIMIT_MM)) {
                 s_trk_mm6 = 0;
                 guide_track_release();
             }
         }
-        v = (float)out.pos * guide_h_scale();
-        D.guide_span = out.width;
-        apply_status(out.status, (int16_t)((v >= 0.0f) ? (v + 0.5f) : (v - 0.5f)));
-        return;
+        v = (float)out->pos * guide_h_scale();
+        D.guide_span = out->width;
+        apply_status(out->status, (int16_t)((v >= 0.0f) ? (v + 0.5f) : (v - 0.5f)));
+        return 1;
     }
     /* 'a' 소스 중 분기·테이프 구간. 패턴이 전부 꺼짐·켜짐일 때만 위치 상태를 고친다 */
     {
@@ -111,6 +110,7 @@ static void on_led(const guide_rx_t *rx)
         else if (v == on) { apply_status(GUIDE_ALL_ON, 0); }
         else              { apply_status(GUIDE_NORMAL, v); }
     }
+    return 0;
 }
 
 /* 정렬 회전은 라인이 사라지는 것이 정상이다. 오류로 치지 않고 위치와 상태만 고친다 */
@@ -127,8 +127,12 @@ static void on_turn_led(const guide_rx_t *rx)
 
 static void on_rx(const guide_rx_t *rx)
 {
+    /* 'h' 전용 소스의 'a' 는 튜닝 배율 짝에만 쓴다. 조향 위치·오류 판정·추적 상태는 'h' 그대로 */
+    int a_pair_only = (rx->kind == GUIDE_RX_POSITION) && guide_source_led();
+    guide_out_t out;
+
     D.guide_wide = rx->wide;
-    if (rx->kind != GUIDE_RX_LED) { D.guide_track = GUIDE_TRK_NORMAL; }
+    if ((rx->kind != GUIDE_RX_LED) && !a_pair_only) { D.guide_track = GUIDE_TRK_NORMAL; }
     /* 정렬 회전 중 'S' 같은 응답은 오류로 세지 않는다. 라인이 없으면 회전이 258 로 끝난다 */
     if (D.tape_align && D.flag_turn) {
         if (rx->kind == GUIDE_RX_LED) { on_turn_led(rx); }
@@ -136,12 +140,12 @@ static void on_rx(const guide_rx_t *rx)
     }
     switch (rx->kind) {
     case GUIDE_RX_POSITION:
-        apply_status(rx->status, rx->pos);
+        if (!a_pair_only) { apply_status(rx->status, rx->pos); }
         if (tune_active()) { tune_on_a(rx->status, rx->pos); }
         break;
     case GUIDE_RX_LED:
-        on_led(rx);
-        if (tune_active()) { tune_on_h(rx); }
+        if (on_led(rx, &out)) { if (tune_active()) { tune_on_h(rx, &out); } }
+        else if (tune_active()) { tune_on_h(rx, 0); }
         break;
     case GUIDE_RX_SENSOR_ERR:
         range_error(ERR_GUIDE_SENSOR, 0);
@@ -164,9 +168,15 @@ static void send_request(void)
 {
     uint16_t buf[4];
     uint16_t tape = (uint16_t)((D.tape_stop_id != 0) || (D.tape_turn_dir != 0) || D.tape_align);
+    uint16_t branch = (uint16_t)((D.branch_start != 0) && (D.branch_step != 3));
+    int h;
 
+    /* 테이프·분기는 'H' 우선. 튜닝 측정 중에는 위치 소스와 무관하게 'A'/'H' 를 번갈아 배율 짝을 만든다 */
+    if (tape || branch)                      { h = 1; }
+    else if (tune_active() && tune_measuring()) { h = tune_want_h(); }
+    else                                     { h = guide_want_h(D.branch_start, D.branch_step); }
     buf[0] = FRAME_STX;
-    buf[1] = (tape || guide_want_h(D.branch_start, D.branch_step) || (tune_active() && tune_want_h())) ? 'H' : 'A';
+    buf[1] = h ? 'H' : 'A';
     buf[2] = frame_checksum(&buf[1], 1);
     buf[3] = FRAME_ETX;
     (void)hal_sci_send(HAL_SCI_B, buf, 4);
