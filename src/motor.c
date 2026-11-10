@@ -560,7 +560,7 @@ void motor_run(void)
     motor_feedback_update();
     motor_stall_check();
 
-    if (s_motor.forcing) {      /* 바닥 rpm·타력 시험: 주행·조향·정지 제어를 모두 건너뛴다 */
+    if (s_motor.forcing) {      /* 바닥 rpm 시험: 주행·조향·정지 제어를 모두 건너뛴다 */
         uint16_t i;
         int16_t ok = (int16_t)(!D.system_err && !D.estop);
         D.amp_run = ok;

@@ -27,7 +27,7 @@ void    motor_drive_step(void);                 /* Driving_auto */
 int16_t motor_turn_adjust(void);                /* DA_Tape_Turn_Angle_Adj */
 void    motor_run(void);                        /* Motor_Run_Process. 오류 판정과 수동 동작은 호출자 몫 */
 
-/* 바닥 rpm·타력 시험. 속도 PI 를 거치지 않고 두 바퀴 DAC 를 고정한다. 오류·E-STOP 이면 0 */
+/* 바닥 rpm 시험. 속도 PI 를 거치지 않고 두 바퀴 DAC 를 고정한다. 오류·E-STOP 이면 0 */
 #define MOTOR_DAC_MAX        4095
 void    motor_dac_force(int16_t left, int16_t right);
 void    motor_dac_release(void);

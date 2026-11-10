@@ -623,7 +623,7 @@ int tune_key(uint16_t key)
         (void)ident_rpm_key();
         return 1;
     }
-    if (((st == TUNE_TEMP) || (st == TUNE_BLD)) && ident_coast_key()) { return 1; }   /* 타력·정지 중 아무 키 */
+    if (((st == TUNE_TEMP) || (st == TUNE_BLD)) && ident_coast_key()) { return 1; }   /* 가감속 찾기·정지 중 아무 키 */
     if ((st == TUNE_BLD) && ident_rpm_key()) { return 1; }
     if (D.flag_run || D.flag_stopping) { return 0; }
     if (s_tune.editing) { return edit_key(key); }

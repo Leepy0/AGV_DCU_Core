@@ -6,7 +6,7 @@
  * 회 사이(모든 튜닝 시험 공통): 0회 뒤 직선 위 위치를 엔코더로 잇고 교차선마다 다시 맞춘다(X = 0, Y = L).
  *  측정이 끝나면 다음 회에 필요한 앞 거리를 셈해, 서서 뒤(온 쪽 선)가 그만큼이면 그 자리 직선 테이프 위에서 정렬
  *  180도 회전하고, 모자라면 LOS(2번)로 더 가서 돈다. 선이 필요한 회(TOP, 개루프 rpm, 직선보다 긴 회)만 선까지 LOS 로
- *  가고 센서가 선 APPROACH_MM 앞에서 최저 속도가 된다. 짝 회의 첫 회(제작·점검은 타력 단계 밖 모든 회)는 앞이 넉넉하면 돌지 않고 잇는다. 끝은 돌지 않고 선다.
+ *  가고 센서가 선 APPROACH_MM 앞에서 최저 속도가 된다. 짝 회의 첫 회(제작·점검은 모든 회)는 앞이 넉넉하면 돌지 않고 잇는다. 끝은 돌지 않고 선다.
  *  직선 가운데서 교차선을 보거나 선이 위치 계산과 LINE_TOL_MM 넘게 어긋나면 서서 실패(순서 8).
  *  직선 위 회전은 테이프를 다시 잡아야 끝난다. 못 잡으면 258 로 서고 실패(순서 9). X–Y 테이프는 깨끗한 직선이어야 한다.
  * 결과는 agv_ident 에 쌓인다. CCS Expressions 에 agv_ident 를 넣고 펼쳐 읽는다.
@@ -142,7 +142,7 @@ typedef struct {
 typedef struct {
     int16_t state;           /* 1 진행, 2 끝, 3 실패 */
     int16_t fail;            /* 단계 × 1000 + 회 × 10 + 순서. 0 = 없음 */
-    int16_t stage;           /* 1 식별, 2 조향 스윕, 3 최고 속도. 지정 시험은 3 타력, 4 정지 정확도 */
+    int16_t stage;           /* 1 식별, 2 조향 스윕, 3 최고 속도. 지정 시험은 3 을 건너뛰고 4 정지 정확도 */
     int16_t pass, phase;     /* 단계 2 의 회(스윕 칸 × 2 + 0·1 + 1)와 순서. 단계 1·3 은 agv_ident·agv_top 쪽을 본다 */
     int16_t sweep_n;         /* 스윕 칸 수 */
     int16_t sweep_k;         /* 지금(또는 마지막) 스윕 칸 */
@@ -165,55 +165,34 @@ extern all_result_t agv_all;
 void ident_sweep_set(const sweep_cand_t *c, uint16_t n);
 void ident_start_all(void);  /* 이후 ident_run, ident_pass, ident_phase, ident_abort, ident_want_h 를 같이 쓴다 */
 int  ident_all_mode(void);   /* 1 = 지금 돌고 있는(또는 마지막) 시험이 통합 시험이나 지정 시험 */
-uint16_t ident_stage(void);  /* 통합 시험 단계 1~3, 지정 시험 1~4. 통합 시험이 아니면 0 */
+uint16_t ident_stage(void);  /* 통합 시험 단계 1~3, 지정 시험 1·2·4(3 은 비어 있다). 통합 시험이 아니면 0 */
 
 /* ---- 지정 시험 (튜닝 모드 t3.5 TEMP) ----
  * 통합 시험을 줄인 것. 단계 1 은 0회만(선 찾기, L 측정, 회전 두 번). 식별 1~6회와 최고 속도 시험은 없다.
  * 0회 두 번째 회전이 끝나면 바로 단계 2. 통합 시험 단계 2 와 같이 선에서 출발해 TEMP 목록 칸마다 2회 잰다
  * (속도 단계 2, 같은 회 순서, 51·39·38번은 RAM 에만, 회마다 조향 상태를 지움, 창이 안 들어가면 4/5 로 다시).
- * 마지막 스윕 회전 뒤 단계 3 타력 시험. 51·39·38번을 시험 전 값으로 돌린 뒤 COAST_PASSES 회(방향 번갈아), 선에서 출발한다.
- *  1·2회는 속도 단계 2(스윕에서 낮춘 상한 그대로), 3·4회는 최고 속도. 1 가속 → 2 안정 0.5 s(조향 켬)
- *  → 7 타력: 두 DAC 를 0 으로 고정(조향 꺼짐)하고 매 틱 원시 rpm 을 잰다. 좌우 평균이 최저 속도 이하가 되거나
- *  3 s 가 지나거나 감속 끝점(L - GD - 100 mm)에 닿거나 가이드가 크게 벗어나면 풀고, 지령을 실제 속도(최저 속도 상한)에서
- *  최저 속도로 이어 8 선 찾기 → 9 회전. 순서 7(SL 정지)은 지정 시험에 없어 타력에 쓴다.
- *  타력 시작은 늦어도 L - GD - 100 mm - (v² - 최저²) / (2 × 1000 rpm/s). 안정 창이 안 들어가면 4/5 로 다시(cut 2).
- * 결과는 agv_all 과 agv_coast. agv_ident 에는 0회 값(L 등)만 남는다(state 2, pass 0).
- * 단계 3·4 의 agv_all.pass·phase 는 그 단계 회와 순서. 마지막 타력 회전 뒤 단계 4(아래 agv_stopt).
- * 끝, 실패, 끊김 모두 51·39·38번을 되돌린다. STOP·E-STOP·오류·패널 키는 타력 중이면 바로 고정을 푼다. 실패 코드는 통합 시험과 같다 */
+ * 마지막 스윕 회전 뒤 스윕 칸이 RAM 에 건 조향 스위치·가이드 소스를 시험 전 값으로 돌리고 바로 단계 4(아래 agv_stopt)로 간다. 단계 3 은 비워 두고 건너뛴다.
+ * 결과는 agv_all 과 agv_stopt. agv_ident 에는 0회 값(L 등)만 남는다(state 2, pass 0).
+ * 단계 4 의 agv_all.pass·phase 는 그 단계 회와 순서.
+ * 끝, 실패, 끊김 모두 그 조향 스위치·가이드 소스를 되돌린다. 실패 코드는 통합 시험과 같다 */
 /* TEMP 목록. 기본은 예전 OPT 0, 3, 19, 26 의 조향을 두 번 돈다(위치 소스는 시작 때 값). n 은 SWEEP_MAX 에서 자른다.
  * 한계 밖의 칸은 건너뛴다 */
 void ident_temp_set(const sweep_cand_t *c, uint16_t n);
 void ident_start_temp(void); /* 이후 ident_run, ident_pass, ident_phase, ident_abort, ident_want_h 를 같이 쓴다 */
 int  ident_temp_mode(void);  /* 1 = 지금 돌고 있는(또는 마지막) 시험이 지정 시험 */
-int  ident_coast_key(void);  /* 패널 키. 타력 중이면 고정을 풀고, 단계 4 정지 중이면 대기를 풀고 실패시켜 1 */
+int  ident_coast_key(void);  /* 패널 키. 가감속 찾기 감속이나 정지 정확도 정지 중이면 대기를 풀고 실패시켜 1 */
 
-#define COAST_PASSES 4
-#define COAST_CURVE  64            /* 20 ms 간격 평균 rpm */
-
-typedef struct {
-    int16_t v0_rpm[2];             /* 고정 직전 0.1 s 평균 rpm. 좌, 우 */
-    int16_t dec_rpm_s;             /* v0 의 90% → 30% 구간 평균 감속도. 좌우 평균 rpm/s. 닿지 않으면 -1 */
-    int16_t dec_hi_rpm_s;          /* 90% → 60% */
-    int16_t dec_lo_rpm_s;          /* 60% → 30% */
-    int16_t t_min_ms;              /* 고정부터 최저 속도까지. 못 닿고 풀었으면 -1 */
-    int16_t dist_mm;               /* 고정부터 풀 때까지 거리 (엔코더) */
-    int16_t n;                     /* curve 칸 수 */
-    int16_t curve[COAST_CURVE];    /* 고정부터 20 ms 마다 좌우 평균 원시 rpm */
-    float   v0_mpm, dec_mps2;      /* dec_rpm_s 를 m/s². 닿지 않으면 -1 */
-    int16_t cut;                   /* 비트 합. 1 감속 끝점에서 풀었다, 2 속도를 낮췄다, 4 가이드가 벗어나 풀었다 */
-} coast_pass_t;                    /* float 는 짝수 칸(72)에 온다. 지정 시험(t3.5) 단계 3 만 쓴다. 연속 시험은 state·pass·phase 만 */
-
+/* 연속 시험 가감속 찾기(단계 4)의 진행 칸. 결과는 agv_build */
 typedef struct {
     int16_t state;                 /* 1 진행, 2 끝, 3 실패 */
     int16_t fail;                  /* 회 × 10 + 순서 */
     int16_t pass, phase;
-    coast_pass_t p[COAST_PASSES];
 } coast_result_t;
 
 extern coast_result_t agv_coast;
 
 /* ---- 지정 시험 단계 4: 정지 정확도 ----
- * 마지막 타력 회전 뒤 STOPT_PASSES 회(방향 번갈아), 선에서 출발한다. 사용자 51·39·38번, 조향 켬.
+ * 마지막 스윕 회전 뒤 STOPT_PASSES 회(방향 번갈아), 선에서 출발한다. 사용자 51·39·38번, 조향 켬.
  * 회 1·2 는 최고 속도의 1/3, 3·4 는 2/3, 5·6 은 최고 속도(앞 단계에서 낮춘 상한 그대로).
  * 홀수 회 목표 = CID(35번, 0 이면 STOPT_CID_MM), 짝수 회 = STOPT_SHORT_MM.
  * 1 가속 → 2 안정 0.5 s → 7 정지: 그 자리에서 교차로 대기 목표(cross_pulses)를 직접 건다(ACS 를 거치지 않는다).
