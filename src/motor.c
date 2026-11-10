@@ -369,8 +369,10 @@ void motor_drive_step(void)
         D.cur_speed = motor_scv_speed(P.llow_speed, P.acc, P.dcc);
         motor_velocity(D.cur_speed);
         break;
-    case DRIVE_RISK_STOP:
-        D.cur_speed = motor_scv_speed((int16_t)((float)P.low_speed * 0.7f), GUIDE_RISK_ACC, GUIDE_RISK_DCC);
+    case DRIVE_RISK_STOP: {
+        /* 지령이 더 낮으면 지령 그대로다. 위험 감속이 속도를 올리지 않고, 아래 풀림 조건(cur_speed <= speed_cmd)이 성립한다 */
+        int16_t risk = (int16_t)((float)P.low_speed * 0.7f);
+        D.cur_speed = motor_scv_speed((risk < D.speed_cmd) ? risk : D.speed_cmd, GUIDE_RISK_ACC, GUIDE_RISK_DCC);
         motor_velocity(D.cur_speed);
         if ((D.cur_speed <= D.speed_cmd) && (D.guide_pos <= GUIDE_REALIGN_RANGE) && (D.guide_pos >= -GUIDE_REALIGN_RANGE)) {
             D.guide_realign_cnt++;
@@ -383,6 +385,7 @@ void motor_drive_step(void)
             D.guide_realign_cnt = 0;
         }
         break;
+    }
     case DRIVE_RISK_RESUME:
         D.cur_speed = motor_scv_speed(D.speed_cmd, GUIDE_RISK_ACC, GUIDE_RISK_DCC);
         motor_velocity(D.cur_speed);

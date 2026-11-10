@@ -185,6 +185,21 @@ int main(void)
     for (int i = 0; i < 2000 && D.step == DRIVE_RISK_RESUME; i++) { motor_drive_step(); }
     assert(D.step == DRIVE_CRUISE && D.risk_stop == 0 && D.vin_out == D.speed_cmd);
 
+    /* 지령이 Low×0.7 보다 낮으면(예: Low 31, 지령 20 m/min) 위험 감속이 속도를 올리지 않고, 편차가 돌아오면 풀린다 */
+    setup();
+    D.speed_cmd = (int16_t)((long)P.low_speed * 20 / 31);
+    assert(D.speed_cmd < (int16_t)((float)P.low_speed * 0.7f) && D.speed_cmd >= P.llow_speed);
+    for (int i = 0; i < 5000 && D.step != DRIVE_CRUISE; i++) { motor_drive_step(); }
+    assert(D.step == DRIVE_CRUISE && D.vin_out == D.speed_cmd);
+    D.guide_pos = 12;
+    motor_drive_step();
+    assert(D.step == DRIVE_RISK_STOP && D.risk_stop == 1);
+    for (int i = 0; i < 2000; i++) { motor_drive_step(); assert(D.vin_out <= D.speed_cmd && D.step == DRIVE_RISK_STOP); }
+    assert(D.vin_out == D.speed_cmd);
+    D.guide_pos = 2;
+    for (int i = 0; i < 2000 && D.step != DRIVE_CRUISE; i++) { motor_drive_step(); assert(D.vin_out <= D.speed_cmd); }
+    assert(D.step == DRIVE_CRUISE && D.risk_stop == 0 && D.vin_out == D.speed_cmd);
+
     /* 트리거 조건: 저속이면 위험 감속 안 함 */
     setup();
     D.vin_out = (int16_t)(P.llow_speed - 1);
