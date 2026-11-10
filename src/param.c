@@ -300,10 +300,20 @@ int16_t param_set_ram(uint16_t idx, int16_t value)
     return 0;
 }
 
+/* 저장 규칙: LOS 는 DRS 를 넘지 않는다. LOS 를 크게 쓰면 DRS 로 자르고,
+ * DRS 를 LOS 보다 낮게 쓰면 LOS 도 함께 낮춰 저장한다. param_set_ram 은 이 규칙 밖이다(임시 값) */
 int16_t param_set(uint16_t idx, int16_t value)
 {
+    int16_t los_cut = 0;
+    if ((idx == P_SPEED_LOW) && limit_ok(idx, value) && (value > s_set[P_SPEED_HIGH])) { value = s_set[P_SPEED_HIGH]; }
     if (param_set_ram(idx, value) != 0) { return -1; }
+    if ((idx == P_SPEED_HIGH) && (s_set[P_SPEED_LOW] > value)) {
+        s_set[P_SPEED_LOW] = value;
+        recalc_one(P_SPEED_LOW);
+        los_cut = 1;
+    }
     if (idx <= P_SAVED_LAST) { store_one(idx); }
+    if (los_cut) { store_one(P_SPEED_LOW); }
     {
         const extra_t *e = extra_find(idx);
         if (e != 0) { s_store->write(e->addr, (uint16_t)value); }

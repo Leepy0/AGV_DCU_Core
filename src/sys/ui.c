@@ -473,6 +473,7 @@ static void commit(void)
         return;
     }
     (void)param_set((uint16_t)s_ui.para, s_ui.value);
+    s_ui.value = para_value(s_ui.para);                 /* 잘린 값(LOS)이 바로 보이게 */
     if ((s_ui.para == P_TURN_FORBACK) && (P.forback_mode == 0)) { run_relay(0, 1); }
 }
 

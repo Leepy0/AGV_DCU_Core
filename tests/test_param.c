@@ -141,6 +141,22 @@ int main(void)
       assert(P.min_speed == min_before && P.actuator_delay == 90); }
     assert(param_set(P_SPEED_TURN, 3) == 0 && P.turn_speed == param_rpm(3));
     assert(param_set(P_SPEED_LOW, 60) == 0 && P.low_speed == P.target_speed);
+    assert(param_get(P_SPEED_LOW) == 30 && fake_ee[P_SPEED_LOW] == 30);   /* LOS 를 DRS 보다 크게 쓰면 DRS 로 잘린다 */
+
+    /* DRS 를 저장할 때 LOS 가 DRS 를 넘지 않게 한다 */
+    assert(param_set(P_SPEED_LOW, 25) == 0 && param_get(P_SPEED_LOW) == 25 && fake_ee[P_SPEED_LOW] == 25);
+    assert(param_set(P_SPEED_HIGH, 20) == 0);
+    assert(param_get(P_SPEED_LOW) == 20 && fake_ee[P_SPEED_HIGH] == 20 && fake_ee[P_SPEED_LOW] == 20);
+    assert(fake_ee[0] == ee_sum() && P.low_speed == param_rpm(20));
+    assert(param_set(P_SPEED_HIGH, 30) == 0 && param_get(P_SPEED_LOW) == 20 && fake_ee[P_SPEED_LOW] == 20);   /* 이상이면 LOS 불변 */
+    assert(param_set(P_SPEED_HIGH, 20) == 0 && param_get(P_SPEED_LOW) == 20);                                  /* 같은 값도 불변 */
+    assert(param_set(P_SPEED_LOW, 61) == -1 && param_get(P_SPEED_LOW) == 20);                                  /* 한계 위반은 그대로 거부 */
+    /* RAM 만 바꾸는 임시 변경은 저장소의 LOS 를 건드리지 않는다(주행 속도는 파생값 자르기가 막는다) */
+    assert(param_set(P_SPEED_HIGH, 30) == 0 && param_set(P_SPEED_LOW, 25) == 0);
+    fake_ee_writes = 0;
+    assert(param_set_ram(P_SPEED_HIGH, 10) == 0);
+    assert(fake_ee_writes == 0 && fake_ee[P_SPEED_LOW] == 25 && fake_ee[P_SPEED_HIGH] == 30 && fake_ee[0] == ee_sum());
+    assert(param_set_ram(P_SPEED_HIGH, 30) == 0);
     assert(param_set(P_STEER_KI, 5) == 0 && agv_drive.p_ki == 5.0f * 0.1f);
     assert(param_set(P_CROSS_MODE, 10) == 0);       /* 42번은 무시한다. 한계·저장만 남는다 */
 

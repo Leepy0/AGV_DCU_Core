@@ -1490,6 +1490,7 @@ static void test_tune_inputs(void)
     assert(!tune_editing() && param_get(P_WHEEL_DIA_MM) == 213 && tune_menu() == 1110);
     t1_to(1);                                         /* DRS: 최고 속도 상한 = DRS 파라미터 */
     assert(param_get(P_SPEED_HIGH) == 30);
+    (void)param_set(P_SPEED_LOW, 28);                 /* 확정할 DRS 25 보다 큼 */
     key(KEY_SET);
     key(KEY_SHIFT);
     key(KEY_DOWN);                                    /* 20 */
@@ -1500,6 +1501,7 @@ static void test_tune_inputs(void)
     assert(param_get(P_SPEED_HIGH) == 25);            /* 확정하는 순간 DRS */
     ticks(100);
     assert(shows("DRS25") && host.ee[P_SPEED_HIGH] == 25);
+    assert(param_get(P_SPEED_LOW) == 25 && host.ee[P_SPEED_LOW] == 25);   /* LOS 도 DRS 이하로 */
     t1_to(14);                                        /* L 네 자리 */
     key(KEY_SET);
     for (k = 0; k < 3; k++) { key(KEY_SHIFT); }
@@ -1600,6 +1602,7 @@ static void test_tune_t1_save(void)
     int a, k;
 
     boot_keys(KEY_MODE + KEY_SET, 0);
+    (void)param_set(P_SPEED_LOW, 28);   /* 채택 DRS 25 보다 크다: 저장 때 LOS 도 25 로 낮아진다 */
     drive_up();                      /* t1 에서 START */
     run_scan(3);
     assert(tune_state() == TUNE_BLD && ident_build_mode() && agv_build.mask != 0);
@@ -1668,13 +1671,14 @@ static void test_tune_t1_save(void)
     assert(param_get(P_SPEED_HIGH) == 25 && param_get(P_DCC) == 40 && param_get(P_CROSS_IN_CM) == 40);
     assert(param_get(P_OPT_FLAGS) == 0 && host.ee[116] == before[116]);
     assert(host.ee[P_SPEED_HIGH] == 25 && host.ee[P_DCC] == 40 && host.ee[P_CROSS_IN_CM] == 40);
+    assert(param_get(P_SPEED_LOW) == 25 && host.ee[P_SPEED_LOW] == 25);   /* DRS 채택과 함께 LOS 도 낮아짐 */
     assert(tune_base_valid() && tune_base(TUNE_BASE_TOP) == 3000 && tune_base(TUNE_BASE_UNUSED) == 0);
     assert(tune_base(TUNE_BASE_LR) == -4 && ((uint16_t)tune_base(TUNE_BASE_AMP_SE) >> 8) == 'S');
     assert(((uint16_t)tune_base(TUNE_BASE_AMP_SE) & 0xFFu) == 43u);
     /* 쓴 칸: 체크섬 0, 채택한 1·35, 기준값 110~114·119·125 뿐 */
     for (a = 0; a < 128; a++) {
         int base = (a == TUNE_EE_CHECK) || (a == 111) || (a == 112) || (a == 113) || (a == 114) || (a == 119) || (a == 125);
-        int adopt = (a == 0) || (a == P_SPEED_HIGH) || (a == P_CROSS_IN_CM);
+        int adopt = (a == 0) || (a == P_SPEED_HIGH) || (a == P_SPEED_LOW) || (a == P_CROSS_IN_CM);
         if (!base && !adopt) { assert(host.ee[a] == before[a]); }
     }
     key(KEY_MODE);                   /* 저장 뒤 키는 듣지 않는다 */
