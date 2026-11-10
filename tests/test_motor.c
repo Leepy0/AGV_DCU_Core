@@ -1,5 +1,6 @@
 /* test_motor.c - rpm 피드백, 속도 PI, S커브, 주행 단계 */
 #include <assert.h>
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 #include "agv/branch.h"
@@ -295,6 +296,68 @@ int main(void)
         printf("  정렬 회전 최저 속도 구간 %.1f 도\n", (4870.0f - at_min) / rate);
         assert((4870.0f - at_min) / rate <= 3.0f && (4870.0f - at_min) / rate >= 1.0f);
         assert(D.vin_out == P.turn_min);
+    }
+    /* 편차 → 각 환산: atan(편차 mm / GD). 1단위 = 6.89 / 2 mm. GD 250, 1도 10 펄스 */
+    { static const struct { int16_t pos; float lo, hi; } cv[2] = { { 15, 115.0f, 118.0f }, { 31, 229.0f, 233.0f } };
+      for (int c = 0; c < 2; c++) {
+          setup();
+          guide_reset();
+          D.control = RUN_TURN;
+          D.tape_step = 1;
+          D.tape_align = 1;
+          D.turn_90 = 900;
+          D.turn_pulses = D.tape_total_pulse = 1800;
+          D.tape_target_cnt = D.tape_end_cnt = 1800.0f;
+          D.tape_max = 400;
+          D.tape_turned = 1500;
+          D.guide_pos = cv[c].pos;                  /* 일반 15단위 약 11.7도, wide 31단위 약 23.1도 */
+          (void)motor_turn_adjust();
+          printf("  편차 %d단위 → %.1f 도\n", cv[c].pos, (D.tape_end_cnt - 1500.0f) / 10.0f);
+          assert(D.tape_end_cnt - 1500.0f >= cv[c].lo && D.tape_end_cnt - 1500.0f <= cv[c].hi);
+      } }
+    /* 재가속 없음: 감속 중 새 라인이 센서 끝(일반 15, wide 31단위)에 들어와 끝점이 멀어져도 속도 지령은 올라가지 않는다.
+     * 실제 라인 중앙은 목표의 1.05 배. 위치는 atan 모형으로 준다 */
+    for (int c = 0; c < 2; c++) {
+        int16_t edge = c ? 31 : 15;
+        float rate, acc = 0.0f, center;
+        int16_t prev = 0, seen = 0, down = 0;
+        setup();
+        guide_reset();
+        (void)param_set(P_DCC, 40);
+        D.control = RUN_TURN;
+        D.tape_step = 1;
+        D.tape_align = 1;
+        D.turn_90 = 2435;
+        rate = (float)D.turn_90 / 90.0f;
+        D.turn_pulses = D.tape_total_pulse = 4870;
+        D.tape_target_cnt = D.tape_end_cnt = 4870.0f;
+        D.tape_max = (int16_t)(rate * 20.0f);
+        center = 4870.0f * 1.05f;
+        D.guide_all_off = 1;
+        D.vin_out = P.turn_speed;
+        D.tape_turned = 3000;
+        while (D.tape_align && (D.tape_turned < 6000)) {
+            float deg = (center - (float)D.tape_turned) / rate;
+            float u = 250.0f * tanf(deg * 3.14159265f / 180.0f) / (6.89f / 2.0f);
+            int16_t on = (int16_t)(fabsf(u) <= (float)edge + 0.5f);
+            int16_t v;
+            D.guide_all_off = (int16_t)!on;
+            if (on) { D.guide_pos = (int16_t)lroundf(u); }
+            (void)motor_turn_adjust();
+            v = D.vin_out;
+            if (on && !seen) {
+                printf("  %s 라인 진입: 남은 %.1f 도, 속도 %d → %d\n", c ? "wide" : "일반", deg, prev, v);
+                assert(v <= prev);                   /* 들어오는 순간 올라가지 않는다 */
+                seen = 1;
+            }
+            if (v < prev) { down = 1; }
+            if (down && D.tape_align) { assert(v <= prev); }   /* 끝난 틱 제외. 감속을 시작한 뒤에는 한 번도 올라가지 않는다 */
+            prev = v;
+            acc += (float)D.vin_out * (12.0f / 6000.0f) * 2.0f;
+            while (acc >= 1.0f) { acc -= 1.0f; D.tape_turned++; }
+        }
+        assert(seen && down && !D.tape_align && D.system_err == 0);
+        assert(fabsf((float)D.tape_turned - center) < rate * 1.5f);   /* 중앙 판정(1단위 안, 약 1.1도 반올림) 안에서 끝 */
     }
     /* 슬립: 출발 라인과의 차로 재고 최소제곱으로 계속 고친다. 가장자리(12칸 밖)는 버린다. 범위 ±25% */
     setup();

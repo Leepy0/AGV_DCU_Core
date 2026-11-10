@@ -123,6 +123,7 @@ void tagact_turn_align(turn_dir_t d, uint16_t deg, uint16_t next)
     D.tape_total_pulse = D.turn_pulses;
     D.tape_target_cnt = D.tape_end_cnt = (float)D.turn_pulses;
     D.tape_sum_mt = D.tape_sum_tt = 0.0f;
+    D.tape_plan_min = 0;
     D.tape_max = (int16_t)(((float)D.turn_90 / 90.0f) * TAPE_WINDOW_DEG);
     D.tape_slip_ratio = 1.0f;
     D.tape_lost_cnt = 0;

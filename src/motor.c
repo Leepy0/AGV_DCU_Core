@@ -8,6 +8,7 @@
 #include "agv/stop.h"
 
 float sqrtf(float x);
+float atanf(float x);
 
 #define D agv_drive
 #define P param_dv
@@ -398,10 +399,11 @@ static float tape_deg_pulse(void)
     return (float)((D.turn_90 > 0) ? D.turn_90 : P.turn_90) / 90.0f;
 }
 
+/* 센서 편차 → 회전각 펄스. 센서는 회전 중심에서 GD 앞이라 각 = atan(편차 / GD). 직선 근사는 큰 편차에서 각을 키운다 */
 static int32_t guide_offset_to_pulse(int16_t guide)
 {
     float offset_mm = (float)guide * guide_h_scale() * GUIDE_UNIT_MM;
-    float angle_deg = (offset_mm / P.guide_dist_mm) * (180.0f / PI_F);
+    float angle_deg = atanf(offset_mm / P.guide_dist_mm) * (180.0f / PI_F);
     return (int32_t)(angle_deg * tape_deg_pulse());
 }
 
@@ -496,6 +498,9 @@ static int16_t tape_adjust(void)
     }
     if (D.tape_align) {
         int16_t plan = tape_plan(D.tape_end_cnt - (float)turned);
+        /* 감속을 시작하면 다시 올리지 않는다. 새 라인으로 끝점이 멀어져도 지금 속도로 가다가 마지막만 최저 속도 */
+        if ((D.tape_plan_min > 0) && (plan > D.tape_plan_min)) { plan = D.tape_plan_min; }
+        D.tape_plan_min = plan;
         if (plan < speed) { speed = plan; }
     }
     return speed;

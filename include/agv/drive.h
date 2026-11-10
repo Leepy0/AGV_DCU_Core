@@ -98,6 +98,7 @@ typedef struct {
     float   tape_target_cnt;         /* DA_Tape_Turn_Target_Cnt. 슬립 보정 목표. 탐색 범위의 기준 */
     float   tape_end_cnt;            /* 라인 중앙 예상 펄스. 목표를 새 라인 위치로 고친 값. 감속 계획과 TN 표시 */
     float   tape_sum_mt, tape_sum_tt;   /* 슬립비 최소제곱 누적: 잰 펄스 × 돈 펄스, 돈 펄스² */
+    int16_t tape_plan_min;           /* 이번 정렬 회전의 감속 계획 최솟값 rpm. 0 = 아직 없음. 계획을 다시 올리지 않는다 */
     int16_t tape_stop_id;            /* DA_Guide_Stop_Action. 0 = 없음 */
     int16_t tape_turn_dir;           /* DA_Tape_Turn_Dir. 교차 테이프를 찾으면 회전한다 */
     int16_t tape_turn_deg;           /* DA_Tape_Turn_Degree */
