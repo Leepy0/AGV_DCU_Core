@@ -1714,10 +1714,10 @@ static int turn_done(void);
  * 측정이 끝나면 다음 회에 필요한 앞 거리(need)를 셈한다. 지금 자리에서 서면 뒤(온 쪽 선까지)가 need 이상이면
  * 그 자리에서 서서 직선 테이프 위에서 180도 정렬 회전한다. 모자라면 LOS(2번)로 더 가서 뒤가 need 가 되는 자리에서
  * 서고 돈다. need 가 직선에 안 들어가거나(최고 속도 시험, 개루프 rpm 회 등) 위치를 모르면 앞 선까지 LOS 로 가고
- * 마지막 APPROACH_MM 만 최저 속도로 들어가 선 위에서 돈다. 다음 회가 짝 회의 첫 회(방향을 가리지 않는다)이고
- * 앞이 need 이상이면 돌지 않고 서서 같은 방향으로 잇는다. 시험이 끝나면 돌지 않고 선다 */
+ * 마지막 APPROACH_MM 만 최저 속도로 들어가 선 위에서 돈다. 다음 회가 방향을 가리지 않고(제작·점검의 모든 회,
+ * 그 밖의 짝 회 첫 회) 앞이 need 이상이면 돌지 않고 서서 같은 방향으로 잇는다. 시험이 끝나면 돌지 않고 선다 */
 
-/* 다음 회의 종류와 번호(np). free 1 = 방향을 가리지 않는다(짝 회의 첫 회, 단계 첫 회, 다시 하는 회) */
+/* 다음 회의 종류와 번호(np). free 1 = 방향을 가리지 않는다(제작·점검, 짝 회의 첫 회, 단계 첫 회, 다시 하는 회) */
 static int16_t next_kind(uint16_t *np, int16_t *free)
 {
     uint16_t p = PASS, st = (uint16_t)agv_all.stage;
@@ -1731,7 +1731,9 @@ static int16_t next_kind(uint16_t *np, int16_t *free)
     }
     if (s_id.retry) { return sweep() ? NX_SWEEP : (stopt() ? NX_STOPT : (coast() ? NX_COAST : NX_IDENT)); }
     *np = (uint16_t)(p + 1u);
-    *free = ((p & 1u) == 0u);                        /* 같은 속도 왕복의 둘째 회는 반대 방향 */
+    /* 제작·점검(t1·t2)은 앞이 넉넉하면 같은 방향으로 잇는다. 식별·지정·통합 시험의 같은 속도 왕복 둘째 회는
+     * 반대 방향 그대로다: 옆 계단·편차·타력(조향 끔)은 정렬 회전이 테이프 가운데에 다시 세운 뒤 재야 한다 */
+    *free = s_build || ((p & 1u) == 0u);
     if (s_build) {
         done = (st == 2u) ? (p >= 4u) : (st == 4u) ? (p >= BLD_COAST_PASSES) : (st == 5u) ? cid_done()
              : (p >= BLD_DEV_PASSES);
