@@ -1804,6 +1804,22 @@ static void test_tune_t2_compare(void)
     ticks(50);
     assert(param_get(P_SPEED_HIGH) == 25 && host.ee[P_SPEED_HIGH] == 25);
     assert(tune_base(TUNE_BASE_TOP) == 3000);
+    /* 판 1(편차 1단위를 6.89 mm 로 환산하던 이미지) 기준: 다른 칸은 견주고 SE 는 견주지 않는다 */
+    host.ee[TUNE_EE_CHECK] = (uint16_t)(host.ee[TUNE_EE_CHECK] ^ TUNE_BASE_MARK ^ TUNE_BASE_MARK_V1);
+    boot_keys(KEY_MODE + KEY_SET, 1);
+    key(KEY_UP);
+    key(KEY_SET);
+    assert(tune_base_valid());
+    drive_up();
+    run_scan(3);
+    agv_build.top_rpm = 2700;
+    agv_build.se_x10 = 70;
+    fake_build_done();
+    key(KEY_RESET);
+    for (k = 0; (k < 20) && !shows("T-010"); k++) { key(KEY_UP); }
+    assert(shows("T-010") && tune_flick() == 0x03u);
+    for (k = 0; (k < 20) && !shows("SE070"); k++) { key(KEY_UP); }
+    assert(shows("SE070") && tune_flick() == 0u);
     printf("  tune t2 compare ok\n");
 }
 

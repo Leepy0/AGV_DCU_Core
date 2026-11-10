@@ -25,6 +25,10 @@
 #define GUIDE_BLOB_MAX     16      /* 32칸에 번갈아 켜진 경우 */
 #define GUIDE_CROSS_LED_MIN 10     /* 이만큼 켜지면 교차선 */
 
+/* 위치 1단위 mm. 'a'·'h' 위치는 같은 단위이고 LED 하나 차이가 2단위다(blob_pos = 시작 + 끝 - (LED 수 + 1)).
+ * 그래서 1단위 = 센서 피치 6.89 mm 의 절반 */
+#define GUIDE_UNIT_MM      (6.89f / 2.0f)
+
 #define GUIDE_CURVE_SPAN_DEFAULT 4     /* 레거시 판정 (점등 4칸 이상) */
 #define GUIDE_MISS_LIMIT    3          /* 무응답 연속 3회 = 30 ms. P_GUIDE_TIMEOUT 이 0 일 때 */
 #define GUIDE_BAD_LIMIT     10         /* 체크섬 실패 연속 10회 */

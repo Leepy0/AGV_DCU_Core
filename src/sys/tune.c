@@ -301,12 +301,17 @@ void tune_load(void)
 
 int16_t tune_base(uint16_t i) { return (int16_t)ee(tune_base_addr[(i < TUNE_BASE_N) ? i : 0u]); }
 
-int tune_base_valid(void)
+/* 기준값 판. 0 = 없음 */
+static uint16_t base_mark(void)
 {
-    uint16_t i, sum = 0;
+    uint16_t i, sum = 0, c = ee(TUNE_EE_CHECK);
     for (i = 0; i < TUNE_BASE_N; i++) { sum = (uint16_t)(sum + ee(tune_base_addr[i])); }
-    return ee(TUNE_EE_CHECK) == (uint16_t)(TUNE_BASE_MARK ^ sum);
+    if (c == (uint16_t)(TUNE_BASE_MARK ^ sum))    { return TUNE_BASE_MARK; }
+    if (c == (uint16_t)(TUNE_BASE_MARK_V1 ^ sum)) { return TUNE_BASE_MARK_V1; }
+    return 0;
 }
+
+int tune_base_valid(void) { return base_mark() != 0u; }
 
 /* 기준값은 t1 SAVE 때만 쓴다(쓰기 수명). 검사 칸이 맞지 않으면 기준값이 없는 것으로 본다 */
 static void base_write(void)
@@ -391,12 +396,12 @@ static void build_pages(void)
         add_cmp(N_FR, b->floor_rpm, TUNE_BASE_FLOOR, TUNE_NG_FLOOR_PCT);
         add(PK_VAL, N_OS, b->over_mm, 0, chk && (b->over_mm > BLD_OVER_OK_MM));
     }
-    if (m & BLD_STEER)   {   /* 기준은 125 아래 바이트 */
+    if (m & BLD_STEER)   {   /* 기준은 125 아래 바이트. 판 1(단위 변경 전) 기준과는 견주지 않는다 */
         int16_t base = (int16_t)((uint16_t)tune_base(TUNE_BASE_AMP_SE) & 0xFFu);
-        add(PK_VAL, N_SE, b->se_x10, 0, chk && tune_base_valid() && (base > 0) && (b->se_x10 != TUNE_NO_DATA)
+        add(PK_VAL, N_SE, b->se_x10, 0, chk && (base_mark() == TUNE_BASE_MARK) && (base > 0) && (b->se_x10 != TUNE_NO_DATA)
                                         && ((int32_t)b->se_x10 * 100L > (int32_t)base * (100L + TUNE_NG_SE_PCT)));
     }
-    if ((m & BLD_STEER) && !chk) {   /* 후진 점검 평균 편차 칸 × 10. 안 함 ---, 치우침 큼·발산은 깜박임 */
+    if ((m & BLD_STEER) && !chk) {   /* 후진 점검 평균 편차 단위 × 10. 안 함 ---, 치우침 큼·발산은 깜박임 */
         add(PK_VAL, N_BK, (b->bk_judge > 0) ? b->bk_dev_x10 : TUNE_NO_DATA, 0, b->bk_judge >= 2);
     }
     add(PK_VAL, N_LR, b->lr_permille, 0, chk && (lr > TUNE_NG_LR));

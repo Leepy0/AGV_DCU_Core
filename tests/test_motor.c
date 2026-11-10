@@ -311,8 +311,8 @@ int main(void)
     D.guide_pos = 5;
     (void)motor_turn_adjust();
     assert(D.tape_origin_ok == 1 && D.tape_origin == 5);
-    D.tape_turned = 100;
-    D.guide_pos = 12;                         /* 7칸 = 48.2 mm, GD 250 이면 11.05도 = 110 펄스 */
+    D.tape_turned = 50;
+    D.guide_pos = 12;                         /* 7단위 = 24.1 mm, GD 250 이면 5.5도 = 55 펄스 */
     (void)motor_turn_adjust();
     assert(D.tape_slip_ratio > 1.09f && D.tape_slip_ratio < 1.11f);
     assert(D.tape_target_cnt > 1810.0f && D.tape_target_cnt < 1830.0f && D.tape_end_cnt == D.tape_target_cnt);
@@ -320,7 +320,7 @@ int main(void)
     D.guide_pos = 15;                         /* 가장자리: 버린다 */
     (void)motor_turn_adjust();
     assert(D.tape_slip_ratio > 1.09f && D.tape_slip_ratio < 1.11f);
-    D.tape_turned = 40;                       /* 같은 110 펄스를 40 에서 보면 비가 커진다: (110·100 + 110·40) / (100² + 40²) = 1.33 */
+    D.tape_turned = 31;                       /* 같은 55 펄스를 31 에서 보면 비가 커진다: (55·50 + 55·31) / (50² + 31²) = 1.29 */
     D.guide_pos = 12;
     (void)motor_turn_adjust();
     assert(D.tape_slip_ratio == 1.25f);
@@ -339,7 +339,7 @@ int main(void)
     D.tape_turned = 2150;
     (void)motor_turn_adjust();
     assert(D.tape_step == 2 && D.system_err == 0);
-    assert(D.tape_end_cnt > 2150.0f + 40.0f && D.tape_end_cnt < 2150.0f + 50.0f);   /* 3칸 = 4.7도 남음 */
+    assert(D.tape_end_cnt > 2150.0f + 20.0f && D.tape_end_cnt < 2150.0f + 26.0f);   /* 3단위 = 10.3 mm = 2.4도 남음 */
     D.tape_step = 1;
     D.guide_all_off = 1;
     D.tape_turned = 2201;
@@ -358,7 +358,7 @@ int main(void)
     D.tape_step = 2; D.tape_align = 1; D.turn_pulses = 2000; D.tape_turned = 1900;
     D.tape_total_pulse = 2000;
     D.tape_target_cnt = D.tape_end_cnt = 2000.0f; D.tape_max = 100;
-    D.guide_pos = 9;                          /* 14.2도 남음 */
+    D.guide_pos = 9;                          /* 9단위 = 31 mm = 7.1도 남음 */
     D.vin_out = P.turn_speed;
     for (int i = 0; i < 2000; i++) { (void)motor_turn_adjust(); }
     assert(D.tape_align == 1 && D.vin_out > P.turn_min && D.vin_out < P.turn_speed);

@@ -48,9 +48,8 @@
 #define END_TICKS        50       /* 창 끝 평균 */
 #define RAMP_LIMIT       2000     /* 가속이 20 s 안에 안 끝나면 실패 */
 #define STOP_LIMIT       3000
-#define LAT_STEP_BITS    4
+#define LAT_STEP_BITS    4        /* 옆 이동 계단: 위치 4단위(약 13.8 mm) */
 #define SPD_STEP_MPM     3.0f
-#define GUIDE_MM         6.89f
 #define BAND             0.1f     /* 정착 판정 ±10% */
 #define FIND_LIMIT_MM    20000.0f /* 0회 선 찾기 */
 #define TRACK_MIN_MM     2000.0f
@@ -94,7 +93,7 @@
 #define BK_GROW_TICKS    10       /* 편차 절대값을 0.1 s 마다 견준다 */
 #define BK_GROW_N        5        /* 연속 이만큼 커지고 */
 #define BK_GROW_MIN      4        /* 이 칸 이상이면 발산 */
-#define BK_BIAS_X10      30       /* 후진 평균이 전진 평균과 3칸 넘게 다르면 치우침 큼 */
+#define BK_BIAS_X10      30       /* 후진 평균이 전진 평균과 3단위(약 10 mm) 넘게 다르면 치우침 큼 */
 #define KEEP_MARK        ((uint16_t)(0x7E57u ^ (uint16_t)(sizeof(agv_ident) + sizeof(agv_top) + sizeof(agv_all) \
                                                            + sizeof(agv_coast) + sizeof(agv_rpmt) + sizeof(agv_stopt) \
                                                            + sizeof(agv_build))))
@@ -681,9 +680,9 @@ static void hold_finish(ident_level_t *lv)
         }
         side = now;
     }
-    lv->dev_mean_mm = mean * GUIDE_MM;
-    lv->dev_rms_mm = rms * GUIDE_MM;
-    lv->dev_pp_mm = (hi - lo) * GUIDE_MM;
+    lv->dev_mean_mm = mean * GUIDE_UNIT_MM;
+    lv->dev_rms_mm = rms * GUIDE_UNIT_MM;
+    lv->dev_pp_mm = (hi - lo) * GUIDE_UNIT_MM;
     lv->osc_ms = (cross >= 3) ? (2.0f * (float)(last - first) * TICK_MS / (float)(cross - 1)) : 0.0f;
     lv->steer_rms_rpm = sqrtf(s_id.steer_ss / n);
     lv->rpm_l = s_id.rpm_s[0] / n;
@@ -703,7 +702,7 @@ static void lat_finish(ident_level_t *lv)
     lv->lat_rise_ms = ((s->t10 < 0) || (s->t90 < 0)) ? -1.0f : ms((int16_t)(s->t90 - s->t10));
     lv->lat_over_pct = over_pct(s);
     lv->lat_settle_ms = settle_ms(s);
-    lv->lat_err_mm = (s->end_sum / (float)s->end - 1.0f) * s->step * GUIDE_MM;
+    lv->lat_err_mm = (s->end_sum / (float)s->end - 1.0f) * s->step * GUIDE_UNIT_MM;
 }
 
 /* 정속 토크 = 마찰 + 기울기 × rpm. 기울기 × 1000 이 52번 단위다. 정속 측정 전에 끊긴 회는 뺀다 */
@@ -793,7 +792,7 @@ static int plan(ident_level_t *lv)
 static void lat_begin(const ident_level_t *lv)
 {
     D.p_test = LAT_STEP_BITS;
-    step_begin(&s_id.lat, lv->dev_mean_mm / GUIDE_MM, (float)LAT_STEP_BITS, s_id.lat_n);   /* 목표 = 평균 + 4칸 */
+    step_begin(&s_id.lat, lv->dev_mean_mm / GUIDE_UNIT_MM, (float)LAT_STEP_BITS, s_id.lat_n);   /* 목표 = 평균 + 4단위 */
     enter(PH_LAT);
 }
 
@@ -1697,9 +1696,9 @@ static void bk_judge(void)
     float d;
 
     if ((agv_build.bk_judge != 0) || (k->v_mpm == 0.0f)) { return; }
-    d = k->dev_mean_mm / GUIDE_MM * 10.0f;
+    d = k->dev_mean_mm / GUIDE_UNIT_MM * 10.0f;
     agv_build.bk_dev_x10 = (int16_t)((d < 0.0f) ? d - 0.5f : d + 0.5f);
-    agv_build.bk_judge = (fabsf(k->dev_mean_mm - f->dev_mean_mm) * 10.0f > (float)BK_BIAS_X10 * GUIDE_MM) ? 2 : 1;
+    agv_build.bk_judge = (fabsf(k->dev_mean_mm - f->dev_mean_mm) * 10.0f > (float)BK_BIAS_X10 * GUIDE_UNIT_MM) ? 2 : 1;
 }
 
 /* 편차 단계 회가 끝나 서 있다(방향 전환도 끝났다). 0 = 할 일 없음(단계 끝, 안 했으면 판정 0), 1 = 전진으로 되돌리는 방향 전환을

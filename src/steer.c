@@ -186,7 +186,7 @@ void steer_run(int16_t tuning_type)
 
     kalman_step(curve_now, dt);
 
-    /* 기존은 센서 원시값이다. 칼만 위치는 6.89 mm 양자화와 한 틱 지연을 줄인다 */
+    /* 기존은 센서 원시값이다. 칼만 위치는 1단위(약 3.4 mm) 양자화와 한 틱 지연을 줄인다 */
     pos = param_opt(OPT_KF_POSITION) ? D.kf_pos : (float)D.guide_pos;
     sen = pos;
     if (D.guide_wide == 0) {

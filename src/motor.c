@@ -31,7 +31,6 @@ float sqrtf(float x);
 #define TAPE_CENTER_POS      1       /* 이 안이면 회전을 끝낸다 */
 #define TAPE_CREEP_DEG       2.0f    /* 최저 속도로 도는 마지막 각. 라인 가운데 맞추기 */
 #define TAPE_PLAN_DCC        0.75f   /* 감속 계획 = 회전 감속(DCC/4, 많아야 10) × 이 값. S커브 지연 여유 */
-#define GUIDE_BIT_PITCH_MM   6.89f
 #define PI_F                 3.14159265f
 
 agv_drive_t agv_drive;
@@ -401,7 +400,7 @@ static float tape_deg_pulse(void)
 
 static int32_t guide_offset_to_pulse(int16_t guide)
 {
-    float offset_mm = (float)guide * guide_h_scale() * GUIDE_BIT_PITCH_MM;
+    float offset_mm = (float)guide * guide_h_scale() * GUIDE_UNIT_MM;
     float angle_deg = (offset_mm / P.guide_dist_mm) * (180.0f / PI_F);
     return (int32_t)(angle_deg * tape_deg_pulse());
 }
