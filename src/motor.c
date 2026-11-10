@@ -32,6 +32,10 @@ float atanf(float x);
 #define TAPE_CENTER_POS      1       /* 이 안이면 회전을 끝낸다 */
 #define TAPE_CREEP_DEG       2.0f    /* 최저 속도로 도는 마지막 각. 라인 가운데 맞추기 */
 #define TAPE_PLAN_DCC        0.75f   /* 감속 계획 = 회전 감속(DCC/4, 많아야 10) × 이 값. S커브 지연 여유 */
+#define TAPE_SETTLE_TICKS    20      /* 중앙에서 선 뒤 0.2 s 기다리고 바퀴가 서면 편차를 본다 */
+#define TAPE_SETTLE_MAX      100     /* 바퀴가 안 서도 1 s 면 본다 */
+#define TAPE_FIX_MAX         2       /* 보정 횟수 상한 */
+#define TAPE_FIX_DEG         5.0f    /* 보정 한 번의 회전각 상한 */
 #define PI_F                 3.14159265f
 
 agv_drive_t agv_drive;
@@ -412,6 +416,7 @@ static void tape_end(void)
     D.tape_step = 0;
     D.turn_pulses = 0;
     D.tape_align = 0;
+    D.tape_fix_rev = 0;
 }
 
 static int32_t abs32(int32_t v) { return (v < 0) ? -v : v; }
@@ -436,7 +441,55 @@ static void tape_refine(int32_t turned, int32_t pos, float hi)
     D.tape_end_cnt = (end > hi) ? hi : end;
 }
 
-/* 정렬 회전 한 틱. 가이드는 회전 중 'h' 로만 받는다. 위치 부호는 보지 않아 실측 전에도 쓴다.
+/* 지령 0 으로 바로 서고 정착을 기다린다 */
+static int16_t tape_stop(void)
+{
+    D.tape_step = TAPE_STEP_SETTLE;
+    D.tape_wait = 0;
+    D.vin_out = 0;
+    D.scv_accel = 0;
+    return 0;
+}
+
+/* 중앙에서 선 뒤. 정착하면 편차를 보고, 중앙 밖이면 최저 속도로 편차를 줄이는 쪽으로 돌다가 중앙에서 다시 선다.
+ * 방향은 새 라인이 다가올 때의 위치 부호(tape_side)와 견준다: 같으면 덜 왔다(같은 방향), 다르면 지나쳤다(반대 방향).
+ * 센서 부호 실측과 무관하다. 보정은 tape_turned 에 넣지 않는다(회전 보정비 측정). 오류로 만들지 않고 tape_fix_end 에 사유만 남긴다 */
+static int16_t tape_after(int16_t seen, int32_t pos)
+{
+    if (D.tape_step == TAPE_STEP_FIX) {
+        if (D.guide_all_off)                  { D.tape_fix_end = 3; return tape_stop(); }
+        if (seen && (pos <= TAPE_CENTER_POS)) { return tape_stop(); }
+        if ((float)D.tape_fix_turned > TAPE_FIX_DEG * tape_deg_pulse()) { D.tape_fix_end = 2; return tape_stop(); }
+        return P.turn_min;
+    }
+    D.vin_out = 0;
+    D.scv_accel = 0;
+    D.tape_wait++;
+    if ((D.tape_wait < TAPE_SETTLE_TICKS)
+        || (((D.rpm[0] != 0) || (D.rpm[1] != 0)) && (D.tape_wait < TAPE_SETTLE_MAX))) {
+        return 0;
+    }
+    if (D.tape_fix_cnt == 0) { D.tape_stop_pos = D.guide_pos; }
+    D.tape_final_pos = D.guide_pos;
+    if (D.tape_fix_end < 0) {
+        if (!seen)                               { D.tape_fix_end = 3; }
+        else if (pos <= TAPE_CENTER_POS)         { D.tape_fix_end = 0; }
+        else if (D.tape_side == 0)               { D.tape_fix_end = 4; }
+        else if (D.tape_fix_cnt >= TAPE_FIX_MAX) { D.tape_fix_end = 1; }
+        else {
+            D.tape_fix_cnt++;
+            D.tape_fix_rev = (int16_t)(((D.guide_pos > 0) ? 1 : -1) != D.tape_side);
+            D.tape_fix_turned = 0;
+            D.tape_step = TAPE_STEP_FIX;
+            if (!param_quirk(QUIRK_TURN_START)) { D.vin_out = STOP_MIN_RPM; }   /* 바닥 아래 구간을 건너뛴다(회전 시작과 같다) */
+            return P.turn_min;
+        }
+    }
+    tape_end();
+    return 0;
+}
+
+/* 정렬 회전 한 틱. 가이드는 회전 중 'h' 로만 받는다. 중앙까지는 위치 부호를 보지 않아 실측 전에도 쓴다.
  * 목표 = 휠 간격·회전 보정비로 잡은 펄스 ÷ 슬립비(출발 라인이 보이는 동안 최소제곱으로 계속 고침).
  * 탐색 범위 = 보정 전·후 목표 둘 다 ± tape_max. 라인을 보면 위치로 중앙 예상(tape_end_cnt)을 고치고 거기까지 거리로 감속한다 */
 static int16_t tape_adjust(void)
@@ -486,13 +539,19 @@ static int16_t tape_adjust(void)
         }
         else if (seen && in_win) {
             tape_refine(turned, pos, hi);
+            if (pos > TAPE_CENTER_POS) { D.tape_side = (D.guide_pos > 0) ? 1 : -1; }
             if (pos <= TAPE_SLOW_POS) { D.tape_step = 2; }
         }
         break;
-    case 2:     /* 라인을 잡았다. 중앙까지 */
+    case 2:     /* 라인을 잡았다. 중앙까지. 중앙이면 지령 0 으로 바로 선다(각도 우선) */
         if (seen) { tape_refine(turned, pos, hi); }
-        if ((seen && (pos <= TAPE_CENTER_POS)) || ((float)turned > hi)) { tape_end(); }
+        if (seen && (pos > TAPE_CENTER_POS)) { D.tape_side = (D.guide_pos > 0) ? 1 : -1; }
+        if (seen && (pos <= TAPE_CENTER_POS)) { return tape_stop(); }
+        if ((float)turned > hi) { tape_end(); }
         break;
+    case TAPE_STEP_SETTLE:
+    case TAPE_STEP_FIX:
+        return tape_after(seen, pos);
     default:
         break;
     }
@@ -598,8 +657,8 @@ void motor_run(void)
                 D.amp_dir = D.motion;
                 motor_drive_step();
                 break;
-            case RUN_TURN:
-                D.motion = D.turn_motion;
+            case RUN_TURN:   /* 지나친 뒤 보정은 반대 방향(CCW 2 ↔ CW 3) */
+                D.motion = (D.tape_align && D.tape_fix_rev) ? (int16_t)(D.turn_motion ^ 1) : D.turn_motion;
                 D.amp_dir = D.motion;
                 motor_velocity(motor_turn_adjust());
                 break;

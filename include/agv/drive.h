@@ -19,6 +19,7 @@ typedef enum { UI_AUTO = 101, UI_JOG, UI_PARAM, UI_REMOTE,
 
 /* 앰프 방향 (motorMotionDirection, Turn_Direction 의 값) */
 enum { MOTION_FWD = 0, MOTION_BACK = 1, MOTION_CCW = 2, MOTION_CW = 3 };
+enum { TAPE_STEP_SETTLE = 3, TAPE_STEP_FIX = 4 };   /* 정렬 회전: 중앙에서 선 뒤 정착, 보정 회전 */
 
 /* 오류 코드. ACS 로 전송되므로 값 고정 */
 #define ERR_AMP_L_OVERLOAD  200
@@ -103,7 +104,17 @@ typedef struct {
     int16_t tape_turn_dir;           /* DA_Tape_Turn_Dir. 교차 테이프를 찾으면 회전한다 */
     int16_t tape_turn_deg;           /* DA_Tape_Turn_Degree */
     uint16_t tape_turn_next;         /* 회전 인자 둘째 칸: fb | auto<<4 | obs<<8 */
-    volatile int32_t tape_turned;    /* 정렬 회전에서 지금까지 돈 펄스. 엔코더 ISR 이 센다 */
+    volatile int32_t tape_turned;    /* 정렬 회전에서 지금까지 돈 펄스. 엔코더 ISR 이 센다. 중앙에서 선 뒤(정착·보정)는 넣지 않는다 */
+    /* 정렬 회전 정지 뒤 보정. tape_step TAPE_STEP_SETTLE·TAPE_STEP_FIX 동안 tape_align 은 1 로 남아 회전이 안 끝난 것으로 보인다 */
+    int16_t tape_side;               /* 새 라인이 중앙에 오기 전 위치 부호(+1/-1). 0 = 모름. 같은 부호면 덜 왔다 */
+    int16_t tape_wait;               /* 정착 틱 */
+    int16_t tape_fix_rev;            /* 1 = 보정 회전이 원래 회전 방향의 반대(지나쳤다) */
+    volatile int32_t tape_fix_turned;   /* 이번 보정에서 돈 두 바퀴 펄스. 엔코더 ISR 이 센다 */
+    /* 마지막 정렬 회전 기록(CCS). 다음 정렬 회전 시작 때 지운다 */
+    int16_t tape_stop_pos;           /* 중앙에서 선 뒤 정착한 편차(단위) */
+    int16_t tape_fix_cnt;            /* 보정 횟수 */
+    int16_t tape_final_pos;          /* 끝낼 때 편차(단위) */
+    int16_t tape_fix_end;            /* -1 정지 뒤 확인 안 함(탐색 범위 끝 등), 0 중앙, 1 보정 횟수 상한, 2 보정 각 상한, 3 선 잃음, 4 방향 모름 */
 
     /* 일시정지 조건 */
     int16_t cross_in_flag, cross_in_on;     /* Flag_Cross_In_Flag/On */

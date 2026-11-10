@@ -242,8 +242,96 @@ int main(void)
     (void)motor_turn_adjust();
     assert(D.tape_align == 1);                    /* -3 은 중앙이 아니다 */
     D.guide_pos = 1;
-    (void)motor_turn_adjust();
-    assert(D.tape_align == 0 && D.turn_pulses == 0);
+    D.vin_out = P.turn_min;
+    assert(motor_turn_adjust() == 0 && D.vin_out == 0);   /* 중앙에 든 틱에 지령 0 */
+    assert(D.tape_step == TAPE_STEP_SETTLE && D.tape_align == 1 && D.turn_pulses == 2000);   /* 회전은 아직 안 끝났다 */
+    /* 정지 뒤 보정. side = 새 라인이 다가온 쪽. 정착 뒤 편차 pos 를 보고 한 단계씩 */
+    {
+        static const struct { int16_t pos, rev; } fx[2] = { { 2, 0 }, { -2, 1 } };   /* 덜 옴 → 같은 방향, 지나침 → 반대 */
+        for (int c = 0; c < 2; c++) {
+            int32_t t0;
+            setup();
+            D.control = RUN_TURN;
+            D.tape_step = 2;
+            D.tape_align = 1;
+            D.turn_90 = 900;                   /* 1도 10 펄스 */
+            D.turn_pulses = 2000;
+            D.tape_turned = t0 = 1900;
+            D.tape_target_cnt = D.tape_end_cnt = 2000.0f;
+            D.tape_max = 100;
+            D.tape_fix_end = -1;
+            D.guide_pos = 4;
+            assert(motor_turn_adjust() > 0 && D.tape_side == 1);
+            D.guide_pos = 0;
+            assert(motor_turn_adjust() == 0);
+            D.guide_pos = fx[c].pos;           /* 서는 동안 미끄러졌다 */
+            for (int i = 0; i < 19; i++) { assert(motor_turn_adjust() == 0 && D.tape_step == TAPE_STEP_SETTLE); }
+            D.rpm[0] = 30;                     /* 바퀴가 아직 돈다: 기다린다 */
+            assert(motor_turn_adjust() == 0 && D.tape_step == TAPE_STEP_SETTLE);
+            D.rpm[0] = 0;
+            assert(motor_turn_adjust() > 0);
+            assert(D.tape_step == TAPE_STEP_FIX && D.tape_fix_rev == fx[c].rev && D.tape_fix_cnt == 1);
+            assert(D.tape_stop_pos == fx[c].pos && D.tape_align == 1 && D.turn_pulses == 2000);
+            for (int i = 0; i < 30; i++) { assert(motor_turn_adjust() <= (P.turn_min > STOP_MIN_RPM ? P.turn_min : STOP_MIN_RPM)); }
+            D.tape_fix_turned = 20;            /* 2도 */
+            D.guide_pos = (int16_t)(fx[c].pos / 2);   /* 1단위 = 중앙 */
+            assert(motor_turn_adjust() == 0 && D.vin_out == 0 && D.tape_step == TAPE_STEP_SETTLE);
+            for (int i = 0; i < 19; i++) { (void)motor_turn_adjust(); }
+            assert(D.tape_align == 1);
+            assert(motor_turn_adjust() == 0);
+            assert(D.tape_align == 0 && D.turn_pulses == 0 && D.tape_fix_rev == 0);
+            assert(D.tape_fix_end == 0 && D.tape_fix_cnt == 1 && D.tape_final_pos == fx[c].pos / 2);
+            assert(D.tape_turned == t0 && D.system_err == 0);
+        }
+    }
+    /* 보정 상한: 두 번 보정해도 중앙 밖이면 오류 없이 끝(1). 보정 각 5도를 넘으면 서고 끝(2). 보정 중 선을 잃으면 서고 끝(3) */
+    for (int c = 1; c <= 3; c++) {
+        setup();
+        D.control = RUN_TURN;
+        D.tape_step = TAPE_STEP_SETTLE;
+        D.tape_align = 1;
+        D.turn_90 = 900;
+        D.turn_pulses = 2000;
+        D.tape_side = 1;
+        D.tape_fix_end = -1;
+        D.guide_pos = 3;
+        for (int k = 0; (k < 10) && D.tape_align; k++) {
+            for (int i = 0; (i < 20) && (D.tape_step == TAPE_STEP_SETTLE); i++) { (void)motor_turn_adjust(); }
+            if (!D.tape_align) { break; }
+            assert(D.tape_step == TAPE_STEP_FIX && motor_turn_adjust() > 0);
+            if (c == 1) {                     /* 중앙에 갔다가 서는 동안 다시 3 */
+                D.guide_pos = 0;
+                assert(motor_turn_adjust() == 0);
+                D.guide_pos = 3;
+            }
+            else if (c == 2) {
+                D.tape_fix_turned = 50;
+                assert(motor_turn_adjust() > 0);
+                D.tape_fix_turned = 51;
+                assert(motor_turn_adjust() == 0 && D.vin_out == 0);
+            }
+            else {
+                D.guide_all_off = 1;
+                assert(motor_turn_adjust() == 0 && D.vin_out == 0 && D.tape_align == 1);
+            }
+        }
+        assert(D.tape_align == 0 && D.turn_pulses == 0 && D.system_err == 0);
+        assert(D.tape_fix_end == c && D.tape_fix_cnt == ((c == 1) ? 2 : 1));
+    }
+    /* 다가온 쪽을 모르면 보정하지 않는다(4). 정지 뒤 선이 없으면 끝(3) */
+    for (int c = 0; c < 2; c++) {
+        setup();
+        D.control = RUN_TURN;
+        D.tape_step = TAPE_STEP_SETTLE;
+        D.tape_align = 1;
+        D.turn_pulses = 2000;
+        D.tape_fix_end = -1;
+        D.guide_pos = 3;
+        D.tape_side = (int16_t)c;
+        D.guide_all_off = (int16_t)c;
+        for (int i = 0; i < 20; i++) { assert(motor_turn_adjust() == 0); }
+        assert(D.tape_align == 0 && D.tape_fix_cnt == 0 && D.tape_fix_end == (c ? 3 : 4) && D.system_err == 0);
+    }
     /* 정렬 회전 감속은 일반 회전과 같다(DCC/4). 라인을 보기 전에 미리 줄인다 */
     setup();
     (void)param_set(P_DCC, 40);

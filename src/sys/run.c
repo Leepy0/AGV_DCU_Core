@@ -151,7 +151,10 @@ void run_encoder(uint16_t wheel, uint32_t period)
         D.travel_pulses++;
     }
     if (D.flag_turn && (D.turn_pulses > 0)) {
-        if (D.tape_align) { D.tape_turned++; }   /* 끝은 가이드가 정한다. turn_pulses 는 회전 중 표시로 둔다 */
+        if (D.tape_align) {                       /* 끝은 가이드가 정한다. turn_pulses 는 회전 중 표시로 둔다 */
+            if (D.tape_step >= TAPE_STEP_SETTLE) { D.tape_fix_turned++; }   /* 중앙에서 선 뒤는 회전 보정비 측정에 넣지 않는다 */
+            else                                 { D.tape_turned++; }
+        }
         else              { D.turn_pulses--; }
     }
 }

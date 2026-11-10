@@ -129,6 +129,12 @@ void tagact_turn_align(turn_dir_t d, uint16_t deg, uint16_t next)
     D.tape_lost_cnt = 0;
     D.tape_turned = 0;
     D.tape_origin_ok = 0;
+    D.tape_side = 0;
+    D.tape_fix_rev = 0;
+    D.tape_fix_turned = 0;
+    D.tape_stop_pos = D.tape_final_pos = 0;
+    D.tape_fix_cnt = 0;
+    D.tape_fix_end = -1;
     /* 방향이 바뀌면 센서 전원도 바뀌어 출발 라인을 볼 수 없다. 슬립 측정을 건너뛴다 */
     D.tape_step = (fb != 0u) ? 1 : 0;
     D.tape_align = 1;

@@ -1222,6 +1222,7 @@ static void turn_scan(uint16_t leds, int32_t pulses)
 #define LED_CENTER 0x0180u     /* 8·9번 칸: 위치 0 */
 #define LED_EDGE   0x0003u     /* 1·2번 칸: 위치 -14 */
 #define LED_NEAR   0x0030u     /* 5·6번 칸: 위치 -6 */
+#define LED_OVER2  0x0300u     /* 9·10번 칸: 위치 +2 */
 
 static void align_start(uint16_t next)
 {
@@ -1274,9 +1275,31 @@ static void test_align_turn(void)
     assert(D.tape_step == 2);
     turn_scan(LED_NEAR, 0);
     assert(D.tape_align == 1);
-    turn_scan(LED_CENTER, 0);
-    assert((D.tape_align == 0) && (D.turn_pulses == 0));
+    turn_scan(LED_CENTER, 0);                          /* 중앙: 그 틱에 지령 0 으로 선다. 회전은 아직 안 끝났다 */
+    assert(D.tape_step == TAPE_STEP_SETTLE && D.vin_out == 0 && D.w_cmd[0] == 0 && D.w_cmd[1] == 0);
+    assert(D.tape_align == 1 && D.flag_turn == 1 && D.turn_pulses == total && D.turn_motion == MOTION_CW);
+    assert(D.tape_side == -1);                         /* 새 라인은 - 쪽에서 왔다 */
+    {   /* 선 뒤 +2 로 지나쳤다: 정착 0.2 s 뒤 반대 방향(CCW)으로 최저 속도 보정, 중앙에서 다시 선다 */
+        int32_t t0 = D.tape_turned;
+        for (i = 0; i < 19; i++) { turn_scan(LED_OVER2, 0); }
+        assert(D.tape_step == TAPE_STEP_SETTLE && D.vin_out == 0);
+        turn_scan(LED_OVER2, 0);
+        assert(D.tape_step == TAPE_STEP_FIX && D.tape_fix_rev == 1 && D.tape_fix_cnt == 1 && D.tape_stop_pos == 2);
+        turn_scan(LED_OVER2, 30);
+        assert(D.motion == MOTION_CCW && D.vin_out > 0 && D.vin_out <= P.turn_speed);
+        assert(D.tape_turned == t0 && D.tape_fix_turned == 30);   /* 보정은 회전 보정비 측정에 안 들어간다 */
+        assert(D.flag_turn == 1 && D.turn_pulses == total);
+        turn_scan(LED_CENTER, 0);
+        assert(D.tape_step == TAPE_STEP_SETTLE && D.vin_out == 0 && D.tape_align == 1);
+        for (i = 0; i < 19; i++) { turn_scan(LED_CENTER, 0); }
+        assert(D.tape_align == 1);
+        turn_scan(LED_CENTER, 0);
+        assert((D.tape_align == 0) && (D.turn_pulses == 0));
+        assert(D.tape_fix_end == 0 && D.tape_fix_cnt == 1 && D.tape_final_pos == 0);
+    }
     assert(D.system_err == 0);
+    for (i = 0; i < 40; i++) { turn_scan(LED_CENTER, 0); }   /* 정지 처리가 회전을 끝낸다 */
+    assert(D.flag_turn == 0 && D.turn_motion == 0);
 
     /* 라인을 못 찾으면 오류로 끝낸다 */
     align_start(0x10);
