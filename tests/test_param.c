@@ -101,18 +101,12 @@ int main(void)
       assert(P.straight_len == 3L * P.tag_pulse[10]);
       assert(P.for_obs == 1 && P.back_obs == 1 && P.turn_mode == 2 && P.forback_mode == 2); }
 
-    /* 기본값 세 벌 */
-    param_default_types(11, 22, 33);
-    param_default(2);
-    assert(param_get(P_SPEED_HIGH) == 25 && param_get(P_GEAR_RATIO) == 60 && param_get(P_AGV_TYPE) == 22);
-    assert(param_get(P_ACS_RETRY_SEC) == 1 && param_get(P_CROSS_MODE) == 1 && param_get(P_ERR_REPORT_MIN) == 10);
-    assert(param_get(P_CROSS_IN_CM) == 60);
-    assert(param_get(P_BAT_OFFSET_DV) == -9 && (int16_t)fake_ee[P_BAT_OFFSET_DV] == -9);
-    param_default(3);
-    assert(param_get(P_WHEEL_BASE_MM) == 130 && param_get(P_AGV_ID) == 3 && param_get(P_SPEED_MIN) == 7);
-    assert(param_get(P_STOP_LEN_MM) == 0 && param_get(P_AGV_TYPE) == 33);
-    assert(P.min_speed == (int16_t)(7.0f * P.one_meter_rpm));
-    param_default(1);
+    /* 기본값 한 벌 */
+    param_default_type(11);
+    param_default();
+    assert(param_get(P_SPEED_HIGH) == 30 && param_get(P_SPEED_LOW) == 25 && param_get(P_AGV_TYPE) == 11);
+    assert(param_get(P_CROSS_IN_CM) == 60 && param_get(P_BAT_OFFSET_DV) == 0);
+    assert(fake_ee[P_SPEED_HIGH] == 30 && fake_ee[P_AGV_TYPE] == 11 && fake_ee[0] == ee_sum());
     assert(param_get(P_GUIDE_CURVE_DETECT) == 0);   /* 새 파라미터 자리는 옛 기본값을 쓰지 않는다 */
 
     /* 한계: 일반, 하한 0 으로 낮춘 36, 자리별 */

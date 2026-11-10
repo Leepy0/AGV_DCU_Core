@@ -447,10 +447,10 @@ static void enter_group(void)
     s_ui.screen = (int16_t)(s_ui.screen + SCREEN_LIST);
 }
 
-/* 파라미터 46 에 77·88·99 를 넣고 확정하면 기본값 세트를 쓴다 */
-static void init_defaults(uint16_t kind)
+/* INT 에 77 을 넣고 확정하면 기본값을 쓴다 */
+static void init_defaults(void)
 {
-    param_default(kind);
+    param_default();
     seq_pick_profile();
     s_ui.msg_init = 1;
     s_ui.msg_ticks = 0;
@@ -460,9 +460,7 @@ static void init_defaults(uint16_t kind)
 static void commit(void)
 {
     if (s_ui.para == P_PARA_INIT) {
-        if (s_ui.value == 77)      { init_defaults(1); }
-        else if (s_ui.value == 88) { init_defaults(2); }
-        else if (s_ui.value == 99) { init_defaults(3); }
+        if (s_ui.value == 77) { init_defaults(); }
         return;
     }
     s_ui.edit = EDIT_OFF_FLAG;

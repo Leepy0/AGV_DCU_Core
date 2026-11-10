@@ -95,7 +95,7 @@ static const tag_rule_t s_rules[] = {
 static int s_manual_count;
 void site_register(void)
 {
-    param_default_types(0, 0, 0);
+    param_default_type(0);
     (void)seq_bind(&s_site);
     tagact_bind(s_rules, sizeof(s_rules) / sizeof(s_rules[0]), 0);
 }
@@ -1075,14 +1075,28 @@ static void test_para_init(void)
     for (i = 0; (i < 40) && (ui_para_number() != P_PARA_INIT); i++) { key(KEY_UP); }
     assert(ui_para_number() == P_PARA_INIT);
     key(KEY_SET);
-    /* 값 88 = 십의 자리 8 */
+    /* 값 88, 99 는 아무 일도 하지 않는다 */
     key(KEY_SHIFT);
     for (i = 0; i < 8; i++) { key(KEY_UP); }
     key(KEY_SHIFT);
     for (i = 0; i < 8; i++) { key(KEY_UP); }
     key(KEY_SET);
-    assert(param_get(P_SPEED_HIGH) == 25);            /* 세트 2 */
-    printf("  77/88/99 ok\n");
+    ticks(10);
+    assert(param_get(P_SPEED_HIGH) == 44 && !shows("INIT"));
+    for (i = 0; i < 11; i++) { key(KEY_UP); }         /* 88 → 99 */
+    key(KEY_SET);
+    ticks(10);
+    assert(param_get(P_SPEED_HIGH) == 44 && !shows("INIT"));
+    /* 값 77 = 기본값 한 벌 */
+    key(KEY_SHIFT);
+    for (i = 0; i < 2; i++) { key(KEY_DOWN); }
+    key(KEY_SHIFT);
+    for (i = 0; i < 2; i++) { key(KEY_DOWN); }
+    key(KEY_SET);
+    assert(param_get(P_SPEED_HIGH) == 30);
+    ticks(100);
+    assert(host.ee[P_SPEED_HIGH] == 30);
+    printf("  77 ok\n");
 }
 
 static void test_lamp(void)

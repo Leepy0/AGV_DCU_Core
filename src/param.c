@@ -9,7 +9,7 @@ param_dv_t param_dv;
 
 static int16_t s_set[P_COUNT];
 static const param_store_t *s_store;
-static int16_t s_default_type[3];
+static int16_t s_default_type;
 
 typedef struct { int16_t low, up; } limit_t;
 
@@ -27,14 +27,10 @@ static const limit_t s_limit[P_PARA_INIT + 1] = {
     {-999, 999}, {0, 99}, {0, 99}, {0, 99}
 };
 
-/* 1~45 세 벌. 26(P_AGV_TYPE)은 param_default_types 로 받는다. 38 은 새 파라미터라 전부 0 */
-static const int16_t s_defaults[3][P_SAVED_LAST] = {
-    { 30, 25, 13, 0, 0, 1, 11, 11, 10, 0, 50, 8, 40, 0, 0, 0, 22, 5, 35, 0, 0, 202, 40, 60, 0, 0,
-      0, 0, 1, 0, 0, 0, 0, 54, 60, 5, 0, 0, 0, 5, 0, 0, 0, 0, 11 },
-    { 25, 20, 7, 0, 0, 1, 11, 11, 4, -9, 40, 8, 40, 0, 0, 0, 22, 5, 35, 0, 0, 202, 60, 60, 0, 0,
-      0, 0, 1, 0, 0, 0, 0, 54, 60, 5, 1, 0, 0, 10, 0, 1, 0, 0, 11 },
-    { 30, 25, 7, 0, 0, 1, 11, 11, 4, -9, 40, 8, 40, 0, 0, 0, 22, 5, 0, 0, 0, 202, 40, 130, 3, 0,
-      0, 7, 1, 0, 0, 0, 0, 54, 60, 5, 0, 0, 0, 10, 0, 0, 0, 0, 11 }
+/* 1~45 기본값(INT 77). 26(P_AGV_TYPE)은 param_default_type 으로 받는다. 38 은 새 파라미터라 0 */
+static const int16_t s_defaults[P_SAVED_LAST] = {
+    30, 25, 13, 0, 0, 1, 11, 11, 10, 0, 50, 8, 40, 0, 0, 0, 22, 5, 35, 0, 0, 202, 40, 60, 0, 0,
+    0, 0, 1, 0, 0, 0, 0, 54, 60, 5, 0, 0, 0, 5, 0, 0, 0, 0, 11
 };
 
 int16_t param_digit(int16_t value, int16_t place)
@@ -54,12 +50,7 @@ int16_t param_rpm(int16_t m_per_min)
     return (int16_t)((float)m_per_min * param_dv.one_meter_rpm);
 }
 
-void param_default_types(int16_t kind1, int16_t kind2, int16_t kind3)
-{
-    s_default_type[0] = kind1;
-    s_default_type[1] = kind2;
-    s_default_type[2] = kind3;
-}
+void param_default_type(int16_t kind) { s_default_type = kind; }
 
 /* 체크섬 밖 EEPROM 에 따로 두는 파라미터. 현장 장비의 체크섬 범위를 건드리지 않는다 */
 typedef struct { uint16_t idx, addr; int16_t low, up, def; } extra_t;
@@ -332,12 +323,11 @@ static void after_load(void)
     }
 }
 
-void param_default(uint16_t kind)
+void param_default(void)
 {
     uint16_t i;
-    if ((kind < 1) || (kind > 3)) { return; }
-    for (i = 1; i <= P_SAVED_LAST; i++) { s_set[i] = s_defaults[kind - 1][i - 1]; }
-    s_set[P_AGV_TYPE] = s_default_type[kind - 1];
+    for (i = 1; i <= P_SAVED_LAST; i++) { s_set[i] = s_defaults[i - 1]; }
+    s_set[P_AGV_TYPE] = s_default_type;
     store_all();
     after_load();
 }
@@ -427,7 +417,7 @@ int16_t param_boot(const param_store_t *store, int16_t version)
     }
     /* 한계 위반이면 기본값으로 초기화하고, 체크섬 불일치는 읽은 값을 그대로 쓴다 (원본 정책) */
     if (result < 0) {
-        param_default(1);
+        param_default();
         return status;
     }
     if (status != 0) {

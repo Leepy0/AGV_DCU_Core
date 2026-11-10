@@ -70,6 +70,6 @@ const param_store_t fake_store = { ee_read, ee_write };
 void fake_params(void)
 {
     memset(fake_ee, 0xFF, sizeof(fake_ee));
-    param_default_types(0, 0, 0);
+    param_default_type(0);
     (void)param_boot(&fake_store, 2611);
 }

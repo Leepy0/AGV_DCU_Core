@@ -9,7 +9,7 @@ static const seq_site_t s_site = { 0, 0, 0, 0, 0, 0, 0, 0 };
 
 void site_register(void)
 {
-    param_default_types(0, 0, 0);
+    param_default_type(0);
     (void)seq_bind(&s_site);
     tagact_bind(0, 0, 0);
 }
