@@ -55,29 +55,29 @@ int main(void)
     steer_run(1);
     assert(D.p_kp == 20.0f && D.p_ki == 0.2f);
 
-    /* 큰 편차 강제 130, wide 임계 20. 위험 감속 중에는 걸지 않는다 */
+    /* 큰 편차: 4단위부터 올려 12단위에서 130. 일반·wide 같다. 위험 감속 중에도 건다 */
     setup();
     D.guide_pos = 13;
     steer_run(1);
     assert(D.p_kp == 130.0f);
     setup();
-    D.guide_pos = 8;                    /* 문턱 12 의 2/3 까지는 속도별 값 그대로 */
+    D.guide_pos = 4;                    /* 4단위까지는 속도별 값 그대로 */
     steer_run(1);
     assert(D.p_kp == 35.0f);
     setup();
-    D.guide_pos = 12;                   /* 8 → 13 사이를 곧게 올린다: 35 + 95 × 4/5 */
+    D.guide_pos = 8;                    /* 4 → 12 사이를 곧게 올린다: 35 + 95 × 4/8 */
     steer_run(1);
-    assert(near0(D.p_kp - 111.0f) < 0.01f);
+    assert(near0(D.p_kp - 82.5f) < 0.01f);
     setup();
     D.guide_wide = 1;
-    D.guide_pos = 13;
+    D.guide_pos = -8;
     steer_run(1);
-    assert(D.p_kp == 35.0f);
+    assert(near0(D.p_kp - 82.5f) < 0.01f);
     setup();
     D.guide_wide = 1;
-    D.guide_pos = 20;                   /* 13 → 21: 35 + 95 × 7/8 */
+    D.guide_pos = 12;
     steer_run(1);
-    assert(near0(D.p_kp - 118.125f) < 0.01f);
+    assert(D.p_kp == 130.0f);
     /* 예전 계단은 QUIRK_STEER_STEP */
     setup();
     (void)param_set(P_LEGACY_QUIRKS, QUIRK_STEER_STEP);
@@ -115,7 +115,23 @@ int main(void)
     D.guide_pos = 13;
     D.risk_stop = 1;
     steer_run(1);
+    assert(D.p_kp == 130.0f);
+    /* 위험 감속 중에도 적분을 쌓는다 */
+    D.guide_pos = 5;
+    steer_run(1);
+    { float a = D.p_pi_out - D.p_kp * (float)D.p_err;
+      steer_run(1);
+      assert(D.p_pi_out - D.p_kp * (float)D.p_err < a - 0.1f); }
+    /* 예전 조향(QUIRK_STEER_STEP): 위험 감속 중에는 속도별 Kp 만 쓰고 적분을 지운다 */
+    setup();
+    (void)param_set(P_LEGACY_QUIRKS, QUIRK_STEER_STEP);
+    D.guide_pos = 13;
+    D.risk_stop = 1;
+    steer_run(1);
+    steer_run(1);
     assert(D.p_kp == 35.0f);
+    assert(near0(D.p_pi_out - 35.0f * (float)D.p_err) < 0.01f);
+    (void)param_set(P_LEGACY_QUIRKS, 0);
 
     /* 커브('h' 소스): 덩어리 폭 4칸 이상이면 Kp ×1.3, 상한 169 */
     setup();

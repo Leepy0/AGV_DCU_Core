@@ -24,5 +24,12 @@ else {
     & build/t/test_system.exe
     if ($LASTEXITCODE -ne 0) { Write-Output 'FAIL sys'; $failed++ }
 }
+# Closed-loop curve simulation on the same full stack
+& gcc -std=gnu99 -Wall -DAGV_HOST_BUILD -Iinclude -Ihal/host tests/test_curve.c @sys -o build/t/test_curve.exe -lm
+if ($LASTEXITCODE -ne 0) { Write-Output 'BUILD FAIL curve'; $failed++ }
+else {
+    & build/t/test_curve.exe
+    if ($LASTEXITCODE -ne 0) { Write-Output 'FAIL curve'; $failed++ }
+}
 if ($failed -ne 0) { Write-Output "FAILED: $failed"; exit 1 }
 Write-Output 'ALL PASSED'

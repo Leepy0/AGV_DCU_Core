@@ -11,8 +11,13 @@
 #define GUIDE_KP_MIN                20.0f
 #define GUIDE_KP_MAX                130.0f
 #define GUIDE_KP_SPEED_GAIN         15.0f
-#define GUIDE_KP_DEV_THRESHOLD      12
+#define GUIDE_KP_DEV_THRESHOLD      12     /* QUIRK_STEER_STEP 만: 이 편차를 넘으면 Kp 가 한 번에 최대 */
 #define GUIDE_KP_DEV_THRESHOLD_WIDE 20
+/* 편차 4단위부터 Kp 를 올려 12단위에서 최대(일반·wide 공통). 위험 감속(편차 10단위) 중에도 건다.
+ * 폐루프 곡선 모의(tests/test_curve.c, 반경 0.55~0.96 m, 31 m/min): 편차 최대 92~108 mm(선 잃음 포함) → 37~50 mm.
+ * 예전(위험 감속 중 속도 스케줄 Kp 만·적분 지움, 문턱에서 한 번에 최대)은 QUIRK_STEER_STEP 에 남긴다 */
+#define GUIDE_KP_RAMP_LO            4
+#define GUIDE_KP_RAMP_HI            12
 #define GUIDE_KI_PERIOD_SCALE       0.2f
 #define GUIDE_KI_MIN                0.1f
 #define GUIDE_DEADBAND_SPEED_GAIN   2.0f
@@ -136,15 +141,13 @@ static float gains_and_deadband(float pos, int16_t v_abs, float r, int16_t curve
     if (param_get(P_STEER_KP) == 0) {
         D.p_kp = (v_abs > 0) ? (GUIDE_KP_MIN + (GUIDE_KP_SPEED_GAIN * r)) : GUIDE_KP_MIN;
         if (D.p_kp > GUIDE_KP_MAX) { D.p_kp = GUIDE_KP_MAX; }
-        /* 위험 감속 중에는 강제 최대 게인을 걸지 않는다 */
-        if (!D.risk_stop) {
+        {
             int16_t a = (D.guide_pos >= 0) ? D.guide_pos : (int16_t)(-D.guide_pos);
-            int16_t lo = (int16_t)(dev_threshold * 2 / 3);
-            if (param_quirk(QUIRK_STEER_STEP)) {
-                if (a > dev_threshold) { D.p_kp = GUIDE_KP_MAX; }
+            if (param_quirk(QUIRK_STEER_STEP)) {    /* 예전 조향: 위험 감속 중에는 강제 최대 게인을 걸지 않는다 */
+                if (!D.risk_stop && (a > dev_threshold)) { D.p_kp = GUIDE_KP_MAX; }
             }
-            else if (a > lo) {      /* 문턱의 2/3 부터 올려 예전과 같은 편차에서 최대가 된다 */
-                float k = (float)(a - lo) / (float)(dev_threshold + 1 - lo);
+            else if (a > GUIDE_KP_RAMP_LO) {
+                float k = (float)(a - GUIDE_KP_RAMP_LO) / (float)(GUIDE_KP_RAMP_HI - GUIDE_KP_RAMP_LO);
                 if (k > 1.0f) { k = 1.0f; }
                 if (D.p_kp < GUIDE_KP_MAX) { D.p_kp += (GUIDE_KP_MAX - D.p_kp) * k; }
             }
@@ -196,8 +199,8 @@ void steer_run(int16_t tuning_type)
         sen = gains_and_deadband(pos, v_abs, r, curve_now, tuning_type, GUIDE_KP_DEV_THRESHOLD_WIDE, GUIDE_LINEAR_ZONE_WIDE);
     }
 
-    /* 조향 기준이나 운전 상태가 바뀌면 적분 기억을 지운다 */
-    clear_integral = D.risk_stop || (D.obs_on && !stop_is_braking()) || (v_abs <= 0)
+    /* 조향 기준이나 운전 상태가 바뀌면 적분 기억을 지운다. 위험 감속 중 지우는 것은 예전 조향만 */
+    clear_integral = (D.risk_stop && param_quirk(QUIRK_STEER_STEP)) || (D.obs_on && !stop_is_braking()) || (v_abs <= 0)
                   || D.guide_all_off || D.guide_all_on
                   || (s_steer.prev_control != D.control) || (s_steer.prev_branch != D.branch_start)
                   || (s_steer.prev_p_cmd != D.p_cmd) || (s_steer.prev_backward != D.backward);
