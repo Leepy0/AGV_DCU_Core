@@ -1,4 +1,4 @@
-/* test_steer.c - 조향 게인 스케줄, 불감대, 칼만, 한계, 결함 비트 */
+/* test_steer.c - 조향 게인 스케줄, 불감대(예전 동작), 칼만, 한계, 결함 비트 */
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -87,7 +87,7 @@ int main(void)
     steer_run(1);
     assert(D.p_kp == 130.0f);
     (void)param_set(P_LEGACY_QUIRKS, 0);
-    /* 편차를 한 칸씩 올릴 때 비례 출력이 한 번에 크게 뛰지 않는다. 최고 속도(불감대 4), 일반·wide */
+    /* 편차를 한 칸씩 올릴 때 비례 출력이 한 번에 크게 뛰지 않는다. 최고 속도, 일반·wide */
     { int16_t wide;
       for (wide = 0; wide <= 1; wide++) {
           int16_t p, max = wide ? 31 : 15;
@@ -139,28 +139,72 @@ int main(void)
     assert(D.p_kp == 40.0f);
     (void)param_set(P_STEER_KP, 0);
 
-    /* 불감대: 폭 2 (r=1), 안쪽 0, 밖은 어디서나 폭만큼 뺀다. 예전(8 이상은 그대로)은 QUIRK_STEER_STEP */
+    /* 기본은 불감대가 없다: 작은 편차도 그대로 오차가 된다 */
     setup();
+    D.vin_out = P.min_speed;            /* 저속 r = 0 */
+    D.guide_pos = 1;
+    steer_run(1);
+    assert(D.p_err == -1);
+    setup();
+    D.guide_pos = 2;                    /* r = 1 */
+    steer_run(1);
+    assert(D.p_err == -2);
+    setup();
+    D.guide_pos = 5;
+    steer_run(1);
+    assert(D.p_err == -5);
+    setup();
+    D.guide_pos = -5;
+    steer_run(2);
+    assert(D.p_err == 5);
+    setup();
+    D.guide_pos = 8;
+    steer_run(1);
+    assert(D.p_err == -8);
+    /* 옆 이동 4칸 지령: 오차 0 인 위치는 정확히 4 하나다 */
+    { int16_t p, zeros = 0;
+      for (p = -10; p <= 10; p++) {
+          setup();
+          D.vin_out = D.v_cmd = P.target_speed;
+          D.p_test = 4;
+          D.guide_pos = p;
+          steer_run(1);
+          if (D.p_err == 0) { assert(p == 4); zeros++; }
+      }
+      assert(zeros == 1); }
+    /* 예전 불감대는 QUIRK_STEER_STEP: 폭 2 (r=1), 안쪽 0, 선형 구간(8) 안에서만 폭을 뺀다 */
+    setup();
+    (void)param_set(P_LEGACY_QUIRKS, QUIRK_STEER_STEP);
     D.guide_pos = 2;
     steer_run(1);
     assert(D.p_err == 0);
     setup();
+    (void)param_set(P_LEGACY_QUIRKS, QUIRK_STEER_STEP);
     D.guide_pos = 5;
     steer_run(1);
     assert(D.p_err == -3);
     setup();
+    (void)param_set(P_LEGACY_QUIRKS, QUIRK_STEER_STEP);
     D.guide_pos = -5;
     steer_run(2);
     assert(D.p_err == 3);
-    setup();
-    D.guide_pos = 8;
-    steer_run(1);
-    assert(D.p_err == -6);
     setup();
     (void)param_set(P_LEGACY_QUIRKS, QUIRK_STEER_STEP);
     D.guide_pos = 8;
     steer_run(1);
     assert(D.p_err == -8);
+    setup();
+    (void)param_set(P_LEGACY_QUIRKS, QUIRK_STEER_STEP);
+    D.guide_pos = 3;                    /* 커브면 폭 ×0.3 → 0 */
+    D.guide_led = 0x000F;
+    steer_run(1);
+    assert(D.p_err == -3);
+    setup();
+    (void)param_set(P_LEGACY_QUIRKS, QUIRK_STEER_STEP);
+    D.p_test = 4;                       /* 지령 이동이 불감대만큼 더 간다: 오차 0 이 6 */
+    D.guide_pos = 6;
+    steer_run(1);
+    assert(D.p_err == 0);
     (void)param_set(P_LEGACY_QUIRKS, 0);
     /* tuning 0 은 불감대를 건너뛴다 */
     setup();
@@ -180,7 +224,7 @@ int main(void)
     D.backward = 1;
     D.guide_pos = 5;
     steer_run(1);
-    assert(D.p_err == 3);
+    assert(D.p_err == 5);
 
     /* 분기 중에는 센서를 무시한다 */
     setup();

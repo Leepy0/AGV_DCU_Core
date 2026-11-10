@@ -125,7 +125,8 @@ static void kalman_step(int16_t curve_now, float dt)
     }
 }
 
-/* 좁은·넓은 가이드 공통. 임계값만 다르다. 반환은 불감대를 적용한 위치값 */
+/* 좁은·넓은 가이드 공통. 임계값만 다르다. 반환은 조향 입력 위치값.
+ * 기본은 불감대가 없다(불감대 안 아무 데나 머물고 지령 이동이 폭만큼 더 갔다). 불감대는 QUIRK_STEER_STEP 에서만 */
 static float gains_and_deadband(float pos, int16_t v_abs, float r, int16_t curve_now, int16_t tuning_type,
                                 int16_t dev_threshold, int16_t linear_zone)
 {
@@ -157,14 +158,13 @@ static float gains_and_deadband(float pos, int16_t v_abs, float r, int16_t curve
         D.p_ki = (v_abs > 0) ? ((1.0f - r) * GUIDE_KI_PERIOD_SCALE) : (1.0f * GUIDE_KI_PERIOD_SCALE);
         if (D.p_ki < GUIDE_KI_MIN) { D.p_ki = GUIDE_KI_MIN; }
     }
-    band = (int16_t)(GUIDE_DEADBAND_SPEED_GAIN * r);
-    if (band < GUIDE_DEADBAND_MIN) { band = GUIDE_DEADBAND_MIN; }
-    if (curve_now) { band = (int16_t)((float)band * GUIDE_DEADBAND_CURVE_SCALE); }
-    if ((tuning_type == 1) || (tuning_type == 2)) {
+    if (param_quirk(QUIRK_STEER_STEP) && ((tuning_type == 1) || (tuning_type == 2))) {
+        band = (int16_t)(GUIDE_DEADBAND_SPEED_GAIN * r);
+        if (band < GUIDE_DEADBAND_MIN) { band = GUIDE_DEADBAND_MIN; }
+        if (curve_now) { band = (int16_t)((float)band * GUIDE_DEADBAND_CURVE_SCALE); }
         if ((sen <= (float)band) && (sen >= (float)-band))                { sen = 0.0f; }
-        /* 선형 구간 끝에서 입력이 불감대 폭만큼 뛰지 않게 전 구간에서 뺀다 */
-        else if ((sen > 0.0f) && ((sen < (float)linear_zone) || !param_quirk(QUIRK_STEER_STEP)))  { sen -= (float)band; }
-        else if ((sen < 0.0f) && ((sen > (float)-linear_zone) || !param_quirk(QUIRK_STEER_STEP))) { sen += (float)band; }
+        else if ((sen > 0.0f) && (sen < (float)linear_zone))              { sen -= (float)band; }
+        else if ((sen < 0.0f) && (sen > (float)-linear_zone))             { sen += (float)band; }
     }
     return sen;
 }
