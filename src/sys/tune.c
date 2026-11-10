@@ -2,7 +2,7 @@
  * 주행은 ident.c(연속 시험 ident_start_build, 개발 시험)와 rpmtest.c 가 한다.
  * 여기는 선 찾기 중 'a' 와 'h' 를 번갈아 받아 교차선 수, 가이드 부호·배율, 직진 편차도 잰다.
  * 저장 구분:
- *  바로 저장    입력 확정(t1 파라미터 칸, L, ACC 상한), 연속 시험 중 22·28번·회전 보정비·'h' 부호·배율(ident.c), 점검 GA 확정(50번)
+ *  바로 저장    입력 확정(t1 파라미터 칸, L, ACC·DCC 상한 AU), 연속 시험 중 22·28번·회전 보정비·'h' 부호·배율(ident.c), 점검 GA 확정(50번)
  *  채택 저장    결과 쪽 1·13·35번(점검은 28·1·13번). SET 채택, RESET 건너뛰기, SAVE 에서 쓴다
  *  기준값       t1 SAVE 때 EEPROM 110~114·119·125. t2 가 견준다
  *  안 건드림    20·21번(KP·KI) */
@@ -76,9 +76,9 @@ static const struct { char tag[2]; void (*start)(void); uint16_t run; } s_dev[] 
 /* 결과 쪽. PK_SET 채택(파라미터 화면과 같은 이름·자릿수), PK_PAR 파라미터 값(같은 이름, 채택 없음), PK_VAL 잰 값.
  * 잰 값 이름은 파라미터 화면 이름(ui.c s_view)과 겹치지 않는다 */
 enum { PK_SET = 0, PK_VAL, PK_PAR, PK_GA, PK_SAVE };
-enum { N_G = 0, N_TP, N_DE, N_FR, N_OS, N_SE, N_LR, N_OV, N_A, N_AM, N_RT };
+enum { N_G = 0, N_TP, N_DM, N_FR, N_OS, N_SE, N_LR, N_OV, N_A, N_AM, N_RT };
 static const char s_name[][2] = {
-    {'G', ' '}, {'T', 'P'}, {'D', 'E'}, {'F', 'R'}, {'O', 'S'}, {'S', 'E'}, {'L', 'R'}, {'O', 'V'}, {'A', ' '}, {'A', 'M'},
+    {'G', ' '}, {'T', 'P'}, {'D', 'M'}, {'F', 'R'}, {'O', 'S'}, {'S', 'E'}, {'L', 'R'}, {'O', 'V'}, {'A', ' '}, {'A', 'M'},
     {'R', 'T'}
 };
 typedef struct { int16_t kind, id, v, old, flag; } page_t;   /* flag: PK_SET 채택, PK_VAL NG. PK_VAL old 1 = 이름 한 글자 + 네 자리 */
@@ -276,7 +276,7 @@ void tune_turn_scale_set(int16_t x1000)
 
 static uint16_t ee(uint16_t addr) { return storage_queued.read(addr); }
 
-/* 부팅: 가이드 부호·배율, 입력 L·ACC 상한. 빈 칸이나 한계 밖은 0·ACC 지금 값 */
+/* 부팅: 가이드 부호·배율, 입력 L·ACC·DCC 상한 AU. 빈 칸이나 한계 밖은 0·ACC 지금 값 */
 void tune_load(void)
 {
     guide_cfg_t cfg;
@@ -317,7 +317,7 @@ static void base_write(void)
     uint16_t i, sum = 0;
 
     v[TUNE_BASE_TOP] = b->top_rpm;
-    v[TUNE_BASE_DEC] = b->dec_rpm_s;
+    v[TUNE_BASE_UNUSED] = 0;         /* 112 미사용(예전 타력 감속도). 자리는 그대로 */
     v[TUNE_BASE_FLOOR] = b->floor_rpm;
     v[TUNE_BASE_LR] = b->lr_permille;
     v[TUNE_BASE_BAT] = b->bat_dv;
@@ -355,7 +355,7 @@ static void add_cmp(int16_t name, int16_t now, uint16_t bi, int16_t ng_pct)
     int16_t b = tune_base(bi);
     int32_t p;
 
-    int16_t w = (name == N_TP) || (name == N_DE);   /* 1000 을 넘는 값은 이름 한 글자 + 네 자리 */
+    int16_t w = (name == N_TP);      /* 1000 을 넘는 값은 이름 한 글자 + 네 자리 */
 
     if (now <= 0) { add(PK_VAL, name, TUNE_NO_DATA, w, 0); return; }
     if ((s_tune.cat != 2u) || !tune_base_valid() || (b <= 0)) { add(PK_VAL, name, now, w, 0); return; }
@@ -384,8 +384,8 @@ static void build_pages(void)
     if (m & BLD_MIN)     { add(PK_PAR, P_SPEED_MIN, b->min_rec, 0, 0); }
     if (m & BLD_TOP)     { add_cmp(N_TP, b->top_rpm, TUNE_BASE_TOP, TUNE_NG_TOP_PCT); }
     if (m & BLD_COAST)   {
-        add_cmp(N_DE, b->dec_rpm_s, TUNE_BASE_DEC, TUNE_NG_DEC_PCT);
         add(PK_VAL, N_AM, (b->acc_max > 0) ? b->acc_max : TUNE_NO_DATA, 0, 0);
+        add(PK_VAL, N_DM, (b->dcc_max > 0) ? b->dcc_max : TUNE_NO_DATA, 0, 0);
     }
     if (m & BLD_STOPT)   {
         add_cmp(N_FR, b->floor_rpm, TUNE_BASE_FLOOR, TUNE_NG_FLOOR_PCT);
@@ -467,7 +467,7 @@ static int field_set(int16_t f, int16_t v)
 
     if (s_field[f].param != 0u) { return (param_set(s_field[f].param, v) == 0) ? 2 : 1; }
     switch (f) {
-    case F_ACC:                /* 위 바이트 ACC 상한. 아래 바이트는 쓰지 않는다(최고 속도 상한은 DRS) */
+    case F_ACC:                /* 위 바이트 ACC·DCC 상한 AU. 아래 바이트는 쓰지 않는다(최고 속도 상한은 DRS) */
         s_tune.acc_cap = v;
         storage_request(TUNE_EE_CAP, (uint16_t)((uint16_t)s_tune.acc_cap << 8));
         return 2;

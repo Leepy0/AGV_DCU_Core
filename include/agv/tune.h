@@ -3,7 +3,7 @@
  *  MODE 같은 단계 다음 칸(결과 쪽은 다음 쪽), SET 아래 단계로·수정 시작·확정, RESET 한 단계 위·수정 취소
  *  (결과 쪽에서는 채택 빼기. 추천은 처음부터 채택이고 저장 쪽 SV n 에서 SET 하면 쓰기가 끝날 때까지 BUSY 뒤 RBOT),
  *  START 고른 시험, UP·DOWN 결과 넘기기·값 증감, SHIFT 고치는 자리
- *  t1 제작   t1 아래 입력 5칸(지름 22번, GD 50번, 최고 속도 상한, 교차선 간격 L, ACC 상한 AU). START = 연속 시험 전체
+ *  t1 제작   t1 아래 입력 5칸(지름 22번, GD 50번, 최고 속도 상한, 교차선 간격 L, ACC·DCC 상한 AU). START = 연속 시험 전체
  *  t2 점검   t2.1 빠른 점검, t2.2 바퀴 교체, t2.3 가이드 센서 교체, t2.4 모터·앰프 교체. 2.1·2.2·2.4 는 SET 으로 L 입력
  *  t3 개발   t3.1 IDEN, t3.2 RPM, t3.3 TOP, t3.4 ALL, t3.5 TEMP, t3.6 HS(SET 으로 속도 입력). 결과는 RAM 에만.
  *            시험 추가는 tune.c s_dev 표 한 줄
@@ -27,13 +27,13 @@ enum { TUNE_DEV_IDENT = 1, TUNE_DEV_RPM, TUNE_DEV_TOP, TUNE_DEV_ALL, TUNE_DEV_TE
 #define TUNE_HS_PAGES 5           /* 고속 스윕 결과 쪽: 0 OK(+가장 좋은 후보)/F, 1~4 후보 평균 편차 RMS */
 
 /* EEPROM (128 워드 칩 기준). 0~50 파라미터·표시, 51~109 KEEP(77~81 은 공차 파라미터), 115~118 체크섬 밖 파라미터, 120~124 OUT 큐와 겹치지 않는다.
- * 입력 L·ACC 상한은 확정 즉시, 기준값은 t1 결과 SAVE 때만 쓴다. 회전 보정비는 KEEP 54(storage.h), 기구 단계 끝에 바로 쓴다 */
+ * 입력 L·AU 는 확정 즉시, 기준값은 t1 결과 SAVE 때만 쓴다. 회전 보정비는 KEEP 54(storage.h), 기구 단계 끝에 바로 쓴다 */
 #define TUNE_EE_TRACK  126        /* 교차선 간격 L mm. 0 = 지름 보정 안 함 */
-#define TUNE_EE_CAP    127        /* 위 바이트 ACC 상한(ACC 단위). 0 = ACC 지금 값. 아래 바이트는 미사용(옛 최고 속도 상한, 지금은 DRS) */
+#define TUNE_EE_CAP    127        /* 위 바이트 ACC·DCC 상한 AU(ACC 단위). 0 = ACC 지금 값. 아래 바이트는 미사용(옛 최고 속도 상한, 지금은 DRS) */
 #define TUNE_EE_CHECK  110        /* 기준값 검사 = TUNE_BASE_MARK ^ 기준값 6칸 합. 틀리면 기준값 없음 */
 #define TUNE_BASE_MARK 0xB501u    /* 아래 바이트 = 판 */
 enum { TUNE_BASE_TOP = 0,         /* 111 최고 rpm 좌우 평균 */
-       TUNE_BASE_DEC,             /* 112 타력 감속도 rpm/s */
+       TUNE_BASE_UNUSED,          /* 112 미사용(예전 타력 감속도). 0 을 쓴다. 자리는 옮기지 않는다 */
        TUNE_BASE_FLOOR,           /* 113 정지 바닥 속도 rpm */
        TUNE_BASE_LR,              /* 114 우/좌 펄스 비 - 1, 천분율 */
        TUNE_BASE_BAT,             /* 119 전압 dV (48번) */
@@ -42,7 +42,6 @@ enum { TUNE_BASE_TOP = 0,         /* 111 최고 rpm 좌우 평균 */
 extern const uint16_t tune_base_addr[TUNE_BASE_N];
 /* 점검 판정. 기준 대비 % (LR 은 지금 값) 가 넘으면 NG */
 #define TUNE_NG_TOP_PCT   (-5)
-#define TUNE_NG_DEC_PCT   (-15)
 #define TUNE_NG_FLOOR_PCT 20
 #define TUNE_NG_LR        10      /* |우/좌 - 1| 천분율 */
 #define TUNE_NG_SE_PCT    50      /* 직진 편차 RMS */

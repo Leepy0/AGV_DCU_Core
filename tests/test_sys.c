@@ -1605,7 +1605,7 @@ static void test_tune_t1_save(void)
     agv_build.min_rec = 7;
     agv_build.turn_x1000 = 1110;
     agv_build.top_rpm = 3000;
-    agv_build.dec_rpm_s = 3500;
+    agv_build.dcc_max = 35;
     agv_build.lr_permille = -4;
     agv_build.amp = 'S';
     fake_build_done();
@@ -1637,13 +1637,15 @@ static void test_tune_t1_save(void)
     }
     key(KEY_DOWN);
     assert(tune_page() == 0);
-    {   /* 값 쪽 이름: 회전 보정비·최고 rpm·감속도는 이름 한 글자 + 네 자리 */
+    {   /* 값 쪽 이름: 회전 보정비·최고 rpm 은 이름 한 글자 + 네 자리. 가감속 찾기는 AM·DM */
         for (k = 0; (k < 30) && !shows("R1110"); k++) { key(KEY_UP); }
         assert(shows("R1110"));
         for (k = 0; (k < 30) && !shows("T3000"); k++) { key(KEY_UP); }
         assert(shows("T3000"));
         key(KEY_UP);
-        assert(shows("D3500"));
+        assert(shows("AM---"));
+        key(KEY_UP);
+        assert(shows("DM035"));
     }
     /* 저장 전에는 아무것도 쓰지 않았다 */
     assert(param_get(P_SPEED_HIGH) == 30 && param_get(P_CROSS_IN_CM) == 60 && param_get(P_OPT_FLAGS) == 0);
@@ -1659,7 +1661,7 @@ static void test_tune_t1_save(void)
     assert(param_get(P_SPEED_HIGH) == 25 && param_get(P_DCC) == 40 && param_get(P_CROSS_IN_CM) == 40);
     assert(param_get(P_OPT_FLAGS) == 0 && host.ee[116] == before[116]);
     assert(host.ee[P_SPEED_HIGH] == 25 && host.ee[P_DCC] == 40 && host.ee[P_CROSS_IN_CM] == 40);
-    assert(tune_base_valid() && tune_base(TUNE_BASE_TOP) == 3000 && tune_base(TUNE_BASE_DEC) == 3500);
+    assert(tune_base_valid() && tune_base(TUNE_BASE_TOP) == 3000 && tune_base(TUNE_BASE_UNUSED) == 0);
     assert(tune_base(TUNE_BASE_LR) == -4 && ((uint16_t)tune_base(TUNE_BASE_AMP_SE) >> 8) == 'S');
     assert(((uint16_t)tune_base(TUNE_BASE_AMP_SE) & 0xFFu) == 43u);
     /* 쓴 칸: 체크섬 0, 채택한 1·35, 기준값 110~114·119·125 뿐 */
@@ -1700,7 +1702,7 @@ static void test_tune_t2_compare(void)
 {
     int k;
 
-    test_tune_t1_save();             /* 기준값 TOP 3000, DEC 3500 */
+    test_tune_t1_save();             /* 기준값 TOP 3000 */
     boot_keys(KEY_MODE + KEY_SET, 1);
     key(KEY_MODE);
     key(KEY_SET);                    /* t2.1 */
@@ -1710,7 +1712,6 @@ static void test_tune_t2_compare(void)
     assert(tune_state() == TUNE_BLD && shows("C1008"));
     agv_build.high_rec = 22;
     agv_build.top_rpm = 2700;        /* -10% NG */
-    agv_build.dec_rpm_s = 3400;      /* -2% */
     agv_build.over_mm = 25;          /* NG */
     agv_build.lr_permille = 15;      /* NG */
     agv_build.se_x10 = 70;           /* 기준 43 의 +63% NG */
@@ -1720,9 +1721,9 @@ static void test_tune_t2_compare(void)
     for (k = 0; (k < 20) && !shows("T-010"); k++) { key(KEY_UP); }
     assert(shows("T-010") && tune_flick() == 0x03u);
     key(KEY_UP);
-    assert(shows("D-002") && tune_flick() == 0);
+    assert(shows("AM---"));          /* 가감속 찾기가 없었다 */
     key(KEY_UP);
-    assert(shows("AM---"));          /* 가속 측정이 없었다 */
+    assert(shows("DM---"));
     key(KEY_UP);
     assert(shows("FR---"));          /* 정지가 없었다. 이름은 파라미터 화면 FL(32번)과 다르다 */
     key(KEY_UP);

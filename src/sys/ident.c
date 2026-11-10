@@ -15,6 +15,7 @@
  * 지정 시험(TEMP)은 통합 시험에 s_temp 를 켠 것이다. 0회 뒤 바로 단계 2(TEMP 목록), 단계 3 은 타력 시험이다.
  * 고속 스윕(HS)은 지정 시험에 s_hs(속도 rpm)를 켠 것이다. 0회 뒤 L 을 보고 단계 2 만 입력 속도로 하고 끝낸다.
  * 타력은 1 가속, 2 안정, 7 타력(DAC 0 고정), 8, 9. 7 은 지정 시험에 SL 정지가 없어 다시 쓴다. 결과는 agv_coast
+ * 연속 시험의 가감속 찾기(단계 4)는 같은 1, 2 뒤 7 감속(후보 DCC 램프로 최저 속도까지), 8, 9. 결과는 agv_build
  * 단계 4 정지 정확도는 타력과 같은 1, 2 뒤 7 교차로 위치 정지, 8, 9. 결과는 agv_stopt
  * 바닥 rpm 시험(RPM)은 같은 0회 뒤 1~5회. 회 안(순서 = 단계 1~7)은 rpmtest.c 가 하고, 끝나면 실제 속도에서 이어
  * 다음 회 자리로 간다(8). 측정 중 교차선은 위치 모델상 선 가까이면 실패가 아니라 그 회를 끊고
@@ -75,10 +76,8 @@
 #define SWEEP_LEVEL      1u       /* 단계 2 속도 = 식별 3·4회 단계 */
 #define COAST_V0_TICKS   10       /* 타력: 고정 직전 평균 */
 #define COAST_TICKS      300      /* 3 s 안에 최저 속도가 안 되면 풀고 다음으로 */
-#define COAST_EST_RPM_T  10.0f    /* 타력 거리 어림 감속도 1000 rpm/s 를 틱으로 */
+#define COAST_EST_RPM_T  10.0f    /* 타력 거리 어림 감속도 1000 rpm/s 를 틱으로(지정 시험 타력만) */
 #define COAST_GUIDE_OFF  10       /* 조향이 꺼져 있으니 가이드가 이만큼 벗어나면 푼다(위험 감속 문턱) */
-#define COAST_BRAKE_MPS2 2.0f    /* 타력 감속이 이보다 크면 굴러서 선 것이 아니라 앰프가 제동했다 */
-#define COAST_CUT_BRAKE  8        /* cut 비트: 제동으로 보여 평균에서 뺐다 */
 #define ACC_WIN_LO       30       /* ACC 판정 창: 지령이 목표의 30% → 80% 사이(저속 가속 제한 llow 위만) */
 #define ACC_WIN_HI       80
 #define ACC_FOLLOW_PCT   90       /* 창 안 실제 가속도가 지령 가속도의 이만큼 이상이어야 깨끗하다 */
@@ -88,6 +87,8 @@
 #define ACC_SLIP_RPM     100      /* 가속 중 좌우 rpm 차가 이보다 크고 */
 #define ACC_SLIP_PCT     15       /* 평균의 이만큼보다 크게 */
 #define ACC_SLIP_TICKS   5        /* 이만큼 이어지면 미끄럼 */
+#define DCC_WIN_HI       80       /* DCC 판정 창: 지령이 회 속도의 80% → 30% 사이(저속 감속 제한 최저 속도 × 2 위만) */
+#define DCC_WIN_LO       30
 #define KEEP_MARK        ((uint16_t)(0x7E57u ^ (uint16_t)(sizeof(agv_ident) + sizeof(agv_top) + sizeof(agv_all) \
                                                            + sizeof(agv_coast) + sizeof(agv_rpmt) + sizeof(agv_stopt) \
                                                            + sizeof(agv_build))))
@@ -171,20 +172,23 @@ static struct {
     float   dec;
 } s_tp;
 
-/* 연속 시험 ACC 찾기. 최고 속도 단계부터 최고 속도·타력·편차 회의 가속 램프를 후보 ACC 로 달려 깨끗한지 본다
+/* 연속 시험 ACC·DCC 찾기. 같은 이분 찾기를 가속(ACC)과 감속(DCC)에 따로 쓴다.
+ * ACC 는 최고 속도 단계부터 최고 속도·가감속 찾기·편차 회의 가속 램프를 후보 ACC 로 달려 깨끗한지 본다
  * (따로 달리지 않는다). 정지 단계는 정지 정확도를 흐리지 않게 시작 때 ACC 로 달린다.
- * lo = 깨끗하다고 아는 가장 큰 값(처음은 지금 12번), hi = 입력 상한. 첫 후보는 hi, 뒤는 가운데(이분) */
-static struct {
-    int16_t a0, lo, hi, c;        /* c: 지금 후보. 0 = 찾지 않는다 */
+ * DCC 는 가감속 찾기 회마다 정속 뒤 최저 속도까지 감속 램프를 후보 DCC 로 달린다.
+ * lo = 깨끗하다고 아는 가장 큰 값(처음은 지금 값), hi = 입력 상한 AU. 첫 후보는 hi, 뒤는 가운데(이분) */
+typedef struct {
+    int16_t a0, lo, hi, c;        /* a0: 시작 값(끝나면 돌린다). c: 지금 후보. 0 = 찾지 않는다 */
     int16_t t, t1, win, bad, slip_n;
     float   r1;
-} s_acc;
+} srch_t;
+static srch_t s_acc, s_dcc;
 
 static struct {                  /* 타력(정지 정확도) 한 회 */
     int16_t  last[2];
     int32_t  v0[2];
     uint32_t start;
-    float    prev, tc[3];        /* tc: 90·60·30% 에 닿은 틱(보간). -1 = 아직 */
+    float    prev, tc[3];        /* tc: 90·60·30% 에 닿은 틱(보간). -1 = 아직. prev: 가감속 찾기는 감속 전 회 속도 */
     uint16_t n;                  /* 단계 4: 트리거 때 stop_last.n */
 } s_cs;
 
@@ -543,7 +547,7 @@ static int16_t clamp_p(uint16_t idx, int32_t v)
     return (v < lo) ? lo : ((v > up) ? up : (int16_t)v);
 }
 
-/* 연속 시험이 RAM 에서 바꾼 1·13번을 돌린다 */
+/* 연속 시험이 RAM 에서 바꾼 DRS·DCC·ACC 를 돌린다 */
 static void build_restore(int16_t state)
 {
     (void)param_set_ram(P_SPEED_HIGH, agv_build.cfg_high);
@@ -1011,20 +1015,20 @@ static float coast_mm(float v, float lo)
     return (v * v - lo * lo) / (2.0f * COAST_EST_RPM_T) * (1000.0f / 6000.0f / P.one_meter_rpm);
 }
 
-/* 회전 중심이 선 위에서 출발한다. 타력은 늦어도 budget 에서 시작해야 감속 끝점 전에 최저 속도가 된다 */
+/* 회전 중심이 선 위에서 출발한다. 타력(감속)은 늦어도 budget 에서 시작해야 감속 끝점 전에 최저 속도가 된다.
+ * 연속 시험 가감속 찾기는 시작 DCC 램프 거리로 셈한다(후보는 시작 값보다 커서 더 짧다) */
 static void coast_begin(void)
 {
-    coast_pass_t *cp;
-    float v;
-
     if (s_id.retry) { s_id.retry = 0; }
     else            { agv_coast.pass++; }
-    cp = &agv_coast.p[PASS - 1u];
-    memset(cp, 0, sizeof(*cp));
     memset(&s_cs, 0, sizeof(s_cs));
-    if (pass_rpm() < level_rpm()) { cp->cut = 2; }   /* 낮춘 속도로 잰다 */
-    v = (float)pass_rpm();
-    s_id.budget = ahead_mm() - P.guide_dist_mm - DEC_MARGIN_MM - coast_mm(v, (float)P.min_speed);
+    if (s_build) { s_id.budget = ahead_mm() - P.guide_dist_mm - DEC_MARGIN_MM - decel_mm(pass_rpm()); }
+    else {
+        coast_pass_t *cp = &agv_coast.p[PASS - 1u];
+        memset(cp, 0, sizeof(*cp));
+        if (pass_rpm() < level_rpm()) { cp->cut = 2; }   /* 낮춘 속도로 잰다 */
+        s_id.budget = ahead_mm() - P.guide_dist_mm - DEC_MARGIN_MM - coast_mm((float)pass_rpm(), (float)P.min_speed);
+    }
     D.p_test = 0;
     enter(PH_RAMP);
 }
@@ -1040,7 +1044,7 @@ static float stopt_target(uint16_t p)
     return (float)STOPT_SHORT_MM;
 }
 
-/* 선 자리는 목표나 타력 거리 중 먼 쪽까지로 본다(제동 토크가 없다) */
+/* 선 자리는 목표나 주행 램프 감속 거리 중 먼 쪽까지로 본다 */
 static void stopt_begin(void)
 {
     stopt_pass_t *sp;
@@ -1054,7 +1058,7 @@ static void stopt_begin(void)
     if (pass_rpm() < level_rpm()) { sp->cut = 2; }
     d = stopt_target(PASS);
     sp->target_mm = d;
-    c = coast_mm((float)pass_rpm(), 0.0f);
+    c = decel_mm(pass_rpm());
     s_id.budget = ahead_mm() - P.guide_dist_mm - DEC_MARGIN_MM - ((c > d) ? c : d);
     D.p_test = 0;
     enter(PH_RAMP);
@@ -1118,7 +1122,6 @@ static int coast_end(coast_pass_t *cp, int16_t act, int reached)
     cp->dec_lo_rpm_s = coast_dec(v0, 0.3f, 1u, 2u);
     cp->v0_mpm = v0 / P.one_meter_rpm;
     cp->dec_mps2 = (cp->dec_rpm_s < 0) ? -1.0f : (float)cp->dec_rpm_s / P.one_meter_rpm / 60.0f;
-    if (cp->dec_mps2 > COAST_BRAKE_MPS2) { cp->cut |= COAST_CUT_BRAKE; }
     for (i = 0; i < 2u; i++) { D.w_pi_out[i] = D.iref_it[i] = D.iref_fb[i] = 0.0f; }   /* 타력 전 정속 적분은 버린다 */
     steer_reset();
     D.vin_out = (act < P.min_speed) ? act : P.min_speed;
@@ -1129,58 +1132,80 @@ static int coast_end(coast_pass_t *cp, int16_t act, int reached)
     return 0;
 }
 
-/* ACC 찾기 결과를 내고 12번 RAM 을 다음 후보(끝나면 시작 값)로 둔다 */
-static void acc_set(void)
+/* 찾기 결과(max, rec = min(lo, 상한))를 내고 다음 후보(끝나면 0)를 둔다. RAM 은 램프가 시작할 때 넣는다 */
+static void srch_set(srch_t *s, int16_t cap, int16_t *max, int16_t *rec)
 {
-    agv_build.acc_max = s_acc.lo;
-    agv_build.acc_rec = ((agv_build.acc_cap > 0) && (agv_build.acc_cap < s_acc.lo)) ? agv_build.acc_cap : s_acc.lo;
-    s_acc.c = (s_acc.hi > s_acc.lo) ? ((s_acc.c == 0) ? s_acc.hi : (int16_t)((s_acc.lo + s_acc.hi + 1) / 2)) : 0;
-    s_acc.t = s_acc.win = s_acc.bad = s_acc.slip_n = 0;
+    *max = s->lo;
+    *rec = ((cap > 0) && (cap < s->lo)) ? cap : s->lo;
+    s->c = (s->hi > s->lo) ? ((s->c == 0) ? s->hi : (int16_t)((s->lo + s->hi + 1) / 2)) : 0;
+    s->t = s->win = s->bad = s->slip_n = 0;
 }
 
-/* 타력 단계 들어갈 때. 상한이 지금 값 이하면 찾지 않는다(추천 = 상한) */
-static void acc_begin(void)
+/* 찾기 시작. 상한이 시작 값 이하면 찾지 않는다(추천 = 상한) */
+static void srch_begin(srch_t *s, int16_t a0, int16_t cap, int16_t *max, int16_t *rec)
 {
-    int16_t cap = agv_build.acc_cap;
-
-    s_acc.a0 = P.acc;
-    s_acc.lo = (cap > 0) && (cap < s_acc.a0) ? cap : s_acc.a0;
-    s_acc.hi = (cap > s_acc.lo) ? cap : s_acc.lo;
-    s_acc.c = 0;
-    acc_set();
+    s->a0 = a0;
+    s->lo = ((cap > 0) && (cap < a0)) ? cap : a0;
+    s->hi = (cap > s->lo) ? cap : s->lo;
+    s->c = 0;
+    srch_set(s, cap, max, rec);
 }
+
+/* 후보 램프 매 틱. 지령이 from 을 지나면 창을 열고 to 를 지나면 닫는다(from < to 가속, from > to 감속).
+ * 창 안에서 좌우 rpm 이 어긋나면(미끄럼) 깨끗하지 않다. 창 끝에 실제 변화율(rpm/틱)이 후보의 ACC_FOLLOW_PCT 에 못 미쳐도 */
+static void srch_tick(srch_t *s, int32_t from, int32_t to, int16_t *slip)
+{
+    int32_t a = D.rpm[0], b = D.rpm[1], d = (a > b) ? a - b : b - a, v = D.vin_out;
+    int up = (to > from);
+    float r;
+
+    s->t++;
+    if ((s->win == 0) && (up ? (v >= from) : (v <= from))) {
+        s->win = 1;
+        s->t1 = s->t;
+        s->r1 = (float)(a + b) * 0.5f;
+    }
+    if (s->win != 1) { return; }
+    s->slip_n = (int16_t)(((d > ACC_SLIP_RPM) && (d * 200L > (a + b) * ACC_SLIP_PCT)) ? s->slip_n + 1 : 0);
+    if (s->slip_n >= ACC_SLIP_TICKS) {
+        s->bad = 1;
+        *slip = 1;
+    }
+    if (up ? (v < to) : (v > to)) { return; }
+    r = ((float)(a + b) * 0.5f - s->r1) / (float)(s->t - s->t1);   /* 창 끝: 실제 변화율이 후보를 따라왔나 */
+    if ((up ? r : -r) * 100.0f < (float)(s->c * ACC_FOLLOW_PCT)) { s->bad = 1; }
+    s->win = 2;
+}
+
+/* 램프 끝. 창을 다 봤으면 판정해 다음 후보로 */
+static void srch_judge(srch_t *s, int16_t cap, int16_t *max, int16_t *rec)
+{
+    if ((s->c == 0) || (s->win != 2)) { return; }
+    if (s->bad) { s->hi = (int16_t)(s->c - 1); }
+    else        { s->lo = s->c; }
+    srch_set(s, cap, max, rec);
+}
+
+/* DCC 상한 = AU 를 DCC 한계로 자른 값. 0 = 없음 */
+static int16_t dcc_cap(void) { return (agv_build.acc_cap > 0) ? clamp_p(P_DCC, agv_build.acc_cap) : 0; }
+
+/* 최고 속도 단계(없으면 그 뒤) 들어갈 때 */
+static void acc_begin(void) { srch_begin(&s_acc, P.acc, agv_build.acc_cap, &agv_build.acc_max, &agv_build.acc_rec); }
 
 /* 가속 램프 매 틱(후보가 있을 때). 지령이 목표의 30 → 80% 를 지나는 동안 실제 가속도, 토크 지령, 좌우 rpm 어긋남을 본다.
- * 목표는 최고 속도 회면 1번, 아니면 그 회 속도. 저속 가속 제한(llow 아래 ACC 5) 구간은 빼고 본다 */
+ * 목표는 최고 속도 회면 DRS, 아니면 그 회 속도. 저속 가속 제한(llow 아래 ACC 5) 구간은 빼고 본다 */
 static void acc_ramp(void)
 {
-    int32_t a = D.rpm[0], b = D.rpm[1], d = (a > b) ? a - b : b - a;
     int32_t ref = s_top ? P.target_speed : s_id.want;
     int32_t pct = (ref > 0) ? ((int32_t)D.vin_out * 100L) / ref : 0;
     int32_t lo = ((ref * ACC_WIN_LO) / 100L > (int32_t)P.llow_speed * 11L / 10L) ? (ref * ACC_WIN_LO) / 100L
                : (int32_t)P.llow_speed * 11L / 10L;
 
     if ((s_acc.c == 0) || stopt() || (lo * 100L >= ref * ACC_WIN_HI)) { return; }
-    s_acc.t++;
-    if ((s_acc.win == 0) && (D.vin_out >= lo)) {
-        s_acc.win = 1;
-        s_acc.t1 = s_acc.t;
-        s_acc.r1 = (float)(a + b) * 0.5f;
-    }
-    if (s_acc.win != 1) { return; }
-    if ((pct <= ACC_TQ_PCT)
+    srch_tick(&s_acc, lo, (ref * ACC_WIN_HI + 99L) / 100L, &agv_build.acc_slip);
+    if ((s_acc.win == 1) && (pct <= ACC_TQ_PCT)
         && (((float)D.tq_cmd[0] >= MOTOR_TORQUE_LIMIT * ACC_TQ_OK) || ((float)D.tq_cmd[1] >= MOTOR_TORQUE_LIMIT * ACC_TQ_OK))) {
         s_acc.bad = 1;
-    }
-    s_acc.slip_n = (int16_t)(((d > ACC_SLIP_RPM) && (d * 200L > (a + b) * ACC_SLIP_PCT)) ? s_acc.slip_n + 1 : 0);
-    if (s_acc.slip_n >= ACC_SLIP_TICKS) {
-        s_acc.bad = 1;
-        agv_build.acc_slip = 1;
-    }
-    if (pct >= ACC_WIN_HI) {        /* 창 끝: 실제 가속도(rpm/틱)가 후보를 따라왔나 */
-        float r = ((float)(a + b) * 0.5f - s_acc.r1) / (float)(s_acc.t - s_acc.t1);
-        if (r * 100.0f < (float)(s_acc.c * ACC_FOLLOW_PCT)) { s_acc.bad = 1; }
-        s_acc.win = 2;
     }
 }
 
@@ -1191,13 +1216,36 @@ static void acc_reset(void)
     if (s_build && (s_acc.a0 > 0)) { (void)param_set_ram(P_ACC, ((s_acc.c > 0) && !stopt()) ? s_acc.c : s_acc.a0); }
 }
 
-/* 램프 끝. 창을 다 봤으면 판정해 다음 후보로 */
-static void acc_judge(void)
+static void acc_judge(void) { srch_judge(&s_acc, agv_build.acc_cap, &agv_build.acc_max, &agv_build.acc_rec); }
+
+/* 가감속 찾기: 정속 뒤 후보 DCC 를 RAM 에 넣고 최저 속도로 감속한다 */
+static int dec_begin(void)
 {
-    if ((s_acc.c == 0) || (s_acc.win != 2)) { return; }
-    if (s_acc.bad) { s_acc.hi = (int16_t)(s_acc.c - 1); }
-    else           { s_acc.lo = s_acc.c; }
-    acc_set();
+    s_dcc.t = s_dcc.win = s_dcc.bad = s_dcc.slip_n = 0;
+    if (s_dcc.c > 0) { (void)param_set_ram(P_DCC, s_dcc.c); }
+    s_cs.prev = (float)s_id.want;
+    set_speed(P.min_speed, 1);
+    enter(PH_COAST);
+    return 0;
+}
+
+/* 감속 매 틱. 지령이 회 속도의 80 → 30% 를 지나는 동안 실제 감속도와 좌우 rpm 어긋남을 본다.
+ * 저속 감속 제한(최저 속도 × 2 아래에서 DCC 20 미만은 20) 구간은 빼고 본다. 토크 지령은 0 아래로 안 가 제동 포화는 보지 않는다.
+ * 최저 속도가 되거나 감속 끝점에 닿으면 판정하고 DCC 를 시작 값으로 돌려 다음 자리로 간다 */
+static int dec_run(void)
+{
+    int32_t ref = (int32_t)s_cs.prev;
+    int32_t lo = ((ref * DCC_WIN_LO) / 100L > (int32_t)P.min_speed * 22L / 10L) ? (ref * DCC_WIN_LO) / 100L
+               : (int32_t)P.min_speed * 22L / 10L;
+
+    if ((s_dcc.c > 0) && (lo * 100L < ref * DCC_WIN_HI)) { srch_tick(&s_dcc, (ref * DCC_WIN_HI) / 100L, lo, &agv_build.dcc_slip); }
+    if ((D.vin_out > P.min_speed) && (ahead_mm() > P.guide_dist_mm + DEC_MARGIN_MM)) {
+        return (++s_id.t > RAMP_LIMIT) ? fail_now() : 0;
+    }
+    srch_judge(&s_dcc, dcc_cap(), &agv_build.dcc_max, &agv_build.dcc_rec);
+    (void)param_set_ram(P_DCC, s_dcc.a0);
+    leave(0);
+    return 0;
 }
 
 static int coast_run(int stopped)
@@ -1235,6 +1283,7 @@ static int coast_run(int stopped)
         }
         if (++s_id.t < SETTLE_TICKS) { return 0; }
         if (stopt()) { return stopt_trigger(); }
+        if (s_build) { return dec_begin(); }
         cp = &agv_coast.p[PASS - 1u];
         for (i = 0; i < 2u; i++) { cp->v0_rpm[i] = (int16_t)(s_cs.v0[i] / COAST_V0_TICKS); }
         s_cs.prev = ((float)cp->v0_rpm[0] + (float)cp->v0_rpm[1]) * 0.5f;
@@ -1246,7 +1295,8 @@ static int coast_run(int stopped)
     }
 
     if (stopt()) { return stopt_wait(); }
-    /* PH_COAST. s_id.t = 고정부터 틱 */
+    if (s_build) { return dec_run(); }
+    /* PH_COAST(지정 시험 타력). s_id.t = 고정부터 틱 */
     cp = &agv_coast.p[PASS - 1u];
     m = ((float)s_cs.last[0] + (float)s_cs.last[1]) * 0.5f;
     v0 = ((float)cp->v0_rpm[0] + (float)cp->v0_rpm[1]) * 0.5f;
@@ -1501,8 +1551,9 @@ void ident_start_build(uint16_t mask, int16_t track_in_mm, int16_t cap_mpm)
     agv_build.cfg_dia = param_get(P_WHEEL_DIA_MM);
     agv_build.cfg_wb = param_get(P_WHEEL_BASE_MM);
     agv_build.min_rec = agv_build.high_rec = agv_build.dcc_rec = agv_build.cid_rec = -1;
-    agv_build.acc_max = agv_build.acc_rec = -1;
+    agv_build.acc_max = agv_build.acc_rec = agv_build.dcc_max = -1;
     memset(&s_acc, 0, sizeof(s_acc));
+    memset(&s_dcc, 0, sizeof(s_dcc));
     s_acc.a0 = -1;
     agv_build.se_x10 = TUNE_NO_DATA;
     s_build = mask;
@@ -1533,11 +1584,10 @@ static void stopt_profile(int on)
     }
 }
 
-/* 단계가 끝났다. 추천값을 내고 바로 저장 몫을 저장한다. 1·13번은 뒤 단계를 위해 RAM 에 넣는다 */
+/* 단계가 끝났다. 추천값을 내고 바로 저장 몫을 저장한다. DRS·DCC 는 뒤 단계를 위해 RAM 에 넣는다 */
 static void stage_end(uint16_t st)
 {
     build_result_t *b = &agv_build;
-    uint16_t i, k;
 
     switch (st) {
     case 1:
@@ -1564,19 +1614,9 @@ static void stage_end(uint16_t st)
             (void)param_set_ram(P_SPEED_HIGH, b->high_rec);
         }
         break;
-    case 4: {
-        int32_t sum = 0;
-        for (i = k = 0; i < BLD_COAST_PASSES; i++) {
-            if ((agv_coast.p[i].dec_rpm_s > 0) && !(agv_coast.p[i].cut & COAST_CUT_BRAKE)) { sum += agv_coast.p[i].dec_rpm_s; k++; }
-        }
-        /* 유효한 회가 없으면 추천 없음(-1)·감속 측정 없음(0). 뒤 단계는 지금 DCC 로 간다 */
-        if (k > 0u) {                 /* 타력으로 낼 수 있는 감속의 0.8. DCC 1 = 100 rpm/s */
-            b->dec_rpm_s = (int16_t)(sum / (int32_t)k);
-            b->dcc_rec = clamp_p(P_DCC, ((int32_t)b->dec_rpm_s * 8L) / 1000L);
-            (void)param_set_ram(P_DCC, b->dcc_rec);
-        }
+    case 4:                           /* 가감속 찾기: 뒤 정지 단계는 DCC 추천으로 간다 */
+        (void)param_set_ram(P_DCC, b->dcc_rec);
         break;
-    }
     case 5: {
         const stopt_pass_t *sp = &agv_stopt.p[PASS - 1u];
         stopt_profile(0);
@@ -1620,6 +1660,7 @@ static int build_next(void)
         break;
     case 4:
         point(&agv_coast.state, &agv_coast.fail, &agv_coast.pass, &agv_coast.phase, &agv_all.track_mm);
+        srch_begin(&s_dcc, P.dcc, dcc_cap(), &agv_build.dcc_max, &agv_build.dcc_rec);
         break;
     case 5:
         point(&agv_stopt.state, &agv_stopt.fail, &agv_stopt.pass, &agv_stopt.phase, &agv_all.track_mm);
@@ -1631,9 +1672,16 @@ static int build_next(void)
         break;
     }
     if ((st >= 3u) && (s_acc.a0 < 0)) { acc_begin(); }   /* 최고 속도 단계(없으면 그 뒤)부터 ACC 찾기 */
+    if ((st == 4u) && (s_acc.c == 0) && (s_dcc.c == 0)) {   /* 가감속 찾기에 찾을 것이 없다. 달리지 않는다 */
+        stage_end(4u);
+        return build_next();
+    }
     *s_r.state = 1;
     return 0;
 }
+
+/* 가감속 찾기 끝: ACC·DCC 찾기가 둘 다 끝났거나 BLD_COAST_PASSES 회 */
+static int coast_done(uint16_t p) { return (p >= BLD_COAST_PASSES) || ((s_acc.c == 0) && (s_dcc.c == 0)); }
 
 /* 제작 최고 속도: 1회가 포화까지 가서 1번 추천이 이미 상한이면 2회는 추천을 바꾸지 못한다 */
 static int top_capped(void)
@@ -1678,7 +1726,7 @@ static int build_turn(void)
     }
     else if (st == 2u) { done = (PASS >= 4u); }
     else if (st == 3u) { done = (PASS >= TOP_PASSES) || top_capped(); }
-    else if (st == 4u) { done = (PASS >= BLD_COAST_PASSES); }
+    else if (st == 4u) { done = coast_done(PASS); }
     else if (st == 5u) {
         done = cid_done();
         if (!done) { s_bld.cid = cid_next(); }
@@ -1714,7 +1762,7 @@ static int turn_done(void);
  * 측정이 끝나면 다음 회에 필요한 앞 거리(need)를 셈한다. 지금 자리에서 서면 뒤(온 쪽 선까지)가 need 이상이면
  * 그 자리에서 서서 직선 테이프 위에서 180도 정렬 회전한다. 모자라면 LOS(2번)로 더 가서 뒤가 need 가 되는 자리에서
  * 서고 돈다. need 가 직선에 안 들어가거나(최고 속도 시험, 개루프 rpm 회 등) 위치를 모르면 앞 선까지 LOS 로 가고
- * 마지막 APPROACH_MM 만 최저 속도로 들어가 선 위에서 돈다. 다음 회가 방향을 가리지 않고(제작·점검의 타력 밖 모든 회,
+ * 마지막 APPROACH_MM 만 최저 속도로 들어가 선 위에서 돈다. 다음 회가 방향을 가리지 않고(제작·점검의 모든 회,
  * 그 밖의 짝 회 첫 회) 앞이 need 이상이면 돌지 않고 서서 같은 방향으로 잇는다. 시험이 끝나면 돌지 않고 선다 */
 
 /* 다음 회의 종류와 번호(np). free 1 = 방향을 가리지 않는다(제작·점검, 짝 회의 첫 회, 단계 첫 회, 다시 하는 회) */
@@ -1731,15 +1779,14 @@ static int16_t next_kind(uint16_t *np, int16_t *free)
     }
     if (s_id.retry) { return sweep() ? NX_SWEEP : (stopt() ? NX_STOPT : (coast() ? NX_COAST : NX_IDENT)); }
     *np = (uint16_t)(p + 1u);
-    /* 제작·점검(t1·t2)은 앞이 넉넉하면 같은 방향으로 잇는다(타력 단계만 빼고). 식별·지정·통합 시험의 같은 속도
+    /* 제작·점검(t1·t2)은 앞이 넉넉하면 같은 방향으로 잇는다. 식별·지정·통합 시험의 같은 속도
      * 왕복 둘째 회는 반대 방향 그대로다: 옆 계단·편차·타력(조향 끔)은 정렬 회전이 테이프 가운데에 다시 세운 뒤 재야 한다 */
     *free = s_build || ((p & 1u) == 0u);
     if (s_build) {
-        done = (st == 2u) ? (p >= 4u) : (st == 4u) ? (p >= BLD_COAST_PASSES) : (st == 5u) ? cid_done()
+        done = (st == 2u) ? (p >= 4u) : (st == 4u) ? coast_done(p) : (st == 5u) ? cid_done()
              : (p >= BLD_DEV_PASSES);
         if (!done) {
             if (st == 2u) { *np = 4u; *free = 1; return NX_RPM; }   /* 점검 1회 뒤 4회 */
-            if (st == 4u) { *free = ((p & 1u) == 0u); }   /* 타력 감속은 두 방향 평균으로 바닥 기울기를 없앤다 */
             return (st == 4u) ? NX_COAST : (st == 5u) ? NX_STOPT : NX_SWEEP;
         }
         *free = 1;
@@ -1790,12 +1837,16 @@ static float next_need(int16_t *free)
     case NX_SWEEP:
         v = rpm_at(SWEEP_LEVEL);
         return run_need(v, SETTLE_TICKS + 2 * WIN_TICKS, DEC_MARGIN_MM + decel_mm(v));
-    case NX_COAST:                   /* 타력은 길어야 COAST_TICKS. 그동안 v 그대로 간다고 본다 */
-        v = rpm_at(s_build ? (uint16_t)(IDENT_LEVELS - 1u) : (uint16_t)((p + 1u) / 2u));
+    case NX_COAST:                   /* 가감속 찾기는 안정 뒤 감속. 타력은 길어야 COAST_TICKS, 그동안 v 그대로 간다고 본다 */
+        if (s_build) {
+            v = rpm_at(IDENT_LEVELS - 1u);
+            return run_need(v, SETTLE_TICKS, DEC_MARGIN_MM + decel_mm(v));
+        }
+        v = rpm_at((uint16_t)((p + 1u) / 2u));
         return run_need(v, SETTLE_TICKS + COAST_TICKS, DEC_MARGIN_MM);
     case NX_STOPT:
         v = rpm_at(s_build ? (uint16_t)(IDENT_LEVELS - 1u) : (uint16_t)((p - 1u) / 2u));
-        c = coast_mm((float)v, 0.0f);
+        c = decel_mm(v);
         d = (s_build && !(s_build & BLD_CHECK) && (agv_all.stage == 5) && !s_id.retry) ? cid_next() : stopt_target(p);
         return run_need(v, SETTLE_TICKS, DEC_MARGIN_MM + ((c > d) ? c : d));
     case NX_RPM:

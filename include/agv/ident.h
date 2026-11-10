@@ -200,9 +200,8 @@ typedef struct {
     int16_t n;                     /* curve 칸 수 */
     int16_t curve[COAST_CURVE];    /* 고정부터 20 ms 마다 좌우 평균 원시 rpm */
     float   v0_mpm, dec_mps2;      /* dec_rpm_s 를 m/s². 닿지 않으면 -1 */
-    int16_t cut;                   /* 비트 합. 1 감속 끝점에서 풀었다, 2 속도를 낮췄다, 4 가이드가 벗어나 풀었다,
-                                      8 감속이 2 m/s² 를 넘어 앰프 제동으로 보고 평균에서 뺐다 */
-} coast_pass_t;                    /* float 는 짝수 칸(72)에 온다 */
+    int16_t cut;                   /* 비트 합. 1 감속 끝점에서 풀었다, 2 속도를 낮췄다, 4 가이드가 벗어나 풀었다 */
+} coast_pass_t;                    /* float 는 짝수 칸(72)에 온다. 지정 시험(t3.5) 단계 3 만 쓴다. 연속 시험은 state·pass·phase 만 */
 
 typedef struct {
     int16_t state;                 /* 1 진행, 2 끝, 3 실패 */
@@ -220,7 +219,7 @@ extern coast_result_t agv_coast;
  * 1 가속 → 2 안정 0.5 s → 7 정지: 그 자리에서 교차로 대기 목표(cross_pulses)를 직접 건다(ACS 를 거치지 않는다).
  *  주행 단계가 제동점까지 달리고 교차로 위치 정지(사유 5)가 선다. 조용해지면(stop_last 기록) 대기를 풀고
  *  8 최저 속도로 선 찾기 → 9 회전. 제동 토크가 없어 목표가 가까우면 지나친다. 그 거리를 잰다.
- * 트리거는 늦어도 L - GD - 100 mm - max(목표, v² / (2 × 1000 rpm/s)). 안 들어가면 4/5 로 다시(cut 2).
+ * 트리거는 늦어도 L - GD - 100 mm - max(목표, v 에서 최저 속도까지 주행 램프 감속 거리). 안 들어가면 4/5 로 다시(cut 2).
  * STOP·E-STOP·오류·패널 키·가이드 이탈(10칸)·정지 중 교차선은 실패 = 4000 + 회 × 10 + 순서. 30 s 안에 안 서도 실패.
  * 마지막 회전 뒤 agv_all.state = 2, stage 4 */
 #define STOPT_PASSES   6
@@ -271,12 +270,17 @@ void  ident_speed(int16_t v, int ramp);   /* 주행 지령. ramp 0 = 바로 */
  *         4 미만은 4. low_rpm 이 0(300 rpm 도 불안정)이면 추천 없음. 28번은 RAM 최저 속도를 바로 안 바꾼다(다시 켜면 적용).
  *  3 최고 속도: TOP 1·2회. 1번 추천 = min(내림(max_mpm × 0.85), 상한). 뒤 단계는 이 값(RAM)으로 달린다.
  *          제작은 1회로 추천이 상한에 닿으면(top_capped) 2회를 건너뛴다.
- *  4 타력: 최고 속도로 BLD_COAST_PASSES 회. 13번 추천 = 내림(감속도 평균 × 0.8 ÷ 100), 20~60 으로 자른다. 뒤 단계는 이 값(RAM).
- *          감속이 2 m/s² 를 넘은 회는 앰프 제동으로 보고 평균에서 뺀다(cut 8). 남은 회가 없으면 DCC 추천 없음, 뒤 단계는 지금 DCC.
+ *  4 가감속 찾기: 최고 속도 회마다 가속 램프로 ACC 후보 하나, 0.5 s 정속 뒤 최저 속도까지 감속 램프로 DCC 후보 하나를 본다.
+ *          ACC·DCC 찾기가 둘 다 끝나면(많아야 BLD_COAST_PASSES 회) 끝. 찾을 것이 없으면 달리지 않는다.
+ *          DCC 찾기는 ACC 찾기를 뒤집은 것이다(아래 ACC). 시작 = 지금 DCC, 상한 = AU(acc_cap, DCC 한계 20~60 으로 자름).
+ *          판정 창은 지령이 회 속도의 80% → 30% 를 지나는 동안(저속 감속 제한 최저 속도 × 2 의 1.1배 위만).
+ *          실제 감속도가 후보의 90% 이상이고 좌우 rpm 이 어긋나지 않아야 깨끗하다. 토크 지령은 0 아래로 안 가 제동 포화는 보지 않는다.
+ *          후보는 그 회 감속 동안만 DCC RAM 에 넣고 끝나면 시작 값으로 돌린다. 단계 끝에 DCC 추천(min(깨끗한 가장 큰 값, 상한))을
+ *          RAM 에 넣어 뒤 정지 단계가 그 값으로 간다. 회는 앞이 넉넉하면 같은 방향으로 잇는다.
  *  5 정지: 최고 속도에서 교차로 위치 정지. 제작은 목표 20 cm 부터, 다음 목표 = 올림(목표 + 지나침 - BLD_OVER_OK_MM, 10 cm),
  *          적어도 +10 cm, 많아야 60 cm. 지나침이 BLD_OVER_OK_MM 이하인 첫 목표에서 멈춘다(35번 추천).
  *          점검(BLD_CHECK)은 지금 35번(0 이면 60 cm)으로 한 번.
- *  ACC: 단계 3 부터 최고 속도·타력·편차 회의 출발 램프를 후보 ACC(12번, RAM)로 달려 실제 가속이 따라오는지 본다(이분 찾기,
+ *  ACC: 단계 3 부터 최고 속도·가감속 찾기·편차 회의 출발 램프를 후보 ACC(12번, RAM)로 달려 실제 가속이 따라오는지 본다(이분 찾기,
  *          첫 후보 = acc_cap). 정지 단계는 시작 때 ACC. 12번 추천 = min(깨끗한 가장 큰 값, acc_cap). 끝나면 12번 RAM 을 되돌린다.
  *  6 편차: 지금 설정(51·39·38번 그대로)으로 직진 BLD_DEV_PASSES 회. 통합 시험 단계 2 의 한 회와 같다(최고 속도의 2/3,
  *          앞 단계에서 RAM 에 넣은 1번 추천 기준). 정속 편차 RMS × 10 이 se_x10(기준값 125 아래 바이트, t2 판정)이다.
@@ -296,7 +300,7 @@ void  ident_speed(int16_t v, int ramp);   /* 주행 지령. ramp 0 = 바로 */
 #define BLD_GA     0x0400u
 #define BLD_CHECK  0x0800u
 #define BLD_STAGES 6
-#define BLD_COAST_PASSES 2
+#define BLD_COAST_PASSES 8   /* 가감속 찾기 회 상한 */
 #define BLD_OVER_OK_MM 10
 #define BLD_DEV_PASSES 1
 
@@ -311,7 +315,6 @@ typedef struct {
     int16_t turn_x1000;      /* 잰 제자리 회전 보정비 × 1000(둘째 회전 펄스 ÷ 휠 간격 180도 펄스). 0 = 안 함 */
     int16_t lr_permille;     /* 둘째 직선 우/좌 펄스 비 - 1, 천분율 */
     int16_t top_rpm;         /* agv_top.max_rpm 좌우 평균. 0 = 없음 */
-    int16_t dec_rpm_s;       /* 타력 감속도 평균(제동으로 보인 회는 뺀다). 0 = 없음 */
     int16_t over_mm;         /* 정지 단계 마지막 회 지나친 거리 */
     int16_t ov_mm;           /* BLD_GA: 선을 본 뒤 미끄러진 거리 */
     int16_t amp;             /* agv_rpmt.amp. 1회를 안 하는 제작(t1)은 0 */
@@ -319,10 +322,12 @@ typedef struct {
     int16_t guide_k100;      /* 기구 단계 끝 'a' = k × 'h' 의 k × 100. TUNE_NO_DATA = 측정 부족 */
     int16_t se_x10;          /* 편차 단계 정속 편차 RMS × 10. TUNE_NO_DATA = 없음 */
     int16_t floor_rpm, bat_dv;   /* tune.c 가 끝에 채운다: 정지 바닥 rpm, 48번 */
-    int16_t acc_cap;         /* ACC(12번) 상한. tune.c 가 시작 때 넣는다 */
-    int16_t acc_max;         /* 가속을 깨끗이 따라간 가장 큰 ACC(타력·정지·편차 회의 램프로 찾음). -1 = 없음 */
+    int16_t acc_cap;         /* ACC·DCC 상한(입력 AU). tune.c 가 시작 때 넣는다 */
+    int16_t acc_max;         /* 가속을 깨끗이 따라간 가장 큰 ACC(최고 속도·가감속 찾기·편차 회의 램프로 찾음). -1 = 없음 */
     int16_t acc_rec;         /* 12번 추천 = min(acc_max, acc_cap). -1 = 없음 */
     int16_t acc_slip;        /* 1 = 어느 후보 램프에서 좌우 rpm 이 어긋났다(미끄럼) */
+    int16_t dcc_max;         /* 감속을 깨끗이 따라간 가장 큰 DCC(가감속 찾기 회의 감속 램프로 찾음). -1 = 없음 */
+    int16_t dcc_slip;        /* 1 = 어느 후보 감속 램프에서 좌우 rpm 이 어긋났다(미끄럼) */
     float   track_mm;        /* 0회에 잰 L (지름 보정 전) */
 } build_result_t;
 
