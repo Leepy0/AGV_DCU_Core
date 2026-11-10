@@ -42,7 +42,10 @@ static int16_t     s_edge_s, s_edge_e;   /* 정상 추적 때의 가장자리 �
 static uint16_t    s_release;
 /* 다시 잡을 때 지속 확인(주행 위치 경로만). 잡았다가 잃은 뒤 처음 보이는 덩어리는 후보로만 두고
  * GUIDE_REACQ_N 응답을 이어 같은 자리에 있어야 받는다. 끊긴 자리의 바닥 반사 한두 칸을 주행선으로 받지 않는다 */
-static int16_t     s_reacq;       /* 이번 호출에 지속 확인을 건다 */
+static int16_t     s_drive;       /* 이번 호출은 주행 위치 경로다: 가장자리 고정·폭 학습·지속 확인을 한다 */
+static int16_t     s_relearn;     /* 가장자리 고정·유지 상한을 넘겨 폭을 다시 배우는 중 */
+static uint16_t    s_merge_age;   /* 필터 전 덩어리가 둘 이상이던 마지막 스캔 뒤 지난 스캔 수(포화). 붙어 있는 동안은 멈춘다 */
+static int16_t     s_trk_last;    /* 지난 주행 위치 스캔의 guide_track_t */
 static int16_t     s_ever;        /* 시작·센서 전환 뒤 선을 잡은 적이 있다. 첫 획득은 바로 받는다 */
 static int16_t     s_cand_pos, s_cand_n;
 
@@ -86,6 +89,9 @@ void guide_on_sensor_switch(void)
     s_release = 0;
     s_ever = 0;
     s_cand_n = 0;
+    s_relearn = 0;
+    s_merge_age = GUIDE_MERGE_SCANS;
+    s_trk_last = GUIDE_TRK_NORMAL;
     comm_clear();
 }
 
@@ -323,8 +329,13 @@ static int16_t pick(const guide_blob_t *b, uint16_t n, uint16_t leds, int16_t br
     return best;
 }
 
-/* 10 mm 테이프는 1칸·2칸을 오간다. 평균 1.5 를 2 로 올리고, 가끔 한 칸 넓어지는 것은 무시한다 */
-uint16_t guide_tape_width(void) { return (uint16_t)((s_tape_q4 + 11u) >> 4); }
+/* 10 mm 테이프는 1칸·2칸을 오간다. 평균 1.5 를 2 로 올리고, 가끔 한 칸 넓어지는 것은 무시한다.
+ * 하한 2칸: 한 칸만 켜지는 구간이 길어도 1 로 굳지 않는다. 0 = 아직 모름 */
+uint16_t guide_tape_width(void)
+{
+    uint16_t w = (uint16_t)((s_tape_q4 + 11u) >> 4);
+    return (s_tape_q4 == 0) ? 0u : ((w < 2u) ? 2u : w);
+}
 void     guide_track_release(void) { s_release = 1; }
 
 static void learn_width(uint16_t w)
@@ -343,14 +354,16 @@ static int16_t edge_fix(int16_t *s, int16_t *e, uint16_t leds, uint16_t blobs, i
 
     if (ds < 0) { ds = (int16_t)(-ds); }
     if (de < 0) { de = (int16_t)(-de); }
-    if ((ref == 0) || s_release) {                   /* 처음이거나 상한을 넘겼다: 보이는 대로 받고 폭을 다시 배운다 */
-        s_tape_q4 = 0;
-        s_release = 0;
+    /* 상한을 넘겼다: 폭을 지우지 않고 다시 배운다. 넓은 덩어리를 가운데로 받으며 느린 평균으로 올린다 */
+    if (s_release) { s_release = 0; s_relearn = 1; }
+    if (ref == 0) {                                  /* 처음: 보이는 대로 받고 배운다 */
     }
-    else if (w < ref) {                              /* 센서 끝에 반만 걸렸다. 안쪽 가장자리가 기준이다 */
-        if (*s == 1)                  { *s = (int16_t)(*e - ref + 1); }
-        else if (*e == (int16_t)leds) { *e = (int16_t)(*s + ref - 1); }
-        return GUIDE_TRK_NORMAL;
+    else if (w < ref) {                              /* 센서 끝에 반만 걸렸으면 안쪽 가장자리가 기준이다. 배우지 않는다 */
+        if (*s == 1)                  { *s = (int16_t)(*e - ref + 1); return GUIDE_TRK_NORMAL; }
+        if (*e == (int16_t)leds)      { *e = (int16_t)(*s + ref - 1); return GUIDE_TRK_NORMAL; }
+    }
+    else if (s_relearn) {
+        if (w <= ref + 1) { s_relearn = 0; }
     }
     else if (!tracking) {                            /* 다시 잡는 중: 견줄 가장자리가 없다 */
     }
@@ -358,6 +371,8 @@ static int16_t edge_fix(int16_t *s, int16_t *e, uint16_t leds, uint16_t blobs, i
         return GUIDE_TRK_NORMAL;                     /* 떨어진 다른 덩어리로 옮겼다. 붙은 것이 아니다 */
     }
     else if (w > ref + 1) {
+        /* 교차선·합류선은 붙기 전에 떨어진 덩어리로 먼저 보인다. 그런 적이 없이 넓어지면 커브다: 가운데, 폭 그대로 */
+        if (s_merge_age >= GUIDE_MERGE_SCANS) { return GUIDE_TRK_NORMAL; }
         if ((ds == 1) && (de == 1)) { return GUIDE_TRK_NORMAL; }   /* 양쪽으로 한 칸씩: 커브 */
         if ((ds == 0) || ((ds == 1) && (de > 1))) { *e = (int16_t)(*s + ref - 1); return GUIDE_TRK_EDGE; }
         if ((de == 0) || ((de == 1) && (ds > 1))) { *s = (int16_t)(*e - ref + 1); return GUIDE_TRK_EDGE; }
@@ -391,9 +406,9 @@ static int16_t reacq_wait(const guide_blob_t *b, uint16_t n, uint16_t leds, int1
 
 void guide_track_drive(const guide_rx_t *rx, int16_t branch, int16_t backward, guide_out_t *out)
 {
-    s_reacq = 1;
+    s_drive = 1;
     guide_track(rx, branch, backward, out);
-    s_reacq = 0;
+    s_drive = 0;
 }
 
 void guide_track(const guide_rx_t *rx, int16_t branch, int16_t backward, guide_out_t *out)
@@ -407,6 +422,10 @@ void guide_track(const guide_rx_t *rx, int16_t branch, int16_t backward, guide_o
 
     out->blobs = guide_blobs(lat, leds, blob);
     out->track = GUIDE_TRK_NORMAL;
+    if (s_drive) {
+        if (out->blobs >= 2u) { s_merge_age = 0; }
+        else if ((s_trk_last == GUIDE_TRK_NORMAL) && (s_merge_age < GUIDE_MERGE_SCANS)) { s_merge_age++; }
+    }
     if (lat == all) {
         out->status = GUIDE_ALL_ON;
         out->width = leds;
@@ -415,7 +434,7 @@ void guide_track(const guide_rx_t *rx, int16_t branch, int16_t backward, guide_o
         chosen = (out->blobs == 0) ? -1 : pick(blob, out->blobs, leds, branch, backward, invert);
         if (chosen < 0) { s_cand_n = 0; }
         if ((chosen < 0)
-            || (s_reacq && (branch == 0) && s_ever && !s_prev_valid && reacq_wait(blob, out->blobs, leds, &chosen))) {
+            || (s_drive && (branch == 0) && s_ever && !s_prev_valid && reacq_wait(blob, out->blobs, leds, &chosen))) {
             out->status = GUIDE_LOST;
             out->width = 0;
             s_prev_valid = 0;
@@ -424,8 +443,8 @@ void guide_track(const guide_rx_t *rx, int16_t branch, int16_t backward, guide_o
             int16_t s = (int16_t)blob[chosen].start, e = (int16_t)blob[chosen].end;
             out->status = GUIDE_NORMAL;
             out->width = (uint16_t)(e - s + 1);
-            /* 분기는 일부러 선을 갈아타는 동작이라 가장자리를 고치지 않는다 */
-            if (branch == 0) { out->track = edge_fix(&s, &e, leds, out->blobs, s_prev_valid); }
+            /* 분기는 일부러 선을 갈아타는 동작이라 가장자리를 고치지 않는다. 정렬 회전·튜닝 직접 호출도 고치지 않는다 */
+            if ((branch == 0) && s_drive) { out->track = edge_fix(&s, &e, leds, out->blobs, s_prev_valid); }
             if (out->track != GUIDE_TRK_NORMAL) { out->width = guide_tape_width(); }   /* 붙은 폭을 커브로 보지 않는다 */
             if (out->track != GUIDE_TRK_HOLD) {
                 s_prev = (int16_t)(s + e - (int16_t)(leds + 1));
@@ -439,6 +458,7 @@ void guide_track(const guide_rx_t *rx, int16_t branch, int16_t backward, guide_o
             }
         }
     }
+    if (s_drive) { s_trk_last = out->track; }
     out->pos = invert ? (int16_t)(-s_prev) : s_prev;
 }
 

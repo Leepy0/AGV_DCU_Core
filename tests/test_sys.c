@@ -1224,6 +1224,39 @@ static void turn_scan(uint16_t leds, int32_t pulses)
 #define LED_NEAR   0x0030u     /* 5·6번 칸: 위치 -6 */
 #define LED_OVER2  0x0300u     /* 9·10번 칸: 위치 +2 */
 
+/* 가장자리 고정은 달린 거리 GUIDE_EDGE_LIMIT_MM 까지 유지되고 그 뒤 풀린다. 속도(vin_out)는 모터 rpm 이다 */
+static void test_edge_release(void)
+{
+    float mm = 0.0f;
+    int k, n = 0;
+
+    boot();
+    assert(param_set_ram(P_LEGACY_QUIRKS, 0) == 0);
+    drive_up();
+    for (k = 0; k < 400; k++) {
+        host.sci[HAL_SCI_B].rx_len = host.sci[HAL_SCI_B].rx_pos = 0;
+        guide_led_reply((k == 399) ? (LED_CENTER | 0x3000u) : LED_CENTER);     /* 마지막에 떨어진 둘째 덩어리 */
+        run_encoder(0, 20000);
+        run_encoder(1, 20000);
+        tick();
+    }
+    assert(D.guide_track == GUIDE_TRK_NORMAL && D.guide_pos == 0 && D.vin_out > 1000);
+    for (k = 0; k < 300; k++) {
+        host.sci[HAL_SCI_B].rx_len = host.sci[HAL_SCI_B].rx_pos = 0;
+        guide_led_reply(0x1F80u);                                              /* 8~13번 칸: 주행선에 붙었다 */
+        run_encoder(0, 20000);
+        run_encoder(1, 20000);
+        tick();
+        if (D.guide_track != GUIDE_TRK_EDGE) { break; }
+        assert(D.guide_pos == 0);
+        mm += (float)D.vin_out * P.one_rpm_meter / 6.0f;
+        n++;
+    }
+    printf("  가장자리 고정 %d 틱, %.0f mm\n", n, mm);
+    assert((n > 20) && (mm > (float)GUIDE_EDGE_LIMIT_MM - 10.0f) && (mm < (float)GUIDE_EDGE_LIMIT_MM + 10.0f));
+    assert(D.guide_track == GUIDE_TRK_NORMAL && D.guide_pos == 4);              /* 풀리면 덩어리 가운데 */
+}
+
 static void align_start(uint16_t next)
 {
     boot();
@@ -2072,6 +2105,20 @@ static void test_curvelog(void)
     cl_drive(rb, 1521.0f, 0);
     assert(agv_curvelog.g[0].n == 0);
     D.flag_run = 0;
+    /* 오래 달린 뒤에도 같은 곡선은 같은 값이다(원점 옮김, 표본 수 32비트). 20 km 를 완만하게(반경 30 m, 5 m 마다 좌우) 달린다 */
+    curvelog_reset();
+    cl_route(rb, 1521.0f, 4, 0);
+    assert(agv_curvelog.g[0].n == 1);
+    { long k;
+      for (k = 0; k < 4000000L; k++) { cl_feed(5.0f, ((k / 1000L) & 1L) ? 30000.0f : -30000.0f, 0, 1, 0); } }
+    assert(agv_curvelog.g[0].n == 1);
+    cl_route(rb, 1521.0f, 4, 0);
+    { const curve_rec_t *a = &agv_curvelog.g[0].c[0], *b = &agv_curvelog.g[0].c[1];
+      printf("  20 km 뒤 곡선: 차체 %d → %d, 테이프 %d → %d, 길이 %d → %d\n", a->r_body_mm, b->r_body_mm, a->r_tape_mm, b->r_tape_mm, a->len_mm, b->len_mm);
+      assert(agv_curvelog.g[0].n == 2);
+      assert(cl_in(b->r_body_mm, (int16_t)(a->r_body_mm * 0.97f), (int16_t)(a->r_body_mm * 1.03f)));
+      assert(cl_in(b->r_tape_mm, (int16_t)(a->r_tape_mm * 0.97f), (int16_t)(a->r_tape_mm * 1.03f)));
+      assert(b->dev_max_x10 == a->dev_max_x10 && cl_in(b->len_mm, (int16_t)(a->len_mm - 30), (int16_t)(a->len_mm + 30))); }
     printf("  curvelog ok\n");
 }
 
@@ -2334,6 +2381,7 @@ int main(void)
     test_tune_guide();
     test_guide_h_only();
     test_curvelog();
+    test_edge_release();
     test_turn_scale();
     test_tape_turn();
     test_io_test();

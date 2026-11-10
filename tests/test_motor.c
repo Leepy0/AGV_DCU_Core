@@ -296,7 +296,7 @@ int main(void)
         D.tape_fix_end = -1;
         D.guide_pos = 3;
         for (int k = 0; (k < 10) && D.tape_align; k++) {
-            for (int i = 0; (i < 20) && (D.tape_step == TAPE_STEP_SETTLE); i++) { (void)motor_turn_adjust(); }
+            for (int i = 0; (i < 40) && (D.tape_step == TAPE_STEP_SETTLE); i++) { (void)motor_turn_adjust(); }
             if (!D.tape_align) { break; }
             assert(D.tape_step == TAPE_STEP_FIX && motor_turn_adjust() > 0);
             if (c == 1) {                     /* 중앙에 갔다가 서는 동안 다시 3 */
@@ -310,9 +310,14 @@ int main(void)
                 D.tape_fix_turned = 51;
                 assert(motor_turn_adjust() == 0 && D.vin_out == 0);
             }
-            else {
+            else {      /* 일시정지 뒤 재개처럼 몇 틱 선이 없다가 돌아오면 보정을 잇는다. 10틱 이어지면 끝 */
                 D.guide_all_off = 1;
-                assert(motor_turn_adjust() == 0 && D.vin_out == 0 && D.tape_align == 1);
+                for (int i = 0; i < 9; i++) { assert(motor_turn_adjust() > 0 && D.tape_step == TAPE_STEP_FIX); }
+                D.guide_all_off = 0;
+                assert(motor_turn_adjust() > 0);
+                D.guide_all_off = 1;
+                for (int i = 0; i < 9; i++) { assert(motor_turn_adjust() > 0 && D.tape_step == TAPE_STEP_FIX); }
+                assert(motor_turn_adjust() == 0 && D.vin_out == 0 && D.tape_align == 1 && D.tape_fix_end == 3);
             }
         }
         assert(D.tape_align == 0 && D.turn_pulses == 0 && D.system_err == 0);
@@ -330,6 +335,10 @@ int main(void)
         D.tape_side = (int16_t)c;
         D.guide_all_off = (int16_t)c;
         for (int i = 0; i < 20; i++) { assert(motor_turn_adjust() == 0); }
+        if (c) {    /* 정착 뒤 선 없음도 10틱 이어져야 끝낸다 */
+            assert(D.tape_align == 1 && D.tape_fix_end == -1);
+            for (int i = 0; i < 9; i++) { assert(motor_turn_adjust() == 0); }
+        }
         assert(D.tape_align == 0 && D.tape_fix_cnt == 0 && D.tape_fix_end == (c ? 3 : 4) && D.system_err == 0);
     }
     /* 정렬 회전 감속은 일반 회전과 같다(DCC/4). 라인을 보기 전에 미리 줄인다 */

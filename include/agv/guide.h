@@ -43,6 +43,7 @@ typedef enum {
 } guide_track_t;
 #define GUIDE_HOLD_LIMIT_MM  100   /* 유지 주행 상한. 30도 교차·25 mm 테이프에서 덮이는 구간이 약 43 mm */
 #define GUIDE_EDGE_LIMIT_MM  300   /* 가장자리 고정 상한. 넘으면 테이프 폭이 바뀐 것으로 보고 다시 배운다 */
+#define GUIDE_MERGE_SCANS    50    /* 이 스캔(0.5 s) 안에 떨어진 둘째 덩어리를 본 적이 있어야 붙은 것으로 본다 */
 #define GUIDE_REACQ_N        3     /* 잃은 뒤 다시 잡을 때 같은 자리에 이어져야 하는 응답 수(30 ms. 60 m/min 에서 30 mm) */
 #define GUIDE_REACQ_TOL      2     /* 같은 자리로 보는 위치 차(단위) */
 
@@ -110,8 +111,9 @@ uint16_t guide_blobs(uint32_t lateral, uint16_t leds, guide_blob_t *out);
 
 /* branch: 0 없음, BRANCH_LEFT, BRANCH_RIGHT. 진행 방향 기준이고 backward 로 센서 좌우로 바꾼다 */
 void     guide_track(const guide_rx_t *rx, int16_t branch, int16_t backward, guide_out_t *out);
-/* 주행 위치 경로(guide_poll)용. guide_track 과 같고, 잡았다가 잃은 뒤에는 GUIDE_REACQ_N 응답을 이어 본 덩어리만 받는다.
- * 그동안은 LOST 로 낸다. 시작·센서 전환 뒤 첫 획득과 분기는 바로 받는다. 정렬 회전·튜닝은 guide_track 을 쓴다 */
+/* 주행 위치 경로(guide_poll)용. 가장자리 고정·유지와 테이프 폭 학습은 이 경로만 한다(분기 제외).
+ * 잡았다가 잃은 뒤에는 GUIDE_REACQ_N 응답을 이어 본 덩어리만 받고 그동안은 LOST 로 낸다. 시작·센서 전환 뒤 첫 획득과
+ * 분기는 바로 받는다. 정렬 회전·튜닝은 guide_track 을 쓴다: 덩어리 가운데를 바로 받고 폭을 배우지 않는다 */
 void     guide_track_drive(const guide_rx_t *rx, int16_t branch, int16_t backward, guide_out_t *out);
 
 /* 'a' 소스에서 'h' 응답이 왔을 때의 위치값. 전부 꺼짐·켜짐 표시만 넣고 그 밖에는 이전 값을 둔다 */

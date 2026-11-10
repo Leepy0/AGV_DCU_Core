@@ -36,6 +36,7 @@ float atanf(float x);
 #define TAPE_SETTLE_MAX      100     /* 바퀴가 안 서도 1 s 면 본다 */
 #define TAPE_FIX_MAX         2       /* 보정 횟수 상한 */
 #define TAPE_FIX_DEG         5.0f    /* 보정 한 번의 회전각 상한 */
+#define TAPE_FIX_LOST_TICKS  10      /* 정착·보정 중 선 잃음은 이만큼 이어져야 인정한다. 일시정지 뒤 재개 첫 틱은 선 없음으로 시작한다 */
 #define PI_F                 3.14159265f
 
 agv_drive_t agv_drive;
@@ -446,6 +447,7 @@ static int16_t tape_stop(void)
 {
     D.tape_step = TAPE_STEP_SETTLE;
     D.tape_wait = 0;
+    D.tape_lost_cnt = 0;
     D.vin_out = 0;
     D.scv_accel = 0;
     return 0;
@@ -457,7 +459,8 @@ static int16_t tape_stop(void)
 static int16_t tape_after(int16_t seen, int32_t pos)
 {
     if (D.tape_step == TAPE_STEP_FIX) {
-        if (D.guide_all_off)                  { D.tape_fix_end = 3; return tape_stop(); }
+        if (!D.guide_all_off)                 { D.tape_lost_cnt = 0; }
+        else if (++D.tape_lost_cnt >= TAPE_FIX_LOST_TICKS) { D.tape_fix_end = 3; return tape_stop(); }
         if (seen && (pos <= TAPE_CENTER_POS)) { return tape_stop(); }
         if ((float)D.tape_fix_turned > TAPE_FIX_DEG * tape_deg_pulse()) { D.tape_fix_end = 2; return tape_stop(); }
         return P.turn_min;
@@ -469,6 +472,7 @@ static int16_t tape_after(int16_t seen, int32_t pos)
         || (((D.rpm[0] != 0) || (D.rpm[1] != 0)) && (D.tape_wait < TAPE_SETTLE_MAX))) {
         return 0;
     }
+    if (!seen && (D.tape_fix_end < 0) && (++D.tape_lost_cnt < TAPE_FIX_LOST_TICKS)) { return 0; }
     if (D.tape_fix_cnt == 0) { D.tape_stop_pos = D.guide_pos; }
     D.tape_final_pos = D.guide_pos;
     if (D.tape_fix_end < 0) {
@@ -480,6 +484,7 @@ static int16_t tape_after(int16_t seen, int32_t pos)
             D.tape_fix_cnt++;
             D.tape_fix_rev = (int16_t)(((D.guide_pos > 0) ? 1 : -1) != D.tape_side);
             D.tape_fix_turned = 0;
+            D.tape_lost_cnt = 0;
             D.tape_step = TAPE_STEP_FIX;
             if (!param_quirk(QUIRK_TURN_START)) { D.vin_out = STOP_MIN_RPM; }   /* 바닥 아래 구간을 건너뛴다(회전 시작과 같다) */
             return P.turn_min;

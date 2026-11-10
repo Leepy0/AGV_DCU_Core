@@ -18,7 +18,7 @@ enum { PREV_UNKNOWN = -1 };
 static int16_t s_prev_back = PREV_UNKNOWN;
 static int16_t s_ready_cnt;
 static int16_t s_err_cnt;       /* gComm_Error_Cnt */
-static int16_t s_trk_mm6;       /* 가장자리 고정·유지로 달린 거리 × 6 (m/min × 10 ms = 1/6 mm) */
+static float   s_trk_mm;        /* 가장자리 고정·유지로 달린 거리 mm */
 
 void guide_poll_reset(void)
 {
@@ -32,7 +32,7 @@ void guide_poll_start(void)
 {
     s_ready_cnt = 0;
     s_err_cnt = 0;
-    s_trk_mm6 = 0;
+    s_trk_mm = 0.0f;
     D.guide_track = GUIDE_TRK_NORMAL;
     D.guide_all_on = D.guide_all_off = 0;
     guide_on_run_start();
@@ -88,11 +88,11 @@ static int on_led(const guide_rx_t *rx, guide_out_t *out)
         float v;
         guide_track_drive(rx, D.branch_start, D.backward, out);
         D.guide_track = out->track;
-        if (out->track == GUIDE_TRK_NORMAL) { s_trk_mm6 = 0; }
-        else {
-            s_trk_mm6 = (int16_t)(s_trk_mm6 + ((D.vin_out >= 0) ? D.vin_out : -D.vin_out));
-            if (s_trk_mm6 >= 6 * ((out->track == GUIDE_TRK_HOLD) ? GUIDE_HOLD_LIMIT_MM : GUIDE_EDGE_LIMIT_MM)) {
-                s_trk_mm6 = 0;
+        if (out->track == GUIDE_TRK_NORMAL) { s_trk_mm = 0.0f; }
+        else {      /* vin_out 은 모터 rpm 이다. rpm × (m/min)/rpm × 10 ms = mm × 6 */
+            s_trk_mm += (float)((D.vin_out >= 0) ? D.vin_out : -D.vin_out) * P.one_rpm_meter / 6.0f;
+            if (s_trk_mm >= (float)((out->track == GUIDE_TRK_HOLD) ? GUIDE_HOLD_LIMIT_MM : GUIDE_EDGE_LIMIT_MM)) {
+                s_trk_mm = 0.0f;
                 guide_track_release();
             }
         }

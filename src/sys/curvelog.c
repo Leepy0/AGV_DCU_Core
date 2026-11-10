@@ -27,6 +27,7 @@ float cosf(float x);
 #define CURVE_POST_TICKS   100            /* 출구 넘침을 보는 시간 1 s */
 #define CURVE_FIT_MIN      5.0f           /* 원 맞춤 최소 점 수 */
 #define RING_STEP_MM       10.0f          /* 표본 간격 */
+#define CURVE_REBASE_MM    10000.0f       /* 곡선 밖에서 이만큼 갈 때마다 원점을 지금 자리로 옮긴다. float 누적이 커지지 않게 */
 #define RING_N             32             /* 0.2 m 지연 + 여유. 간격이 10 mm 이상이라 밀린 표본은 21 개 이하 */
 
 /* .ebss(RAML1)에 안 들어가 RAMH0 시험 결과 뒤에 둔다(cmd 의 curvelog_ram). 부팅 때 curvelog_reset 이 지운다 */
@@ -53,11 +54,13 @@ typedef struct {
 #pragma DATA_SECTION(s_cl, "curvelog_ram")
 #endif
 static struct {
-    float    x, y, phi, s;          /* 활성 동안 이어지는 오도메트리(mm, rad, 진행 방향 기준) */
+    float    x, y, phi, s;          /* 활성 동안 이어지는 오도메트리(mm, rad, 진행 방향 기준). 곡선 밖에서 주기적으로 원점을 옮긴다 */
+    float    c, sn;                 /* cos·sin(phi). 틱마다 한 번만 계산한다 */
+    float    oc, os;                /* cos·sin(ophi) */
     int32_t  tick;
     int16_t  lost_n, prev_lost;
     ring_t   ring[RING_N];
-    uint16_t push_n, proc_n;        /* 넣은 표본 수, 누적에 쓴 표본 수 */
+    uint32_t push_n, proc_n;        /* 넣은 표본 수, 누적에 쓴 표본 수 */
     ring_t   pp;                    /* 마지막으로 처리한 표본 */
     int16_t  back;                  /* 지난 틱 진행 방향. -1 = 모름 */
     int16_t  sens_above;            /* 센서 점 곡률이 문턱 위 */
@@ -78,6 +81,9 @@ static struct {
 static void state_clear(void)
 {
     s_cl.push_n = s_cl.proc_n = 0;
+    s_cl.x = s_cl.y = s_cl.phi = s_cl.s = 0.0f;
+    s_cl.c = 1.0f;
+    s_cl.sn = 0.0f;
     s_cl.back = -1;
     s_cl.st = 0;
     s_cl.sens_above = 0;
@@ -126,7 +132,7 @@ static void acc_add(acc_t *a, const ring_t *k, const ring_t *prev)
     a->ticks += (float)(k->tick - prev->tick);
     a->lost = (int16_t)(a->lost + (k->lost_n - prev->lost_n));
     if (k->ok) {
-        float c = cosf(s_cl.ophi), s = sinf(s_cl.ophi);
+        float c = s_cl.oc, s = s_cl.os;
         float dx = k->sx - s_cl.ox, dy = k->sy - s_cl.oy;
         float u = (dx * c + dy * s) * 0.001f, v = (-dx * s + dy * c) * 0.001f;
         float d = (float)k->pos;
@@ -209,16 +215,16 @@ static float curv3(float ax, float ay, float bx, float by, float cx, float cy)
     return (l > 0.0f) ? 2000.0f * (abx * acy - aby * acx) / l : 0.0f;
 }
 
-static const ring_t *sample(uint16_t n) { return &s_cl.ring[n % RING_N]; }
+static const ring_t *sample(uint32_t n) { return &s_cl.ring[n % RING_N]; }
 
 /* 창 곡률: 차체 kb, 센서 점 ks(세 점: 지금, 약 0.1 m 전, 약 0.2 m 전). 창이 덜 찼으면 0 */
 static void window_curv(float sx, float sy, int16_t sok, float *kb, float *ks)
 {
     const ring_t *mid_s = 0, *far_s = 0;
-    uint16_t i, n = (s_cl.push_n < RING_N) ? s_cl.push_n : RING_N;
+    uint32_t i, n = (s_cl.push_n < RING_N) ? s_cl.push_n : RING_N;
     *kb = *ks = 0.0f;
     for (i = 1; i <= n; i++) {
-        const ring_t *k = sample((uint16_t)(s_cl.push_n - i));
+        const ring_t *k = sample(s_cl.push_n - i);
         float back = s_cl.s - k->s;
         if ((mid_s == 0) && (back >= 0.5f * CURVE_WIN_MM)) { mid_s = k; }
         if (back >= CURVE_WIN_MM) { far_s = k; break; }
@@ -246,10 +252,28 @@ static void process(const ring_t *k)
     s_cl.pp = *k;
 }
 
+/* 원점을 지금 자리·방향으로 옮긴다. 링 안 표본과 기준 표본도 같이 옮겨 창 곡률이 끊기지 않는다. 곡선 밖에서만 */
+static void rebase(void)
+{
+    uint32_t i, n = (s_cl.push_n < RING_N) ? s_cl.push_n : RING_N;
+    for (i = 0; i <= n; i++) {
+        ring_t *k = (i < n) ? &s_cl.ring[(s_cl.push_n - 1u - i) % RING_N] : &s_cl.pp;
+        float dx = k->sx - s_cl.x, dy = k->sy - s_cl.y;
+        k->sx = dx * s_cl.c + dy * s_cl.sn;
+        k->sy = -dx * s_cl.sn + dy * s_cl.c;
+        k->s -= s_cl.s;
+        k->phi -= s_cl.phi;
+    }
+    s_cl.sens_cross_s -= s_cl.s;
+    s_cl.x = s_cl.y = s_cl.phi = s_cl.s = 0.0f;
+    s_cl.c = 1.0f;
+    s_cl.sn = 0.0f;
+}
+
 void curvelog_feed(const curvelog_in_t *in)
 {
     float sgn = in->backward ? -1.0f : 1.0f;
-    float ds, dphi, mid, sx = 0.0f, sy = 0.0f, kb, ks, lat;
+    float ds, dphi, c0, s0, sx = 0.0f, sy = 0.0f, kb, ks, lat;
     int16_t above;
 
     if (!in->active || (in->wb_mm <= 0.0f) || ((s_cl.back >= 0) && (s_cl.back != in->backward))) {
@@ -262,20 +286,23 @@ void curvelog_feed(const curvelog_in_t *in)
     /* 오도메트리: 진행 방향 기준. 후진이면 바퀴 이동이 음수라 회전 부호가 바뀐다 */
     ds = 0.5f * (in->dl_mm + in->dr_mm);
     dphi = sgn * (in->dr_mm - in->dl_mm) / in->wb_mm;
-    mid = s_cl.phi + 0.5f * dphi;
-    s_cl.x += ds * cosf(mid);
-    s_cl.y += ds * sinf(mid);
+    c0 = s_cl.c;
+    s0 = s_cl.sn;
     s_cl.phi += dphi;
+    s_cl.c = cosf(s_cl.phi);
+    s_cl.sn = sinf(s_cl.phi);
+    s_cl.x += ds * 0.5f * (c0 + s_cl.c);      /* 앞뒤 방향의 평균(사다리꼴) */
+    s_cl.y += ds * 0.5f * (s0 + s_cl.sn);
     s_cl.s += ds;
     s_cl.tick++;
     if (in->lost && !s_cl.prev_lost) { s_cl.lost_n++; }
     s_cl.prev_lost = in->lost;
     if (!in->lost) {
         lat = (float)in->pos * GUIDE_UNIT_MM;     /* + = 진행 방향 왼쪽 */
-        sx = s_cl.x + in->gd_mm * cosf(s_cl.phi) - lat * sinf(s_cl.phi);
-        sy = s_cl.y + in->gd_mm * sinf(s_cl.phi) + lat * cosf(s_cl.phi);
+        sx = s_cl.x + in->gd_mm * s_cl.c - lat * s_cl.sn;
+        sy = s_cl.y + in->gd_mm * s_cl.sn + lat * s_cl.c;
     }
-    if ((s_cl.push_n == 0) || (s_cl.s - sample((uint16_t)(s_cl.push_n - 1u))->s >= RING_STEP_MM)) {
+    if ((s_cl.push_n == 0) || (s_cl.s - sample(s_cl.push_n - 1u)->s >= RING_STEP_MM)) {
         ring_t *r = &s_cl.ring[s_cl.push_n % RING_N];
         r->s = s_cl.s;  r->phi = s_cl.phi;  r->sx = sx;  r->sy = sy;
         r->tick = s_cl.tick;  r->pos = in->pos;  r->ok = (int16_t)!in->lost;  r->lost_n = s_cl.lost_n;
@@ -301,10 +328,12 @@ void curvelog_feed(const curvelog_in_t *in)
             s_cl.begun = 0;
             s_cl.start_s = s_cl.s;
             s_cl.ox = s_cl.x;  s_cl.oy = s_cl.y;  s_cl.ophi = s_cl.phi;
+            s_cl.oc = s_cl.c;  s_cl.os = s_cl.sn;
             s_cl.lag = s_cl.sens_above ? clip16(s_cl.s - s_cl.sens_cross_s) : 0;
             s_cl.hold_mm = 0.0f;
             s_cl.st = 1;
         }
+        else if (s_cl.s >= CURVE_REBASE_MM) { rebase(); }
         break;
     case 1:
         if (!above) { s_cl.st = 0; break; }

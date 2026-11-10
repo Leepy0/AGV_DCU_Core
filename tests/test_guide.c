@@ -213,7 +213,7 @@ static int cross_sim(int leds, float tape_mm, float main_c, float step, int *nai
             if (cover(main_c, w, i) + cover(xc, wx, i) > 0.35f) { bits |= 1UL << (i - 1); }
         }
         r = (leds == 32) ? rx_wide(bits) : rx_narrow((uint16_t)bits);
-        guide_track(&r, 0, 0, &o);
+        guide_track_drive(&r, 0, 0, &o);
         assert(o.status == GUIDE_NORMAL);
         e = (int)((float)o.pos - truth);
         if (e < 0) { e = -e; }
@@ -249,29 +249,81 @@ static void test_cross(void)
             }
         }
     }
-    /* 상한을 넘겨 풀어 주면 넓어진 덩어리를 그대로 받고 폭을 다시 배운다 */
+    /* 붙음 판정·폭 학습 */
     { guide_out_t o;
       guide_rx_t r;
       int k;
       guide_reset();
       r = rx_narrow(BITS(7, 8));
-      for (k = 0; k < 5; k++) { guide_track(&r, 0, 0, &o); }
+      for (k = 0; k < 5; k++) { guide_track_drive(&r, 0, 0, &o); }
       assert(guide_tape_width() == 2 && o.track == GUIDE_TRK_NORMAL && guide_curve_span() == 4);
+      /* 둘째 덩어리를 본 적 없이 한쪽으로 넓어지면 커브다: 가운데, 폭 그대로. 폭은 배우지 않는다 */
+      r = rx_narrow(BITS(7, 10));
+      guide_track_drive(&r, 0, 0, &o);
+      assert(o.track == GUIDE_TRK_NORMAL && o.pos == 2 && o.width == 4);
       r = rx_narrow(BITS(7, 11));
-      guide_track(&r, 0, 0, &o);
+      guide_track_drive(&r, 0, 0, &o);
+      assert(o.track == GUIDE_TRK_NORMAL && o.pos == 3 && o.width == 5 && guide_tape_width() == 2);
+      /* 떨어진 둘째 덩어리가 먼저 보인 뒤 붙으면 가장자리 고정·유지 */
+      r = rx_narrow(BITS(7, 8) | BITS(11, 12));
+      guide_track_drive(&r, 0, 0, &o);
+      assert(o.track == GUIDE_TRK_NORMAL && o.pos == 0 && o.blobs == 2);
+      r = rx_narrow(BITS(7, 11));
+      guide_track_drive(&r, 0, 0, &o);
       assert(o.track == GUIDE_TRK_EDGE && o.pos == 0 && o.width == 2);
+      /* 정렬 회전·튜닝 직접 호출은 가장자리를 고치지 않고 폭도 배우지 않는다 */
+      { guide_out_t t;
+        guide_track(&r, 0, 0, &t);
+        assert(t.track == GUIDE_TRK_NORMAL && t.pos == 3 && t.width == 5 && guide_tape_width() == 2);
+        r = rx_narrow(BITS(7, 8));
+        guide_track(&r, 0, 0, &t);
+        r = rx_narrow(BITS(7, 11));
+        guide_track_drive(&r, 0, 0, &o);
+        assert(o.track == GUIDE_TRK_EDGE && o.pos == 0); }
+      /* 붙어 있는 동안은 둘째 덩어리를 본 기억이 낡지 않는다 */
+      for (k = 0; k < 2 * GUIDE_MERGE_SCANS; k++) { guide_track_drive(&r, 0, 0, &o); }
+      assert(o.track == GUIDE_TRK_EDGE && o.pos == 0);
       r = rx_narrow(BITS(3, 12));
-      guide_track(&r, 0, 0, &o);
+      guide_track_drive(&r, 0, 0, &o);
       assert(o.track == GUIDE_TRK_HOLD && o.pos == 0);
+      /* 상한을 넘겨 풀어 주면 넓은 덩어리를 가운데로 받고, 폭은 지우지 않고 느리게 올린다 */
       guide_track_release();
-      guide_track(&r, 0, 0, &o);
-      assert(o.track == GUIDE_TRK_NORMAL && o.pos == 0 && guide_tape_width() == 10 && guide_curve_span() == 12);
+      guide_track_drive(&r, 0, 0, &o);
+      assert(o.track == GUIDE_TRK_NORMAL && o.pos == 0 && guide_tape_width() <= 3);
+      for (k = 0; k < 10; k++) { guide_track_drive(&r, 0, 0, &o); }
+      assert(o.track == GUIDE_TRK_NORMAL && guide_tape_width() >= 5 && guide_tape_width() <= 8);
+      for (k = 0; k < 60; k++) { guide_track_drive(&r, 0, 0, &o); }
+      assert(guide_tape_width() >= 9);
+      /* 다시 좁아지면 빨리 따라 내려온다(좁아지는 학습) */
+      r = rx_narrow(BITS(7, 8));
+      for (k = 0; k < 20; k++) { guide_track_drive(&r, 0, 0, &o); }
+      assert(guide_tape_width() == 2 && o.track == GUIDE_TRK_NORMAL && o.pos == 0);
+      /* 둘째 덩어리를 본 지 GUIDE_MERGE_SCANS 가 지나면 넓어져도 커브로 본다 */
+      r = rx_narrow(BITS(7, 8) | BITS(11, 12));
+      guide_track_drive(&r, 0, 0, &o);
+      r = rx_narrow(BITS(7, 8));
+      for (k = 0; k < GUIDE_MERGE_SCANS; k++) { guide_track_drive(&r, 0, 0, &o); }
+      r = rx_narrow(BITS(7, 11));
+      guide_track_drive(&r, 0, 0, &o);
+      assert(o.track == GUIDE_TRK_NORMAL && o.pos == 3);
+      /* 첫 학습이 교차선 위(7칸)에서 시작해도 정상 테이프에서 내려온다. 붙은 채로 시작하면 가운데 */
+      guide_reset();
+      r = rx_narrow(BITS(4, 10));
+      guide_track_drive(&r, 0, 0, &o);
+      assert(o.track == GUIDE_TRK_NORMAL && o.pos == -1 && guide_tape_width() == 7);
+      r = rx_narrow(BITS(7, 8));
+      for (k = 0; k < 20; k++) { guide_track_drive(&r, 0, 0, &o); }
+      assert(guide_tape_width() == 2);
+      /* 한 칸만 켜지는 구간이 길어도 배운 폭은 2칸 아래로 안 간다 */
+      r = rx_narrow(BITS(7, 7));
+      for (k = 0; k < 50; k++) { guide_track_drive(&r, 0, 0, &o); }
+      assert(guide_tape_width() == 2 && o.pos == -1);
       /* 센서 끝에 반만 걸리면 안쪽 가장자리에서 폭만큼 잡는다 */
       guide_reset();
       r = rx_narrow(BITS(7, 10));
-      for (k = 0; k < 5; k++) { guide_track(&r, 0, 0, &o); }
+      for (k = 0; k < 5; k++) { guide_track_drive(&r, 0, 0, &o); }
       r = rx_narrow(BITS(0, 1));
-      guide_track(&r, 0, 0, &o);
+      guide_track_drive(&r, 0, 0, &o);
       assert(o.pos == 0 + 2 - 17 - 1);     /* 칸 -1~2 로 본다 */
     }
 }
@@ -291,7 +343,7 @@ static void run_table(void)
         guide_configure(&cfg);
         if (c->prev_set) {
             r = c->wide ? rx_wide(c->prev_lo) : rx_narrow((uint16_t)c->prev_lo);
-            guide_track(&r, 0, 0, &o);
+            guide_track_drive(&r, 0, 0, &o);
             assert(o.status == GUIDE_NORMAL);
         }
         cfg.min_width = c->min_w;
@@ -300,7 +352,7 @@ static void run_table(void)
         guide_configure(&cfg);
         r = c->wide ? rx_wide(c->lo) : rx_narrow(0);
         if (!c->wide) { r.led_lo = c->lo; }
-        guide_track(&r, c->branch, c->backward, &o);
+        guide_track_drive(&r, c->branch, c->backward, &o);
         if ((o.pos != c->pos) || (o.status != c->status) || (o.width != c->width)
             || (o.blobs != c->blobs)) {
             printf("%s: pos %d status %d width %u blobs %u\n", c->name, o.pos, o.status, o.width, o.blobs);
@@ -412,29 +464,32 @@ int main(void)
     run_table();
     test_cross();
 
-    /* LOST 뒤에는 변화량 제한 없이 다시 잡는다 */
+    /* LOST 뒤에는 변화량 제한 없이 다시 잡는다(지속 확인 뒤) */
     guide_reset();
     guide_cfg_default(&cfg);
     guide_configure(&cfg);
     r = rx_narrow(0x0018);
-    guide_track(&r, 0, 0, &o);
+    guide_track_drive(&r, 0, 0, &o);
     cfg.max_step = 2;
     guide_configure(&cfg);
     r = rx_narrow(0x3000);
-    guide_track(&r, 0, 0, &o);
+    guide_track_drive(&r, 0, 0, &o);
     assert(o.status == GUIDE_LOST && o.pos == -8);
-    guide_track(&r, 0, 0, &o);
+    guide_track_drive(&r, 0, 0, &o);       /* 주행 경로는 같은 자리에 GUIDE_REACQ_N 응답을 본 뒤 받는다 */
+    guide_track_drive(&r, 0, 0, &o);
+    assert(o.status == GUIDE_LOST && o.pos == -8);
+    guide_track_drive(&r, 0, 0, &o);
     assert(o.status == GUIDE_NORMAL && o.pos == 10);
 
     /* ALL_ON 뒤에는 위치가 유지되어 다음 덩어리를 그 기준으로 고른다 */
     guide_reset();
     r = rx_narrow(0xC000);
-    guide_track(&r, 0, 0, &o);
+    guide_track_drive(&r, 0, 0, &o);
     r = rx_narrow(0xFFFF);
-    guide_track(&r, 0, 0, &o);
+    guide_track_drive(&r, 0, 0, &o);
     assert(o.pos == 14 && o.status == GUIDE_ALL_ON);
     r = rx_narrow(0xC003);
-    guide_track(&r, 0, 0, &o);
+    guide_track_drive(&r, 0, 0, &o);
     assert(o.pos == 14);
 
     /* 'a' 소스에서 온 'h': 위치를 덮지 않는다. 비트를 켜면 자리표 10 */
@@ -460,19 +515,19 @@ int main(void)
     cfg.invert_back = 1;
     guide_configure(&cfg);
     r = rx_narrow(0x0006);                                     /* 위치 -12 */
-    guide_track(&r, 0, 0, &o);
+    guide_track_drive(&r, 0, 0, &o);
     assert(o.pos == -12);
-    guide_track(&r, 0, 1, &o);
+    guide_track_drive(&r, 0, 1, &o);
     assert(o.pos == 12);
     guide_reset();
 
     /* 센서 전환: 앞 센서의 마지막 위치로 뒤 센서 덩어리를 고르지 않는다 */
     r = rx_narrow(0xC000);                                     /* 앞 센서 위치 14 */
-    guide_track(&r, 0, 0, &o);
+    guide_track_drive(&r, 0, 0, &o);
     assert(o.pos == 14);
     r = rx_narrow(0xC180);                                     /* 뒤 센서: 14 와 중앙(0) 두 덩어리 */
     guide_on_sensor_switch();
-    guide_track(&r, 0, 1, &o);
+    guide_track_drive(&r, 0, 1, &o);
     assert(o.pos == 0 && o.width == 2);
     /* 전환 뒤 변화량 제한도 첫 값에는 걸지 않는다 */
     guide_cfg_default(&cfg);
@@ -480,7 +535,7 @@ int main(void)
     guide_configure(&cfg);
     r = rx_narrow(0x0003);
     guide_on_sensor_switch();
-    guide_track(&r, 0, 1, &o);
+    guide_track_drive(&r, 0, 1, &o);
     assert(o.status == GUIDE_NORMAL && o.pos == -14);
     guide_reset();
 
