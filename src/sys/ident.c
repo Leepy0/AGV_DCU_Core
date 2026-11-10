@@ -94,6 +94,10 @@
 #define BK_GROW_N        5        /* 연속 이만큼 커지고 */
 #define BK_GROW_MIN      4        /* 이 칸 이상이면 발산 */
 #define BK_BIAS_X10      30       /* 후진 평균이 전진 평균과 3단위(약 10 mm) 넘게 다르면 치우침 큼 */
+#define BK_SETTLE_TICKS  20       /* 방향 전환 뒤 뒤 센서 첫 정상 응답부터 0.2 s 는 판정하지 않는다 */
+#define BK_SETTLE_MAX_TICKS 100   /* 정상 응답이 1 s 또는 */
+#define BK_SETTLE_MAX_MM 100.0f   /* 100 mm 안에 한 번도 없으면 선 잃음 */
+#define BK_LOST_TICKS    10       /* 정착 뒤 선 잃음은 0.1 s 이어져야 */
 #define KEEP_MARK        ((uint16_t)(0x7E57u ^ (uint16_t)(sizeof(agv_ident) + sizeof(agv_top) + sizeof(agv_all) \
                                                            + sizeof(agv_coast) + sizeof(agv_rpmt) + sizeof(agv_stopt) \
                                                            + sizeof(agv_build))))
@@ -194,9 +198,10 @@ typedef struct {
 static srch_t s_acc, s_dcc;
 
 /* 후진 점검. st: 0 안 함·아직, 1 바꿀 자리로 가서 후진으로 바꾸는 중, 2 후진 회, 3 전진으로 되돌리는 중, 4 끝.
- * flip 1 = 릴레이가 to 가 되기를 기다린다. d0 = 시작 방향. creep 1 = 출발 뒤 최저 속도 구간, 2 = 발산으로 서는 중 */
+ * flip 1 = 릴레이가 to 가 되기를 기다린다. d0 = 시작 방향. creep 1 = 출발 뒤 최저 속도 구간, 2 = 발산으로 서는 중.
+ * ok = 첫 정상 응답 뒤 틱(0 = 아직), lost = 정착 뒤 선 잃음 연속 틱 */
 enum { BK_NONE = 0, BK_OUT, BK_RUN, BK_RET, BK_END };
-static struct { int16_t st, d0, to, flip, creep, grow, last; } s_bk;
+static struct { int16_t st, d0, to, flip, creep, grow, last, ok, lost; } s_bk;
 
 static struct {                  /* 정지 정확도·가감속 찾기 한 회 */
     int16_t  last[2];
@@ -767,6 +772,7 @@ static void pass_begin(void)
     D.p_test = 0;
     s_bk.creep = (int16_t)(s_bk.st == BK_RUN);
     s_bk.grow = s_bk.last = 0;
+    s_bk.ok = s_bk.lost = 0;
     enter(PH_RAMP);
 }
 
@@ -1719,8 +1725,22 @@ static int bk_turn(void)
     return 0;
 }
 
+/* 발산·선 잃음(판정 3)으로 선다. why = bk_why */
+static int bk_diverge(int16_t why)
+{
+    agv_build.bk_judge = 3;
+    agv_build.bk_why = why;
+    agv_build.bk_dev_x10 = (int16_t)(lateral() * 10.0f);
+    D.p_test = 0;
+    tagact_stop();
+    s_bk.creep = 2;
+    s_id.t = 0;
+    return 0;
+}
+
 /* 후진 회 처음 BK_CREEP_MM: 최저 속도로 가며 편차가 문턱에 닿거나 계속 커지거나 선을 잃으면 바로 선다(발산, 판정 3).
- * t1 실패가 아니다. 가이드 이탈 오류(전부 꺼짐 600 mm)보다 먼저 선다. 다 가면 회 속도로 올린다(PH_RAMP 그대로) */
+ * t1 실패가 아니다. 가이드 이탈 오류(전부 꺼짐 600 mm)보다 먼저 선다. 다 가면 회 속도로 올린다(PH_RAMP 그대로).
+ * 방향 전환(뒤 센서 전원 전환) 직후 첫 응답은 전부 꺼짐이거나 늦을 수 있다. 첫 정상 응답 뒤 0.2 s 까지는 판정하지 않는다 */
 static int bk_creep(int stopped)
 {
     int16_t g = (D.guide_pos < 0) ? (int16_t)-D.guide_pos : D.guide_pos;
@@ -1734,19 +1754,20 @@ static int bk_creep(int stopped)
     }
     if (stopped || D.flag_stopping) { return fail_now(); }
     set_speed(P.min_speed, 1);
+    if (s_bk.ok < BK_SETTLE_TICKS) {
+        if ((s_bk.ok > 0) || (!D.guide_all_off && !D.guide_all_on)) { s_bk.ok++; }
+        else if ((s_id.t >= BK_SETTLE_MAX_TICKS) || (mm_since(s_id.begin) >= BK_SETTLE_MAX_MM)) { return bk_diverge(4); }
+        s_id.t++;
+        return 0;
+    }
+    s_bk.lost = (int16_t)(D.guide_all_off ? s_bk.lost + 1 : 0);
     if ((s_id.t++ % BK_GROW_TICKS) == 0) {
         s_bk.grow = (int16_t)((g > s_bk.last) ? s_bk.grow + 1 : ((g < s_bk.last) ? 0 : s_bk.grow));
         s_bk.last = g;
     }
-    if (D.guide_all_off || (g >= (D.guide_wide ? BK_LIM_WIDE : BK_LIM)) || ((s_bk.grow >= BK_GROW_N) && (g >= BK_GROW_MIN))) {
-        agv_build.bk_judge = 3;
-        agv_build.bk_dev_x10 = (int16_t)(lateral() * 10.0f);
-        D.p_test = 0;
-        tagact_stop();
-        s_bk.creep = 2;
-        s_id.t = 0;
-        return 0;
-    }
+    if (s_bk.lost >= BK_LOST_TICKS)                    { return bk_diverge(3); }
+    if (g >= (D.guide_wide ? BK_LIM_WIDE : BK_LIM))    { return bk_diverge(1); }
+    if ((s_bk.grow >= BK_GROW_N) && (g >= BK_GROW_MIN)) { return bk_diverge(2); }
     if (mm_since(s_id.begin) >= BK_CREEP_MM) {
         s_bk.creep = 0;
         s_id.t = 0;

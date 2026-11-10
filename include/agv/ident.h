@@ -330,6 +330,7 @@ typedef struct {
     int16_t bk_judge;        /* 후진 점검 0 안 함, 1 정상, 2 치우침 큼(전진 평균과 3칸 넘게 다름), 3 발산·선 잃음 */
     srch_hist_t acc_hist;    /* ACC·DCC 찾기 판정 이력. 뒤에 붙여 앞 필드 주소를 옮기지 않는다 */
     srch_hist_t dcc_hist;
+    int16_t bk_why;          /* 후진 점검 판정 3 사유: 1 문턱 도달, 2 계속 증가, 3 선 잃음(0.1 s), 4 정착 구간(1 s·100 mm) 안 정상 응답 없음. 0 = 아님 */
 } build_result_t;
 
 extern build_result_t agv_build;
