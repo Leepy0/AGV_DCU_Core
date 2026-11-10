@@ -182,10 +182,14 @@ static struct {
  * ACC 는 최고 속도 단계부터 최고 속도·가감속 찾기·편차 회의 가속 램프를 후보 ACC 로 달려 깨끗한지 본다
  * (따로 달리지 않는다). 정지 단계는 정지 정확도를 흐리지 않게 시작 때 ACC 로 달린다.
  * DCC 는 가감속 찾기 회마다 정속 뒤 최저 속도까지 감속 램프를 후보 DCC 로 달린다.
- * lo = 깨끗하다고 아는 가장 큰 값(처음은 지금 값), hi = 입력 상한 AU. 첫 후보는 hi, 뒤는 가운데(이분) */
+ * lo = 깨끗하다고 아는 가장 큰 값(처음은 지금 값), hi = 입력 상한 AU. 첫 후보는 hi, 뒤는 가운데(이분).
+ * 한계 근처 후보는 시험마다 갈리므로 탈락한 후보는 같은 값으로 한 번 더 보고, 두 번 다 탈락해야 hi 를 줄인다 */
 typedef struct {
     int16_t a0, lo, hi, c;        /* a0: 시작 값(끝나면 돌린다). c: 지금 후보. 0 = 찾지 않는다 */
-    int16_t t, t1, win, bad, slip_n;
+    int16_t t, t1, win, slip_n;
+    int16_t bad;                  /* 탈락 사유 비트(srch_log_t.why). 0 = 깨끗하다 */
+    int16_t rt;                   /* 1 = 탈락한 후보를 재시험 중 */
+    int16_t fol, tq;              /* 창 안 실제 변화율 ÷ 후보 %, 창 안 최대 토크 지령 % */
     float   r1;
 } srch_t;
 static srch_t s_acc, s_dcc;
@@ -1116,7 +1120,7 @@ static void srch_begin(srch_t *s, int16_t a0, int16_t cap, int16_t *max, int16_t
     s->a0 = a0;
     s->lo = ((cap > 0) && (cap < a0)) ? cap : a0;
     s->hi = (cap > s->lo) ? cap : s->lo;
-    s->c = 0;
+    s->c = s->rt = 0;
     srch_set(s, cap, max, rec);
 }
 
@@ -1125,6 +1129,7 @@ static void srch_begin(srch_t *s, int16_t a0, int16_t cap, int16_t *max, int16_t
 static void srch_tick(srch_t *s, int32_t from, int32_t to, int16_t *slip)
 {
     int32_t a = D.rpm[0], b = D.rpm[1], d = (a > b) ? a - b : b - a, v = D.vin_out;
+    int16_t q = (D.tq_cmd[0] > D.tq_cmd[1]) ? D.tq_cmd[0] : D.tq_cmd[1];
     int up = (to > from);
     float r;
 
@@ -1133,25 +1138,47 @@ static void srch_tick(srch_t *s, int32_t from, int32_t to, int16_t *slip)
         s->win = 1;
         s->t1 = s->t;
         s->r1 = (float)(a + b) * 0.5f;
+        s->tq = 0;
     }
     if (s->win != 1) { return; }
+    q = (int16_t)((float)q * (100.0f / MOTOR_TORQUE_LIMIT));
+    if (q > s->tq) { s->tq = q; }
     s->slip_n = (int16_t)(((d > ACC_SLIP_RPM) && (d * 200L > (a + b) * ACC_SLIP_PCT)) ? s->slip_n + 1 : 0);
     if (s->slip_n >= ACC_SLIP_TICKS) {
-        s->bad = 1;
+        s->bad |= 4;
         *slip = 1;
     }
     if (up ? (v < to) : (v > to)) { return; }
     r = ((float)(a + b) * 0.5f - s->r1) / (float)(s->t - s->t1);   /* 창 끝: 실제 변화율이 후보를 따라왔나 */
-    if ((up ? r : -r) * 100.0f < (float)(s->c * ACC_FOLLOW_PCT)) { s->bad = 1; }
+    if (!up) { r = -r; }
+    s->fol = (int16_t)(r * 100.0f / (float)s->c);
+    if (r * 100.0f < (float)(s->c * ACC_FOLLOW_PCT)) { s->bad |= 1; }
     s->win = 2;
 }
 
-/* 램프 끝. 창을 다 봤으면 판정해 다음 후보로 */
-static void srch_judge(srch_t *s, int16_t cap, int16_t *max, int16_t *rec)
+/* 램프 끝. 창을 다 봤으면 판정을 h 에 남기고 다음 후보로. 첫 탈락은 같은 후보를 한 번 더 본다(재시험 합격이면 합격) */
+static void srch_judge(srch_t *s, int16_t cap, int16_t *max, int16_t *rec, srch_hist_t *h)
 {
+    srch_log_t *e;
+
     if ((s->c == 0) || (s->win != 2)) { return; }
-    if (s->bad) { s->hi = (int16_t)(s->c - 1); }
-    else        { s->lo = s->c; }
+    e = &h->log[h->n % SRCH_LOG_N];
+    e->c = s->c;
+    e->why = s->bad;
+    e->fol = s->fol;
+    e->tq = s->tq;
+    h->n++;
+    if (s->bad) {
+        h->fail = *e;
+        if (!s->rt) {
+            s->rt = 1;
+            s->t = s->win = s->bad = s->slip_n = 0;
+            return;
+        }
+        s->hi = (int16_t)(s->c - 1);
+    }
+    else { s->lo = s->c; }
+    s->rt = 0;
     srch_set(s, cap, max, rec);
 }
 
@@ -1174,7 +1201,7 @@ static void acc_ramp(void)
     srch_tick(&s_acc, lo, (ref * ACC_WIN_HI + 99L) / 100L, &agv_build.acc_slip);
     if ((s_acc.win == 1) && (pct <= ACC_TQ_PCT)
         && (((float)D.tq_cmd[0] >= MOTOR_TORQUE_LIMIT * ACC_TQ_OK) || ((float)D.tq_cmd[1] >= MOTOR_TORQUE_LIMIT * ACC_TQ_OK))) {
-        s_acc.bad = 1;
+        s_acc.bad |= 2;
     }
 }
 
@@ -1185,7 +1212,7 @@ static void acc_reset(void)
     if (s_build && (s_acc.a0 > 0)) { (void)param_set_ram(P_ACC, ((s_acc.c > 0) && !stopt()) ? s_acc.c : s_acc.a0); }
 }
 
-static void acc_judge(void) { srch_judge(&s_acc, agv_build.acc_cap, &agv_build.acc_max, &agv_build.acc_rec); }
+static void acc_judge(void) { srch_judge(&s_acc, agv_build.acc_cap, &agv_build.acc_max, &agv_build.acc_rec, &agv_build.acc_hist); }
 
 /* 가감속 찾기: 정속 뒤 후보 DCC 를 RAM 에 넣고 최저 속도로 감속한다 */
 static int dec_begin(void)
@@ -1211,7 +1238,7 @@ static int dec_run(void)
     if ((D.vin_out > P.min_speed) && (ahead_mm() > P.guide_dist_mm + DEC_MARGIN_MM)) {
         return (++s_id.t > RAMP_LIMIT) ? fail_now() : 0;
     }
-    srch_judge(&s_dcc, dcc_cap(), &agv_build.dcc_max, &agv_build.dcc_rec);
+    srch_judge(&s_dcc, dcc_cap(), &agv_build.dcc_max, &agv_build.dcc_rec, &agv_build.dcc_hist);
     (void)param_set_ram(P_DCC, s_dcc.a0);
     leave(0);
     return 0;

@@ -260,7 +260,8 @@ void  ident_speed(int16_t v, int ramp);   /* 주행 지령. ramp 0 = 바로 */
  *          적어도 +10 cm, 많아야 60 cm. 지나침이 BLD_OVER_OK_MM 이하인 첫 목표에서 멈춘다(35번 추천).
  *          점검(BLD_CHECK)은 지금 35번(0 이면 60 cm)으로 한 번.
  *  ACC: 단계 3 부터 최고 속도·가감속 찾기·편차 회의 출발 램프를 후보 ACC(12번, RAM)로 달려 실제 가속이 따라오는지 본다(이분 찾기,
- *          첫 후보 = acc_cap). 정지 단계는 시작 때 ACC. 12번 추천 = min(깨끗한 가장 큰 값, acc_cap). 끝나면 12번 RAM 을 되돌린다.
+ *          첫 후보 = acc_cap). 탈락한 후보는 바로 같은 값으로 한 번 더 보고, 두 번 다 탈락해야 위쪽을 줄인다
+ *          (재시험 합격이면 합격). 합격은 한 번으로 인정. DCC 찾기도 같다. 판정마다 agv_build.acc_hist·dcc_hist 에 남긴다. 정지 단계는 시작 때 ACC. 12번 추천 = min(깨끗한 가장 큰 값, acc_cap). 끝나면 12번 RAM 을 되돌린다.
  *  6 편차: 지금 설정(51·39·38번 그대로)으로 직진 BLD_DEV_PASSES 회. 통합 시험 단계 2 의 한 회와 같다(최고 속도의 2/3,
  *          앞 단계에서 RAM 에 넣은 1번 추천 기준). 정속 편차 RMS × 10 이 se_x10(기준값 125 아래 바이트, t2 판정)이다.
  *  후진 점검(t1, TFB 일의 자리 > 0): 편차 단계 전진 회 뒤 그 자리에서 회전 대신 방향 전환(run_dir_change, 0도 회전과 같다)을 하고
@@ -284,9 +285,24 @@ void  ident_speed(int16_t v, int ramp);   /* 주행 지령. ramp 0 = 바로 */
 #define BLD_GA     0x0400u
 #define BLD_CHECK  0x0800u
 #define BLD_STAGES 6
-#define BLD_COAST_PASSES 8   /* 가감속 찾기 회 상한 */
+#define BLD_COAST_PASSES 10  /* 가감속 찾기 회 상한. 탈락 재확인으로 판정이 늘어 8 → 10 */
 #define BLD_OVER_OK_MM 10
 #define BLD_DEV_PASSES 1
+
+/* ACC·DCC 찾기 후보 판정 한 번 */
+typedef struct {
+    int16_t c;               /* 후보. 0 = 없음 */
+    int16_t why;             /* 0 합격. 탈락 사유 비트: 1 따라감 부족, 2 토크 포화, 4 미끄럼 */
+    int16_t fol;             /* 창 안 실제 가속도(감속도) ÷ 후보 % */
+    int16_t tq;              /* 창 안 최대 토크 지령, 상한 대비 % */
+} srch_log_t;
+
+#define SRCH_LOG_N 8
+typedef struct {
+    srch_log_t fail;         /* 마지막 탈락 판정 */
+    int16_t    n;            /* 판정 수. n 번째 판정은 log[(n - 1) % SRCH_LOG_N] (마지막 8개만 남는다) */
+    srch_log_t log[SRCH_LOG_N];
+} srch_hist_t;
 
 typedef struct {
     int16_t state;           /* 1 진행, 2 끝, 3 실패 */
@@ -315,6 +331,8 @@ typedef struct {
     float   track_mm;        /* 0회에 잰 L (지름 보정 전) */
     int16_t bk_dev_x10;      /* 후진 점검 정속 편차 평균(칸 × 10, 진행 방향 기준). 발산이면 선 때 편차. TUNE_NO_DATA = 안 함 */
     int16_t bk_judge;        /* 후진 점검 0 안 함, 1 정상, 2 치우침 큼(전진 평균과 3칸 넘게 다름), 3 발산·선 잃음 */
+    srch_hist_t acc_hist;    /* ACC·DCC 찾기 판정 이력. 뒤에 붙여 앞 필드 주소를 옮기지 않는다 */
+    srch_hist_t dcc_hist;
 } build_result_t;
 
 extern build_result_t agv_build;
