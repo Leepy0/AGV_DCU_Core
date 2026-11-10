@@ -1655,8 +1655,8 @@ static void test_fnd_fit(void)
     assert(memcmp(c, "CD060", 5) == 0);
     ui_param_text(P_SPEED_MIN, 7, c);
     assert(memcmp(c, "SPN07", 5) == 0);
-    ui_param_text(P_LEGACY_QUIRKS, 1023, c);   /* LG 는 b9 까지라 네 자리: L + 값 */
-    assert(memcmp(c, "L1023", 5) == 0);
+    ui_param_text(P_LEGACY_QUIRKS, 2047, c);   /* LG 는 b10 까지라 네 자리: L + 값 */
+    assert(memcmp(c, "L2047", 5) == 0);
     ui_param_text(P_LOAD_DETECT, 1, c);
     assert(memcmp(c, "LDSON", 5) == 0);
     tune_value_text(c, 'D', 'E', 5414, 1);

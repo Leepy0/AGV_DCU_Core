@@ -17,6 +17,9 @@ float atanf(float x);
 #define TCNT_SYSCLK_PER_TICK 1000000L
 #define IDLE_TICKS_MAX       1000
 #define SCV_JERK_DIV         8
+/* 저속(LOS/2 아래)은 엔코더 펄스가 드물어(1회전 12펄스) 속도 제어가 계단처럼 거칠다. 가속 때 그 구간 체류를 줄인다 */
+#define SCV_LOW_ACC_DIV      2
+#define SCV_LOW_ACC_MIN      5
 #define GUIDE_RISK_DCC       60
 #define GUIDE_RISK_ACC       20
 #define GUIDE_RISK_THRESHOLD 10
@@ -241,7 +244,9 @@ int16_t motor_scv_core(int16_t vin, int16_t *vout, int16_t acc, int16_t dcc, int
 {
     int16_t diff, a_lim, jerk, a_tgt, a_abs, n;
     int16_t v_abs = (*vout >= 0) ? *vout : (int16_t)(-*vout);
-    int16_t n_acc = ((*vout > llow) || (acc < 5)) ? acc : 5;
+    int16_t low_acc = param_quirk(QUIRK_LOW_ACC) ? SCV_LOW_ACC_MIN : (int16_t)(acc / SCV_LOW_ACC_DIV);
+    int16_t n_acc = ((*vout > llow) || (acc < SCV_LOW_ACC_MIN)) ? acc
+                  : ((low_acc > SCV_LOW_ACC_MIN) ? low_acc : SCV_LOW_ACC_MIN);
     int16_t n_dcc = (!use_dcc_floor || (v_abs > min_speed * 2) || (dcc > 20)) ? dcc : 20;
     int32_t brake;
 

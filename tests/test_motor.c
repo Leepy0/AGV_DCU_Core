@@ -124,7 +124,7 @@ int main(void)
     motor_speed_pi(500);
     assert(D.w_cmd[0] == 0 && D.w_cmd[1] == 520);
 
-    /* S커브: 저속 가속 상한 5, 목표 도달, 오버슈트 없음, 가속도 연속 */
+    /* S커브: 저속 가속 상한 ACC/2, 목표 도달, 오버슈트 없음, 가속도 연속 */
     setup();
     v = 0; a = 0;
     { int16_t prev_a = 0;
@@ -133,7 +133,7 @@ int main(void)
           motor_scv_core(2000, &v, 60, 60, 500, 300, 300, 1, &a);
           assert(v <= 2000 && v >= before);
           if (v != 2000) { assert((a - prev_a <= 7) && (a - prev_a >= -7)); }     /* jerk = 60/8 */
-          if (before <= 500) { assert(a <= 5); }
+          if (before <= 500) { assert(a <= 30); }
           prev_a = a;
       }
       assert(v == 2000 && a == 0); }
@@ -159,6 +159,30 @@ int main(void)
     v = 0; a = 40;
     motor_scv_core(100, &v, 8, 20, 500, 100, 0, 1, &a);
     assert(a == 1);
+    /* 저속 구간 가속 한계 max(5, ACC/2): ACC 50·LOS 31 에서 0 → 400 rpm 이 예전(5) 의 1/3 이하, 첫 틱은 저크로 오른다 */
+    { int16_t llow = (int16_t)(31.0f * P.one_meter_rpm / 2.0f);
+      int t_new = 0, t_old = 0;
+      assert(llow > 400);
+      v = 0; a = 0;
+      for (; t_new < 1000 && v < 400; t_new++) {
+          int16_t prev_a = a;
+          motor_scv_core(2000, &v, 50, 50, llow, 300, 300, 1, &a);
+          assert(a - prev_a <= 50 / 2 / 8 && a <= 25);   /* 저크 = (ACC/2)/8, 급발진 없음 */
+          if (t_new == 0) { assert(a <= 3); }
+      }
+      v = 0; a = 0;
+      for (; t_old < 1000 && v < 400; t_old++) { motor_scv_core(2000, &v, 5, 50, llow, 300, 300, 1, &a); }
+      printf("scv 0->400 rpm: ACC 50 %d ticks, low 5 %d ticks\n", t_new, t_old);
+      assert(v >= 400 && t_new * 3 <= t_old);
+      /* 작은 ACC(4)는 그대로 4 */
+      v = 0; a = 0;
+      for (int i = 0; i < 200; i++) { motor_scv_core(2000, &v, 4, 50, llow, 300, 300, 1, &a); assert(a <= 4); }
+      assert(a == 4);
+      /* LG b10(QUIRK_LOW_ACC): 예전처럼 저속 구간 5 */
+      assert(param_set(P_LEGACY_QUIRKS, QUIRK_LOW_ACC) == 0);
+      v = 0; a = 0;
+      for (int i = 0; i < 40; i++) { motor_scv_core(2000, &v, 50, 50, llow, 300, 300, 1, &a); assert(a <= 5); }
+      assert(param_set(P_LEGACY_QUIRKS, 0) == 0); }
 
     /* 주행 단계: 400 → 401 정속 */
     setup();
