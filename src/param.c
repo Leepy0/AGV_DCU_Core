@@ -73,8 +73,7 @@ static const extra_t s_extra[] = {
     { P_EMPTY_TURN,  PARAM_EMPTY_ADDR0 + 1u, 0, 15, 0 },
     { P_EMPTY_ACC,   PARAM_EMPTY_ADDR0 + 2u, 0, 60, 0 },
     { P_EMPTY_DCC,   PARAM_EMPTY_ADDR0 + 3u, 0, 60, 0 },
-    { P_LOAD_DETECT, PARAM_EMPTY_ADDR0 + 4u, 0, 1,  0 },
-    { P_CART_CENTER_CM, PARAM_CART_CENTER_ADDR, 0, 999, 0 }
+    { P_LOAD_DETECT, PARAM_EMPTY_ADDR0 + 4u, 0, 1,  0 }
 };
 static int16_t s_empty;
 #define EXTRA_COUNT (sizeof(s_extra) / sizeof(s_extra[0]))

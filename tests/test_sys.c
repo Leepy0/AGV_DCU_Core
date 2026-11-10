@@ -848,7 +848,7 @@ static void test_menu5(void)
         P_SPEED_HIGH, P_SPEED_LOW, P_SPEED_TURN, P_EMPTY_SPEED, P_EMPTY_TURN, P_ACC, P_DCC, P_SPEED_JOG,
         P_EMPTY_ACC, P_EMPTY_DCC, P_SPEED_MIN,
         P_STOP_LEN_MM, P_CROSS_IN_CM, P_AUTO_START_SEC, P_OBS_USE, P_BUMPER_USE, P_STOP_LEN_FWD_MM, P_LOAD_DETECT,
-        P_CART_CENTER_CM, P_GUIDE_DIST_MM, P_TURN_FORBACK, P_BRANCH_MODE, P_BRANCH_OFFSET, P_ENC_STALL_TICKS, P_GUIDE_TIMEOUT,
+        P_GUIDE_DIST_MM, P_TURN_FORBACK, P_BRANCH_MODE, P_BRANCH_OFFSET, P_ENC_STALL_TICKS, P_GUIDE_TIMEOUT,
         P_AGV_ID, P_WHEEL_DIA_MM, P_WHEEL_BASE_MM, P_GEAR_RATIO, P_AGV_TYPE, P_TAG_DIGITS, P_OPT_FLAGS,
         P_STEER_KP, P_STEER_KI, P_SPEED_FF,
         P_ACS_RETRY_LEGACY, P_CROSS_RETRY_100MS, P_ACS_STANDBY, P_ACS_RETRY_SEC, P_COMM_LINK, P_INTERFACE_MODE,
@@ -856,18 +856,18 @@ static void test_menu5(void)
         P_BAT_DV, P_BAT_PERCENT, P_VERSION, P_PARA_INIT,
         P_AUTO_DRIVE_MODE, P_STEER_RPM_OFFSET, P_GUIDE_CURVE_DETECT, P_LEGACY_QUIRKS
     };
-    static const int ends[5] = { 11, 25, 35, 50, 58 };
+    static const int ends[5] = { 11, 24, 34, 49, 57 };
     static const struct { uint16_t idx; char c[4]; } names[] = {
         { P_SPEED_MIN, "SPN" }, { P_GUIDE_TIMEOUT, "GTO" }, { P_COMM_LINK, "CML" }, { P_STEER_RPM_OFFSET, "SR " },
         { P_GUIDE_CURVE_DETECT, "GSR" }, { P_LEGACY_QUIRKS, "LG " }, { P_EMPTY_SPEED, "EDS" }, { P_EMPTY_TURN, "ETN" },
-        { P_EMPTY_ACC, "EAC" }, { P_EMPTY_DCC, "EDC" }, { P_LOAD_DETECT, "LDS" }, { P_AUTO_DRIVE_MODE, "ATD" }, { P_CART_CENTER_CM, "CC " }
+        { P_EMPTY_ACC, "EAC" }, { P_EMPTY_DCC, "EDC" }, { P_LOAD_DETECT, "LDS" }, { P_AUTO_DRIVE_MODE, "ATD" }
     };
     uint16_t d[5];
     char l[3];
     int g, i, k = 0, n;
 
-    assert(sizeof(want) / sizeof(want[0]) == 58u);
-    for (i = 0; i < 58; i++) {          /* 빠진 넷 */
+    assert(sizeof(want) / sizeof(want[0]) == 57u);
+    for (i = 0; i < 57; i++) {          /* 빠진 넷 */
         assert(want[i] != P_STATION_NO && want[i] != P_SWITCH_START_NUM && want[i] != P_TAG_TYPE && want[i] != P_CROSS_MODE);
     }
     for (i = 0; i < (int)(sizeof(names) / sizeof(names[0])); i++) {
