@@ -129,6 +129,7 @@ uint16_t guide_curve_span(void);                                  /* 설정값�
 uint16_t guide_tape_width(void);                                  /* 배운 테이프 폭(칸). 0 = 아직 모름 */
 /* 가장자리 고정·유지가 상한 거리를 넘었을 때 부른다. 다음 응답은 덩어리 가운데를 받고 폭을 다시 배운다 */
 void     guide_track_release(void);
+int16_t  guide_reacq_pending(void);     /* 1 = 잃은 뒤 다시 잡을 후보를 지속 확인 중이다(그동안 LOST 를 낸다) */
 /* 직진 판정. guide_poll 이 틱(10 ms)마다 실측 좌우 rpm 과 최저 속도(SPN, rpm)를 넘긴다. 반환 1 = 직진.
  * 직진이 아니면 폭을 배우지 않는다(처음 배우는 폭 제외). 가장자리 고정·유지·위치는 그대로 */
 int16_t  guide_straight_tick(int16_t rpm_l, int16_t rpm_r, int16_t min_rpm);

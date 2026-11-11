@@ -31,6 +31,13 @@ typedef struct {
     int16_t entry_lag_mm;   /* 진입 지연 mm: 차체 곡률이 문턱을 넘은 거리 - 센서 점 곡률이 넘은 거리. 0 = 센서 점이 못 넘음 */
     int16_t lost;           /* 선 잃음 횟수 */
     int16_t dir;            /* 1 왼쪽, -1 오른쪽 (진행 방향 기준) */
+    /* 곡선 안 첫 선 잃음 진단. lost 0 이면 전부 0 */
+    int16_t  lost_at_mm;    /* 곡선 시작부터 회전 중심 이동 거리 mm */
+    int16_t  lost_prev_pos; /* 직전 정상 응답의 위치(단위) */
+    uint16_t lost_prev_lo, lost_prev_hi;    /* 직전 정상 응답의 'h' LED 비트 0~15, 16~31 */
+    uint16_t lost_led_lo, lost_led_hi;      /* 선 잃음 응답의 LED 비트. 0 이 아니면 켜진 LED 가 있었는데 받지 않았다 */
+    int16_t  lost_trk;      /* b0~1 직전 정상 응답의 추적 상태(0 NORMAL, 1 EDGE, 2 HOLD).
+                               b2 선 잃음 동안 다시 잡기 지속 확인(GUIDE_REACQ_N)으로 LOST 를 낸 응답이 있었다 */
 } curve_rec_t;
 
 typedef struct {
@@ -52,6 +59,9 @@ typedef struct {
     int16_t backward;       /* 1 = 후진 */
     int16_t pos;            /* 가이드 위치(단위) */
     int16_t lost;           /* 1 = 선 없음 */
+    uint32_t led;           /* 이번 'h' 응답 LED 비트(일반 센서는 하위 16) */
+    int16_t track;          /* guide_track_t */
+    int16_t reacq;          /* 1 = 다시 잡기 지속 확인 중(guide_reacq_pending) */
     int16_t active;         /* 0 = 기록 안 함(진행 중 구간은 버린다) */
     float   wb_mm, gd_mm;   /* 휠 간격(회전 보정비 적용), 센서 거리 */
 } curvelog_in_t;

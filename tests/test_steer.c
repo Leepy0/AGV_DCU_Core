@@ -116,9 +116,9 @@ int main(void)
     D.risk_stop = 1;
     steer_run(1);
     assert(D.p_kp == 130.0f);
-    /* 위험 감속 중에도 적분을 쌓는다 */
+    /* 위험 감속 중에도 적분을 쌓는다. 출력 변화 묶음(틱당 50 rpm)이 따라잡은 뒤 본다 */
     D.guide_pos = 5;
-    steer_run(1);
+    { int k; for (k = 0; k < 30; k++) { steer_run(1); } }
     { float a = D.p_pi_out - D.p_kp * (float)D.p_err;
       steer_run(1);
       assert(D.p_pi_out - D.p_kp * (float)D.p_err < a - 0.1f); }
@@ -360,14 +360,15 @@ int main(void)
       assert(D.p_kp == 35.0f * 1.3f);
       (void)param_set(P_GUIDE_CURVE_DETECT, 0); }   /* GSR 값은 무시: 위 결과와 같다 */
 
-    /* 변화율 항 부호: 기본은 감쇠, QUIRK_DAMP_SIGN_OLD 는 예전 부호. 칼만 상태를 고정해 비교한다 */
+    /* 변화율 항 부호: 기본은 감쇠, QUIRK_DAMP_SIGN_OLD 는 예전 부호. 칼만 상태를 고정해 비교한다.
+     * 편차 10단위: 일반 센서 출력 변화 묶음 밖이라 한 번에 나온다 */
     { float out_p, out_a, out_b;
       int k;
       for (k = 0; k < 3; k++) {
           setup();
-          D.guide_pos = 3;
+          D.guide_pos = 10;
           D.guide_kf_init = 1;
-          D.kf_pos = 3.0f;
+          D.kf_pos = 10.0f;
           D.kf_rate = (k == 0) ? 0.0f : 50.0f;    /* y = 0 이라 변화율이 유지된다 */
           D.kf_p00 = D.kf_p11 = 0.0f; D.kf_p01 = 0.0f;
           (void)param_set(P_LEGACY_QUIRKS, (k == 1) ? QUIRK_DAMP_SIGN_OLD : 0);
@@ -412,29 +413,34 @@ int main(void)
     (void)param_set(P_OPT_FLAGS, 0);
 
     /* 휠 간격 비례: 기본. 60 cm 면 그대로, 120 cm 면 비례 출력이 두 배. QUIRK_NO_WB_GAIN 은 비례하지 않는다.
-     * 예전 OPT 값 19(b0·b1·b4)는 비어 있는 비트라 아무 일도 하지 않는다 */
+     * 예전 OPT 값 19(b0·b1·b4)는 비어 있는 비트라 아무 일도 하지 않는다.
+     * 편차 10단위(출력 변화 묶음 밖)에 지령을 9 옮겨 오차 1단위만 본다 */
     { float out60;
       setup();
       (void)param_set(P_WHEEL_BASE_MM, 60);
-      D.guide_pos = 3;
+      D.guide_pos = 10;
+      D.p_test = 9;
       steer_run(0);
       out60 = D.p_pi_out;
       setup();
       (void)param_set(P_WHEEL_BASE_MM, 120);
-      D.guide_pos = 3;
+      D.guide_pos = 10;
+      D.p_test = 9;
       steer_run(0);
       assert(near0(D.p_pi_out - 2.0f * out60) < 1e-2f);
       setup();
       (void)param_set(P_WHEEL_BASE_MM, 120);
       (void)param_set(P_OPT_FLAGS, 19);
-      D.guide_pos = 3;
+      D.guide_pos = 10;
+      D.p_test = 9;
       steer_run(0);
       assert(near0(D.p_pi_out - 2.0f * out60) < 1e-2f);
       (void)param_set(P_OPT_FLAGS, 0);
       setup();
       (void)param_set(P_WHEEL_BASE_MM, 120);
       (void)param_set(P_LEGACY_QUIRKS, QUIRK_NO_WB_GAIN);
-      D.guide_pos = 3;
+      D.guide_pos = 10;
+      D.p_test = 9;
       steer_run(0);
       assert(near0(D.p_pi_out - out60) < 1e-3f);
       (void)param_set(P_LEGACY_QUIRKS, 0);
@@ -447,6 +453,56 @@ int main(void)
     steer_run(0);
     assert(D.p_err == 4);
     D.p_test = 0;
+
+    /* 계단 완화: 10 ms 당 출력 변화 50 rpm. 일반 센서는 편차 10단위, wide 는 20단위부터 묶지 않는다.
+     * 분기·예전 조향(QUIRK_STEER_STEP)은 묶지 않는다. 20 ms 조향은 한 번에 100 */
+    { static const struct { int16_t wide, pos, branch, lg; float step; } cs[] = {
+          { 0, 8, 0, 0, 50.0f }, { 0, -9, 0, 0, 50.0f }, { 1, 19, 0, 0, 50.0f }, { 0, 8, 0, QUIRK_STEER_20MS, 100.0f },
+          { 0, 10, 0, 0, 0.0f }, { 1, 20, 0, 0, 0.0f }, { 0, 8, 1, 0, 0.0f }, { 0, 8, 0, QUIRK_STEER_STEP, 0.0f } };
+      int k;
+      for (k = 0; k < (int)(sizeof(cs) / sizeof(cs[0])); k++) {
+          setup();
+          (void)param_set(P_LEGACY_QUIRKS, cs[k].lg);
+          D.vin_out = D.v_cmd = P.target_speed;
+          D.guide_wide = cs[k].wide;
+          steer_run(1);
+          steer_run(1);
+          assert(D.p_pi_out == 0.0f);
+          D.guide_pos = cs[k].pos;
+          D.branch_start = cs[k].branch;
+          D.p_cmd = cs[k].branch ? 8 : 0;
+          steer_run(1);
+          if (cs[k].step > 0.0f) { assert(near0(D.p_pi_out) == cs[k].step); }
+          else                   { assert(near0(D.p_pi_out) > 200.0f); }
+      }
+      (void)param_set(P_LEGACY_QUIRKS, 0); }
+
+    /* 곡선 끝 적분 감쇠: 편차 6단위 이상을 지나 4단위 아래로 들어오면 10 ms 마다 0.95 배. 5단위까지만 간 적분은 그대로 */
+    { int k, arm;
+      float i0 = 0.0f, i1 = 0.0f;
+      for (arm = 0; arm <= 1; arm++) {
+          setup();
+          D.vin_out = D.v_cmd = P.target_speed;
+          D.guide_pos = arm ? 6 : 5;
+          for (k = 0; k < 400; k++) { steer_run(1); }
+          D.guide_pos = 3;
+          for (k = 0; k < 60; k++) { steer_run(1); }        /* 출력 묶음이 따라잡게 */
+          i0 = D.p_pi_out - D.p_kp * (float)D.p_err;
+          steer_run(1);
+          i1 = D.p_pi_out - D.p_kp * (float)D.p_err;
+          printf("  적분 감쇠 %s: %.1f → %.1f\n", arm ? "6단위 뒤" : "5단위 뒤", i0, i1);
+          if (arm) { assert((near0(i0) < 20.0f) && (near0(i1) < near0(i0) + 0.01f)); }
+          else     { assert((i0 < -30.0f) && (near0(i1 - i0) < 1.0f)); }
+      }
+      setup();
+      (void)param_set(P_LEGACY_QUIRKS, QUIRK_STEER_STEP);   /* 예전 조향은 그대로 */
+      D.vin_out = D.v_cmd = P.target_speed;
+      D.guide_pos = 6;
+      for (k = 0; k < 400; k++) { steer_run(1); }
+      D.guide_pos = 3;
+      for (k = 0; k < 60; k++) { steer_run(1); }
+      assert(D.p_pi_out - D.p_kp * (float)D.p_err < -30.0f);
+      (void)param_set(P_LEGACY_QUIRKS, 0); }
 
     puts("test_steer ok");
     return 0;

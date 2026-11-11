@@ -42,12 +42,21 @@ typedef struct {
     int16_t  pos, ok, lost_n;   /* ok = 선 있음. lost_n = 그때까지 선 잃음 누적 */
 } ring_t;
 
+/* 선 잃음 진단. 잃는 순간 잡아 두고 0.2 m 늦은 누적이 그 선 잃음을 곡선에 넣을 때 옮긴다 */
+typedef struct {
+    float    s;                 /* 잃은 때 이동 거리 mm */
+    uint32_t prev_led, led;     /* 직전 정상 응답·잃은 응답의 LED 비트 */
+    int16_t  prev_pos, trk;     /* 직전 정상 응답의 위치·추적 상태, trk b2 = 지속 확인으로 LOST */
+    int16_t  n;                 /* 이 선 잃음의 lost_n 번호. 0 = 없음 */
+} lost_t;
+
 /* 한 구간의 누적. 원 맞춤은 곡선 좌표(m)에서 대수적 원 맞춤(Kasa) 합으로 한다 */
 typedef struct {
     float   len, dphi, ticks;
     float   n, sx, sy, sxx, syy, sxy, sxxx, syyy, sxxy, sxyy;
     float   dev_n, dev_sum, dev_sum2, dev_max;
     int16_t lost;
+    lost_t  lz;                 /* 이 구간 첫 선 잃음 */
 } acc_t;
 
 #ifdef __TMS320C2000__
@@ -76,6 +85,9 @@ static struct {
     curve_rec_t *post_rec;          /* 0 = 아직 기록 전(끝 확정 대기) */
     uint32_t last_p[2];
     int16_t  prev_mode;
+    lost_t   lz;                    /* 아직 누적에 안 들어간 첫 선 잃음 */
+    uint32_t ok_led;                /* 마지막 정상 응답 */
+    int16_t  ok_pos, ok_trk;
 } s_cl;
 
 static void state_clear(void)
@@ -88,6 +100,7 @@ static void state_clear(void)
     s_cl.st = 0;
     s_cl.sens_above = 0;
     s_cl.post_on = 0;
+    s_cl.lz.n = 0;
 }
 
 static void group_start(void)
@@ -130,6 +143,7 @@ static void acc_add(acc_t *a, const ring_t *k, const ring_t *prev)
     a->len += k->s - prev->s;
     a->dphi += k->phi - prev->phi;
     a->ticks += (float)(k->tick - prev->tick);
+    if ((a->lost == 0) && (k->lost_n > prev->lost_n) && (s_cl.lz.n == prev->lost_n + 1)) { a->lz = s_cl.lz; }
     a->lost = (int16_t)(a->lost + (k->lost_n - prev->lost_n));
     if (k->ok) {
         float c = s_cl.oc, s = s_cl.os;
@@ -201,6 +215,15 @@ static void finish(const acc_t *a, float gd)
     r->entry_lag_mm = s_cl.lag;
     r->lost = a->lost;
     r->dir = (a->dphi >= 0.0f) ? 1 : -1;
+    if ((a->lost > 0) && (a->lz.n != 0)) {
+        r->lost_at_mm = clip16(a->lz.s - s_cl.start_s);
+        r->lost_prev_pos = a->lz.prev_pos;
+        r->lost_prev_lo = (uint16_t)(a->lz.prev_led & 0xFFFFu);
+        r->lost_prev_hi = (uint16_t)(a->lz.prev_led >> 16);
+        r->lost_led_lo = (uint16_t)(a->lz.led & 0xFFFFu);
+        r->lost_led_hi = (uint16_t)(a->lz.led >> 16);
+        r->lost_trk = a->lz.trk;
+    }
     if (s_cl.post_on) {
         s_cl.post_rec = r;
         r->exit_over_x10 = clip16(s_cl.post_max * GUIDE_UNIT_MM * 10.0f);
@@ -265,6 +288,7 @@ static void rebase(void)
         k->phi -= s_cl.phi;
     }
     s_cl.sens_cross_s -= s_cl.s;
+    s_cl.lz.s -= s_cl.s;
     s_cl.x = s_cl.y = s_cl.phi = s_cl.s = 0.0f;
     s_cl.c = 1.0f;
     s_cl.sn = 0.0f;
@@ -295,7 +319,23 @@ void curvelog_feed(const curvelog_in_t *in)
     s_cl.y += ds * 0.5f * (s0 + s_cl.sn);
     s_cl.s += ds;
     s_cl.tick++;
-    if (in->lost && !s_cl.prev_lost) { s_cl.lost_n++; }
+    if (in->lost && !s_cl.prev_lost) {
+        s_cl.lost_n++;
+        if ((s_cl.lz.n == 0) || (s_cl.lz.n <= s_cl.pp.lost_n)) {     /* 앞 것은 이미 누적을 지났다 */
+            s_cl.lz.n = s_cl.lost_n;
+            s_cl.lz.s = s_cl.s;
+            s_cl.lz.prev_led = s_cl.ok_led;
+            s_cl.lz.prev_pos = s_cl.ok_pos;
+            s_cl.lz.trk = (int16_t)(s_cl.ok_trk & 3);
+            s_cl.lz.led = in->led;
+        }
+    }
+    if (in->lost && in->reacq && (s_cl.lz.n == s_cl.lost_n)) { s_cl.lz.trk |= 4; }
+    if (!in->lost) {
+        s_cl.ok_led = in->led;
+        s_cl.ok_pos = in->pos;
+        s_cl.ok_trk = in->track;
+    }
     s_cl.prev_lost = in->lost;
     if (!in->lost) {
         lat = (float)in->pos * GUIDE_UNIT_MM;     /* + = 진행 방향 왼쪽 */
@@ -396,6 +436,9 @@ void curvelog_tick(void)
     in.backward = (int16_t)(D.backward != 0);
     in.pos = D.guide_pos;
     in.lost = (int16_t)(D.guide_all_off != 0);
+    in.led = D.guide_wide ? D.guide_led32 : (uint32_t)D.guide_led;
+    in.track = D.guide_track;
+    in.reacq = guide_reacq_pending();
     in.active = (int16_t)((D.ui_mode == UI_AUTO) && !tune_active() && D.flag_run && (D.control == RUN_DRIVE)
                           && !D.flag_turn);
     in.wb_mm = (float)param_get(P_WHEEL_BASE_MM) * 10.0f * tune_turn_scale();   /* 제자리 회전과 같은 휠 간격 */

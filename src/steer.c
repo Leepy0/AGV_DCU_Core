@@ -38,11 +38,24 @@
 #define STEER_GUIDE_REF_MM          250.0f    /* 이득을 맞춘 센서 거리 */
 #define STEER_WB_REF_MM             600.0f    /* 이득을 맞춘 휠 간격 */
 #define STEER_LIMIT_RPM             1500
+/* 곡선 계단 완화. 'h' 위치는 1단위 계단이라 Kp 가 오르는 편차 4~12단위에서 칸이 바뀔 때마다 출력이 150~260 rpm 씩 뛰었다
+ * (기울기 Kp + a·dKp/da). 10 ms 당 출력 변화를 50 rpm 으로 묶는다. 센서 반폭의 약 60% 넘게 벗어나면 선을 놓치지 않게 묶지 않는다.
+ * 곡선 모의(반경 0.55~0.96 m, 31 m/min): 틱당 변화 상위 5% 167~193 → 50 rpm, 편차 최대 wide +4~14%·일반 +2~6%, 직선 응답 같음.
+ * 일반 센서를 위험 감속 편차 위에서도 묶으면 속도 루프 지연 150 ms·반경 0.55 m 에서 선을 잃는다 */
+#define STEER_SLEW_RPM              50.0f
+#define STEER_SLEW_DEV_MAX          10        /* 일반 센서(반폭 16단위). motor.c GUIDE_RISK_THRESHOLD 와 같다 */
+#define STEER_SLEW_DEV_MAX_WIDE     20        /* wide 센서(반폭 32단위) */
+/* 곡선 끝 적분 감쇠. 편차 6단위 이상(곡선)을 지나 4단위 아래로 들어오면 곡선 동안 쌓인 적분을 10 ms 마다 0.95 배로 뺀다.
+ * 그대로 두면 출구에서 반대쪽으로 넘어간 뒤 적분이 빠질 때까지 2 m 넘게 4단위쯤 비켜 달린다(모의 D: 넘침 19 → 3 mm) */
+#define STEER_I_EXIT_ARM            6
+#define STEER_I_EXIT_DECAY          0.95f
+#define STEER_I_EXIT_DONE           5.0f      /* 이보다 작아지면 감쇠를 끝낸다 rpm */
 
 static struct {
     float i_out;
     int16_t prev_control, prev_branch, prev_backward, prev_p_cmd;
     int16_t previous_speed;
+    int16_t i_exit;         /* 곡선 편차를 지났다: 4단위 아래로 들어오면 적분을 뺀다 */
 } s_steer;
 
 void steer_reset(void)
@@ -53,6 +66,7 @@ void steer_reset(void)
     s_steer.prev_backward = -1;
     s_steer.prev_p_cmd = 0;
     s_steer.previous_speed = 0;
+    s_steer.i_exit = 0;
 }
 
 static int16_t popcount16(uint16_t v)
@@ -206,6 +220,7 @@ void steer_run(int16_t tuning_type)
                   || (s_steer.prev_p_cmd != D.p_cmd) || (s_steer.prev_backward != D.backward);
     if (clear_integral) {
         s_steer.i_out = 0.0f;
+        s_steer.i_exit = 0;
         if (D.control != RUN_DRIVE) { D.p_pi_out = 0.0f; }
     }
 
@@ -220,7 +235,8 @@ void steer_run(int16_t tuning_type)
     s_steer.prev_p_cmd = D.p_cmd;
 
     if (D.control == RUN_DRIVE) {
-        int16_t limit;
+        int16_t limit, dev = (D.guide_pos >= 0) ? D.guide_pos : (int16_t)(-D.guide_pos);
+        int16_t smooth = !param_quirk(QUIRK_STEER_STEP);     /* 예전 조향은 계단 완화·적분 감쇠가 없다 */
         float p_out, i_candidate, rate_ff, unsat, out;
         /* 센서가 회전 중심에서 멀수록 같은 방향 오차에 위치가 크게 변한다. 기준 거리 250 mm 로 맞춘다 */
         float geom = (P.guide_dist_mm > 0.0f) ? (STEER_GUIDE_REF_MM / P.guide_dist_mm) : 1.0f;
@@ -254,8 +270,21 @@ void steer_run(int16_t tuning_type)
         }
         if (s_steer.i_out > (float)limit)       { s_steer.i_out = (float)limit; }
         else if (s_steer.i_out < (float)-limit) { s_steer.i_out = (float)-limit; }
+        if (smooth) {
+            if (dev >= STEER_I_EXIT_ARM) { s_steer.i_exit = 1; }
+            if (s_steer.i_exit && (dev < GUIDE_KP_RAMP_LO)) {
+                s_steer.i_out *= fast ? STEER_I_EXIT_DECAY : (STEER_I_EXIT_DECAY * STEER_I_EXIT_DECAY);
+                if ((s_steer.i_out < STEER_I_EXIT_DONE) && (s_steer.i_out > -STEER_I_EXIT_DONE)) { s_steer.i_exit = 0; }
+            }
+        }
 
         out = p_out + s_steer.i_out + rate_ff;
+        /* 분기는 일부러 고정 편이를 거는 동작이라 묶지 않는다 */
+        if (smooth && (D.branch_start == 0) && (dev < (D.guide_wide ? STEER_SLEW_DEV_MAX_WIDE : STEER_SLEW_DEV_MAX))) {
+            float slew = fast ? STEER_SLEW_RPM : (STEER_SLEW_RPM * 2.0f);
+            if (out > D.p_pi_out + slew)      { out = D.p_pi_out + slew; }
+            else if (out < D.p_pi_out - slew) { out = D.p_pi_out - slew; }
+        }
         if (out > (float)limit)       { out = (float)limit; }
         else if (out < (float)-limit) { out = (float)-limit; }
         D.p_pi_out = out;

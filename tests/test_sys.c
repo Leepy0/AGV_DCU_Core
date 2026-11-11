@@ -2016,7 +2016,9 @@ static void test_tune_guide(void)
     }
     printf("  tune guide ok\n");
 }
-/* 곡선 기록기: 합성 궤적. 휠 간격 600 mm, GD 250, 틱마다 5 mm */
+/* 곡선 기록기: 합성 궤적. 휠 간격 600 mm, GD 250, 틱마다 5 mm. 선 잃음 진단 입력은 s_cl_in 으로 준다 */
+static struct { int16_t lost, track, reacq; uint32_t led; } s_cl_in;
+
 static void cl_feed(float ds, float r_mm, int16_t pos, int16_t active, int16_t back)
 {
     curvelog_in_t in;
@@ -2027,7 +2029,10 @@ static void cl_feed(float ds, float r_mm, int16_t pos, int16_t active, int16_t b
     in.dr_mm = dr;
     in.backward = back;
     in.pos = pos;
-    in.lost = 0;
+    in.lost = s_cl_in.lost;
+    in.led = s_cl_in.led;
+    in.track = s_cl_in.track;
+    in.reacq = s_cl_in.reacq;
     in.active = active;
     in.wb_mm = 600.0f;
     in.gd_mm = 250.0f;
@@ -2177,6 +2182,36 @@ static void test_curvelog(void)
       assert(cl_in(b->r_body_mm, (int16_t)(a->r_body_mm * 0.97f), (int16_t)(a->r_body_mm * 1.03f)));
       assert(cl_in(b->r_tape_mm, (int16_t)(a->r_tape_mm * 0.97f), (int16_t)(a->r_tape_mm * 1.03f)));
       assert(b->dev_max_x10 == a->dev_max_x10 && cl_in(b->len_mm, (int16_t)(a->len_mm - 30), (int16_t)(a->len_mm + 30))); }
+    /* 곡선 안 첫 선 잃음 진단: 곡선 시작부터 거리, 직전 정상 응답 비트·위치·추적 상태, 잃은 응답 비트, 지속 확인 */
+    curvelog_reset();
+    { float s;
+      s_cl_in.led = 0x00018000UL;
+      for (s = 0.0f; s < 1000.0f; s += 5.0f) { cl_feed(5.0f, 0.0f, 0, 1, 0); }
+      for (s = 0.0f; s < 1521.0f; s += 5.0f) {
+          int in_lost = (s >= 700.0f) && (s < 730.0f);                     /* 6 틱 */
+          s_cl_in.lost = (int16_t)in_lost;
+          s_cl_in.led = in_lost ? ((s < 715.0f) ? 0UL : 0x00600000UL) : 0x00030000UL;
+          s_cl_in.reacq = (int16_t)(in_lost && (s >= 715.0f));             /* 덩어리가 다시 보였지만 확인 중 */
+          s_cl_in.track = (s >= 690.0f) ? GUIDE_TRK_EDGE : GUIDE_TRK_NORMAL;
+          cl_feed(5.0f, rb, (int16_t)(in_lost ? 0 : 3), 1, 0);
+          if ((s >= 900.0f) && (s < 905.0f)) {                            /* 같은 곡선 둘째 선 잃음은 진단을 덮지 않는다 */
+              s_cl_in.lost = 1;
+              s_cl_in.led = 0x1UL;
+              cl_feed(5.0f, rb, 0, 1, 0);
+          }
+      }
+      memset(&s_cl_in, 0, sizeof(s_cl_in));
+      for (s = 0.0f; s < 1000.0f; s += 5.0f) { cl_feed(5.0f, 0.0f, 0, 1, 0); } }
+    c = &agv_curvelog.g[0].c[0];
+    printf("  선 잃음 진단: 잃음 %d 거리 %d 직전 위치 %d 비트 %04X%04X 잃은 비트 %04X%04X 추적 %d\n", c->lost, c->lost_at_mm,
+           c->lost_prev_pos, c->lost_prev_hi, c->lost_prev_lo, c->lost_led_hi, c->lost_led_lo, c->lost_trk);
+    assert(agv_curvelog.g[0].n == 1 && c->lost == 2);
+    assert(cl_in(c->lost_at_mm, 450, 710) && c->lost_prev_pos == 3);
+    assert(c->lost_prev_hi == 0x0003 && c->lost_prev_lo == 0 && c->lost_led_hi == 0 && c->lost_led_lo == 0);
+    assert(c->lost_trk == (GUIDE_TRK_EDGE | 4));
+    cl_route(rb, 1521.0f, 0, 0);        /* 선 잃음 없는 곡선은 0 */
+    c = &agv_curvelog.g[0].c[1];
+    assert(c->lost == 0 && c->lost_at_mm == 0 && c->lost_trk == 0 && c->lost_prev_hi == 0);
     printf("  curvelog ok\n");
 }
 

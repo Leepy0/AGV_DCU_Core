@@ -341,6 +341,7 @@ uint16_t guide_tape_width(void)
     return (s_tape_q4 == 0) ? 0u : ((w < 2u) ? 2u : w);
 }
 void     guide_track_release(void) { s_release = 1; }
+int16_t  guide_reacq_pending(void) { return (int16_t)(s_cand_n > 0); }
 
 /* 후진도 크기로 본다. 차 ≤ 평균 × PCT / 100  ⇔  차 × 200 ≤ 합 × PCT */
 int16_t guide_straight_tick(int16_t rpm_l, int16_t rpm_r, int16_t min_rpm)

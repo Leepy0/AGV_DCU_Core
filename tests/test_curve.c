@@ -13,6 +13,7 @@
 #include <math.h>
 #include <signal.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include "agv/curvelog.h"
@@ -42,6 +43,7 @@
 #define LEAD_MM     6000.0f     /* 곡선 앞 직선. 가속 구간 + 정속 2 m */
 #define TAIL_MM     2000.0f
 #define PI_F        3.14159265f
+#define STEER_SLEW_TEST 50.5f   /* steer.c STEER_SLEW_RPM + 반올림 */
 
 void site_register(void) { param_default_type(0); }
 void site_manual(void)   { }
@@ -62,16 +64,39 @@ typedef struct {
     float body_r, v_avg;    /* 차체 반경 mm, 곡선 평균 속도 m/min */
     float exit_max;         /* 출구 뒤 편차 최대 mm */
     int   exit_flip;        /* 출구 뒤 부호 바뀜 횟수(±1단위 넘은 것만) */
+    float eover;            /* 출구 뒤 곡선 최대 편차와 반대쪽으로 넘어간 최대 mm */
+    float settle;           /* 출구(직선은 계단) 뒤 ±2단위 안으로 들어와 머물기까지 거리 mm. 끝까지 못 들어오면 꼬리 길이 */
+    float max_sg;           /* 곡선 최대 편차의 부호 */
     float tail_pp;          /* 끝 1 m 의 편차 폭 mm. 지속 발진 지표 */
     int   lost, risk, err;  /* 선 잃음 틱, 위험 감속 틱, 정지 오류 */
     float over, steady;     /* 직선: 넘침(단위), 끝 1 m 평균 편차(단위) */
     int   jump;             /* 직선: 계단·끊김 뒤 가이드 위치 절대값 최대(단위) */
     curve_rec_t rec;        /* 곡선 기록기 첫 기록 */
     int   rec_n;
+    /* 계단 지표: 곡선 구간 조향 출력(D.p_pi_out)의 틱(10 ms)당 변화 절대값 rpm */
+    float st_max, st_p95, st_n50;   /* 최대, 상위 5%, 50 rpm 넘는 변화 횟수(초당) */
+    float st_chg;           /* 50 rpm 넘는 변화 중 그 틱이나 한 틱 앞에 위치 칸이 바뀐 비율 % */
+    float st_per_unit;      /* 칸이 바뀐 틱의 출력 변화 / 위치 변화 평균 rpm/단위 */
+    float st_wd_p95;        /* 바퀴 지령 차의 절반((w_cmd[0]-w_cmd[1])/2) 틱당 변화 상위 5% */
+    float j_p95, j_n50;     /* 틱당 변화의 변화(|Δ(t)-Δ(t-1)|) 상위 5%, 50 rpm 넘는 횟수(초당). 꾸준한 기울기는 0, 계단은 크다 */
 } res_t;
 
 static struct { float x, y, th, rpm[2], acc[2], s; } s_v;
 static const case_t *s_c;
+static float s_st[6000], s_wd[6000], s_j[6000];
+
+static int cmp_f(const void *a, const void *b)
+{
+    float x = *(const float *)a, y = *(const float *)b;
+    return (x > y) - (x < y);
+}
+
+static float p95(float *v, int n)
+{
+    if (n <= 0) { return 0.0f; }
+    qsort(v, (size_t)n, sizeof(float), cmp_f);
+    return v[(n * 95) / 100];
+}
 
 /* 경로 점과 접선. s = 경로 길이 mm */
 static void path(float s, float *px, float *py, float *tx, float *ty)
@@ -187,6 +212,9 @@ static void sim(const case_t *c, res_t *r)
     float n = 0, sum2 = 0, th0 = 0, len = 0, px = 0, py = 0, vsum = 0;
     float tail_lo = 1e9f, tail_hi = -1e9f, st_sum = 0, st_n = 0, step_at = 3000.0f;
     int   t, in_prev = 0, side = 0, sped = 0, jog = 0;
+    int   ns = 0, n50 = 0, n50c = 0, chg_n = 0, pos_prev = 0, chg_prev = 0;
+    float out_prev = 0.0f, wd_prev = 0.0f, per_sum = 0.0f, d_prev = 0.0f;
+    int   nj50 = 0;
 
     memset(r, 0, sizeof(*r));
     memset(&s_v, 0, sizeof(s_v));
@@ -238,6 +266,32 @@ static void sim(const case_t *c, res_t *r)
         if (c->mode == 3) { dev = -s_v.y - GD_MM * sinf(s_v.th); }   /* 끊긴 자리에서도 주행선 기준 */
         if (D.guide_all_off && D.flag_run) { r->lost++; }
         if (D.risk_stop) { r->risk++; }
+        {   /* 계단 지표. 위치 칸이 바뀐 틱과 출력 점프를 맞춰 본다 */
+            int chg = (D.guide_pos != pos_prev);
+            float wd = (float)(D.w_cmd[0] - D.w_cmd[1]) * 0.5f;
+            if (in_curve && in_prev && (D.control == RUN_DRIVE) && (ns < 6000)) {
+                float st = fabsf(D.p_pi_out - out_prev);
+                float jk = fabsf((D.p_pi_out - out_prev) - d_prev);
+                s_j[ns] = jk;
+                if (jk > 50.0f) { nj50++; }
+                s_wd[ns] = fabsf(wd - wd_prev);
+                s_st[ns++] = st;
+                if (st > r->st_max) { r->st_max = st; }
+                if (st > 50.0f) {
+                    n50++;
+                    if (chg || chg_prev) { n50c++; }
+                }
+                if (chg) {
+                    per_sum += st / (float)abs(D.guide_pos - pos_prev);
+                    chg_n++;
+                }
+            }
+            d_prev = (in_curve && in_prev) ? D.p_pi_out - out_prev : 0.0f;
+            chg_prev = chg;
+            pos_prev = D.guide_pos;
+            out_prev = D.p_pi_out;
+            wd_prev = wd;
+        }
         if (in_curve) {
             float d = hypotf(s_v.x - px, s_v.y - py);
             if (!in_prev) { th0 = s_v.th; d = 0.0f; }
@@ -245,7 +299,7 @@ static void sim(const case_t *c, res_t *r)
             n += 1.0f;
             sum2 += dev * dev;
             vsum += (s_v.rpm[0] + s_v.rpm[1]) * 0.5f / P.one_meter_rpm;
-            if (fabsf(dev) > r->max) { r->max = fabsf(dev); }
+            if (fabsf(dev) > r->max) { r->max = fabsf(dev); r->max_sg = (dev > 0.0f) ? 1.0f : -1.0f; }
             r->body_r = (fabsf(s_v.th - th0) > 1e-4f) ? len / fabsf(s_v.th - th0) : 0.0f;
         }
         if (after) {
@@ -254,6 +308,8 @@ static void sim(const case_t *c, res_t *r)
             float e = (c->mode == 1) ? dev - 4.0f * GUIDE_UNIT_MM : dev;
             int sg = (e > GUIDE_UNIT_MM) ? 1 : ((e < -GUIDE_UNIT_MM) ? -1 : 0);
             if (fabsf(e) > r->exit_max) { r->exit_max = fabsf(e); }
+            if (-r->max_sg * e > r->eover) { r->eover = -r->max_sg * e; }
+            if (fabsf(e) > 2.0f * GUIDE_UNIT_MM) { r->settle = s_v.s - ((arc > 0.0f) ? LEAD_MM + arc : step_at); }
             if ((sg != 0) && (side != 0) && (sg != side)) { r->exit_flip++; }
             if (sg != 0) { side = sg; }
             if (s_v.s > end - 1000.0f) {
@@ -277,6 +333,13 @@ static void sim(const case_t *c, res_t *r)
     r->steady = (st_n > 0) ? st_sum / st_n / GUIDE_UNIT_MM : 0.0f;
     r->rec_n = agv_curvelog.g[0].n;
     r->rec = agv_curvelog.g[0].c[0];
+    r->st_n50 = (ns > 0) ? (float)n50 / ((float)ns * 0.01f) : 0.0f;
+    r->st_chg = (n50 > 0) ? 100.0f * (float)n50c / (float)n50 : 0.0f;
+    r->st_per_unit = (chg_n > 0) ? per_sum / (float)chg_n : 0.0f;
+    r->st_p95 = p95(s_st, ns);
+    r->j_p95 = p95(s_j, ns);
+    r->j_n50 = (ns > 0) ? (float)nj50 / ((float)ns * 0.01f) : 0.0f;
+    r->st_wd_p95 = p95(s_wd, ns);
 }
 
 static void show(const char *name, const case_t *c, const res_t *r)
@@ -287,6 +350,9 @@ static void show(const char *name, const case_t *c, const res_t *r)
            r->exit_max, r->exit_flip, r->tail_pp, r->lost, r->risk, r->err,
            r->rec_n, r->rec.dev_rms_x10 / 10.0f, r->rec.dev_max_x10 / 10.0f, r->rec.r_body_mm, r->rec.r_tape_mm, r->rec.len_mm,
            r->rec.v_x10 / 10.0f, r->rec.exit_over_x10 / 10.0f);
+    printf("  %-10s 계단: 최대 %4.0f 상위5%% %4.0f 50넘음 %4.1f/s 칸변화대응 %3.0f%% 칸당 %4.0f rpm/단위 바퀴차 상위5%% %4.0f"
+           " | 변화의 변화 상위5%% %4.0f 50넘음 %4.1f/s | 출구 넘침 %4.1f 정착 %4.0f mm\n",
+           "", r->st_max, r->st_p95, r->st_n50, r->st_chg, r->st_per_unit, r->st_wd_p95, r->j_p95, r->j_n50, r->eover, r->settle);
 }
 
 /* 실차 곡선(반경 0.55~0.96 m) 네 개. 각은 기록된 차체 방향 변화에서 잡았다 */
@@ -335,8 +401,16 @@ int main(int argc, char **argv)
                 assert(r.risk > 0);                             /* 편차 10단위를 넘어 위험 감속에 들어간다 */
                 if (g == 0) {
                     assert((r.lost == 0) && (r.err == 0));
-                    assert(r.max < ((i < 2) ? 53.0f : 42.0f));  /* wide 센서 끝(107 mm)의 절반. 일반 센서도 같은 편차다 */
+                    /* v0.33.0 43.6·49.7·37.0·36.1 mm(wide 끝 107 mm 의 절반 아래). 계단 완화 뒤 wide 는 출력 변화를 늘 묶어
+                     * +4~14%(v0.33.0 의 +15% 안), 일반 센서는 10단위 위를 묶지 않아 +2~6% */
+                    assert(r.max < ((i < 2) ? ((l == 32) ? 57.5f : 53.0f) : 42.0f));
                     assert((r.exit_flip <= 1) && (r.tail_pp < 20.0f));
+                    /* 계단 완화: v0.33.0 은 칸이 바뀔 때마다 150~260 rpm 이 뛰었다(상위 5% 167~193, 변화의 변화 50 넘음 11~15/s).
+                     * 일반 센서는 위험 감속 편차(10단위) 위를 묶지 않아 그 구간 칸 변화만 남는다 */
+                    assert((r.st_p95 <= STEER_SLEW_TEST) && (r.st_n50 < 6.0f) && (r.j_n50 < 9.0f));
+                    if (l == 32) { assert((r.st_max <= STEER_SLEW_TEST) && (r.j_n50 < 4.0f)); }   /* 남는 것은 묶인 기울기가 뒤집히는 순간 */
+                    /* 곡선 끝 적분 감쇠: v0.33.0 은 넘침 11~19 mm, 2 m 안에 ±2단위로 못 들어왔다 */
+                    assert((r.eover < 6.0f) && (r.settle < 800.0f));
                 }
                 else if (l == 16) { assert(r.lost > 0); }       /* 예전 조향: 일반 센서는 선을 잃는다 */
                 else if (i >= 2)  { assert((r.rms > 60.0f) && (r.max > 80.0f)); }   /* 실차 곡선에서 잰 큰 편차(RMS 75~80 mm) */
@@ -344,12 +418,30 @@ int main(int argc, char **argv)
             }
         }
     }
+    for (i = 0; i < 16; i++) {      /* 속도 루프 지연 150 ms·두 LOS 에서도 선을 잃지 않고 발진하지 않는다. 일반 센서(±55 mm) B 가 가장 빠듯하다 */
+        case_t c = { (i < 8) ? 16 : 32, s_curves[i & 3].r, s_curves[i & 3].deg, s_curves[i & 3].dir, 31, (i & 4) ? 25 : 31, 31, 0.15f, 0, 0 };
+        sim(&c, &r);
+        show(s_curves[i & 3].name, &c, &r);
+        assert((r.lost == 0) && (r.err == 0) && (r.exit_flip <= 2) && (r.tail_pp < 20.0f) && (r.max < 70.0f));   /* wide B: 출구 한 번 더 넘어간다(끝폭 7 mm) */
+    }
+    {   /* 120도(D 반경)와 진입 25 m/min: 같은 상한 */
+        case_t c = { 32, 961.0f, 120.0f, -1, 31, 31, 31, 0.1f, 0, 0 };
+        sim(&c, &r);
+        show("D120", &c, &r);
+        assert((r.lost == 0) && (r.max < 42.0f) && (r.st_max <= STEER_SLEW_TEST) && (r.eover < 6.0f) && (r.settle < 800.0f));
+        for (i = 0; i < 4; i++) {
+            case_t d = { 32, s_curves[i].r, s_curves[i].deg, s_curves[i].dir, 25, 25, 31, 0.1f, 0, 0 };
+            sim(&d, &r);
+            show(s_curves[i].name, &d, &r);
+            assert((r.lost == 0) && (r.max < 45.0f) && (r.st_max <= STEER_SLEW_TEST) && (r.eover < 6.0f));
+        }
+    }
     for (i = 1; i <= 2; i++) {      /* 직선: 옆 4단위 계단 지령, 5단위 꺾임에서 복귀 */
         case_t c = { 32, 0.0f, 5.0f, 1, 31, 31, 31, 0.1f, 0, i };
         sim(&c, &r);
         printf("  직선 %d: 넘침 %.2f 단위, 끝 평균 %.2f, 바뀜 %d, 끝폭 %.1f mm\n", i, r.over, r.steady, r.exit_flip, r.tail_pp);
         assert((r.lost == 0) && (r.err == 0) && (r.risk == 0));
-        assert(r.over < ((i == 1) ? 1.9f : 3.2f));              /* 고치기 전 2.03, 2.80 */
+        assert(r.over < ((i == 1) ? 1.6f : 2.9f));              /* 고치기 전 2.03, 2.80. v0.33.0 1.52, 2.81: 계단 완화 뒤도 같다 */
         assert((r.exit_flip <= 2) && (r.tail_pp < 5.0f) && (fabsf(r.steady) < 1.0f));
     }
     for (i = 10; i <= 40; i += 10) {     /* 끊긴 자리의 점. 31 m/min 은 응답당 5.2 mm: 10 mm 점은 2응답, 20 mm 는 3~4응답 */
