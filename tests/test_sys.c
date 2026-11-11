@@ -2701,6 +2701,45 @@ static void test_steerlog(void)
     total = agv_steerlog.total;
     printf("  steerlog ok (%lu 표본, 사건 %u)\n", (unsigned long)total, agv_steerlog.ev_n);
 }
+
+/* 넓은 덩어리 유지 규칙(guide_hold_test): 교차선이 한쪽부터 닿아 덩어리 가운데가 +10 이 되는 응답이 와도
+ * 켠 것은 위치를 지켜 위험 감속에 들어가지 않는다. 끈 것은 들어간다(지금 동작). 반환: 지나는 동안 위치 최대 */
+static int hold_cross_run(int hold, int *risk)
+{
+    static const struct { uint16_t leds; int n; } seq[] = {
+        { 0xFC00u, 2 },      /* 11~16번 칸: 교차선이 오른쪽부터 닿았다. 가운데 +10 */
+        { 0xFFFFu, 3 },      /* 전부 켜짐 */
+        { 0x0FFFu, 2 },      /* 1~12번 칸: 왼쪽이 남았다. 가운데 -4 */
+        { 0x0C00u, 5 },
+    };
+    int j, k, worst = 0;
+
+    boot();
+    assert(param_set_ram(P_LEGACY_QUIRKS, 0) == 0);
+    guide_hold_test = (int16_t)hold;
+    drive_up();
+    for (k = 0; k < 400; k++) { sl_scan(0x0C00u); }                /* 11·12번 칸: 위치 +6 */
+    assert(D.vin_out > 1000 && D.risk_stop == 0 && D.guide_track == GUIDE_TRK_NORMAL && D.guide_pos == 6);
+    *risk = 0;
+    for (j = 0; j < 4; j++) {
+        for (k = 0; k < seq[j].n; k++) {
+            sl_scan(seq[j].leds);
+            if (D.risk_stop) { *risk = 1; }
+            if (D.guide_pos > worst) { worst = D.guide_pos; }
+            if (-D.guide_pos > worst) { worst = -D.guide_pos; }
+        }
+    }
+    guide_hold_test = 0;
+    return worst;
+}
+
+static void test_hold_cross(void)
+{
+    int risk_off, risk_on, off = hold_cross_run(0, &risk_off), on = hold_cross_run(1, &risk_on);
+    printf("  유지 규칙 교차선: 끈 것 위치 최대 %d 위험 감속 %d, 켠 것 %d %d\n", off, risk_off, on, risk_on);
+    assert(risk_off == 1 && off >= 10);
+    assert(risk_on == 0 && on == 6 && D.guide_track == GUIDE_TRK_NORMAL);
+}
 #else
 #ifdef STEERLOG_N
 #error "AGV_DEV_TESTS 0 이미지에는 조향 기록기가 없어야 한다"
@@ -2758,6 +2797,7 @@ int main(void)
     test_curvelog();
 #if AGV_DEV_TESTS
     test_steerlog();
+    test_hold_cross();
 #endif
     test_edge_release();
     test_turn_scale();

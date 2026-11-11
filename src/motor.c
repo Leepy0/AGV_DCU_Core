@@ -6,6 +6,7 @@
 #include "agv/param.h"
 #include "agv/steer.h"
 #include "agv/stop.h"
+#include "agv/tune.h"     /* AGV_DEV_TESTS */
 
 float sqrtf(float x);
 float atanf(float x);
@@ -364,7 +365,12 @@ void motor_drive_step(void)
     if (!D.obs_on && !D.flag_stopping
         && ((D.step == DRIVE_CRUISE) || (D.step == DRIVE_CHANGE_SPEED) || (D.step == DRIVE_RISK_RESUME))) {
         if ((D.vin_out >= P.llow_speed)
-            && ((D.guide_pos >= GUIDE_RISK_THRESHOLD) || (D.guide_pos <= -GUIDE_RISK_THRESHOLD))) {
+            && ((D.guide_pos >= GUIDE_RISK_THRESHOLD) || (D.guide_pos <= -GUIDE_RISK_THRESHOLD))
+#if AGV_DEV_TESTS
+            /* 유지 규칙: 유지·옮기는 중 위치는 덩어리 자리가 아니다. 새로 들어가지 않는다 */
+            && (!guide_hold_test || (D.guide_track == GUIDE_TRK_NORMAL))
+#endif
+            ) {
             D.risk_stop = 1;
             D.guide_realign_cnt = 0;
             D.step = DRIVE_RISK_STOP;
