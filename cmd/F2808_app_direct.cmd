@@ -34,8 +34,9 @@ SECTIONS
    .ebss       : > RAML1,      PAGE = 1
    .sysmem     : > RAMH0,      PAGE = 1
    .esysmem    : > RAMH0,      PAGE = 1
-   test_keep   : { *(test_keep) . = 0xA40; *(test_keep_add) *(test_keep_rpm) *(test_keep_bld) *(curvelog_ram) } > RAMH0, PAGE = 1   /* 시험 결과. codestart 가 지우지 않아 리셋에 남는다.
+   test_keep   : { *(test_keep) . = 0xA40; *(test_keep_add) *(test_keep_rpm) *(test_keep_bld) *(curvelog_ram) *(gscan_ram) } > RAMH0, PAGE = 1   /* 시험 결과. codestart 가 지우지 않아 리셋에 남는다.
                                                                        뒤에 붙인 결과(test_keep_add, test_keep_rpm, test_keep_bld)는 앞 주소를 옮기지 않는다.
                                                                        curvelog_ram(곡선 기록기)은 .ebss 에 안 들어가 맨 뒤에 둔다. 부팅 때 curvelog_reset 이 지운다.
+                                                                       gscan_ram(t3.8 스캔 주기 시험 결과·시각 버퍼)은 그 뒤. 보존하지 않고 부팅 때 gresp_reset 이 지운다.
                                                                        . = 0xA40: agv_stopt 를 앞 이미지와 같은 0x3FAA40 에 둔다. 앞이 넘치면 링크가 실패한다 */
 }

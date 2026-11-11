@@ -64,6 +64,7 @@ static const struct { char tag[2]; uint16_t mask; } s_check[] = {
 #if AGV_DEV_TESTS
 static void hs_start(void);
 static void gr_start(void);
+static void gs_start(void);
 
 /* t3 개발 시험. 줄을 더하면 t3.n 이 는다. run 다음 상태가 끝 상태이고 ui.c 가 둘을 그린다 */
 static const struct { char tag[2]; void (*start)(void); uint16_t run; } s_dev[] = {
@@ -73,7 +74,8 @@ static const struct { char tag[2]; void (*start)(void); uint16_t run; } s_dev[] 
     { {'A', 'L'}, ident_start_all,  TUNE_ALL },
     { {'T', 'E'}, ident_start_temp, TUNE_TEMP },
     { {'H', 'S'}, hs_start,         TUNE_HS },
-    { {'G', 'R'}, gr_start,         TUNE_GR }
+    { {'G', 'R'}, gr_start,         TUNE_GR },
+    { {'G', 'S'}, gs_start,         TUNE_GS }
 };
 #define DEV_N ((uint16_t)(sizeof(s_dev) / sizeof(s_dev[0])))
 #define TUNE_CATS 3u
@@ -128,6 +130,9 @@ void tune_reset(void)
     s_tune.state = TUNE_OFF;
     menu_top();
     clear_measure();
+#if AGV_DEV_TESTS
+    gresp_reset();
+#endif
 }
 
 void tune_arm(void)
@@ -159,6 +164,13 @@ static void gr_start(void)
 {
     tagact_stop();
     gresp_start();
+}
+
+/* 스캔 주기 시험도 출발 대기를 세운다. 서고 라인이 보이면 시험이 360도 정렬 회전을 건다 */
+static void gs_start(void)
+{
+    tagact_stop();
+    gscan_start();
 }
 
 /* t3.6 입력 상한: 1번, 입력 L 이 있으면 그 L 에 측정 창이 들어가는 속도까지 */
@@ -680,9 +692,10 @@ int tune_key(uint16_t key)
     case TUNE_TOP_DONE:
     case TUNE_ALL_DONE:
     case TUNE_HS_DONE:
-    case TUNE_GR_DONE: {
+    case TUNE_GR_DONE:
+    case TUNE_GS_DONE: {
         uint16_t n = (st == TUNE_RPM_DONE) ? TUNE_RPMT_PAGES : ((st == TUNE_HS_DONE) ? TUNE_HS_PAGES
-                   : ((st == TUNE_GR_DONE) ? TUNE_GR_PAGES : TUNE_RPM_PAGES));
+                   : (((st == TUNE_GR_DONE) || (st == TUNE_GS_DONE)) ? TUNE_GR_PAGES : TUNE_RPM_PAGES));
         switch (key) {
         case KEY_UP:
         case KEY_MODE:  s_tune.page = (uint16_t)((s_tune.page + 1u) % n); return 1;
@@ -738,7 +751,7 @@ void tune_run(void)
     if (s_tune.splash > 0u) { s_tune.splash--; }
     if (st == TUNE_WAIT) {
 #if AGV_DEV_TESTS                  /* 응답 시험은 첫 응답(주행 시작)을 기다리지 않는다. 센서가 없어도 '없음'으로 끝난다 */
-        if (dev_pick(TUNE_DEV_GR)) {
+        if (dev_pick(TUNE_DEV_GR) || dev_pick(TUNE_DEV_GS)) {
             if (D.flag_ready && !D.flag_stopping) { start(); }
             return;
         }
@@ -752,6 +765,9 @@ void tune_run(void)
 #if AGV_DEV_TESTS
     else if (st == TUNE_GR) {
         if (!gresp_busy()) { s_tune.state = TUNE_GR_DONE; }
+    }
+    else if (st == TUNE_GS) {
+        if (!gscan_run()) { s_tune.state = TUNE_GS_DONE; }
     }
     else if (dev_running(st)) {
         if (ident_run() != 0) { s_tune.state = (uint16_t)(st + 1u); }

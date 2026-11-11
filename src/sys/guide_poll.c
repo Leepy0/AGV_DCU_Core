@@ -196,7 +196,11 @@ void guide_poll(void)
         if (s_prev_back != PREV_UNKNOWN) { guide_on_sensor_switch(); }
         s_prev_back = D.backward;
     }
-    if (gresp_busy()) { return; }    /* 응답 시험(t3.7)이 SCI-B 를 쓴다. 끝나면 평상시대로 */
+    if (gresp_busy()) { return; }    /* 응답 시험(t3.7)·스캔 주기 시험 라인 확인(t3.8)이 SCI-B 를 쓴다. 끝나면 평상시대로 */
+    if (gscan_fast()) {              /* t3.8 회전: 시험이 바로 재요청한다. 마지막 응답 하나로 평상시처럼 제어한다 */
+        if (gscan_take(&rx)) { on_rx(&rx); }
+        return;
+    }
     n = hal_sci_take_errors(HAL_SCI_B);
     if (n != 0u) { log_event(LOG_SCI_ERROR, HAL_SCI_B, (int16_t)n); }
 
