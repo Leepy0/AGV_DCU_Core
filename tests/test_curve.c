@@ -3,6 +3,8 @@
  * 실제 코드: 'h' 응답 해석·추적(guide_feed, guide_track, guide_poll), 조향(steer_run), 주행 단계와 위험 감속
  *            (motor_run, motor_drive_step), S커브, rpm 피드백, 곡선 기록기(curvelog_tick).
  * 모형:      바퀴 rpm 은 바퀴 지령(w_cmd)을 1차 지연으로 따라간다(가감속 한계, 최고 rpm). 토크 지령은 쓰지 않는다.
+ *            엔코더는 모터 12펄스/회전 그대로 낸다(펄스 길이 = 바퀴 둘레/기어비/12). 조향 추정기는 이 정수 펄스로 적분한다.
+ *            강건성(s_m): 실제 휠 간격·GD 배율, 왼쪽 펄스 손실(미끄럼), 오른쪽 바퀴 이동 배율(좌우 바퀴 지름 차).
  *            차동 구동 운동학(휠 간격 × 회전 보정비), 회전 중심에서 GD 앞 센서, 테이프를 0.35 칸 넘게 덮은 LED 가 켜진다.
  *            센서는 10 ms 마다 그때 자세로 답한다(센서 안 지연 없음). 미끄럼·바닥 기울기·하중 없음.
  * 경로:      직선 → 원호(반경·각) → 직선.
@@ -27,6 +29,7 @@
 #include "agv/sys.h"
 #include "agv/tagact.h"
 #include "agv/tune.h"
+#include "agv/stop.h"
 #include "hal_host.h"
 
 #define D agv_drive
@@ -56,7 +59,8 @@ typedef struct {
     float tau;              /* 속도 루프 시정수 s */
     int   lg;               /* LG */
     int   mode;             /* 0 곡선, 1 옆 4단위 계단 지령, 2 편차 5단위에서 복귀,
-                               3 테이프 100 mm 끊김 + 그 안 옆 8단위 자리에 길이 deg mm 인 점(바닥 반사) */
+                               3 테이프 100 mm 끊김 + 그 안 옆 8단위 자리에 길이 deg mm 인 점(바닥 반사),
+                               4 출발 때 회전 중심이 오른쪽으로 deg 단위(센서 위치 +deg) */
 } case_t;
 
 typedef struct {
@@ -79,13 +83,24 @@ typedef struct {
     float st_per_unit;      /* 칸이 바뀐 틱의 출력 변화 / 위치 변화 평균 rpm/단위 */
     float st_wd_p95;        /* 바퀴 지령 차의 절반((w_cmd[0]-w_cmd[1])/2) 틱당 변화 상위 5% */
     float j_p95, j_n50;     /* 틱당 변화의 변화(|Δ(t)-Δ(t-1)|) 상위 5%, 50 rpm 넘는 횟수(초당). 꾸준한 기울기는 0, 계단은 크다 */
+    float cerr;             /* 곡선 구간 회전 중심의 경로 오차 최대 mm(센서가 테이프 위면 안쪽으로 반경 - √(반경² - GD²)) */
+    float tail_rms;         /* 끝 1 m 편차 RMS mm(직선 정속, 센서 양자화 포함) */
+    float a_stmax, a_jn;    /* 직선: 계단·꺾임 0.3 m 뒤부터 출력 틱당 변화 최대 rpm, 변화의 변화 50 rpm 넘는 횟수/s */
+    float pass_s, vmin;     /* 곡선(센서 투영 곡선 앞 0.5 m ~ 뒤 0.5 m) 통과 시간 s, 그 동안 최저 속도 m/min */
+    float izero_s;          /* 안쪽 바퀴 지령 0 에 걸린 시간 s */
+    float cmax;             /* 회전 중심 경로 오차 최대 mm(곡선 앞뒤 포함) */
 } res_t;
 
-static struct { float x, y, th, rpm[2], acc[2], s; } s_v;
+/* 모형 어긋남: 실제 휠 간격·GD 배율, 왼쪽 펄스 손실 %, 오른쪽 바퀴 이동 배율 */
+static struct { float wbx, gdx, slip, wr, pl; } s_m = { 1.0f, 1.0f, 0.0f, 1.0f, 1.0f };   /* pl: 실제 펄스 길이 배율(두 바퀴) */
+
+static struct { float x, y, th, rpm[2], acc[2], s, drop; } s_v;
 static float s_gd = 250.0f;     /* 센서 거리(모형과 GD 같음) */
 static float s_cross_x, s_cross_w;   /* 교차 테이프 x mm·폭 mm. 폭 0 = 없음 */
 static const case_t *s_c;
 static float s_st[6000], s_wd[6000], s_j[6000];
+static int   s_trace;       /* one ... 1: 틱마다 찍는다 */
+static int   s_gmask = 7;   /* cmp 에서 돌릴 조향(b0 새, b1 37차, b2 예전) */
 
 static int cmp_f(const void *a, const void *b)
 {
@@ -104,23 +119,32 @@ static float p95(float *v, int n)
 static void path(float s, float *px, float *py, float *tx, float *ty)
 {
     float arc = (s_c->r_mm > 0.0f) ? s_c->r_mm * s_c->deg * PI_F / 180.0f : 0.0f;
-    float d = (float)s_c->dir;
+    float x = LEAD_MM, y = 0.0f, h = 0.0f, rem = s - LEAD_MM;
+    int k, n = (s_c->mode == 5) ? 2 : 1;      /* mode 5: 같은 반경으로 반대쪽 원호를 잇는 S 곡선 */
     if ((s <= LEAD_MM) || (arc <= 0.0f)) { *px = s; *py = 0.0f; *tx = 1.0f; *ty = 0.0f; return; }
-    {
-        float a = ((s < LEAD_MM + arc) ? (s - LEAD_MM) : arc) / s_c->r_mm;
-        float rest = (s < LEAD_MM + arc) ? 0.0f : (s - LEAD_MM - arc);
-        *tx = cosf(a);
-        *ty = d * sinf(a);
-        *px = LEAD_MM + s_c->r_mm * sinf(a) + rest * *tx;
-        *py = d * s_c->r_mm * (1.0f - cosf(a)) + rest * *ty;
+    for (k = 0; k < n; k++) {
+        float kap = (float)(k ? -s_c->dir : s_c->dir) / s_c->r_mm;
+        float l = (rem < arc) ? rem : arc, a = l * kap;
+        x += (sinf(h + a) - sinf(h)) / kap;
+        y += (cosf(h) - cosf(h + a)) / kap;
+        h += a;
+        rem -= l;
+        if (rem <= 0.0f) { break; }
     }
+    *tx = cosf(h);
+    *ty = sinf(h);
+    *px = x + rem * *tx;
+    *py = y + rem * *ty;
 }
+
+/* 30도 교차선(mode 6): 주행선(x 축)과 x = s_x30 에서 30도로 만나는 직선, 폭 s_x30w mm */
+static float s_x30, s_x30w, s_xa = 30.0f;   /* s_xa: 교차선 각(도). 정렬 회전 모의는 90 */
 
 /* 센서 줄과 테이프가 만나는 점. 반환 1 = 있음. u = 센서 가운데에서 왼쪽으로 mm, slant = 비스듬히 지나며 넓어지는 배율 */
 static int cross(float *u, float *slant)
 {
     float hx = cosf(s_v.th), hy = sinf(s_v.th);
-    float sx = s_v.x + GD_MM * hx, sy = s_v.y + GD_MM * hy;
+    float sx = s_v.x + GD_MM * s_m.gdx * hx, sy = s_v.y + GD_MM * s_m.gdx * hy;
     float px, py, tx, ty, dot = 1.0f;
     int k;
     for (k = 0; k < 8; k++) {
@@ -133,6 +157,19 @@ static int cross(float *u, float *slant)
     *u = -(px - sx) * hy + (py - sy) * hx;
     *slant = 1.0f / dot;
     return 1;
+}
+
+/* 회전 중심의 경로 옆 거리 mm(+ 왼쪽). 경로 위 가장 가까운 점은 센서 점 투영에서 GD 뒤부터 찾는다 */
+static float center_err(void)
+{
+    float s = s_v.s - GD_MM, px, py, tx, ty;
+    int k;
+    for (k = 0; k < 8; k++) {
+        path(s, &px, &py, &tx, &ty);
+        s += (s_v.x - px) * tx + (s_v.y - py) * ty;
+    }
+    path(s, &px, &py, &tx, &ty);
+    return -(s_v.x - px) * ty + (s_v.y - py) * tx;
 }
 
 static float cover(float c, float w, int i)
@@ -174,6 +211,21 @@ static void sensor_reply(float u, float slant, int seen)
             if (cover(c, TAPE_MM * slant / PITCH_MM, i) > 0.35f) { bits |= 1UL << (i - 1); }
         }
     }
+    if (s_x30w > 0.0f) {        /* 교차선과 센서 줄이 만나는 자리 u2. 폭은 줄 방향으로 w / |sin| */
+        float nx = -sinf(s_v.th), ny = cosf(s_v.th), dx = cosf(s_xa * PI_F / 180.0f), dy = sinf(s_xa * PI_F / 180.0f);
+        float sx = s_v.x + GD_MM * cosf(s_v.th), sy = s_v.y + GD_MM * sinf(s_v.th);
+        float cr = nx * dy - ny * dx;
+        if (fabsf(cr) < 0.02f) {        /* 센서 줄이 선과 나란하다: 선 위면 전부 켜짐 */
+            if (fabsf((s_x30 - sx) * dy - (0.0f - sy) * dx) < s_x30w * 0.5f) { bits = (leds == 32) ? 0xFFFFFFFFUL : 0xFFFFUL; }
+        }
+        else {
+            float u2 = ((s_x30 - sx) * dy - (0.0f - sy) * dx) / cr;
+            float c2 = (float)(leds + 1) / 2.0f + u2 / PITCH_MM;
+            for (i = 1; i <= leds; i++) {
+                if (cover(c2, s_x30w / fabsf(cr) / PITCH_MM, i) > 0.35f) { bits |= 1UL << (i - 1); }
+            }
+        }
+    }
     send_h(bits, leds);
 }
 
@@ -192,13 +244,21 @@ static void plant(void)
             s_v.acc[i] += s_v.rpm[i] / 500.0f;
             while (s_v.acc[i] >= 1.0f) {
                 s_v.acc[i] -= 1.0f;
+                if (i == 0) {           /* 미끄럼: 왼쪽 펄스를 slip % 버린다 */
+                    s_v.drop += s_m.slip * 0.01f;
+                    if (s_v.drop >= 1.0f) { s_v.drop -= 1.0f; continue; }
+                }
                 sys_encoder((uint16_t)i, (uint32_t)(500000000.0f / s_v.rpm[i]));
             }
         }
     }
     for (n = 0; n < 5; n++) {
-        float vl = s_v.rpm[0] * k, vr = s_v.rpm[1] * k, v = (vl + vr) * 0.5f;
-        s_v.th += (vr - vl) / (WB_MM * TURN_SCALE) * 0.002f;
+        float vl = s_v.rpm[0] * k * s_m.pl, vr = s_v.rpm[1] * k * s_m.wr * s_m.pl, v;
+        if (D.control == RUN_TURN) {    /* 제자리 회전: CW 는 왼쪽 앞으로·오른쪽 뒤로 */
+            if (D.motion == MOTION_CW) { vr = -vr; } else { vl = -vl; }
+        }
+        v = (vl + vr) * 0.5f;
+        s_v.th += (vr - vl) / (WB_MM * TURN_SCALE * s_m.wbx) * 0.002f;
         s_v.x += v * cosf(s_v.th) * 0.002f;
         s_v.y += v * sinf(s_v.th) * 0.002f;
     }
@@ -213,10 +273,12 @@ static void scan(void)
 
 static void sim(const case_t *c, res_t *r)
 {
-    float arc = (c->r_mm > 0.0f) ? c->r_mm * c->deg * PI_F / 180.0f : 0.0f;
+    float arc = (c->r_mm > 0.0f) ? c->r_mm * c->deg * PI_F / 180.0f * ((c->mode == 5) ? 2.0f : 1.0f) : 0.0f;
+    int   an = 0, aj = 0;
+    float a_prev = 0.0f, a_d = 0.0f;
     float end = LEAD_MM + arc + TAIL_MM;
     float n = 0, sum2 = 0, th0 = 0, len = 0, px = 0, py = 0, vsum = 0;
-    float tail_lo = 1e9f, tail_hi = -1e9f, st_sum = 0, st_n = 0, step_at = 3000.0f;
+    float tail_lo = 1e9f, tail_hi = -1e9f, st_sum = 0, st_n = 0, st_sum2 = 0, step_at = (c->mode == 4) ? 0.0f : 3000.0f;
     int   t, in_prev = 0, side = 0, sped = 0, jog = 0;
     int   ns = 0, n50 = 0, n50c = 0, chg_n = 0, pos_prev = 0, chg_prev = 0;
     float out_prev = 0.0f, wd_prev = 0.0f, per_sum = 0.0f, d_prev = 0.0f;
@@ -226,6 +288,7 @@ static void sim(const case_t *c, res_t *r)
     memset(&s_v, 0, sizeof(s_v));
     s_c = c;
     s_v.s = GD_MM;
+    if (c->mode == 4) { s_v.y = -c->deg * GUIDE_UNIT_MM; jog = 1; }
 
     host_reset();
     memset(&D, 0, sizeof(D));
@@ -248,7 +311,8 @@ static void sim(const case_t *c, res_t *r)
     scan();
     assert(D.flag_ready == 1);
 
-    for (t = 0; t < 6000; t++) {
+    r->vmin = 1e9f;
+    for (t = 0; t < 40000; t++) {
         float u = 0.0f, slant = 1.0f, dev;
         int seen = cross(&u, &slant);
         int in_curve = (arc > 0.0f) && (s_v.s > LEAD_MM) && (s_v.s <= LEAD_MM + arc);
@@ -261,6 +325,8 @@ static void sim(const case_t *c, res_t *r)
             u += 8.0f * GUIDE_UNIT_MM;
             slant = 1.0f;
         }
+        s_x30w = ((c->mode == 6) && (fabsf(s_v.x - 3000.0f) < 1500.0f)) ? c->deg : 0.0f;
+        s_x30 = 3000.0f;
         sensor_reply(u, slant, seen);
         plant();
         scan();
@@ -271,6 +337,13 @@ static void sim(const case_t *c, res_t *r)
         dev = seen ? u : (float)c->leds * PITCH_MM / 2.0f;
         if (c->mode == 3) { dev = -s_v.y - GD_MM * sinf(s_v.th); }   /* 끊긴 자리에서도 주행선 기준 */
         if (D.guide_all_off && D.flag_run) { r->lost++; }
+        if ((arc > 0.0f) && (s_v.s > LEAD_MM - 500.0f) && (s_v.s < LEAD_MM + arc + 500.0f)) {
+            float vv = (s_v.rpm[0] + s_v.rpm[1]) * 0.5f / P.one_meter_rpm, ce = fabsf(center_err());
+            r->pass_s += 0.01f;
+            if (vv < r->vmin) { r->vmin = vv; }
+            if (ce > r->cmax) { r->cmax = ce; }
+        }
+        if ((D.control == RUN_DRIVE) && (D.vin_out > 0) && ((D.w_cmd[0] == 0) || (D.w_cmd[1] == 0))) { r->izero_s += 0.01f; }
         if (D.risk_stop) { r->risk++; }
         {   /* 계단 지표. 위치 칸이 바뀐 틱과 출력 점프를 맞춰 본다 */
             int chg = (D.guide_pos != pos_prev);
@@ -306,8 +379,19 @@ static void sim(const case_t *c, res_t *r)
             sum2 += dev * dev;
             vsum += (s_v.rpm[0] + s_v.rpm[1]) * 0.5f / P.one_meter_rpm;
             if (fabsf(dev) > r->max) { r->max = fabsf(dev); r->max_sg = (dev > 0.0f) ? 1.0f : -1.0f; }
+            if (fabsf(center_err()) > r->cerr) { r->cerr = fabsf(center_err()); }
             r->body_r = (fabsf(s_v.th - th0) > 1e-4f) ? len / fabsf(s_v.th - th0) : 0.0f;
         }
+        if ((arc <= 0.0f) && (s_v.s > step_at + 300.0f) && (D.control == RUN_DRIVE)) {
+            float dd = D.p_pi_out - a_prev;
+            if (an > 0) {
+                if (fabsf(dd) > r->a_stmax) { r->a_stmax = fabsf(dd); }
+                if (fabsf(dd - a_d) > 50.0f) { aj++; }
+            }
+            an++;
+            a_d = dd;
+        }
+        a_prev = D.p_pi_out;
         if (after) {
             int a = (D.guide_pos >= 0) ? D.guide_pos : -D.guide_pos;
             if (a > r->jump) { r->jump = a; }
@@ -322,11 +406,15 @@ static void sim(const case_t *c, res_t *r)
                 if (e < tail_lo) { tail_lo = e; }
                 if (e > tail_hi) { tail_hi = e; }
                 st_sum += e;
+                st_sum2 += e * e;
                 st_n += 1.0f;
             }
             if ((c->mode == 1) && (e > r->over * GUIDE_UNIT_MM)) { r->over = e / GUIDE_UNIT_MM; }
         }
-        if ((c->mode == 2) && jog && (-dev > r->over * GUIDE_UNIT_MM)) { r->over = -dev / GUIDE_UNIT_MM; }   /* 반대쪽으로 넘어간 양 */
+        if (((c->mode == 2) || (c->mode == 4)) && jog && (-dev > r->over * GUIDE_UNIT_MM)) { r->over = -dev / GUIDE_UNIT_MM; }   /* 반대쪽으로 넘어간 양 */
+        if (s_trace && (s_v.s > LEAD_MM - 600.0f) && (s_v.s < LEAD_MM + arc + 1200.0f)) {
+printf("T %6.0f %d dev %6.1f pos %3d out %6.0f v %5d rpm %5.0f %5.0f\n", s_v.s - LEAD_MM, in_curve, dev, D.guide_pos, D.p_pi_out, D.v_cmd, s_v.rpm[0], s_v.rpm[1]);
+        }
         in_prev = in_curve;
         px = s_v.x;
         py = s_v.y;
@@ -337,6 +425,9 @@ static void sim(const case_t *c, res_t *r)
     r->v_avg = (n > 0) ? vsum / n : 0.0f;
     r->tail_pp = (st_n > 0) ? tail_hi - tail_lo : 0.0f;
     r->steady = (st_n > 0) ? st_sum / st_n / GUIDE_UNIT_MM : 0.0f;
+    r->tail_rms = (st_n > 0) ? sqrtf(st_sum2 / st_n) : 0.0f;
+    if (r->vmin > 1e8f) { r->vmin = 0.0f; }
+    r->a_jn = (an > 0) ? (float)aj / ((float)an * 0.01f) : 0.0f;
     r->rec_n = agv_curvelog.g[0].n;
     r->rec = agv_curvelog.g[0].c[0];
     r->st_n50 = (ns > 0) ? (float)n50 / ((float)ns * 0.01f) : 0.0f;
@@ -462,6 +553,109 @@ static void tape_sim(int kind, float gd, int dcc, float tau, float w, tape_res_t
     s_gd = 250.0f;
 }
 
+/* 정렬 회전 모의: 교차 테이프(90도 선)를 찾아 회전 중심을 그 위에 세우고 CW 90도 정렬 회전.
+ * 슬립 = 실제 회전 / 엔코더 회전의 역수(s_m.wbx). 결과: 각-속도 곡선 v² 직선 적합도(R²), 중앙 도달 지령 rpm, 최종 각 오차,
+ * 보정 횟수, 회전 시간, 감속 중 재가속 횟수 */
+typedef struct { float r2, v_center, err_deg, t_turn, a_fit, line_deg, ctr_mm; int fix, reacc, err, done; } turn_res_t;
+
+static void turn_sim(float gd, int leds, float tau, float slip, turn_res_t *r)
+{
+    static const case_t c0 = { 32, 0.0f, 0.0f, 1, 20, 20, 30, 0.1f, 0, 0 };
+    case_t c = c0;
+    int t, armed = 0, phase = 0, t0 = 0;
+    float sx = 0, sy = 0, sxx = 0, sxy = 0, syy = 0, n = 0, prev_v = 1e9f, vpeak_dec = 0.0f;
+
+    c.tau = tau;
+    c.leds = leds;
+    memset(r, 0, sizeof(*r));
+    memset(&s_v, 0, sizeof(s_v));
+    s_c = &c;
+    s_gd = gd;
+    s_x30 = 4000.0f; s_xa = 90.0f; s_x30w = 20.0f;
+    s_v.s = GD_MM;
+    host_reset();
+    memset(&D, 0, sizeof(D));
+    memset(seq_request_flag, 0, sizeof(seq_request_flag));
+    sys_boot();
+    host.adc = 300u << 4;
+    for (t = 0; t < 60; t++) { scan(); }
+    assert(sys_power_on());
+    assert(param_set_ram(P_SPEED_MIN, 4) == 0);
+    assert(param_set_ram(P_GEAR_RATIO, 60) == 0);
+    assert(param_set_ram(P_WHEEL_BASE_MM, (int16_t)(WB_MM / 10.0f)) == 0);
+    assert(param_set_ram(P_GUIDE_DIST_MM, (int16_t)gd) == 0);
+    assert(param_set_ram(P_SPEED_HIGH, 30) == 0);
+    assert(param_set_ram(P_SPEED_LOW, 25) == 0);
+    assert(param_set_ram(P_TURN_FORBACK, 10) == 0);
+    assert(param_set_ram(P_STOP_LEN_MM, 50) == 0);
+    tune_turn_scale_set((int16_t)(TURN_SCALE * 1000.0f + 0.5f));
+    host.bus_in[BUS_IN_A] &= (uint16_t)~RAW_START;
+    scan();
+    host.bus_in[BUS_IN_A] |= RAW_START;
+    scan();
+    for (t = 0; t < 8000; t++) {
+        float u = 0.0f, slant = 1.0f;
+        int seen = cross(&u, &slant);
+        s_m.wbx = (D.control == RUN_TURN) ? slip : 1.0f;
+        sensor_reply(u, slant, seen);
+        plant();
+        scan();
+        if ((t == 50) && D.flag_run) { tagact_speed(15); }
+        if (!armed && (s_v.x + GD_MM >= s_x30 - 600.0f)) {
+            armed = 1;
+            D.tape_turn_dir = TURN_CW; D.tape_turn_deg = 90; D.tape_turn_next = 0;
+        }
+        if ((phase == 0) && D.flag_turn && D.tape_align) { phase = 1; t0 = t; }
+        if (phase == 1) {
+            float rem = (90.0f + s_v.th * 180.0f / PI_F);       /* 남은 실제 각(도), CW 라 th 가 -90 으로 간다 */
+            float v = (float)D.vin_out;
+            if ((D.tape_step <= 2) && (rem < 25.0f) && (rem > 0.3f) && (v > 0.0f)) {
+                sx += rem; sy += v * v; sxx += rem * rem; sxy += rem * v * v; syy += v * v * v * v; n += 1.0f;
+                if (v > prev_v + 1.0f) { r->reacc++; }
+                prev_v = v;
+            }
+            if ((D.tape_step == TAPE_STEP_SETTLE) && (r->v_center == 0.0f)) { r->v_center = (vpeak_dec > 0.0f) ? vpeak_dec : 0.01f; }
+            if (D.tape_step <= 2) { vpeak_dec = (float)D.vin_out; }     /* 중앙에서 서기 직전 지령 */
+            if (!D.tape_align && !D.flag_turn) { phase = 2; r->t_turn = (float)(t - t0) * 0.01f; break; }
+        }
+        if (D.system_err || D.stop_err) { break; }
+    }
+    (void)vpeak_dec;
+    if (n > 3.0f) {
+        float mx = sx / n, my = sy / n, cxy = sxy / n - mx * my, cxx = sxx / n - mx * mx, cyy = syy / n - my * my;
+        r->r2 = (cxx > 0.0f && cyy > 0.0f) ? (cxy * cxy) / (cxx * cyy) : 0.0f;
+        r->a_fit = (cxx > 0.0f) ? cxy / cxx : 0.0f;       /* v² 기울기(rpm²/도) */
+    }
+    r->err_deg = 90.0f + s_v.th * 180.0f / PI_F;
+    {   /* 센서 점의 선 기준 옆 거리 → 선 기준 각 오차, 회전 중심의 선 기준 거리 */
+        float sxp = s_v.x + GD_MM * cosf(s_v.th);
+        r->line_deg = atanf((sxp - s_x30) / GD_MM) * 180.0f / PI_F;
+        r->ctr_mm = s_v.x - s_x30;
+    }
+    r->fix = D.tape_fix_cnt;
+    r->err = D.system_err ? D.system_err : D.stop_err;
+    r->done = (phase == 2);
+    s_x30w = 0.0f; s_xa = 30.0f; s_gd = 250.0f; s_m.wbx = 1.0f;
+}
+
+static void turn_table(void)
+{
+    static const float sl[3] = { 0.8f, 1.0f, 1.25f };
+    int g, l, t, k;
+    for (g = 0; g < 2; g++) {
+        for (l = 0; l < 2; l++) {
+            for (t = 0; t < 2; t++) {
+                for (k = 0; k < 3; k++) {
+                    turn_res_t r;
+                    turn_sim(g ? 500.0f : 250.0f, l ? 16 : 32, t ? 0.15f : 0.1f, sl[k], &r);
+                    printf("TURN GD%d/L%d/t%d/s%.2f | done %d err %d r2 %.3f vcenter %.0f errdeg %.2f fix %d time %.2f reacc %d linedeg %.2f ctr %.1f\n",
+                           g ? 500 : 250, l ? 16 : 32, t ? 150 : 100, sl[k], r.done, r.err, r.r2, r.v_center, r.err_deg, r.fix, r.t_turn, r.reacc, r.line_deg, r.ctr_mm);
+                }
+            }
+        }
+    }
+}
+
 static void tape_table(void)
 {
     static const int   dcc[2] = { 20, 50 };
@@ -485,6 +679,320 @@ static void tape_table(void)
     }
 }
 
+/* 조향 비교: 새 조향(LG 0), 예전(LG 256), 예전 전부(LG 368). 기준선(v0.34.0 조향)은 따로 만든 실행 파일로 같은 표를 낸다 */
+static const int   s_lg3[3] = { 0, QUIRK_STEER_STEP, QUIRK_STEER_LEGACY };
+static const char *s_lgn[3] = { "새", "예전", "예전전체" };
+
+/* 곡선 6개: 실차 A~D, 완만한 1.5 m·4 m */
+static const struct { const char *name; float r, deg; int dir; } s_cur6[6] = {
+    { "A", 650.0f, 45.0f, -1 }, { "B", 551.0f, 45.0f, 1 }, { "C", 909.0f, 90.0f, 1 }, { "D", 961.0f, 90.0f, -1 },
+    { "R1500", 1500.0f, 90.0f, 1 }, { "R4000", 4000.0f, 45.0f, -1 },
+};
+
+typedef struct { float max, rms, cerr, p95, smax, jn, eover, settle, tail; int lost, flip, err, n; } agg_t;
+
+static void agg_add(agg_t *a, const res_t *r)
+{
+    if (r->max > a->max)       { a->max = r->max; }
+    if (r->rms > a->rms)       { a->rms = r->rms; }
+    if (r->cerr > a->cerr)     { a->cerr = r->cerr; }
+    if (r->st_p95 > a->p95)    { a->p95 = r->st_p95; }
+    if (r->st_max > a->smax)   { a->smax = r->st_max; }
+    if (r->j_n50 > a->jn)      { a->jn = r->j_n50; }
+    if (r->eover > a->eover)   { a->eover = r->eover; }
+    if (r->settle > a->settle) { a->settle = r->settle; }
+    if (r->tail_pp > a->tail)  { a->tail = r->tail_pp; }
+    if (r->exit_flip > a->flip) { a->flip = r->exit_flip; }
+    a->lost += r->lost;
+    a->err += (r->err != 0);
+    a->n++;
+}
+
+static void agg_show(const char *name, const agg_t *a)
+{
+    printf("  %-24s n%3d | 최대 %5.1f rms %5.1f 중심 %5.1f | 계단 상위5%% %4.0f 최대 %4.0f 변화의변화 %4.1f/s | 넘침 %4.1f 정착 %5.0f 바뀜 %d 끝폭 %4.1f | 잃음 %d err %d\n",
+           name, a->n, a->max, a->rms, a->cerr, a->p95, a->smax, a->jn, a->eover, a->settle, a->flip, a->tail, a->lost, a->err);
+}
+
+static void line(const char *name, const case_t *c, const res_t *r)
+{
+    printf("    %-5s L%2d v%2d tau%3.0f %-4s | 최대 %5.1f rms %5.1f 중심 %5.1f | 상위5%% %4.0f 최대 %4.0f jn %4.1f | 넘침 %4.1f 정착 %5.0f 바뀜 %d 끝폭 %4.1f | 잃음 %d 위험 %d err %d\n",
+           name, c->leds, c->v_mpm, c->tau * 1000.0f, s_lgn[(c->lg == 0) ? 0 : ((c->lg == QUIRK_STEER_STEP) ? 1 : 2)],
+           r->max, r->rms, r->cerr, r->st_p95, r->st_max, r->j_n50, r->eover, r->settle, r->exit_flip, r->tail_pp, r->lost, r->risk, r->err);
+}
+
+/* 비교 표: 곡선 6 × 진입 31·25·15 × 지연 50·100·150 ms × wide·일반, 직선, 강건성 */
+static void compare(int verbose)
+{
+    static const int   vv[3] = { 31, 25, 15 };
+    static const float tt[3] = { 0.05f, 0.1f, 0.15f };
+    agg_t a[3][2], st[3][2], rb[3];
+    int g, l, v, t, i, k;
+    res_t r;
+    char nm[64];
+
+    memset(a, 0, sizeof(a));
+    memset(st, 0, sizeof(st));
+    memset(rb, 0, sizeof(rb));
+    printf("[곡선]\n");
+    for (l = 0; l < 2; l++) {
+        for (v = 0; v < 3; v++) {
+            for (t = 0; t < 3; t++) {
+                for (i = 0; i < 6; i++) {
+                    for (g = 0; g < 3; g++) {
+                        if (!(s_gmask & (1 << g))) { continue; }
+                        case_t c = { l ? 16 : 32, s_cur6[i].r, s_cur6[i].deg, s_cur6[i].dir, vv[v], vv[v], 31, tt[t], s_lg3[g], 0 };
+                        sim(&c, &r);
+                        agg_add(&a[g][l], &r);
+                        if (verbose || ((v == 0) && (t == 1))) { line(s_cur6[i].name, &c, &r); }
+                    }
+                }
+            }
+        }
+    }
+    printf("[직선] 1 옆 4단위 지령, 2 5단위 꺾임 복귀, 4 출발 편차 5단위\n");
+    for (l = 0; l < 2; l++) {
+        for (v = 0; v < 3; v++) {
+            for (k = 1; k <= 4; k++) {
+                if (k == 3) { continue; }
+                for (g = 0; g < 3; g++) {
+                    if (!(s_gmask & (1 << g))) { continue; }
+                    case_t c = { l ? 16 : 32, 0.0f, (k == 1) ? 4.0f : 5.0f, 1, vv[v], vv[v], 31, 0.1f, s_lg3[g], k };
+                    sim(&c, &r);
+                    st[g][l].max = (r.over > st[g][l].max) ? r.over : st[g][l].max;
+                    st[g][l].settle = (r.settle > st[g][l].settle) ? r.settle : st[g][l].settle;
+                    st[g][l].tail = (r.tail_rms > st[g][l].tail) ? r.tail_rms : st[g][l].tail;
+                    st[g][l].lost += r.lost;
+                    st[g][l].err += (r.err != 0) || (r.risk != 0);
+                    st[g][l].flip = (r.exit_flip > st[g][l].flip) ? r.exit_flip : st[g][l].flip;
+                    printf("    직선%d L%2d v%2d %-4s | 넘침 %4.2f 단위 정착 %5.0f mm 끝 평균 %5.2f 단위 끝 RMS %4.2f mm 끝폭 %4.1f 바뀜 %d | 잃음 %d 위험 %d err %d\n",
+                           k, c.leds, c.v_mpm, s_lgn[g], r.over, r.settle, r.steady, r.tail_rms, r.tail_pp, r.exit_flip, r.lost, r.risk, r.err);
+                }
+            }
+        }
+    }
+    printf("[강건성] 곡선 A~D, wide·일반, 31 m/min, 지연 100·150 ms. rms 칸 = 직선 꺾임 뒤 정상 편차 mm\n");
+    for (k = 0; k < 7; k++) {
+        static const char *kn[7] = { "휠간격-5%", "휠간격+5%", "GD-10%", "GD+10%", "왼쪽 펄스 2% 손실", "오른쪽 바퀴 +1.5%", "오른쪽 바퀴 -1.5%" };
+        agg_t one[3];
+        memset(one, 0, sizeof(one));
+        for (g = 0; g < 3; g++) {
+            if (!(s_gmask & (1 << g))) { continue; }
+            s_m.wbx = (k == 0) ? 0.95f : ((k == 1) ? 1.05f : 1.0f);
+            s_m.gdx = (k == 2) ? 0.9f : ((k == 3) ? 1.1f : 1.0f);
+            s_m.slip = (k == 4) ? 2.0f : 0.0f;
+            s_m.wr = (k == 5) ? 1.015f : ((k == 6) ? 0.985f : 1.0f);
+            for (l = 0; l < 2; l++) {
+                for (t = 1; t < 3; t++) {
+                    for (i = 0; i < 4; i++) {
+                        case_t c = { l ? 16 : 32, s_cur6[i].r, s_cur6[i].deg, s_cur6[i].dir, 31, 31, 31, tt[t], s_lg3[g], 0 };
+                        sim(&c, &r);
+                        agg_add(&one[g], &r);
+                        agg_add(&rb[g], &r);
+                        if (verbose) { line(s_cur6[i].name, &c, &r); }
+                    }
+                }
+                {   /* 직선 꺾임 복귀: 정상 편차·발진 */
+                    case_t c = { l ? 16 : 32, 0.0f, 5.0f, 1, 31, 31, 31, 0.15f, s_lg3[g], 2 };
+                    sim(&c, &r);
+                    one[g].rms = 0.0f;
+                    if (fabsf(r.steady) * GUIDE_UNIT_MM > one[g].rms) { one[g].rms = fabsf(r.steady) * GUIDE_UNIT_MM; }
+                    if (r.tail_pp > one[g].tail) { one[g].tail = r.tail_pp; }
+                    one[g].lost += r.lost;
+                }
+            }
+            s_m.wbx = s_m.gdx = s_m.wr = 1.0f;
+            s_m.slip = 0.0f;
+            snprintf(nm, sizeof(nm), "%s %s", kn[k], s_lgn[g]);
+            agg_show(nm, &one[g]);
+        }
+    }
+    printf("[요약 곡선] 끝폭 = 출구 뒤 끝 1 m 편차 폭\n");
+    for (l = 0; l < 2; l++) {
+        for (g = 0; g < 3; g++) {
+            snprintf(nm, sizeof(nm), "%s %s", l ? "일반" : "wide", s_lgn[g]);
+            agg_show(nm, &a[g][l]);
+        }
+    }
+    printf("[요약 직선] 넘침(단위)·정착(mm)·끝 RMS(mm) 최대\n");
+    for (l = 0; l < 2; l++) {
+        for (g = 0; g < 3; g++) {
+            printf("  %-4s %-4s 넘침 %4.2f 정착 %5.0f 끝 RMS %4.2f 바뀜 %d 잃음 %d 오류·위험 %d\n",
+                   l ? "일반" : "wide", s_lgn[g], st[g][l].max, st[g][l].settle, st[g][l].tail, st[g][l].flip, st[g][l].lost, st[g][l].err);
+        }
+    }
+    printf("[요약 강건성]\n");
+    for (g = 0; g < 3; g++) { agg_show(s_lgn[g], &rb[g]); }
+}
+
+/* 합격 표: 한 줄에 한 조건. 같은 표를 기준선(v0.34.0 조향) 실행 파일과 견준다. LG 0 만 돈다 */
+static void acc_line(const char *grp, const char *name, const case_t *c, const res_t *r)
+{
+    printf("K %s/%s/L%d/v%d/t%d/m%d/d%.1f | max %.1f rms %.1f jn %.2f p95 %.0f smax %.0f eover %.1f settle %.0f tail %.1f lost %d flip %d err %d"
+           " astmax %.0f ajn %.2f over %.2f trms %.2f risk %d vavg %.1f\n",
+           grp, name, c->leds, c->v_mpm, (int)(c->tau * 1000.0f + 0.5f), c->mode, c->deg, r->max, r->rms, r->j_n50, r->st_p95, r->st_max,
+           r->eover, r->settle, r->tail_pp, r->lost, r->exit_flip, r->err, r->a_stmax, r->a_jn, r->over, r->tail_rms, r->risk, r->v_avg);
+}
+
+static void acc_case(const char *grp, const char *name, case_t c)
+{
+    res_t r;
+    sim(&c, &r);
+    acc_line(grp, name, &c, &r);
+}
+
+static void acceptance(void)
+{
+    static const int   vv[3] = { 31, 25, 15 };
+    static const float tt[3] = { 0.05f, 0.1f, 0.15f };
+    static const char *kn[9] = { "WW-20", "WW+20", "GD-20", "GD+20", "PL-20", "PL+20", "R+1.5", "R-1.5", "SLIP2" };
+    int l, v, t, i, k;
+    for (l = 0; l < 2; l++) {
+        int leds = l ? 16 : 32;
+        for (v = 0; v < 3; v++) {
+            for (t = 0; t < 3; t++) {
+                for (i = 0; i < 6; i++) {
+                    case_t c = { leds, s_cur6[i].r, s_cur6[i].deg, s_cur6[i].dir, vv[v], vv[v], 31, tt[t], 0, 0 };
+                    acc_case("곡선", s_cur6[i].name, c);
+                }
+            }
+            for (k = 1; k <= 5; k++) {      /* 직선: 1 옆 4단위 지령, 2 5단위 꺾임, 4 출발 5단위, 5 = 반 단위 꺾임(1단위 떨림) */
+                case_t c = { leds, 0.0f, (k == 1) ? 4.0f : ((k == 5) ? 1.0f : 5.0f), 1, vv[v], vv[v], 31, 0.1f, 0, (k == 5) ? 2 : k };
+                if (k == 3) { continue; }
+                acc_case("직선", (k == 5) ? "떨림" : ((k == 1) ? "계단" : ((k == 2) ? "꺾임" : "출발")), c);
+            }
+        }
+        for (k = 0; k < 9; k++) {
+            s_m.wbx = (k == 0) ? 0.8f : ((k == 1) ? 1.2f : 1.0f);
+            s_m.gdx = (k == 2) ? 0.8f : ((k == 3) ? 1.2f : 1.0f);
+            s_m.pl = (k == 4) ? 0.8f : ((k == 5) ? 1.2f : 1.0f);
+            s_m.wr = (k == 6) ? 1.015f : ((k == 7) ? 0.985f : 1.0f);
+            s_m.slip = (k == 8) ? 2.0f : 0.0f;
+            for (t = 1; t < 3; t++) {
+                for (i = 0; i < 4; i++) {
+                    char g[24];
+                    case_t c = { leds, s_cur6[i].r, s_cur6[i].deg, s_cur6[i].dir, 31, 31, 31, tt[t], 0, 0 };
+                    snprintf(g, sizeof(g), "강건 %s", kn[k]);
+                    acc_case(g, s_cur6[i].name, c);
+                }
+            }
+            {
+                char g[24];
+                case_t c = { leds, 0.0f, 5.0f, 1, 31, 31, 31, 0.15f, 0, 2 };
+                snprintf(g, sizeof(g), "강건 %s", kn[k]);
+                acc_case(g, "꺾임", c);
+            }
+            s_m.wbx = s_m.gdx = s_m.pl = s_m.wr = 1.0f;
+            s_m.slip = 0.0f;
+        }
+        for (v = 0; v < 2; v++) {           /* 잡음: 끊김 + 점(10·25 mm), 30도 교차선(10·25 mm) */
+            for (k = 0; k < 2; k++) {
+                case_t c3 = { leds, 0.0f, k ? 25.0f : 10.0f, 1, v ? 15 : 31, v ? 15 : 31, 31, 0.1f, 0, 3 };
+                case_t c6 = { leds, 0.0f, k ? 25.0f : 10.0f, 1, v ? 15 : 31, v ? 15 : 31, 31, 0.1f, 0, 6 };
+                acc_case("잡음", "점", c3);
+                acc_case("잡음", "교차30", c6);
+            }
+        }
+        for (t = 1; t < 3; t++) {           /* 태그 없는 최대 곡률: 최고 속도(DRS·LOS 37 m/min)로 진입 */
+            static const float rr[6] = { 500.0f, 800.0f, 1000.0f, 1500.0f, 800.0f, 500.0f };
+            for (i = 0; i < 6; i++) {
+                char nm[16];
+                case_t c = { leds, rr[i], (i < 4) ? 90.0f : 60.0f, (i & 1) ? 1 : -1, 37, 37, 37, tt[t], 0, (i < 4) ? 0 : 5 };
+                snprintf(nm, sizeof(nm), "%s%.0f", (i < 4) ? "R" : "S", rr[i]);
+                acc_case("태그없음", nm, c);
+            }
+        }
+    }
+}
+
+static void acc2_line(const char *grp, const char *name, const case_t *c, const res_t *r)
+{
+    printf("K %s/%s/GD%.0f/L%d/v%d/t%d/m%d/d%.0f | max %.1f cmax %.1f rms %.1f jn %.2f eover %.1f settle %.0f tail %.1f lost %d flip %d err %d"
+           " astmax %.0f ajn %.2f over %.2f trms %.2f risk %d pass %.2f vmin %.1f izero %.2f vavg %.1f\n",
+           grp, name, s_gd, c->leds, c->v_mpm, (int)(c->tau * 1000.0f + 0.5f), c->mode, c->deg, r->max, r->cmax, r->rms, r->j_n50,
+           r->eover, r->settle, r->tail_pp, r->lost, r->exit_flip, r->err, r->a_stmax, r->a_jn, r->over, r->tail_rms, r->risk,
+           r->pass_s, r->vmin, r->izero_s, r->v_avg);
+}
+
+static void acc2_case(const char *grp, const char *name, case_t c)
+{
+    res_t r;
+    sim(&c, &r);
+    acc2_line(grp, name, &c, &r);
+}
+
+/* 경로 기억 비교 표: GD 250·500 × wide·일반, 태그 없음(속도는 처음부터 그대로) */
+static void acceptance2(void)
+{
+    static const float rr[7] = { 400.0f, 500.0f, 600.0f, 800.0f, 1000.0f, 1500.0f, 2000.0f };
+    static const float aa[3] = { 45.0f, 90.0f, 180.0f };
+    static const int   vv[4] = { 15, 25, 31, 37 };
+    static const char *kn[9] = { "WW-20", "WW+20", "GD-20", "GD+20", "PL-20", "PL+20", "R+1.5", "R-1.5", "SLIP2" };
+    int g, l, i, a, v, t, k;
+    for (g = 0; g < 2; g++) {
+        for (l = 0; l < 2; l++) {
+            int leds = l ? 16 : 32;
+            float gd = g ? 500.0f : 250.0f;
+            char nm[24];
+            for (i = 0; i < 9; i++) {
+                for (a = 0; a < 3; a++) {
+                    for (v = 0; v < 4; v++) {
+                        for (t = 0; t < 2; t++) {
+                            int s_shape = (i >= 7);
+                            float r = s_shape ? ((i == 7) ? 600.0f : 1000.0f) : rr[i];
+                            case_t c = { leds, r, aa[a], (a & 1) ? 1 : -1, vv[v], vv[v], 37, t ? 0.15f : 0.1f, 0, s_shape ? 5 : 0 };
+                            s_gd = gd;
+                            snprintf(nm, sizeof(nm), "%s%.0f", s_shape ? "S" : "R", r);
+                            acc2_case("곡선", nm, c);
+                        }
+                    }
+                }
+            }
+            for (v = 0; v < 4; v++) {
+                for (k = 1; k <= 5; k++) {
+                    case_t c = { leds, 0.0f, (k == 1) ? 4.0f : ((k == 5) ? 1.0f : 5.0f), 1, vv[v], vv[v], 37, 0.1f, 0, (k == 5) ? 2 : k };
+                    if (k == 3) { continue; }
+                    s_gd = gd;
+                    acc2_case("직선", (k == 5) ? "떨림" : ((k == 1) ? "계단" : ((k == 2) ? "꺾임" : "출발")), c);
+                }
+            }
+            for (k = 0; k < 9; k++) {
+                s_m.wbx = (k == 0) ? 0.8f : ((k == 1) ? 1.2f : 1.0f);
+                s_m.gdx = (k == 2) ? 0.8f : ((k == 3) ? 1.2f : 1.0f);
+                s_m.pl = (k == 4) ? 0.8f : ((k == 5) ? 1.2f : 1.0f);
+                s_m.wr = (k == 6) ? 1.015f : ((k == 7) ? 0.985f : 1.0f);
+                s_m.slip = (k == 8) ? 2.0f : 0.0f;
+                for (i = 0; i < 2; i++) {
+                    char gr[24];
+                    case_t c = { leds, i ? 1000.0f : 600.0f, 90.0f, i ? 1 : -1, 31, 31, 37, 0.15f, 0, 0 };
+                    s_gd = gd;
+                    snprintf(gr, sizeof(gr), "강건 %s", kn[k]);
+                    acc2_case(gr, i ? "R1000" : "R600", c);
+                }
+                {
+                    case_t c = { leds, 0.0f, 5.0f, 1, 31, 31, 37, 0.15f, 0, 2 };
+                    char gr[24];
+                    s_gd = gd;
+                    snprintf(gr, sizeof(gr), "강건 %s", kn[k]);
+                    acc2_case(gr, "꺾임", c);
+                }
+                s_m.wbx = s_m.gdx = s_m.pl = s_m.wr = 1.0f;
+                s_m.slip = 0.0f;
+            }
+            for (v = 0; v < 2; v++) {
+                for (k = 0; k < 2; k++) {
+                    case_t c3 = { leds, 0.0f, k ? 25.0f : 10.0f, 1, v ? 15 : 31, v ? 15 : 31, 37, 0.1f, 0, 3 };
+                    case_t c6 = { leds, 0.0f, k ? 25.0f : 10.0f, 1, v ? 15 : 31, v ? 15 : 31, 37, 0.1f, 0, 6 };
+                    s_gd = gd;
+                    acc2_case("잡음", "끊김점", c3);
+                    acc2_case("잡음", "교차30", c6);
+                }
+            }
+        }
+    }
+    s_gd = 250.0f;
+}
+
 static void on_abort(int sig) { (void)sig; _exit(3); }
 
 int main(int argc, char **argv)
@@ -495,7 +1003,22 @@ int main(int argc, char **argv)
     signal(SIGABRT, on_abort);
     setvbuf(stdout, 0, _IONBF, 0);
     if ((argc > 1) && (strcmp(argv[1], "sweep") == 0)) { sweep(); return 0; }
+    if ((argc > 1) && (strcmp(argv[1], "acc") == 0))   { acceptance(); return 0; }
+    if ((argc > 1) && (strcmp(argv[1], "acc2") == 0))  { acceptance2(); return 0; }
     if ((argc > 1) && (strcmp(argv[1], "tape") == 0))  { tape_table(); return 0; }
+    if ((argc > 1) && (strcmp(argv[1], "turn") == 0))  { turn_table(); return 0; }
+    if ((argc > 1) && (strcmp(argv[1], "cmp") == 0))   { if (argc > 2) { s_gmask = atoi(argv[2]); } compare(argc > 3); return 0; }
+    if ((argc > 6) && (strcmp(argv[1], "one") == 0)) {  /* one LG 곡선(0~5, 직선은 6 + 모드) v tau_ms leds */
+        int i = atoi(argv[3]);
+        case_t c = { atoi(argv[6]), 0.0f, 5.0f, 1, atoi(argv[4]), atoi(argv[4]), 31, (float)atoi(argv[5]) * 0.001f, atoi(argv[2]), 0 };
+        if (i < 6) { c.r_mm = s_cur6[i].r; c.deg = s_cur6[i].deg; c.dir = s_cur6[i].dir; }
+        else       { c.mode = i - 6; c.deg = (c.mode == 1) ? 4.0f : 5.0f; }
+        s_trace = (argc > 7);
+        sim(&c, &r);
+        show((i < 6) ? s_cur6[i].name : "직선", &c, &r);
+        printf("  중심 %.1f 넘침(직선) %.2f 정착 %.0f 끝 RMS %.2f 끝 평균 %.2f\n", r.cerr, r.over, r.settle, r.tail_rms, r.steady);
+        return 0;
+    }
 
     for (g = 0; g < 2; g++) {
         for (l = 32; l >= 16; l -= 16) {
@@ -568,6 +1091,16 @@ int main(int argc, char **argv)
         }
         tape_sim(1, 250.0f, 50, 0.15f, 10.0f, &tr);
         assert(tr.found && (tr.err == 0) && (fabsf(tr.v_cmd - 4.0f) < 0.1f) && (tr.stop_x < -240.0f) && (tr.stop_x > -255.0f));
+    }
+    {   /* 정렬 회전 끝 등감속(v0.35.0): 가운데 도달 지령 ≤ 정지 바닥, 다시 가속 없음, 선 기준 각 오차 1도 안, 보정 많아야 1번.
+         * v0.34.0(최저 회전 속도 기어가기)은 가운데 도달 615~784 rpm, 보정 24조건 합 26 */
+        turn_res_t tr;
+        for (i = 0; i < 4; i++) {
+            turn_sim((i & 1) ? 500.0f : 250.0f, (i & 2) ? 16 : 32, 0.15f, (i & 1) ? 0.8f : 1.25f, &tr);
+            printf("  정렬 회전 GD %d L%d: 가운데 %.0f rpm, 선 기준 각 %.2f도, 보정 %d, %.2f s\n", (i & 1) ? 500 : 250, (i & 2) ? 16 : 32,
+                   tr.v_center, tr.line_deg, tr.fix, tr.t_turn);
+            assert(tr.done && (tr.err == 0) && (tr.v_center <= (float)stop_min_rpm()) && (tr.reacc == 0) && (fabsf(tr.line_deg) < 1.0f) && (tr.fix <= 1));
+        }
     }
     printf("test_curve ok\n");
     return 0;

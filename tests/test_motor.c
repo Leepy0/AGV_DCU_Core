@@ -313,13 +313,13 @@ int main(void)
             assert(D.tape_stop_pos == fx[c].pos && D.tape_align == 1 && D.turn_pulses == 2000);
             for (int i = 0; i < 30; i++) { assert(motor_turn_adjust() <= (P.turn_min > STOP_MIN_RPM ? P.turn_min : STOP_MIN_RPM)); }
             D.tape_fix_turned = 20;            /* 2도 */
-            D.guide_pos = (int16_t)(fx[c].pos / 2);   /* 1단위 = 중앙 */
+            D.guide_pos = 0;                  /* 가운데 0 칸에서 선다(v0.35.0. 예전은 ±1단위) */
             assert(motor_turn_adjust() == 0 && D.vin_out == 0 && D.tape_step == TAPE_STEP_SETTLE);
             for (int i = 0; i < 19; i++) { (void)motor_turn_adjust(); }
             assert(D.tape_align == 1);
             assert(motor_turn_adjust() == 0);
             assert(D.tape_align == 0 && D.turn_pulses == 0 && D.tape_fix_rev == 0);
-            assert(D.tape_fix_end == 0 && D.tape_fix_cnt == 1 && D.tape_final_pos == fx[c].pos / 2);
+            assert(D.tape_fix_end == 0 && D.tape_fix_cnt == 1 && D.tape_final_pos == 0);
             assert(D.tape_turned == t0 && D.system_err == 0);
         }
     }
@@ -430,8 +430,9 @@ int main(void)
         }
         assert(at_min > 0.0f);
         printf("  정렬 회전 최저 속도 구간 %.1f 도\n", (4870.0f - at_min) / rate);
-        assert((4870.0f - at_min) / rate <= 3.0f && (4870.0f - at_min) / rate >= 1.0f);
-        assert(D.vin_out == P.turn_min);      /* 라인이 안 보이면 마지막 2도는 최저 회전 속도 */
+        /* v0.35.0: 끝점(엔코더 추정)에서 0 이 되는 등감속이라 최저 회전 속도 기어가기가 없다. 끝은 정지 바닥 */
+        assert((4870.0f - at_min) / rate <= 5.0f);   /* 감속도 0.5 몫·지연 20틱이라 약 4도 */
+        assert(D.vin_out == stop_min_rpm());
     }
     /* 편차 → 각 환산: atan(편차 mm / GD). 1단위 = 6.89 / 2 mm. GD 250, 1도 10 펄스 */
     { static const struct { int16_t pos; float lo, hi; } cv[2] = { { 15, 115.0f, 118.0f }, { 31, 229.0f, 233.0f } };
@@ -551,7 +552,7 @@ int main(void)
     D.guide_all_off = 1;
     for (int i = 0; i < 20; i++) { (void)motor_turn_adjust(); }
     assert(D.turn_pulses == 500 && D.tape_step == 0);
-    /* 단계 2: 라인 위치로 남은 각을 알고 거리로 감속한다. 중앙 2도 안이면 최저 속도 */
+    /* 단계 2: 라인 위치로 남은 각을 알고 그 끝에서 0 이 되는 등감속(바닥 아래는 바닥) */
     setup();
     D.control = RUN_TURN;
     D.tape_step = 2; D.tape_align = 1; D.turn_pulses = 2000; D.tape_turned = 1900;
@@ -560,17 +561,18 @@ int main(void)
     D.guide_pos = 9;                          /* 9단위 = 31 mm = 7.1도 남음 */
     D.vin_out = P.turn_speed;
     for (int i = 0; i < 2000; i++) { (void)motor_turn_adjust(); }
-    assert(D.tape_align == 1 && D.vin_out > P.turn_min && D.vin_out < P.turn_speed);
+    assert(D.tape_align == 1 && D.vin_out > stop_min_rpm() && D.vin_out < P.turn_speed);   /* 7도 앞: 등감속 중 */
     D.guide_all_off = 1;                      /* 라인이 잠깐 안 보이면 마지막 예상을 쓴다 */
     D.tape_end_cnt = (float)D.tape_turned + (float)P.turn_90 / 90.0f;
     for (int i = 0; i < 2000; i++) { (void)motor_turn_adjust(); }
-    assert(D.vin_out == P.turn_min);
+    assert((D.vin_out <= P.turn_min) && (D.vin_out >= stop_min_rpm()));   /* 1도 앞: 등감속, 다시 올리지 않는다 */
     /* 라인 위(단계 2)에서 2도 안: 가이드 위치로 남은 각에 비례해 정지 바닥까지 낮춘다. 예전(QUIRK_FLOOR_350)은 최저 회전 속도 */
     D.guide_all_off = 0;
     D.guide_pos = 2;                          /* 2단위 = 6.9 mm = 1.6도 */
     for (int i = 0; i < 300; i++) { (void)motor_turn_adjust(); }
     assert((D.tape_step == 2) && (D.vin_out < P.turn_min) && (D.vin_out >= stop_min_rpm()));
     (void)param_set(P_LEGACY_QUIRKS, QUIRK_FLOOR_350);
+    D.tape_plan_min = 0;                      /* 회전 중 LG 를 바꾼 시험이라 감속 기억을 지운다*/
     for (int i = 0; i < 300; i++) { (void)motor_turn_adjust(); }
     assert(D.vin_out == P.turn_min);
     (void)param_set(P_LEGACY_QUIRKS, 0);
