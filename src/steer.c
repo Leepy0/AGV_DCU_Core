@@ -3,6 +3,7 @@
 #include "agv/drive.h"
 #include "agv/guide.h"
 #include "agv/param.h"
+#include "agv/steerlog.h"
 #include "agv/stop.h"
 #include "agv/tune.h"
 
@@ -61,6 +62,7 @@ static struct {
 
 #if AGV_DEV_TESTS
 int16_t steer_test_rpm;
+float steer_i_out(void) { return s_steer.i_out; }   /* 조향 기록기(steerlog.c)가 읽는다 */
 #endif
 
 void steer_reset(void)

@@ -2616,6 +2616,97 @@ static void test_io_test(void)
     printf("  io test ok\n");
 }
 
+#include "agv/steerlog.h"
+#if AGV_DEV_TESTS
+static void sl_scan(uint16_t leds)
+{
+    host.sci[HAL_SCI_B].rx_len = host.sci[HAL_SCI_B].rx_pos = 0;
+    guide_led_reply(leds);
+    run_encoder(0, 20000);
+    run_encoder(1, 20000);
+    tick();
+}
+
+static const steerlog_smp_t *sl_last(void)
+{
+    return &agv_steerlog.s[(agv_steerlog.w + STEERLOG_N - 1u) % STEERLOG_N];
+}
+
+static const steerlog_ev_t *sl_find(int16_t kind)
+{
+    uint16_t i, n = (agv_steerlog.ev_n < STEERLOG_EV) ? agv_steerlog.ev_n : STEERLOG_EV;
+    for (i = 0; i < n; i++) { if (agv_steerlog.ev[i].kind == kind) { return &agv_steerlog.ev[i]; } }
+    return 0;
+}
+
+/* 조향 기록기: 달리면 표본이 쌓이고(w_cmd 를 풀 수 있다), 위치가 튀면 사건이 직전·이번 LED 와 남고, 서면 언다 */
+static void test_steerlog(void)
+{
+    const steerlog_smp_t *s;
+    const steerlog_ev_t *e;
+    uint32_t total;
+    int k, p, off;
+
+    boot();
+    assert(agv_steerlog.total == 0 && agv_steerlog.runs == 0);
+    assert(param_set_ram(P_LEGACY_QUIRKS, 0) == 0);
+    drive_up();
+    for (k = 0; k < 700; k++) {
+        sl_scan(LED_CENTER);
+        if (agv_steerlog.total > 0u) {      /* w_cmd 풀기 = motor_speed_pi 의 RUN_DRIVE 식 */
+            s = sl_last();
+            p = s->p2 >> 1;
+            off = s->io >> 8;
+            assert(D.w_cmd[0] == ((s->v_cmd + p + off > 0) ? s->v_cmd + p + off : 0));
+            assert(D.w_cmd[1] == ((s->v_cmd - p - off > 0) ? s->v_cmd - p - off : 0));
+        }
+    }
+    assert(D.vin_out > 1000 && agv_steerlog.runs == 1);
+    assert(agv_steerlog.total > STEERLOG_N && agv_steerlog.n == STEERLOG_N);
+    assert(agv_steerlog.w == agv_steerlog.total % STEERLOG_N);
+    assert(agv_steerlog.cfg.los == P.low_speed && agv_steerlog.cfg.drs == P.target_speed && agv_steerlog.cfg.dcc == P.dcc);
+    s = sl_last();
+    assert((s->pf & 0xFFu) == 0 && ((s->pf >> 8) & 7u) == (uint16_t)(D.step - DRIVE_CHANGE_SPEED));
+    assert(s->v_cmd == D.v_cmd && s->rpm[0] == D.rpm[0] && s->rpm[1] == D.rpm[1]);
+    assert(agv_steerlog.ev_n == 0);
+
+    D.pause_stop = 1;                               /* 일시정지로 서면 언다 */
+    for (k = 0; (k < 500) && (D.vin_out != 0); k++) { sl_scan(LED_CENTER); }
+    assert((D.vin_out == 0) && (D.control == RUN_DRIVE));
+    total = agv_steerlog.total;
+    for (k = 0; k < 50; k++) { sl_scan(LED_CENTER); }
+    assert(agv_steerlog.total == total && agv_steerlog.runs == 1);
+    /* 다시 출발: 표본·사건을 새로 시작. 일시정지 재출발 절차 대신 기록기 입력(vin_out)만 바꿔 직접 부른다 */
+    D.vin_out = 300;
+    steerlog_tick();
+    assert(agv_steerlog.runs == 2 && agv_steerlog.total == 1u && agv_steerlog.n == 1u && agv_steerlog.w == 1u);
+    D.vin_out = 0;
+    steerlog_tick();
+    assert(agv_steerlog.total == 1u);
+    boot();                                         /* 위치 튐 사건은 새 주행에서 */
+    assert(agv_steerlog.total == 0 && agv_steerlog.runs == 0);
+    assert(param_set_ram(P_LEGACY_QUIRKS, 0) == 0);
+    drive_up();
+    for (k = 0; k < 400; k++) { sl_scan(LED_CENTER); }
+    assert(D.vin_out > 1000 && agv_steerlog.ev_n == 0 && agv_steerlog.runs == 1);
+
+    sl_scan(LED_CENTER << 6);                       /* 8·9번 칸 → 14·15번 칸: 위치 0 → +12 */
+    assert(D.guide_pos == 12 && D.risk_stop == 1);
+    e = sl_find(STEERLOG_EV_JUMP);
+    assert(e && e->prev_pos == 0 && e->pos == 12 && e->prev_lo == LED_CENTER && e->lo == (LED_CENTER << 6) && e->hi == 0);
+    assert(e->dist_mm > 0 && e->vin_out == D.vin_out && e->tick == (uint16_t)(agv_steerlog.total - 1u));
+    e = sl_find(STEERLOG_EV_RISK);
+    assert(e && e->prev_pos == 0 && e->pos == 12 && e->prev_lo == LED_CENTER && e->lo == (LED_CENTER << 6));
+    assert((sl_last()->p2 & 1) == 1 && (sl_last()->pf & 0xFFu) == 12u);
+    total = agv_steerlog.total;
+    printf("  steerlog ok (%lu 표본, 사건 %u)\n", (unsigned long)total, agv_steerlog.ev_n);
+}
+#else
+#ifdef STEERLOG_N
+#error "AGV_DEV_TESTS 0 이미지에는 조향 기록기가 없어야 한다"
+#endif
+#endif
+
 int main(void)
 {
     setvbuf(stdout, 0, _IONBF, 0);
@@ -2665,6 +2756,9 @@ int main(void)
 #endif
     test_guide_h_only();
     test_curvelog();
+#if AGV_DEV_TESTS
+    test_steerlog();
+#endif
     test_edge_release();
     test_turn_scale();
     test_tape_turn();
