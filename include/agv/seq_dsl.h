@@ -221,6 +221,10 @@ typedef unsigned long long dsl_cond_t;
 /* 회전을 걸고 다음 스캔에 다음 스텝. 회전 중에 뒤 스텝이 돈다 */
 #define TURN_NOWAIT(dir, deg, fb, autostart, obs) \
     DSL_STEP(SK_TURN_NOWAIT, SEQ_NO_LABEL, TURN_##dir, deg, (fb) | ((autostart) << 4) | ((obs) << 8), 0, 0, 0)
+/* 그 자리에서 출발해 mm 앞(지금 전후진 방향)에 위치 정지하고, 설 때까지 기다린 뒤 다음 스텝. mm 1~32767(밖이면 컴파일 오류).
+ * 속도는 거리에 맞춰 SPN~LLOW 안에서 자동(tagact_move_mm). 이동 중 태그는 무시, 장애물은 일시정지 뒤 이어 감 */
+#define DSL_MM_OK(mm)          (0 * sizeof(char[(((mm) >= 1) && ((mm) <= 32767)) ? 1 : -1]))
+#define MOVE_MM(mm)            DSL_STEP(SK_MOVE_MM, SEQ_NO_LABEL, (mm) + DSL_MM_OK(mm), 0, 0, 0, 0, 0)
 #define ERROR_HOLD(code, c, label)  DSL_STEP_C(SK_ERROR_HOLD, label, code, 0, 0, c, 0)
 #define END_RESTART            DSL_STEP(SK_END_RESTART, SEQ_NO_LABEL, 0, 0, 0, 0, 0, 0)
 

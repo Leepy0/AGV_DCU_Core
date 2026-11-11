@@ -34,7 +34,7 @@ static int32_t plan_pulses(const stop_ctrl_t *c, int32_t remaining, float scale)
 
 int16_t stop_is_position(int16_t reason)
 {
-    return (reason >= STOP_REASON_TAG_POSITION) && (reason <= STOP_REASON_TRAFFIC_POSITION);
+    return (reason >= STOP_REASON_TAG_POSITION) && (reason <= STOP_REASON_MOVE);
 }
 
 int16_t stop_is_pause(int16_t reason)
@@ -132,8 +132,8 @@ void stop_ctrl_begin(stop_ctrl_t *c, int16_t reason, int16_t entry_rpm, int16_t 
         limit = (reason == STOP_REASON_TURN_ANGLE)
               ? turn_dcc(dcc)
               : stop_clamp(dcc, 1, STOP_RAPID_DCC_MAX);
-        /* 회전과 교차로 대기는 제동점까지 순항한다 */
-        c->phase = ((reason == STOP_REASON_TURN_ANGLE) || (reason == STOP_REASON_TRAFFIC_POSITION))
+        /* 회전과 교차로 대기, 시퀀스 거리 이동(서 있다 출발)은 제동점까지 순항한다 */
+        c->phase = ((reason == STOP_REASON_TURN_ANGLE) || (reason == STOP_REASON_TRAFFIC_POSITION) || (reason == STOP_REASON_MOVE))
                  ? STOP_PHASE_CRUISE : STOP_PHASE_DECELERATE;
         c->decel_limit = limit;
         if ((reason == STOP_REASON_TURN_ANGLE) && (c->accel_limit > limit)) { c->accel_limit = limit; }
@@ -460,7 +460,7 @@ void stop_reset(void)
 void stop_request_tag(void)
 {
     int16_t reason = ((D.turn_pulses > 0) && (D.turn_motion != 0) && (D.flag_turn == 0))
-                   ? STOP_REASON_BEFORE_TURN : STOP_REASON_TAG_DOCKING;
+                   ? STOP_REASON_BEFORE_TURN : (D.move_on ? STOP_REASON_MOVE : STOP_REASON_TAG_DOCKING);
     if ((uint16_t)s_request < STOP_REASON_COMMAND) { s_request = reason; }
 }
 
@@ -548,6 +548,7 @@ static void finish(void)
     D.flag_stopping = 1;
     D.flag_ready = D.flag_run = D.flag_jog_on = D.flag_turn = 0;
     D.amp_run = 0;
+    D.move_on = 0;          /* 시퀀스 MOVE_MM 이 다음 스텝으로 간다 */
     acs_cross_hold();       /* 교차로 대기 중 다른 정지로 섰다. 허가까지 다시 출발하지 않는다 */
 }
 
@@ -682,7 +683,7 @@ int16_t stop_run(void)
                 stop_begin_runtime(STOP_REASON_TURN_ANGLE);
             }
             else {
-                stop_begin_runtime((D.stop_pulses > 0) ? STOP_REASON_TAG_POSITION : STOP_REASON_COMMAND);
+                stop_begin_runtime((D.stop_pulses > 0) ? (D.move_on ? STOP_REASON_MOVE : STOP_REASON_TAG_POSITION) : STOP_REASON_COMMAND);
             }
         }
         else if (D.flag_turn && (D.control == RUN_TURN) && !D.tape_align) {

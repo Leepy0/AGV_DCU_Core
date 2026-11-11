@@ -9,6 +9,7 @@ extern uint16_t fake_key;           /* ui_key() */
 extern int      fake_restart_count, fake_link_full, fake_tx_count;
 extern uint16_t fake_tx[256][20];
 extern int      fake_speed_arg, fake_forback_arg, fake_turn_count;
+extern int16_t  fake_move_mm;      /* tagact_move_mm 마지막 인자. 부르면 move_on 3 */
 extern int      fake_log_count;     /* log_event 횟수. 마지막 code·a 를 남긴다 */
 extern uint16_t fake_log_code;
 extern int16_t  fake_log_a;

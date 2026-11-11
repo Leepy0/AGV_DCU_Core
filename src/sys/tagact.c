@@ -11,6 +11,8 @@
 #include "agv/stop.h"
 #include "agv/tune.h"
 
+float sqrtf(float x);
+
 #define D agv_drive
 #define P param_dv
 
@@ -84,6 +86,30 @@ void tagact_stop_after_mm(int32_t mm)
     D.flag_stopping = 1;
     D.stop_pulses = (int16_t)p;
     stop_request_tag();
+}
+
+/* 시퀀스 MOVE_MM. 서 있을 때만 건다. run.c 가 출발시키고, 주행 첫 틱에 정지 거리를 걸어 STOP_REASON_MOVE(제동점까지 순항하는
+ * 위치 정지)로 선다. 최고 속도 v(rpm): 0 → v → 0 이 거리 안에 들어가는 가장 빠른 값을 SPN~LLOW 로 묶는다.
+ *   거리 d(rpm·틱) = 펄스 / (12/6000) − 끝 꼬리(STOP_TAIL_RPM_TICKS) 를
+ *   d = A·v² + B·v 로 본다. A = (1/ACC + 1/DCC)/2(등가속·등감속), B = (ACC + DCC)/(2·2.4)(저크로 가감속도가 오르내리는 동안
+ *   속도가 거의 그대로인 몫, 정지 램프 저크 2.4) + 15틱(순항 판정 여유 2틱 + 제동 여유 8 + 지연 5. stop.c braking_pulses·cruise_left).
+ * v 가 커도 제동점은 정지 제어가 정한다(cruise_left). 이 값은 짧은 거리에서 가속만 하다 바로 서는 것을 막는 상한이다 */
+void tagact_move_mm(int16_t mm)
+{
+    float pulses = (float)mm * P.one_length_pulse, d, a, b, v;
+    int16_t acc = (P.acc > 0) ? P.acc : 1, dcc = (P.dcc > 0) ? P.dcc : 1;
+
+    if ((mm < 1) || D.flag_run || D.flag_ready || D.flag_stopping || (D.move_on != 0)) { return; }
+    if (pulses > 32767.0f) { pulses = 32767.0f; }
+    d = pulses * (6000.0f / (float)STOP_ENCODER_PPR) - (float)STOP_TAIL_RPM_TICKS;
+    a = 0.5f * (1.0f / (float)acc + 1.0f / (float)dcc);
+    b = (float)(acc + dcc) * (float)STOP_JERK_DEN / (2.0f * (float)STOP_JERK_NUM) + 15.0f;
+    v = (d > 0.0f) ? (sqrtf(b * b + 4.0f * a * d) - b) / (2.0f * a) : 0.0f;
+    if (v > (float)P.llow_speed) { v = (float)P.llow_speed; }
+    if (v < (float)P.min_speed)  { v = (float)P.min_speed; }
+    D.move_pulses = (int16_t)(pulses + 0.5f);
+    D.move_speed = (int16_t)v;
+    D.move_on = 1;
 }
 
 void tagact_speed(uint16_t level)

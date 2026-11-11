@@ -276,11 +276,22 @@ ACT_END
 ACT_BEGIN( a_bad_nowait )
     TURN_NOWAIT( CW, 90, 0, 0, 0 )
 ACT_END
+ACT_BEGIN( a_bad_move )
+    MOVE_MM( 100 )
+ACT_END
+
+/* 거리 이동: 출력 A 켬 → MOVE_MM(100) → 출력 B 켬 */
+SEQ_BEGIN( s_move )
+    OUT_ON( OUT_EXT_1 )
+    MOVE_MM( 100 )
+    OUT_ON( OUT_EXT_2 )
+    END_STOP
+SEQ_END
 
 enum {
     S_BRANCH = SEQ_SITE_BASE, S_UNMATCHED, S_TIMING, S_ACS, S_DRIVE, S_BUDGET, S_OUTS, S_FLICKER,
     S_ANY, S_HANDSHAKE, S_WAIT_OUT, S_CALL, S_BAD_LABEL, S_ACT_START, S_PROF, S_NO_TABLE,
-    S_XWHEN, S_XWAIT, S_ANY2, S_DPARAM, S_TPARAM, S_NOWAIT
+    S_XWHEN, S_XWAIT, S_ANY2, S_DPARAM, S_TPARAM, S_NOWAIT, S_MOVE
 };
 
 SEQ_MAP_BEGIN( site_seqs )
@@ -307,6 +318,7 @@ SEQ_MAP_BEGIN( site_seqs )
     SEQ_MAP( 0, S_DPARAM, s_dparam )
     SEQ_MAP( 0, S_TPARAM, s_tparam )
     SEQ_MAP( 0, S_NOWAIT, s_nowait )
+    SEQ_MAP( 0, S_MOVE, s_move )
 SEQ_MAP_END
 
 ACT_MAP_BEGIN( site_acts )
@@ -376,6 +388,19 @@ int main(void)
 
     assert(seq_bind(&s_site_ok) == 0);
     assert(seq_profile() == 0);
+
+    /* MOVE_MM: 앞 출력 → 이동 요청(100 mm) → 이동이 끝날(move_on 0) 때까지 대기 → 뒤 출력. ACT 에서는 금지 */
+    start(S_MOVE);
+    fake_move_mm = 0;
+    seq_run();
+    assert(fake_out == BIT(OUT_EXT_1) && fake_move_mm == 100 && D.move_on);
+    seq_run(); seq_run();
+    assert(seq_is_active() && fake_out == BIT(OUT_EXT_1));      /* 서기 전에는 B 를 켜지 않는다 */
+    D.move_on = 0;                                               /* 섰다(stop.c finish) */
+    seq_run();
+    assert(fake_out == (BIT(OUT_EXT_1) | BIT(OUT_EXT_2)) && !seq_is_active());
+    BAD(a_bad_move);
+    assert(seq_bind(&s_site_ok) == 0);
 
     /* WHEN: 대기 → 첫 참의 가지 → 안정 초과 → 재출발 */
     start(S_BRANCH);

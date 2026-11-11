@@ -209,6 +209,7 @@ void run_standby_clear(int16_t id)
 void run_seq_init(void)
 {
     seq_abort_all();
+    D.move_on = 0;
     comm_recent_clear();
     acs_cross_clear();
     D.tape_stop_id = 0;
@@ -259,7 +260,7 @@ static void start_run(void)
     D.cross_in_on = D.cross_out_on = 0;
     s_run.standby_auto = 0;
     s_run.standby_cnt = 0;
-    run_seq_init();
+    if (D.move_on == 0) { run_seq_init(); }   /* MOVE_MM 출발은 시퀀스를 살려 둔다 */
     s_run.wait_sec = 0;
     s_run.wait_ticks = 0;
     link_guide_init();
@@ -461,6 +462,12 @@ static void auto_run(void)
                 D.flag_stopping = 1;
                 D.turn_pulses = 0;
             }
+        }
+        else if (D.move_on == 1) {          /* 시퀀스 MOVE_MM: 시퀀스를 살려 둔 채 출발. 정지 거리는 주행 첫 틱(drive_pre)에 */
+            s_run.seq_go = (int16_t)seq_is_active();
+            start_run();
+            D.stop_pulses = D.move_pulses;  /* 서 있는 지금부터 센다(엔코더 ISR 이 줄인다). 정지는 주행 첫 틱에 건다 */
+            D.move_on = 2;
         }
         else if (D.wait_start) {
             wait_tick();
@@ -810,6 +817,12 @@ static void auto_speed_change(void)
 static void drive_pre(void)
 {
     start_low_speed();
+    if (D.move_on == 2) {               /* MOVE_MM 첫 주행 틱: 지금 자리에서 move_pulses 앞에 선다(stop_run 이 STOP_REASON_MOVE 로 건다) */
+        D.speed_cmd = D.move_speed;
+        if (D.stop_pulses <= 0) { D.stop_pulses = 1; }   /* 출발 전에 다 왔으면 바로 선다 */
+        D.flag_stopping = 1;
+        D.move_on = 3;
+    }
     if (tune_active()) { return; }      /* 튜닝·식별 시험은 속도를 스스로 정한다 */
     start_switch_high();
     if (D.obs_use) { auto_speed_change(); }

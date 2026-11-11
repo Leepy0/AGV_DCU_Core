@@ -1047,6 +1047,29 @@ static void test_tst(void)
     printf("  TST ok\n");
 }
 
+/* 시퀀스 MOVE_MM 이동 중 태그: ACK 는 보내고 동작(정지·속도)은 하지 않는다. 거리·정지 위치는 test_curve move 표(바퀴 모형) */
+static void test_move_tag_ignore(void)
+{
+    int16_t cmd;
+    int n0;
+    boot();
+    drive_up();
+    run_scan(50);
+    D.move_on = 3;                                    /* 이동 중으로 둔다 */
+    cmd = D.speed_cmd;
+    n0 = host.sci[HAL_SCI_A].tx_len;
+    tag_frame(1, '1', 0);                             /* 정지 태그 */
+    run_scan(2);
+    tag_frame(2, '2', 0);                             /* 속도 태그(LLOW) */
+    run_scan(2);
+    assert(!D.flag_stopping && (D.speed_cmd == cmd) && (host.sci[HAL_SCI_A].tx_len > n0));   /* 무시, ACK 는 나감 */
+    D.move_on = 0;
+    tag_frame(1, '3', 0);
+    run_scan(2);
+    assert(D.flag_stopping);                          /* 이동이 끝나면 다시 태그대로 */
+    printf("  MOVE_MM tag ignore ok\n");
+}
+
 /* 속도 조정 태그 'S'(실제 수신 경로 'E' 프레임). [2] 0 = 임시(RAM, 전원 재투입 때 저장된 LOS), 1 = LOS 저장,
  * 0S00 = 저장된 LOS 로 복원, 1S00 = 무시. 묶음: 0 은 SPN~DRS(rpm), 1 은 LOS 하한~DRS(m/min) */
 static void s_tag(char sub, int num)
@@ -2912,6 +2935,7 @@ int main(void)
     test_menu5();
 #if AGV_DEV_TESTS
     test_s_tag();                       /* 'S' 처리는 두 빌드 같다(comm.c). 개발 빌드에서만 돌린다 */
+    test_move_tag_ignore();
     test_tst();
     test_wt_ff();
 #endif

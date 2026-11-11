@@ -60,7 +60,7 @@ static const seq_def_t *find_def(const seq_def_t *list, uint16_t n, uint16_t id)
 static int16_t forbidden_in_act(uint16_t kind)
 {
     return (kind == SK_SPEED) || (kind == SK_FORBACK) || (kind == SK_TURN) || (kind == SK_TURN_NOWAIT)
-        || (kind == SK_ERROR_HOLD) || (kind == SK_END_RESTART);
+        || (kind == SK_ERROR_HOLD) || (kind == SK_END_RESTART) || (kind == SK_MOVE_MM);
 }
 
 void seq_pick_profile(void)
@@ -464,6 +464,13 @@ static uint16_t eval_step(seq_runner_t *r, const seq_step_t *s)
     case SK_TURN:
     case SK_TURN_NOWAIT:
         return eval_turn(r, s);
+    case SK_MOVE_MM:            /* 회전처럼 시퀀스를 살려 둔 채 run.c 가 이동하고, 서면(move_on 0) 다음 스텝. 거부되면 다음 스캔에 통과 */
+        if (r->a == 0) {
+            tagact_move_mm((int16_t)s->arg0);
+            r->a = 1;
+            return R_WAIT;
+        }
+        return D.move_on ? (uint16_t)R_WAIT : (uint16_t)R_NEXT;
     case SK_OBS:
         D.obs_use = (int16_t)s->arg0;
         return R_NEXT;

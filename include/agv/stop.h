@@ -52,6 +52,7 @@ typedef enum {
     STOP_REASON_BEFORE_TURN,
     STOP_REASON_TURN_ANGLE,
     STOP_REASON_TRAFFIC_POSITION,       /* 교차로 대기 목표 D.cross_pulses. 서면 STOP_REASON_TRAFFIC 유지로 넘어간다 */
+    STOP_REASON_MOVE,                   /* 시퀀스 MOVE_MM: 서 있다 출발해 D.stop_pulses 에 선다. 제동점까지 D.speed_cmd 로 순항 */
     STOP_REASON_COMMAND = 10,
     STOP_REASON_SWITCH,
     STOP_REASON_OBSTACLE,

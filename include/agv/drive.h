@@ -88,6 +88,11 @@ typedef struct {
      * DRIVE_ALIGN_HOLD 면 속도 상한 LLOW(선 없음 SPN). +1 은 튜닝(조향 상한만). 1~DRIVE_ALIGN_RAMP = 정렬 뒤 조향 상한을 ×2 로 푸는 틱. 0 = 평소.
      * AGV_START_ALIGN 0 이면 쓰지 않는다(늘 0, run.c·steer.c·motor.c 코드 없음) */
     int16_t start_align;
+    /* 시퀀스 거리 이동(MOVE_MM, tagact_move_mm). 0 없음, 1 요청(run.c 가 출발), 2 출발함(주행 첫 틱에 정지 거리를 건다),
+     * 3 이동 중(STOP_REASON_MOVE). 서면(stop.c finish)·시퀀스 중단(run_seq_init) 때 0 */
+    int16_t move_on;
+    int16_t move_pulses;             /* 목표 거리 펄스 */
+    int16_t move_speed;              /* 최고 속도 rpm(SPN~LLOW) */
     int16_t immediate_stop;          /* DA_Rfid_Retry.ImmediateStop */
 
     /* 정지·회전 거리. 엔코더 ISR 이 감소시킨다 */

@@ -52,6 +52,8 @@ int link_send(const uint16_t *buf, uint16_t n)
 
 void tagact_speed(uint16_t level) { fake_speed_arg = level; }
 void tagact_forback(dir_t d)      { fake_forback_arg = d; }
+int16_t fake_move_mm;
+void tagact_move_mm(int16_t mm)   { fake_move_mm = mm; agv_drive.move_on = 3; }   /* 이동 중으로 둔다. 시험이 0 으로 끝낸다 */
 void tagact_turn(turn_dir_t d, uint16_t deg, dir_t fb, uint16_t autostart, uint16_t obs)
 {
     (void)d; (void)deg; (void)fb; (void)autostart; (void)obs;

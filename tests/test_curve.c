@@ -54,7 +54,17 @@
 #define PI_F        3.14159265f
 #define STEER_SLEW_TEST 50.5f   /* steer.c STEER_SLEW_RPM + 반올림 */
 
-void site_register(void) { param_default_type(0); }
+/* 시퀀스 MOVE_MM 모의(move 표): 출력 A 켬 → MOVE_MM(mm) → 출력 B 켬. 거리는 시험이 arg0 를 바꾼다 */
+#include "agv/seq_dsl.h"
+static seq_step_t s_mv_steps[] = {
+    OUT_ON( OUT_EXT_1 )
+    MOVE_MM( 100 )
+    OUT_ON( OUT_EXT_3 )
+    END_STOP
+};
+static const seq_def_t s_mv_seqs[] = { { 0, SEQ_SITE_BASE, s_mv_steps, sizeof(s_mv_steps) / sizeof(s_mv_steps[0]) } };
+static const seq_site_t s_mv_site = { s_mv_seqs, 1, 0, 0, 0, 0, 0, 0, 0 };
+void site_register(void) { param_default_type(0); (void)seq_bind(&s_mv_site); }
 void site_manual(void)   { }
 
 typedef struct {
@@ -1635,6 +1645,100 @@ static void gs_flow(float p_ms, float tape_mm, int tns, int line, uint32_t seed,
     host.on_send = 0;
 }
 
+/* ---- 시퀀스 MOVE_MM 모의: 서 있다 시퀀스 요청 → A → mm 이동·정지 → B. 직선 테이프, 바퀴 지연 0.1 s.
+ * obs_at 0 이 아니면 그 mm 를 지날 때 앞 장애물을 1 s 켰다 끈다. lose_at 0 이 아니면 그 mm 뒤 선이 없다 */
+typedef struct { float run_mm, vmax_mpm, t_s; int b_early, done, stop_err, seq_on, paused; float x_obs; } mv_res_t;
+static void wt_tick(int reply);
+
+static void move_flow(int mm, int back, int obs_at, int lose_at, mv_res_t *r)
+{
+    static case_t c;
+    case_t c0 = { 32, 0.0f, 0.0f, 1, 25, 25, 30, 0.1f, 0, 0 };
+    float x0;
+    int t, obs_t = 0, moving = 0;
+
+    c = c0;
+    memset(r, 0, sizeof(*r));
+    memset(&s_v, 0, sizeof(s_v));
+    s_c = &c;
+    s_gd = 250.0f;
+    s_x30w = 0.0f;
+    s_cross_w = 0.0f;
+    s_v.s = GD_MM;
+    host_reset();
+    memset(&D, 0, sizeof(D));
+    memset(seq_request_flag, 0, sizeof(seq_request_flag));
+    sys_boot();
+    host.adc = 300u << 4;
+    for (t = 0; t < 60; t++) { scan(); }
+    assert(sys_power_on());
+    assert(param_set_ram(P_GEAR_RATIO, 60) == 0);
+    assert(param_set_ram(P_WHEEL_BASE_MM, (int16_t)(WB_MM / 10.0f)) == 0);
+    assert(param_set_ram(P_GUIDE_DIST_MM, 250) == 0);
+    assert(param_set_ram(P_SPEED_HIGH, 30) == 0);
+    assert(param_set_ram(P_SPEED_LOW, 25) == 0);
+    for (t = 0; t < 30; t++) { wt_tick(1); }
+    if (back) { run_relay(1, 0); }
+    s_mv_steps[1].arg0 = (uint16_t)mm;
+    seq_request(SEQ_SITE_BASE);
+    x0 = s_v.x;
+    for (t = 0; (t < 6000) && !r->done; t++) {
+        float u = 0.0f, slant = 1.0f, run = fabsf(s_v.x - x0);
+        int seen = cross(&u, &slant);
+        if (seen && (fabsf(u) > (float)s_c->leds * PITCH_MM / 2.0f + TAPE_MM)) { seen = 0; }
+        if (lose_at && (run > (float)lose_at)) { seen = 0; }
+        if (obs_at && (run > (float)obs_at) && (obs_t < 100)) { host.bus_in[BUS_IN_B] &= (uint16_t)~0x02u; obs_t++; r->paused |= (D.action_err == ERR_OBSTACLE); }
+        else { host.bus_in[BUS_IN_B] |= 0x02u; }
+        sensor_reply(u, slant, seen);
+        plant();
+        scan();
+        if (D.move_on) { moving = 1; }
+        if ((io_out_mask() & (1UL << OUT_EXT_3)) && ((s_v.rpm[0] > 20.0f) || (s_v.rpm[1] > 20.0f) || D.flag_run)   /* 모형 바퀴는 지수로 줄어 멈춤 판정 뒤에도 10 rpm 안팎(0.1 m/min) 남는다 */) { if (!r->b_early && getenv("MV_DBG")) { printf("    B 켜짐 rpm %.1f %.1f run %d\n", s_v.rpm[0], s_v.rpm[1], D.flag_run); } r->b_early = 1; }
+        if (moving) {
+            float v = (float)((D.vin_out >= 0) ? D.vin_out : -D.vin_out) / P.one_meter_rpm;
+            if (v > r->vmax_mpm) { r->vmax_mpm = v; }
+            r->t_s += 0.01f;
+        }
+        if ((io_out_mask() & (1UL << OUT_EXT_3)) || D.stop_err) { r->done = 1; }
+    }
+    if (getenv("MV_DBG")) {
+        printf("    dbg move_on %d stopping %d run %d ready %d seq %d step %d phase %d reason %d ctrl %d err %d/%d/%d last %d over %.1f tgt %.1f\n", D.move_on, D.flag_stopping,
+               D.flag_run, D.flag_ready, seq_is_active(), seq_active_step(), stop_phase(), stop_reason(), D.control, D.system_err, D.stop_err, D.action_err,
+               stop_last.reason, stop_last.overshoot_mm, stop_last.target_mm);
+    }
+    for (t = 0; t < 30; t++) { wt_tick(1); }
+    r->run_mm = fabsf(s_v.x - x0);
+    r->stop_err = D.stop_err;
+    r->seq_on = seq_is_active();
+}
+
+/* 모형(바퀴 1차 지연 0.1 s)에서 정지 제어가 목표를 1.8~5.3 mm 지나친다(속도에 비례, 바퀴 지연 몫). 회귀 기준은 7 mm */
+#define MV_TOL 7.0f
+static int move_table(void)
+{
+    static const int dist[6] = { 5, 20, 50, 100, 300, 1000 };
+    int i, bad = 0;
+    mv_res_t r;
+    printf("  MOVE_MM 거리 | 정지 오차 mm | 최고 m/min | 시간 s\n");
+    for (i = 0; i < 6; i++) {
+        move_flow(dist[i], 0, 0, 0, &r);
+        printf("  %8d | %6.1f | %5.1f | %4.2f%s\n", dist[i], r.run_mm - (float)dist[i], r.vmax_mpm, r.t_s,
+               (r.b_early || !r.done || (fabsf(r.run_mm - (float)dist[i]) > MV_TOL)) ? "  <-- 벗어남" : "");
+        if (r.b_early || !r.done || (fabsf(r.run_mm - (float)dist[i]) > MV_TOL)) { bad++; }
+    }
+    move_flow(100, 1, 0, 0, &r);
+    printf("  후진 100: 오차 %.1f mm, %.2f s\n", r.run_mm - 100.0f, r.t_s);
+    if (r.b_early || !r.done || (fabsf(r.run_mm - 100.0f) > MV_TOL)) { bad++; }
+    move_flow(300, 0, 100, 0, &r);
+    printf("  장애물(100 mm 에서 1 s) 300: 오차 %.1f mm, 멈춤 %d, %.2f s\n", r.run_mm - 300.0f, r.paused, r.t_s);
+    if (r.b_early || !r.done || !r.paused || (fabsf(r.run_mm - 300.0f) > MV_TOL)) { bad++; }
+    move_flow(1000, 0, 0, 200, &r);
+    printf("  선 잃음(200 mm 뒤) 1000: 오류 %d, 시퀀스 %d, B 켜짐 %d, 간 거리 %.0f mm\n", r.stop_err, r.seq_on,
+           (int)((io_out_mask() >> OUT_EXT_3) & 1u), r.run_mm);
+    if ((r.stop_err == 0) || r.seq_on || ((io_out_mask() >> OUT_EXT_3) & 1u)) { bad++; }
+    return bad;
+}
+
 /* ---- t3.9 WT 전 과정 모의: 튜닝 메뉴 → START → LOS 정속 → 짝 펄스 → 복귀 → 정지. 직선 테이프, 10 ms 마다 센서 응답·차 모형·스캔.
  * 차 모형 바퀴는 지령을 1차 지연 tau 로 따라간다(순수 지연 없음, 가감속 한계 ACC_LIM). 엔코더는 12펄스/회전 그대로 */
 typedef struct { float dev_max, dev_end, run_mm, t_s; } wt_res_t;
@@ -1796,6 +1900,7 @@ int main(int argc, char **argv)
         printf("  흔들림 %.1f%% 바뀜 %.1f/s 넘침 %.1f 끝 RMS %.2f 중심 %.1f\n", r.wob, r.wflip, r.eover, r.tail_rms, r.cerr);
         return 0;
     }
+    if ((argc > 1) && (strcmp(argv[1], "move") == 0)) { return move_table() ? 1 : 0; }   /* 시퀀스 MOVE_MM 표 */
     if ((argc > 1) && (strcmp(argv[1], "start") == 0)) {   /* 출발 정렬 표: 예전(끔) 대 새것 */
         static const struct { float off, th, s0; const char *name; } st[6] = {
             { 5, 0, 0, "옆 5" }, { 10, 0, 0, "옆 10" }, { 15, 0, 0, "옆 15" },
@@ -2010,6 +2115,9 @@ int main(int argc, char **argv)
         printf("  WT 측정 중 40 mm 밀림(일반 센서): state %d fail %d, 편차 최대 %.1f mm, %.1f s\n", agv_wt.state, agv_wt.fail, wr.dev_max, wr.t_s);
         assert((agv_wt.state == 3) && (agv_wt.fail == 1) && (agv_wt.wtl == TUNE_NO_DATA) && (D.system_err == 0) && (D.stop_err == 0));
     }
+#endif
+#if AGV_DEV_TESTS
+    assert(move_table() == 0);          /* 시퀀스 MOVE_MM: 거리 표, 후진, 장애물 멈춤·이어 감, 선 잃음 오류·시퀀스 중단 */
 #endif
     printf("test_curve ok\n");
     return 0;

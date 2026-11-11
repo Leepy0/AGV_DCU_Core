@@ -60,11 +60,35 @@
 | | `FORBACK( FWD·BACK·TOGGLE )` | 방향 전환 예약 | `AGV_ForBack_Action(FB)` |
 | | `TURN( CW, 90, fb, auto, obs )` | 회전 요청 + 완료 대기 | `AGV_Turn_Action(…)` |
 | | `TURN_NOWAIT( CW, 90, fb, auto, obs )` | 회전 요청, 다음 스캔에 다음 스텝. 회전 중 뒤 스텝이 돈다 | `AGV_Turn_Action(…); step++;` |
+| | `MOVE_MM( mm )` | 그 자리에서 mm 앞에 위치 정지하고 설 때까지 대기(3.2.1) | 없음(v0.41.0) |
 | | `OBS_ON` / `OBS_OFF` | 장애물 센서 사용 | `Flag_OBS_Sen_Use` |
 | 상태 | `SET_STATE( id, 값 )` / `WAIT_STATE( id, 값 )` | 사이트 상태 변수 | `Gate1_Out`, `FL_check` 류 |
 | 병렬 | `ACT_START( id )` / `WAIT_ACT( id )` | 4절 | |
 | 확장 | `CALL( 인덱스 )` | 사용자 정의 함수 | 표로 안 되는 블록 |
 | 종료 | `END_RESTART` / `END_STOP` / `END_ERROR( 코드 )` | 재출발 예약 / 그냥 종료 / 오류 종료 | `case 11` / 플래그 OFF / `action_err = n` |
+
+#### 3.2.1 MOVE_MM (v0.41.0)
+
+서 있는 자리에서 출발해 mm(1\~32767, 밖이면 컴파일 오류) 앞에 위치 정지하고, 설 때까지 시퀀스가 기다린 뒤 다음 스텝으로 간다. 회전(`TURN`)처럼 시퀀스를 살려 둔 채 주행한다.
+
+```c
+SEQ_BEGIN( shift_unload )
+    CALL( CALL_LEFT_UNLOAD )      /* 왼쪽 컨베이어 언로딩 */
+    MOVE_MM( 100 )                /* 100 mm 앞으로 */
+    CALL( CALL_RIGHT_UNLOAD )     /* 오른쪽 컨베이어 언로딩 */
+    END_RESTART
+SEQ_END
+```
+
+- 방향: 지금 전후진 그대로. 앞에 `FORBACK( BACK )` 을 두면 후진이다.
+- 속도: 거리에 맞춰 자동. 0 → v → 0 이 거리 안에 드는 가장 빠른 v 를 `SPN`\~`LLOW` 로 묶는다(`tagact_move_mm` 주석에 식). 제동점은 위치 정지 제어가 정한다(`STOP_REASON_MOVE`, 제동점까지 순항). 정지 허용 오차는 다른 위치 정지와 같다.
+- 이동 중 태그: 동작·정지·속도 모두 무시한다. ACK 는 보낸다(안 보내면 재전송이 이동 뒤 늦게 처리될 수 있다).
+- 장애물·일시정지: 서고, 풀리면 남은 거리를 이어 간다(목표 지점 그대로).
+- 선 잃음: 기존 가이드 오류로 서고 시퀀스는 중단된다. STOP·E-STOP 도 중단.
+- 출발 정렬 단계의 조향 상한(× 0.5)이 이동 내내 걸린다. 속도는 이미 `LLOW` 이하라 거리에는 영향이 없다.
+- 짧은 거리: 따로 최소 거리를 두지 않는다. 끝 꼬리(바닥 150 rpm 에서 0, 약 2 펄스)보다 짧으면 `SPN` 으로 출발해 꼬리만큼 간다(모의 5 mm → 7.7 mm).
+- 모의(`test_curve move`, 바퀴 지연 0.1 s, `LOS` 25): 5·20·50·100·300·1000 mm 에서 지나침 2.7·3.1·3.6·4.0·5.6·6.3 mm, 최고 1.6\~12.5 m/min, 0.7\~6.2 s. 지나침은 속도에 비례한다(바퀴 지연 몫).
+- ACT 에서는 금지(`seq_bind` 거부).
 
 ### 3.3 조건
 
@@ -308,7 +332,7 @@ TAG_IF( 36, PF_LIFT, IF_STATION( 1, 101, 116 ), A_ACT( ACT_LIFT_SIGNAL ) )
 | 장애물·교차로 일시정지 | 계속 돈다. 시간도 계속 흐른다 |
 | STOP, E-STOP, `W` 리셋, `system_err`, `stop_err` | 즉시 중단하고 **그 ACT가 켠 출력만** 끈다 |
 | 실패 | `END_ERROR(code)`는 `stop_err = code`로 주행을 멈춘다. 시퀀스의 `END_ERROR`는 `action_err`다 |
-| 금지 스텝 | `SPEED`, `SPEED_MMIN`, `FORBACK`, `TURN`, `TURN_NOWAIT`, `ERROR_HOLD`, `END_RESTART`. 주행 상태를 건드리므로 `seq_bind()`가 부팅 때 거부한다 |
+| 금지 스텝 | `SPEED`, `SPEED_MMIN`, `FORBACK`, `TURN`, `TURN_NOWAIT`, `MOVE_MM`, `ERROR_HOLD`, `END_RESTART`. 주행 상태를 건드리므로 `seq_bind()`가 부팅 때 거부한다 |
 | 시퀀스와 같은 출력 | 금지. 겹치면 같은 스캔에서 나중에 실행되는 ACT가 이긴다. 정지 태그로 시퀀스에 들어갈 때 ACT가 남아 있을 수 있으면 첫 스텝에 `WAIT_ACT( id )` |
 | 정지 태그와 같이 사용 | `TAG( n, PF, A_STOP, A_ACT(id) )`. 정지와 동시에 시작하며 서로 기다리지 않는다 |
 

@@ -247,6 +247,11 @@ static void on_event(const rx_item_t *it)
         return;
     }
     (void)acs_send_tag_ack(b[3], b[1], kind, 'W');
+    if (D.move_on) {
+        /* 시퀀스 MOVE_MM 중 태그는 동작·정지·속도 모두 무시한다. ACK 는 보낸다: 안 보내면 재전송이 이동 뒤에 늦게 처리될 수 있다 */
+        s_rfid.valid = 0;
+        return;
+    }
     s_recent_index = kind;
     s_recent_num = num;
     if ((s_overlap_index == s_recent_index) && (s_overlap_num == s_recent_num)) {

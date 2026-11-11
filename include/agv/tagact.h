@@ -72,6 +72,8 @@ typedef struct {
 #define TA_TURN_ALIGN     0x1000   /* TA_TURN 과 같은 인자. 목표각 근방에서 주행로에 정렬 */
 #define TA_TURN_TAPE      0x1100   /* TA_TURN_ALIGN 과 같다. 교차 테이프를 찾은 뒤 시작 */
 
+/* 시퀀스 MOVE_MM: 서 있을 때 mm 앞에 위치 정지하는 이동을 건다. 달리고 있거나 mm < 1 이면 무시(D.move_on 0 그대로) */
+void     tagact_move_mm(int16_t mm);
 void     tagact_bind(const tag_rule_t *rules, uint16_t n, uint16_t profile);
 void     tagact_bind_packed(const tag_packed_t *t, uint16_t profile);   /* 압축 표 */
 uint16_t tagact_display_tag(void);

@@ -70,6 +70,7 @@ typedef enum {
     SK_DELAY_PARAM,       /* 파라미터 arg0 x arg1 틱 대기 */
     SK_WAIT_PARAM,        /* SK_WAIT 와 같고 제한 시간이 파라미터 arg0 x arg1 틱. 값 0 이하 = 제한 없음 */
     SK_TURN_NOWAIT,       /* SK_TURN 과 같고 완료를 기다리지 않는다. 다음 스캔에 다음 스텝. ACT 금지 */
+    SK_MOVE_MM,           /* arg0 = mm(1~32767). 그 자리에서 출발해 mm 지점에 위치 정지하고 설 때까지 대기(tagact_move_mm). ACT 금지 */
     SK_KIND_MAX
 } seq_kind_t;
 
