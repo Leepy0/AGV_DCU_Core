@@ -6,7 +6,8 @@
  *  t1 제작   t1 아래 입력 5칸(지름 22번, GD 50번, 최고 속도 상한, 교차선 간격 L, ACC·DCC 상한 AU). START = 연속 시험 전체
  *  t2 점검   t2.1 빠른 점검, t2.2 바퀴 교체, t2.3 가이드 센서 교체, t2.4 모터·앰프 교체. 2.1·2.2·2.4 는 SET 으로 L 입력
  *  t3 개발   t3.1 IDEN, t3.2 RPM, t3.3 TOP, t3.4 ALL, t3.5 TEMP, t3.6 HS(SET 으로 속도 입력),
- *            t3.7 GR 가이드 센서 응답 시험(서서 START, 주행 없음, 몇 초. gresp.h). 결과는 RAM 에만.
+ *            t3.7 GR 가이드 센서 응답 시험(서서 START, 주행 없음, 몇 초. gresp.h),
+ *            t3.8 GS 가이드 센서 스캔 주기 시험(라인 위에서 START, 제자리 360도 정렬 회전. gresp.h). 결과는 RAM 에만.
  *            시험 추가는 tune.c s_dev 표 한 줄. AGV_DEV_TESTS 0 이면 t3 가 없고 t2 다음은 t1 이다
  * FND(tune_text): 켠 뒤 1 s(또는 첫 키까지) EEPROM 칩 크기 EE128·EE256(storage.h ee_probe),
  *  메뉴 't' + 번호(점으로 나눔) + 두 글자 이름, 입력 이름 + 값, 연속 시험 진행 'B'(t1)·'C'(t2) + 단계 + 회 2자리
@@ -25,13 +26,14 @@
 /* t3 시험의 진행 상태 다음 값이 끝 상태다 */
 enum { TUNE_OFF = 0, TUNE_WAIT, TUNE_BLD, TUNE_BLD_DONE, TUNE_SAVED,
        TUNE_IDENT, TUNE_IDENT_DONE, TUNE_RPM, TUNE_RPM_DONE, TUNE_TOP, TUNE_TOP_DONE, TUNE_ALL, TUNE_ALL_DONE,
-       TUNE_TEMP, TUNE_TEMP_DONE, TUNE_HS, TUNE_HS_DONE, TUNE_GR, TUNE_GR_DONE };
+       TUNE_TEMP, TUNE_TEMP_DONE, TUNE_HS, TUNE_HS_DONE, TUNE_GR, TUNE_GR_DONE, TUNE_GS, TUNE_GS_DONE };
 
 /* t3.n */
-enum { TUNE_DEV_IDENT = 1, TUNE_DEV_RPM, TUNE_DEV_TOP, TUNE_DEV_ALL, TUNE_DEV_TEMP, TUNE_DEV_HS, TUNE_DEV_GR };
+enum { TUNE_DEV_IDENT = 1, TUNE_DEV_RPM, TUNE_DEV_TOP, TUNE_DEV_ALL, TUNE_DEV_TEMP, TUNE_DEV_HS, TUNE_DEV_GR, TUNE_DEV_GS };
 #define TUNE_RPM_PAGES 3          /* 최고 속도·통합 결과 쪽: 0 OK/F, 1 좌 rpm, 2 우 rpm */
 #define TUNE_RPMT_PAGES 4         /* 바닥 rpm 결과 쪽: 0 OK/F, 1 L 저속 최저 rpm, 2 B 출발 DAC, 3 A 앰프 추정 S·T */
 #define TUNE_GR_PAGES 3           /* 응답 시험 결과 쪽: GRL 최소, GRS 안정 주기, GRH 최대 */
+#define TUNE_GS_PAGES 3           /* 스캔 주기 시험 결과 쪽: GSN 변화 횟수, GSL 간격 최소, GSP 스캔 주기 */
 #define TUNE_HS_PAGES 5           /* 고속 스윕 결과 쪽: 0 OK(+가장 좋은 후보)/F, 1~4 후보 평균 편차 RMS */
 
 /* EEPROM (128 워드 칩 기준). 0~50 파라미터·표시, 51~109 KEEP(77~81 은 공차 파라미터), 115~118 체크섬 밖 파라미터, 120~124 OUT 큐와 겹치지 않는다.

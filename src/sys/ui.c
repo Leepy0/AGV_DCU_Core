@@ -833,20 +833,38 @@ static void show_wide(char name, int16_t v)
 }
 
 /* 응답 시험 결과: 이름 세 글자 + 두 자리. 9.9 ms 까지는 넷째 자리 점(0.1 ms), 99 ms 까지는 ms, 넘으면 OV, 없음 -- */
-static void show_gr(uint16_t page)
+static void show_ms(char n1, char n2, int16_t v)
 {
-    static const char name[TUNE_GR_PAGES][3] = { {'G', 'R', 'L'}, {'G', 'R', 'S'}, {'G', 'R', 'H'} };
-    const gresp_result_t *g = &agv_all.gr;
-    int16_t v = (page == 0u) ? g->grl : ((page == 1u) ? g->grs : g->grh);
-    const char *n = name[(page < TUNE_GR_PAGES) ? page : 0u];
-
-    show(letter(n[0]), letter(n[1]), letter(n[2]), DIGIT_MINUS, DIGIT_MINUS);
+    show(letter('G'), letter(n1), letter(n2), DIGIT_MINUS, DIGIT_MINUS);
     if ((v == TUNE_NO_DATA) || (v < 0)) { return; }
     if (v > 999) { s_ui.digit[3] = letter('O'); s_ui.digit[4] = letter('V'); return; }
     if (v > 99) { v = (int16_t)((v + 5) / 10); }
     else { s_ui.dot |= 0x08u; }
     s_ui.digit[3] = digit_of(v, 10);
     s_ui.digit[4] = digit_of(v, 1);
+}
+
+static void show_gr(uint16_t page)
+{
+    static const char n2[TUNE_GR_PAGES] = { 'L', 'S', 'H' };
+    const gresp_result_t *g = &agv_all.gr;
+    show_ms('R', n2[(page < TUNE_GR_PAGES) ? page : 0u], (page == 0u) ? g->grl : ((page == 1u) ? g->grs : g->grh));
+}
+
+/* 스캔 주기 시험 결과: GSN 은 횟수 그대로 두 자리(100 이상 OV), GSL·GSP 는 응답 시험과 같은 0.1 ms 표시 */
+static void show_gs(uint16_t page)
+{
+    const gscan_result_t *g = &agv_gs;
+
+    if (page == 0u) {
+        show(letter('G'), letter('S'), letter('N'), DIGIT_MINUS, DIGIT_MINUS);
+        if (g->state != 2) { return; }
+        if (g->gsn > 99) { s_ui.digit[3] = letter('O'); s_ui.digit[4] = letter('V'); return; }
+        s_ui.digit[3] = digit_of(g->gsn, 10);
+        s_ui.digit[4] = digit_of(g->gsn, 1);
+        return;
+    }
+    show_ms('S', (page == 1u) ? 'L' : 'P', (page == 1u) ? g->gsl : g->gsp);
 }
 #endif
 
@@ -920,6 +938,12 @@ static void show_tune(void)
         break;
     case TUNE_GR_DONE:
         show_gr(tune_page());
+        break;
+    case TUNE_GS:       /* 1 라인 확인, 2 회전(회전 중에는 회전 화면), 3 계산 */
+        show(letter('G'), letter('S'), DIGIT_NONE, DIGIT_NONE, agv_gs.phase);
+        break;
+    case TUNE_GS_DONE:
+        show_gs(tune_page());
         break;
     case TUNE_RPM:      /* 회, 단계 */
         show(letter('R'), letter('P'), DIGIT_NONE, ident_pass(), ident_phase());

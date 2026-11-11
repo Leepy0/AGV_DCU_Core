@@ -21,6 +21,7 @@
 #include "agv/curvelog.h"
 #include "agv/drive.h"
 #include "agv/guide.h"
+#include "agv/gresp.h"
 #include "agv/ioport.h"
 #include "agv/motor.h"
 #include "agv/param.h"
@@ -29,6 +30,7 @@
 #include "agv/sys.h"
 #include "agv/tagact.h"
 #include "agv/tune.h"
+#include "agv/ui.h"
 #include "agv/stop.h"
 #include "hal_host.h"
 
@@ -1049,6 +1051,280 @@ static void acceptance2(void)
     s_gd = 250.0f;
 }
 
+
+#if AGV_DEV_TESTS
+/* ---- 스캔 주기 시험(t3.8 GS) 추정 모의 ----
+ * 360도 제자리 회전 기하: 센서 줄은 회전 중심에서 GD 앞, 테이프는 회전 중심을 지나는 직선. 각 θ 에서 센서 줄 위 테이프 자리
+ * u = GD·tanθ (옆 속도 GD·ω/cos²θ), 폭 w/|cosθ|. wide 32칸(6.89 mm), 칸의 0.35 넘게 덮이면 켜짐.
+ * 회전: 0.5 s 가속, 정속 ω = 2·TNS/WW, 0.5 s 감속. 센서는 위상 무작위·시계 오차 ±0.5% 로 P 마다 읽고 마지막 스캔을 답한다
+ * (P 0 = 요청을 받을 때마다 새로 읽음). 요청은 1.6 ms ± 0.05 ms 마다, 요청 4바이트(0.35 ms) 뒤에 센서가 받는다 */
+static uint32_t s_gseed;
+static float gs_rand(void) { s_gseed = s_gseed * 1103515245UL + 12345UL; return (float)((s_gseed >> 8) & 0xFFFFu) / 65536.0f; }
+
+static float gs_theta(float t, float w, float t_end)
+{
+    const float ta = 0.5f;
+    if (t <= 0.0f) { return 0.0f; }
+    if (t < ta) { return 0.5f * (w / ta) * t * t; }
+    if (t < t_end - ta) { return 0.5f * w * ta + w * (t - ta); }
+    if (t < t_end) { float r = t_end - t; return 2.0f * PI_F - 0.5f * (w / ta) * r * r; }
+    return 2.0f * PI_F;
+}
+
+static uint32_t gs_bits(float th, float tape_mm)
+{
+    float c = cosf(th), u, wc, cc;
+    uint32_t bits = 0;
+    int i;
+    if (fabsf(c) < 0.05f) { return 0; }
+    u = 250.0f * sinf(th) / c;
+    wc = tape_mm / fabsf(c) / PITCH_MM;
+    cc = 16.5f + u / PITCH_MM;
+    for (i = 1; i <= 32; i++) { if (cover(cc, wc, i) > 0.35f) { bits |= 1UL << (i - 1); } }
+    return bits;
+}
+
+typedef struct { float p_true; int gsn, gsl, gsp, p100, r1000, pairs; } gs_res_t;
+
+/* p_ms 0 = 요청마다 새로 읽음 */
+static void gs_sim(float p_ms, int tns, float tape_mm, uint32_t seed, gs_res_t *r)
+{
+    float w = 2.0f * ((float)tns / 60.0f) * 1000.0f / (WB_MM * TURN_SCALE);    /* rad/s */
+    float t_end = 2.0f * PI_F / w + 0.5f;
+    float e = 0.0f, ph = 0.0f;
+    double t = 0.0;
+    uint32_t prev = 0xFFFFFFFFUL;
+
+    s_gseed = seed;
+    if (p_ms > 0.0f) {
+        e = (gs_rand() * 2.0f - 1.0f) * 0.005f;
+        ph = gs_rand() * p_ms * 0.001f;
+    }
+    r->p_true = p_ms * (1.0f + e);
+    memset(&agv_gs, 0, sizeof(agv_gs));
+    while (t < (double)t_end + 0.2) {
+        float ta = (float)t + 0.000347f, ts = ta;
+        uint32_t b;
+        if (p_ms > 0.0f) {               /* 마지막 스캔 */
+            float pp = r->p_true * 0.001f;
+            float k = floorf((ta - ph) / pp);
+            ts = ph + k * pp;
+        }
+        b = gs_bits(gs_theta(ts, w, t_end), tape_mm);
+        if ((prev != 0xFFFFFFFFUL) && (b != prev)) {
+            if (agv_gs.nt < GS_BUF) { agv_gs.t[agv_gs.nt++] = (uint32_t)(t * 1.0e8) + 12345u; }
+            agv_gs.gsn++;
+        }
+        prev = b;
+        t += 0.0016 + (double)((gs_rand() - 0.5f) * 0.0001f);
+    }
+    gscan_calc_begin();
+    while (gscan_calc_step(1000)) { }
+    r->gsn = agv_gs.gsn;
+    r->gsl = agv_gs.gsl;
+    r->gsp = agv_gs.gsp;
+    r->p100 = agv_gs.p100;
+    r->r1000 = agv_gs.r1000;
+    r->pairs = agv_gs.pairs;
+}
+
+/* 표: 모델별 시드 seeds 개 × TNS 15·25 × 테이프 25·50 mm */
+static int gs_table(int seeds, int print)
+{
+    static const float ps[9] = { 2.0f, 2.5f, 3.0f, 3.5f, 4.0f, 5.0f, 8.0f, 10.0f, 0.0f };
+    int m, bad = 0;
+    for (m = 0; m < 9; m++) {
+        int n = 0, ok = 0, none = 0, wrong = 0, gsn_min = 99999, gsn_max = 0, gsl_min = 99999, rmin = 9999, rmax = 0, k;
+        float gsn_sum = 0.0f, err_max = 0.0f;
+        for (k = 0; k < seeds * 4; k++) {
+            gs_res_t r;
+            gs_sim(ps[m], (k & 1) ? 25 : 15, (k & 2) ? 50.0f : 25.0f, 1000u + 7919u * (uint32_t)k + 104729u * (uint32_t)m, &r);
+            n++;
+            gsn_sum += (float)r.gsn;
+            if (r.gsn < gsn_min) { gsn_min = r.gsn; }
+            if (r.gsn > gsn_max) { gsn_max = r.gsn; }
+            if ((r.gsl != TUNE_NO_DATA) && (r.gsl < gsl_min)) { gsl_min = r.gsl; }
+            if (r.r1000 < rmin) { rmin = r.r1000; }
+            if (r.r1000 > rmax) { rmax = r.r1000; }
+            if (r.gsp == TUNE_NO_DATA) { none++; }
+            else {
+                float er = fabsf((float)r.p100 * 0.01f - r.p_true);
+                if (er > err_max) { err_max = er; }
+                if ((ps[m] > 0.0f) && (er <= 0.1f)) { ok++; } else { wrong++; }
+            }
+            if (print > 1) { printf("    P %.1f k %d: GSN %d GSL %d GSP %d p100 %d R %d pairs %d true %.3f\n", ps[m], k, r.gsn, r.gsl, r.gsp, r.p100, r.r1000, r.pairs, r.p_true); }
+        }
+        if (print) {
+            printf("GS P %s%4.1f | n %d GSN %d~%d (평균 %.0f) GSL 최소 %d | GSP 맞음 %d 없음 %d 틀림 %d, 맞은 오차 최대 %.3f ms | R×1000 %d~%d\n",
+                   (ps[m] > 0.0f) ? "" : "요청마다 ", ps[m], n, gsn_min, gsn_max, gsn_sum / (float)n, gsl_min, ok, none, wrong, err_max, rmin, rmax);
+        }
+        /* 3.5 ms 이상은 모두 0.1 ms 안으로 찾고, 요청마다 읽는 센서는 모두 없음. 3.2 ms(요청 주기 1.6 × 2) 아래는
+         * 요청 주기와의 맥놀이 P·T/(P − T) 와 가를 수 없어 하한 밖이다(3.0 ms 는 몇 % 가 3.43 ms) */
+        if ((ps[m] >= 3.5f) && ((none > 0) || (wrong > 0))) { bad++; }
+        if ((ps[m] == 0.0f) && (none != n)) { bad++; }
+    }
+    return bad;
+}
+#endif
+
+
+#if AGV_DEV_TESTS
+/* ---- t3.8 GS 전 과정 모의: 튜닝 메뉴 → START → 라인 확인 → 360도 정렬 회전(실제 회전 코드·차 모형) → 계산 → 결과 화면.
+ * 메인 루프 10 us, 틱 2 ms, 차 모형 10 ms(그 사이 자세는 보간). 센서는 테이프(y = 0 직선) 기하로 스캔 주기 s_gf.p 마다 읽고
+ * 요청을 받으면(요청 4바이트 뒤) 마지막 스캔을 0.2 ms 뒤 12바이트로 답한다(약 1.6 ms). p 0 = 요청마다 새로 읽음 */
+static struct { float p, ph, tape; float hx[3], hy[3], hth[3]; uint32_t ht[3]; uint32_t busy; int line; } s_gf;
+
+static void gf_pose(uint32_t at, float *x, float *y, float *th)
+{
+    int k = ((int32_t)(at - s_gf.ht[1]) >= 0) ? 1 : 0;      /* [ht0, ht1] 또는 [ht1, ht2] */
+    float f = (float)(int32_t)(at - s_gf.ht[k]) / (float)(int32_t)(s_gf.ht[k + 1] - s_gf.ht[k]);
+    if (f < 0.0f) { f = 0.0f; }
+    if (f > 1.0f) { f = 1.0f; }
+    *x = s_gf.hx[k] + (s_gf.hx[k + 1] - s_gf.hx[k]) * f;
+    *y = s_gf.hy[k] + (s_gf.hy[k + 1] - s_gf.hy[k]) * f;
+    *th = s_gf.hth[k] + (s_gf.hth[k + 1] - s_gf.hth[k]) * f;
+}
+
+static uint32_t gf_bits(uint32_t at)
+{
+    float x, y, th, c, sy, u, cc, wc;
+    uint32_t bits = 0;
+    int i;
+    gf_pose(at, &x, &y, &th);
+    if (!s_gf.line) { return 0; }
+    c = cosf(th);
+    if (fabsf(c) < 0.05f) { return 0; }
+    sy = y + GD_MM * sinf(th);
+    u = -sy / c;
+    cc = 16.5f + u / PITCH_MM;
+    wc = s_gf.tape / fabsf(c) / PITCH_MM;
+    for (i = 1; i <= 32; i++) { if (cover(cc, wc, i) > 0.35f) { bits |= 1UL << (i - 1); } }
+    return bits;
+}
+
+static void gf_send(uint16_t port, const uint16_t *buf, uint16_t n)
+{
+    static const char hex[] = "0123456789abcdef";
+    host_sci_t *b = &host.sci[HAL_SCI_B];
+    uint32_t arr = host.cycles + n * 8681u, ts = arr, bits, t;
+    uint16_t f[12], sum = 0;
+    int i, k;
+
+    if ((port != HAL_SCI_B) || (n < 2) || (buf[1] != 'H')) { return; }
+    if ((int32_t)(arr - s_gf.busy) < 0) { return; }
+    if (s_gf.p > 0.0f) {             /* 마지막 스캔 */
+        float pc = s_gf.p * 100000.0f;
+        float kk = floorf(((float)arr - s_gf.ph) / pc);
+        ts = (uint32_t)(s_gf.ph + kk * pc);
+    }
+    bits = gf_bits(ts);
+    f[0] = 2;
+    f[1] = 'h';
+    for (i = 0; i < 8; i++) { f[2 + i] = (uint16_t)hex[(bits >> (i * 4)) & 0xFu]; }
+    for (i = 1; i < 10; i++) { sum = (uint16_t)(sum + f[i]); }
+    f[10] = (uint16_t)hex[sum & 0xFu];
+    f[11] = 3;
+    k = b->rx_len - b->rx_pos;
+    memmove(b->rx, &b->rx[b->rx_pos], (size_t)k * sizeof(b->rx[0]));
+    memmove(b->rx_at, &b->rx_at[b->rx_pos], (size_t)k * sizeof(b->rx_at[0]));
+    b->rx_len = (uint16_t)k;
+    b->rx_pos = 0;
+    t = arr + 20000u;
+    for (i = 0; i < 12; i++) {
+        t += 8681u;
+        b->rx[b->rx_len] = f[i];
+        b->rx_at[b->rx_len++] = t;
+    }
+    s_gf.busy = t;
+}
+
+/* 10 ms 하나: 차 모형으로 다음 자세를 정하고 그 사이 메인 루프를 10 us 마다 돈다 */
+static void gf_10ms(void)
+{
+    int i;
+    s_gf.hx[0] = s_gf.hx[1]; s_gf.hy[0] = s_gf.hy[1]; s_gf.hth[0] = s_gf.hth[1]; s_gf.ht[0] = s_gf.ht[1];
+    s_gf.hx[1] = s_v.x; s_gf.hy[1] = s_v.y; s_gf.hth[1] = s_v.th; s_gf.ht[1] = host.cycles;
+    plant();
+    s_gf.hx[2] = s_v.x; s_gf.hy[2] = s_v.y; s_gf.hth[2] = s_v.th; s_gf.ht[2] = host.cycles + 1000000u;
+    for (i = 1; i <= 1000; i++) {
+        host.cycles += 1000u;
+        if ((i % 200) == 0) { sys_tick_2ms(); }
+        sys_scan();
+    }
+}
+
+static void gf_key(uint16_t k)
+{
+    int i;
+    host.key = k;
+    for (i = 0; i < 10; i++) { gf_10ms(); }
+    host.key = 0;
+    for (i = 0; i < 10; i++) { gf_10ms(); }
+}
+
+/* 결과: 0 끝까지 감, 시험 시간 ms, 끝 자세 각(도, 360 의 배수에서 뺀 값) */
+static void gs_flow(float p_ms, float tape_mm, int tns, int line, uint32_t seed, int16_t *gsp, float *t_ms, float *end_deg)
+{
+    static const case_t c0 = { 32, 0.0f, 0.0f, 1, 20, 20, 30, 0.15f, 0, 0 };
+    static case_t c;
+    uint32_t t0;
+    int t;
+
+    c = c0;
+    memset(&s_v, 0, sizeof(s_v));
+    memset(&s_gf, 0, sizeof(s_gf));
+    s_c = &c;
+    s_gd = 250.0f;
+    s_x30w = 0.0f;
+    s_gseed = seed;
+    s_gf.p = (p_ms > 0.0f) ? p_ms * (1.0f + (gs_rand() * 2.0f - 1.0f) * 0.005f) : 0.0f;
+    s_gf.ph = gs_rand() * p_ms * 100000.0f;
+    s_gf.tape = tape_mm;
+    s_gf.line = line;
+    host_reset();
+    host.on_send = gf_send;
+    memset(&D, 0, sizeof(D));
+    memset(seq_request_flag, 0, sizeof(seq_request_flag));
+    host.key = KEY_MODE + KEY_SET;      /* 튜닝 모드로 켠다 */
+    sys_boot();
+    host.adc = 300u << 4;
+    for (t = 0; t < 60; t++) { gf_10ms(); }
+    assert(sys_power_on() && tune_active());
+    host.key = 0;
+    assert(param_set_ram(P_GEAR_RATIO, 60) == 0);
+    assert(param_set_ram(P_WHEEL_BASE_MM, (int16_t)(WB_MM / 10.0f)) == 0);
+    assert(param_set_ram(P_GUIDE_DIST_MM, 250) == 0);
+    assert(param_set_ram(P_TURN_FORBACK, 10) == 0);
+    assert(param_set_ram(P_SPEED_TURN, (int16_t)tns) == 0);
+    assert(param_set_ram(P_DCC, 40) == 0);
+    assert(param_set_ram(P_WHEEL_BASE_MM, (int16_t)(WB_MM / 10.0f)) == 0);
+    tune_turn_scale_set((int16_t)(TURN_SCALE * 1000.0f + 0.5f));
+    for (t = 0; t < 120; t++) { gf_10ms(); }   /* EE 표시 1 s */
+    gf_key(KEY_DOWN);                   /* t1 → t3 */
+    gf_key(KEY_SET);                    /* t3.1 */
+    gf_key(KEY_DOWN);                   /* t3.1 → t3.8 */
+    assert(tune_menu() == 3080);
+    t0 = host.cycles;
+    host.bus_in[BUS_IN_A] &= (uint16_t)~RAW_START;
+    gf_10ms();
+    host.bus_in[BUS_IN_A] |= RAW_START;
+    for (t = 0; (t < 3000) && (tune_state() != TUNE_GS_DONE); t++) {
+        s_m.wbx = 1.0f;
+        gf_10ms();
+    }
+    assert(tune_state() == TUNE_GS_DONE);
+    *t_ms = (float)(host.cycles - t0) / 100000.0f;
+    *gsp = agv_gs.gsp;
+    {
+        float d = fmodf(-s_v.th * 180.0f / PI_F, 360.0f);
+        if (d > 180.0f) { d -= 360.0f; }
+        *end_deg = d;
+    }
+    assert(!gscan_fast() && !gresp_busy());
+    host.on_send = 0;
+}
+#endif
+
 static void on_abort(int sig) { (void)sig; _exit(3); }
 
 int main(int argc, char **argv)
@@ -1071,6 +1347,17 @@ int main(int argc, char **argv)
         turn_line(atoi(argv[2]), atoi(argv[3]), atoi(argv[4]), sl, atoi(argv[5]), atoi(argv[6]), &tr);
         return 0;
     }
+#if AGV_DEV_TESTS
+    if ((argc > 1) && (strcmp(argv[1], "gs") == 0))    { return gs_table((argc > 2) ? atoi(argv[2]) : 10, (argc > 3) ? 2 : 1) ? 1 : 0; }
+    if ((argc > 4) && (strcmp(argv[1], "gsflow") == 0)) {  /* gsflow P_ms tape_mm TNS [line 0] */
+        int16_t gsp; float tm, ed;
+        gs_flow((float)atof(argv[2]), (float)atof(argv[3]), atoi(argv[4]), (argc > 5) ? atoi(argv[5]) : 1, 77u, &gsp, &tm, &ed);
+        printf("GSFLOW P %s tape %s TNS %s: state %d GSN %d GSL %d GSP %d p100 %d R %d pairs %d req %u err %u nt %u | %.0f ms, 끝 각 %.2f도, 오류 %d/%d\n",
+               argv[2], argv[3], argv[4], agv_gs.state, agv_gs.gsn, agv_gs.gsl, gsp, agv_gs.p100, agv_gs.r1000, agv_gs.pairs,
+               agv_gs.req, agv_gs.err, agv_gs.nt, tm, ed, D.system_err, D.stop_err);
+        return 0;
+    }
+#endif
     if ((argc > 1) && (strcmp(argv[1], "cmp") == 0))   { if (argc > 2) { s_gmask = atoi(argv[2]); } compare(argc > 3); return 0; }
     if ((argc > 6) && (strcmp(argv[1], "one") == 0)) {  /* one LG 곡선(0~5, 직선은 6 + 모드) v tau_ms leds */
         int i = atoi(argv[3]);
@@ -1166,6 +1453,19 @@ int main(int argc, char **argv)
             assert(tr.done && (tr.err == 0) && (tr.v_center <= (float)stop_min_rpm()) && (tr.reacc == 0) && (fabsf(tr.line_deg) < 1.0f) && (tr.fix <= 1));
         }
     }
+#if AGV_DEV_TESTS
+    {   /* t3.8 GS: 추정(시드 3 × TNS 15·25 × 테이프 25·50 mm)과 전 과정(메뉴 → START → 360도 정렬 회전 → 계산) */
+        int16_t gsp; float tm, ed;
+        assert(gs_table(3, 1) == 0);
+        gs_flow(5.0f, 25.0f, 15, 1, 77u, &gsp, &tm, &ed);
+        printf("  GS 전 과정 P 5 ms: GSN %d GSL %d GSP %d, %.1f s, 끝 각 %.2f도\n", agv_gs.gsn, agv_gs.gsl, gsp, tm / 1000.0f, ed);
+        assert((agv_gs.state == 2) && (abs(gsp - 50) <= 1) && (fabsf(ed) < 1.0f) && (D.system_err == 0) && (D.stop_err == 0));
+        gs_flow(0.0f, 25.0f, 15, 1, 78u, &gsp, &tm, &ed);
+        assert((agv_gs.state == 2) && (gsp == TUNE_NO_DATA) && (agv_gs.gsn > 50) && (fabsf(ed) < 1.0f));
+        gs_flow(5.0f, 25.0f, 15, 0, 79u, &gsp, &tm, &ed);     /* 라인 없음: 돌지 않고 바로 없음 */
+        assert((agv_gs.state == 3) && (gsp == TUNE_NO_DATA) && (tm < 200.0f) && (fabsf(ed) < 0.01f));
+    }
+#endif
     printf("test_curve ok\n");
     return 0;
 }
