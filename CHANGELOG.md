@@ -1,5 +1,22 @@
 # 변경 이력
 
+## v0.39.0 (2026-11-11, 바퀴 지연 측정 t3.9 WT, 조향 기록기 steerlog)
+
+- 튜닝 t3.9 `WT` 바퀴 지연 측정(`AGV_DEV_TESTS`, `src/sys/wtest.c`):
+  - 직선 위에서 START. `LOS` 정속(편차 ±2단위로 0.5 s) 뒤 조향 출력을 시험이 직접 준다(`steer_test_rpm`: 왼쪽 +A, 오른쪽 −A. +A T, −A 2T, +A T. A 200 rpm, T 0.3 s). 10 ms 마다 원시 rpm 을 표본한다.
+  - 계산: 계단 직전 실측을 기준으로 지령의 10%·63% 시각(보간) → τ = (t63 − t10) / 0.895, 순수 지연 = t10 − 0.105·τ.
+  - 결과 `agv_wt`(`gscan_ram`). FND `WTOK`/`WTF`, `TL`·`TR`(τ ms), `DL`·`DR`(순수 지연 ms). 진행 중은 `WT` + 단계.
+  - 복귀 뒤 편차 ±3단위에서 `tagact_stop`. 측정 중 선 잃음·반폭 60% 넘음이면 복귀·정지·없음.
+  - `steer.c` 훅은 `AGV_DEV_TESTS` 전용이고 0 일 때 동작이 같다.
+- 조향 기록기 `agv_steerlog`(`AGV_DEV_TESTS` 전용, `src/sys/steerlog.c`):
+  - 시계열: 주행 중(`RUN_DRIVE`, `vin_out` ≠ 0) 10 ms 표본 616개(6.16 s). 서면 얼리고 다음 출발 때 새로 시작한다.
+  - 사건 16건: 위험 감속, 조향 상한, 위치 6단위 튐, 전부 켜짐, 자동 감속(`LOS`·`DRS`), 선 잃음. 직전·이번 응답 위치와 LED 비트를 같이 남긴다.
+  - 출발 때 설정 스냅샷(P_AUTO 관련).
+  - 훅은 읽기만 한다(`sys.c`, `run.c`, `steer.c` `steer_i_out`). 현장 이미지(`AGV_DEV_TESTS` 0)는 코드·데이터가 같다.
+- 링커 `cmd`: `RAML0` 을 ramfuncs 용 0x80 워드로 줄이고, L0 나머지는 PAGE 1 `RAML0D`(0x008080, 0xF80 워드)로 둔다. `steerlog_ram` 이 여기에 들어간다.
+- docs/07: 가이드 센서 응답 시간 표에 t3.8 실측(`GN` 130, `GSL` 6.1 ms, `GSP` 6.3 ms) 추가.
+- 호스트 시험: `test_curve` wt 모드(모형 τ 50\~300 ms ±20% 회귀), `test_sys` 메뉴 `3090 T39WT`, `test_steerlog`.
+
 ## v0.38.0 (2026-11-11, 정렬 회전 끝 한 번의 등감속, 스캔 주기 시험 t3.8 GS)
 
 - 정렬 회전 끝 한 번의 등감속(`src/motor.c` `tape_brake`):
