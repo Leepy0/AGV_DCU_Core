@@ -41,7 +41,7 @@ typedef enum {
     GUIDE_TRK_EDGE,        /* 다른 선과 붙었다. 안 움직인 가장자리에서 테이프 폭으로 잡은 위치 */
     GUIDE_TRK_HOLD         /* 두 가장자리가 다 움직였다. 이전 위치를 유지한다 */
 } guide_track_t;
-#define GUIDE_HOLD_LIMIT_MM  100   /* 유지 주행 상한. 30도 교차·25 mm 테이프에서 덮이는 구간이 약 43 mm */
+#define GUIDE_HOLD_LIMIT_MM  100   /* 유지 주행 상한. 30도 교차·25 mm 테이프에서 덮이는 구간이 약 43 mm. 유지 규칙 시험은 EDGE·전부 켜짐도 이 값 */
 #define GUIDE_EDGE_LIMIT_MM  300   /* 가장자리 고정 상한. 넘으면 테이프 폭이 바뀐 것으로 보고 다시 배운다 */
 #define GUIDE_MERGE_SCANS    50    /* 이 스캔(0.5 s) 안에 떨어진 둘째 덩어리를 본 적이 있어야 붙은 것으로 본다 */
 #define GUIDE_WIDE_LEARN_SCANS 100 /* 붙음이 아닌데 배운 폭 + 1 보다 넓은 응답이 이만큼(1 s) 이어지면 넓어진 테이프로 보고 폭을 올려 배운다 */
@@ -51,6 +51,18 @@ typedef enum {
 #define GUIDE_STRAIGHT_TICKS 30    /* 위 조건과 평균 rpm ≥ SPN 이 이만큼(0.3 s) 이어져야 직진이다 */
 #define GUIDE_REACQ_N        3     /* 잃은 뒤 다시 잡을 때 같은 자리에 이어져야 하는 응답 수(30 ms. 60 m/min 에서 30 mm) */
 #define GUIDE_REACQ_TOL      2     /* 같은 자리로 보는 위치 차(단위) */
+
+/* 넓은 덩어리 유지 규칙(개발 시험, AGV_DEV_TESTS 에서만 정의. 0 = 예전 동작 그대로, 1 = 새 규칙). 주행 위치 경로·분기 아님만.
+ *  - 고른 덩어리가 배운 폭 + 1 보다 넓어지면 떨어진 둘째 덩어리를 본 적이 없어도 기존 위치를 지킨다(HOLD, 안 움직인
+ *    가장자리가 있으면 EDGE). 양쪽으로 한 칸씩 넓어진 것(커브)만 예전처럼 가운데다. 전부 켜짐도 위치 0 대신 유지(HOLD)
+ *  - 넓은 덩어리·전부 켜짐이 GUIDE_HOLD_LIMIT_MM 넘게 이어지면 덩어리 가운데 쪽으로 GUIDE_HOLD_SLIDE_MM 마다 1단위씩
+ *    옮긴다(EDGE 로 낸다). 다 옮겼는데도 넓으면 폭이 바뀐 것: 상한 풀림(guide_track_release)처럼 다시 배운다.
+ *    이때 guide_track_release 는 무시한다(한 번에 넘어가지 않는다)
+ *  - 원래 폭으로 돌아오면 평소 추적. 위치 차가 GUIDE_HOLD_SNAP 을 넘으면 같은 속도로 옮겨 맞춘다(그동안 EDGE)
+ *  - 유지·옮기는 중(guide_track 이 NORMAL 아님)에는 위험 감속에 새로 들어가지 않는다(motor.c) */
+extern int16_t guide_hold_test;
+#define GUIDE_HOLD_SLIDE_MM  30    /* 상한 뒤 옮기는 속도: 이 주행 거리마다 1단위 */
+#define GUIDE_HOLD_SNAP      2     /* 원래 폭으로 돌아왔을 때 이 단위 이하 차는 바로 맞춘다(한 칸 = 2단위) */
 
 typedef enum {
     GUIDE_RX_NONE = 0,     /* 처리할 내용 없음 (모르는 종류) */

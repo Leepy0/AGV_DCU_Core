@@ -3,6 +3,7 @@
 #include "agv/drive.h"
 #include "agv/param.h"
 #include "agv/tagact.h"
+#include "agv/tune.h"     /* AGV_DEV_TESTS */
 
 #define H_PLACEHOLDER      10      /* 구동작의 'h' 자리표 */
 #define POS_OFF_NARROW     17      /* 'a' 전부 꺼짐 표시 */
@@ -51,6 +52,12 @@ static uint16_t    s_wide_n;      /* 붙음이 아닌데 배운 폭 + 1 보다 �
 static int16_t     s_trk_last;    /* 지난 주행 위치 스캔의 guide_track_t */
 static int16_t     s_ever;        /* 시작·센서 전환 뒤 선을 잡은 적이 있다. 첫 획득은 바로 받는다 */
 static int16_t     s_cand_pos, s_cand_n;
+#if AGV_DEV_TESTS
+int16_t            guide_hold_test;   /* 넓은 덩어리 유지 규칙. guide.h */
+static int16_t     s_hold;        /* 낸 위치가 덩어리 자리가 아니다. 1 = 넓은 덩어리 유지·옮김, 2 = 원래 폭으로 돌아와 옮겨 맞추는 중 */
+static float       s_hold_mm;     /* 넓은 덩어리·전부 켜짐이 이어진 주행 거리 mm */
+static float       s_slide_mm;    /* 옮길 거리 mm. GUIDE_HOLD_SLIDE_MM 마다 1단위 */
+#endif
 
 void guide_cfg_default(guide_cfg_t *cfg)
 {
@@ -96,6 +103,10 @@ void guide_on_sensor_switch(void)
     s_wide_n = 0;
     s_merge_age = GUIDE_MERGE_SCANS;
     s_trk_last = GUIDE_TRK_NORMAL;
+#if AGV_DEV_TESTS
+    s_hold = 0;
+    s_hold_mm = 0.0f;
+#endif
     comm_clear();
 }
 
@@ -340,7 +351,13 @@ uint16_t guide_tape_width(void)
     uint16_t w = (uint16_t)((s_tape_q4 + 11u) >> 4);
     return (s_tape_q4 == 0) ? 0u : ((w < 2u) ? 2u : w);
 }
-void     guide_track_release(void) { s_release = 1; }
+void     guide_track_release(void)
+{
+#if AGV_DEV_TESTS
+    if (guide_hold_test) { return; }    /* 유지 규칙은 상한에서 뛰지 않고 hold_rule 이 옮긴다 */
+#endif
+    s_release = 1;
+}
 int16_t  guide_reacq_pending(void) { return (int16_t)(s_cand_n > 0); }
 
 /* 후진도 크기로 본다. 차 ≤ 평균 × PCT / 100  ⇔  차 × 200 ≤ 합 × PCT */
@@ -397,7 +414,12 @@ static int16_t edge_fix(int16_t *s, int16_t *e, uint16_t leds, uint16_t blobs, i
     }
     else if (w > ref + 1) {
         /* 교차선·합류선은 붙기 전에 떨어진 덩어리로 먼저 보인다. 그런 적이 없이 넓어지면 커브다: 가운데, 폭 그대로 */
+#if AGV_DEV_TESTS
+        /* 유지 규칙: 둘째 덩어리를 본 적이 없어도 붙은 것으로 본다. 양쪽으로 한 칸씩만 커브 */
+        if (((s_merge_age >= GUIDE_MERGE_SCANS) && !guide_hold_test) || ((ds == 1) && (de == 1))) {
+#else
         if ((s_merge_age >= GUIDE_MERGE_SCANS) || ((ds == 1) && (de == 1))) {   /* 양쪽으로 한 칸씩: 커브 */
+#endif
             /* 커브의 폭 증가는 잠깐이다. GUIDE_WIDE_LEARN_SCANS 이어지면 넓어진 테이프다: 아래에서 올려 배운다 */
             if (s_wide_n < GUIDE_WIDE_LEARN_SCANS) { if (s_straight) { s_wide_n++; } return GUIDE_TRK_NORMAL; }
         }
@@ -435,6 +457,49 @@ static int16_t reacq_wait(const guide_blob_t *b, uint16_t n, uint16_t leds, int1
     return s_cand_n < GUIDE_REACQ_N;
 }
 
+#if AGV_DEV_TESTS
+/* 넓은 덩어리 유지 규칙(guide.h). prev = 이번 응답 전 위치, c = 고른 덩어리의 고치기 전 가운데(전부 켜짐 0).
+ * 유지 중 위치는 edge_fix 가 낸 그대로(HOLD 는 prev, EDGE 는 안 움직인 가장자리). 옮길 때만 s_prev 를 prev 에서 한 단위씩 */
+static void hold_rule(guide_out_t *out, int16_t prev, int16_t c)
+{
+    /* 달린 거리: guide_poll s_trk_mm 와 같은 식. vin_out 은 모터 rpm, 응답 하나 = 10 ms */
+    float mm = (float)((agv_drive.vin_out >= 0) ? agv_drive.vin_out : -agv_drive.vin_out) * param_dv.one_rpm_meter / 6.0f;
+    int16_t wide = (int16_t)((out->status == GUIDE_ALL_ON) || (out->track != GUIDE_TRK_NORMAL));
+
+    if (out->status == GUIDE_LOST) {       /* 다시 잡기(GUIDE_REACQ_N)에 맡긴다 */
+        s_hold = 0;
+        s_hold_mm = 0.0f;
+        return;
+    }
+    if (out->status == GUIDE_ALL_ON) { out->track = GUIDE_TRK_HOLD; }
+    if (wide) {
+        if (s_hold != 1) { s_hold = 1; s_slide_mm = 0.0f; }
+        s_hold_mm += mm;
+        if (s_hold_mm <= (float)GUIDE_HOLD_LIMIT_MM) { return; }
+    }
+    else {                                  /* 원래 폭: 평소 추적. 돌아온 응답의 차가 작으면 바로, 크면 끝까지 옮겨 맞춘다 */
+        int16_t d = (int16_t)(s_prev - prev);
+        s_hold_mm = 0.0f;
+        if (!s_hold) { return; }
+        if ((s_hold == 1) && (d <= GUIDE_HOLD_SNAP) && (d >= -GUIDE_HOLD_SNAP)) { s_hold = 0; return; }
+        s_hold = 2;
+        c = s_prev;
+    }
+    s_prev = prev;
+    s_slide_mm += mm;
+    while ((s_slide_mm >= (float)GUIDE_HOLD_SLIDE_MM) && (s_prev != c)) {
+        s_prev = (int16_t)(s_prev + ((c > s_prev) ? 1 : -1));
+        s_slide_mm -= (float)GUIDE_HOLD_SLIDE_MM;
+    }
+    out->track = GUIDE_TRK_EDGE;
+    if (s_prev == c) {
+        s_hold = 0;
+        if (!wide) { out->track = GUIDE_TRK_NORMAL; }
+        else if (out->status != GUIDE_ALL_ON) { s_relearn = 1; }   /* 다 옮겼는데 넓다: 폭이 바뀌었다. 상한 풀림처럼 다시 배운다 */
+    }
+}
+#endif
+
 void guide_track_drive(const guide_rx_t *rx, int16_t branch, int16_t backward, guide_out_t *out)
 {
     s_drive = 1;
@@ -450,6 +515,9 @@ void guide_track(const guide_rx_t *rx, int16_t branch, int16_t backward, guide_o
     uint32_t all = rx->wide ? 0xFFFFFFFFUL : 0xFFFFUL;
     int16_t  invert = backward ? s_cfg.invert_back : s_cfg.invert_fwd;
     int16_t  chosen;
+#if AGV_DEV_TESTS
+    int16_t  prev = s_prev, c = 0;
+#endif
 
     out->blobs = guide_blobs(lat, leds, blob);
     out->track = GUIDE_TRK_NORMAL;
@@ -474,6 +542,9 @@ void guide_track(const guide_rx_t *rx, int16_t branch, int16_t backward, guide_o
             int16_t s = (int16_t)blob[chosen].start, e = (int16_t)blob[chosen].end;
             out->status = GUIDE_NORMAL;
             out->width = (uint16_t)(e - s + 1);
+#if AGV_DEV_TESTS
+            c = (int16_t)(s + e - (int16_t)(leds + 1));
+#endif
             /* 분기는 일부러 선을 갈아타는 동작이라 가장자리를 고치지 않는다. 정렬 회전·튜닝 직접 호출도 고치지 않는다 */
             if ((branch == 0) && s_drive) { out->track = edge_fix(&s, &e, leds, out->blobs, s_prev_valid); }
             if (out->track != GUIDE_TRK_NORMAL) { out->width = guide_tape_width(); }   /* 붙은 폭을 커브로 보지 않는다 */
@@ -489,6 +560,12 @@ void guide_track(const guide_rx_t *rx, int16_t branch, int16_t backward, guide_o
             }
         }
     }
+#if AGV_DEV_TESTS
+    if (guide_hold_test && s_drive) {
+        if (branch == 0) { hold_rule(out, prev, c); }
+        else             { s_hold = 0; s_hold_mm = 0.0f; }   /* 분기는 그대로 둔다. 끝난 뒤 낡은 유지를 잇지 않는다 */
+    }
+#endif
     if (s_drive) { s_trk_last = out->track; }
     out->pos = invert ? (int16_t)(-s_prev) : s_prev;
 }
