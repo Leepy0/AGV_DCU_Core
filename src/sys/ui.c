@@ -851,15 +851,16 @@ static void show_gr(uint16_t page)
     show_ms('R', n2[(page < TUNE_GR_PAGES) ? page : 0u], (page == 0u) ? g->grl : ((page == 1u) ? g->grs : g->grh));
 }
 
-/* 스캔 주기 시험 결과: GSN 은 횟수 그대로 두 자리(100 이상 OV), GSL·GSP 는 응답 시험과 같은 0.1 ms 표시 */
+/* 스캔 주기 시험 결과: GN 은 변화 횟수 세 자리(255 넘으면 OV, 버퍼 256), GSL·GSP 는 응답 시험과 같은 0.1 ms 표시 */
 static void show_gs(uint16_t page)
 {
     const gscan_result_t *g = &agv_gs;
 
     if (page == 0u) {
-        show(letter('G'), letter('S'), letter('N'), DIGIT_MINUS, DIGIT_MINUS);
+        show(letter('G'), letter('N'), DIGIT_MINUS, DIGIT_MINUS, DIGIT_MINUS);
         if (g->state != 2) { return; }
-        if (g->gsn > 99) { s_ui.digit[3] = letter('O'); s_ui.digit[4] = letter('V'); return; }
+        if (g->gsn > 255) { s_ui.digit[2] = DIGIT_NONE; s_ui.digit[3] = letter('O'); s_ui.digit[4] = letter('V'); return; }
+        s_ui.digit[2] = digit_of(g->gsn, 100);
         s_ui.digit[3] = digit_of(g->gsn, 10);
         s_ui.digit[4] = digit_of(g->gsn, 1);
         return;

@@ -410,6 +410,7 @@ int main(void)
     /* 거리 감속: 회전 속도로 오다가 중앙 앞 2도 근처에서 최저 속도가 된다. 최저 속도 구간은 몇 도뿐이다 */
     {
         float rate, acc = 0.0f, at_min = -1.0f;
+        int16_t vmin = 32767;
         setup();
         (void)param_set(P_DCC, 40);
         D.control = RUN_TURN;
@@ -428,10 +429,11 @@ int main(void)
             acc += (float)D.vin_out * (12.0f / 6000.0f) * 2.0f;   /* 두 바퀴 펄스 */
             while (acc >= 1.0f) { acc -= 1.0f; D.tape_turned++; }
             if ((at_min < 0.0f) && (D.vin_out <= P.turn_min)) { at_min = (float)D.tape_turned; }
+            if (D.vin_out < vmin) { vmin = D.vin_out; }
         }
-        /* v0.36.0: 라인을 못 본 채 끝점에 오면 v_잡음(감속 시작 각이 잡음 각 안이면 회전 속도)으로 찾는다. 바닥 속도 찾기는 없다 */
-        printf("  정렬 회전 라인 못 봄: 끝 속도 %d rpm(회전 속도 %d)\n", D.vin_out, P.turn_speed);
-        assert((at_min < 0.0f) && (D.vin_out == P.turn_speed));
+        /* v0.38.0: 엔코더 끝점으로 바닥까지 한 번에 줄이고, 그때까지 라인이 없으면 v_잡음으로 찾는다(tape_plan_min -1) */
+        printf("  정렬 회전 라인 못 봄: 최저 %d rpm, 끝 속도 %d rpm(회전 속도 %d)\n", vmin, D.vin_out, P.turn_speed);
+        assert((vmin <= stop_min_rpm() + 20) && (D.tape_plan_min == -1) && (D.vin_out > stop_min_rpm()) && (D.vin_out < P.turn_speed));
     }
     /* 편차 → 각 환산: atan(편차 mm / GD). 1단위 = 6.89 / 2 mm. GD 250, 1도 10 펄스 */
     { static const struct { int16_t pos; float lo, hi; } cv[2] = { { 15, 115.0f, 118.0f }, { 31, 229.0f, 233.0f } };
@@ -557,10 +559,10 @@ int main(void)
     D.tape_step = 2; D.tape_align = 1; D.turn_pulses = 2000; D.tape_turned = 1900;
     D.tape_total_pulse = 2000;
     D.tape_target_cnt = D.tape_end_cnt = 2000.0f; D.tape_max = 100;
-    D.guide_pos = 9;                          /* 9단위 = 31 mm = 7.1도 남음 */
+    D.guide_pos = 4;                          /* 4단위 = 13.8 mm = 3.2도 남음. 9단위(7.1도)는 아직 감속 전(필요 감속도 < 0.85 × DCC) */
     D.vin_out = P.turn_speed;
-    for (int i = 0; i < 2000; i++) { (void)motor_turn_adjust(); }
-    assert(D.tape_align == 1 && D.vin_out > stop_min_rpm() && D.vin_out < P.turn_speed);   /* 7도 앞: 등감속 중 */
+    for (int i = 0; i < 3; i++) { (void)motor_turn_adjust(); }   /* v0.38.0: 지령을 직접 줄인다. 차가 안 움직이는 이 시험에서 오래 돌리면 바닥까지 간다 */
+    assert(D.tape_align == 1 && D.vin_out > stop_min_rpm() && D.vin_out < P.turn_speed);   /* 3도 앞: 등감속 중 */
     D.guide_all_off = 1;                      /* 라인이 잠깐 안 보이면 마지막 예상을 쓴다 */
     D.tape_end_cnt = (float)D.tape_turned + (float)P.turn_90 / 90.0f;
     for (int i = 0; i < 2000; i++) { (void)motor_turn_adjust(); }

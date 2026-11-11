@@ -562,7 +562,9 @@ typedef struct {
     float r2, v_center, err_deg, t_turn, a_fit, line_deg, ctr_mm, dec_max; int fix, reacc, err, done;
     /* 등감속 지표(v0.38.0). 각은 회전 끝(실제 90도)까지 남은 도 */
     float dec_deg, line_v, line_at, floor_deg, floor_s, floor_ang, stop_s;   /* 감속 시작 각, 라인 감지 때 지령 rpm·남은 각, 바닥 진입 각, 바닥 구간 s·도, 감속 시작 → 정지 s */
-    float ratio, const_s, a_min, a_max;   /* 감속 시작 → 바닥 진입 지령 감속도(rpm/틱) 최소/최대 비, 그 안 정속(감속 0) s */
+    float ratio, const_s, a_min, a_max;   /* 감속 시작 → 지령 2 × 바닥 지령 감속도(rpm/틱) 최소/최대 비, 감속 시작 → 바닥 진입 정속(감속 0) s */
+    float tail_s, tail_ang, drop_min;     /* 꼬리(지령 2 × 바닥 → 정지) s·도, 비 구간 안 이웃 틱 감속도 비 최소 */
+    int   drop_n;                         /* 비 구간 안 감속도가 앞 틱보다 20% 넘게 떨어진 횟수 */
 } turn_res_t;
 static int s_ttrace;            /* turn 궤적 찍기 */
 
@@ -570,7 +572,8 @@ static void turn_sim(float gd, int leds, float tau, float slip, int tns, int dcc
 {
     static const case_t c0 = { 32, 0.0f, 0.0f, 1, 20, 20, 30, 0.1f, 0, 0 };
     case_t c = c0;
-    int t, armed = 0, phase = 0, t0 = 0, td = -1, tf = -1, seen0 = 0, zero = 0, nd = 0;
+    int t, armed = 0, phase = 0, t0 = 0, td = -1, tf = -1, tw = -1, seen0 = 0, zero = 0, nd = 0;
+    float aprev = 0.0f;
     float sx = 0, sy = 0, sxx = 0, sxy = 0, syy = 0, n = 0, prev_v = 1e9f, vpeak_dec = 0.0f, v_peak = 0.0f, vprev = 0.0f, th_prev = 0.0f;
 
     c.tau = tau;
@@ -634,21 +637,28 @@ static void turn_sim(float gd, int leds, float tau, float slip, int tns, int dcc
             }
             if ((D.tape_step == TAPE_STEP_SETTLE) && (r->v_center == 0.0f)) { r->v_center = (vpeak_dec > 0.0f) ? vpeak_dec : 0.01f; }
             if (D.tape_step <= 2) { vpeak_dec = (float)D.vin_out; }     /* 중앙에서 서기 직전 지령 */
-            {   /* 등감속 지표: 감속 시작(지령이 처음 줄어든 틱)부터 바닥 진입(지령 ≤ 바닥)까지 */
+            {   /* 등감속 지표: 감속 시작(지령이 처음 줄어든 틱)부터. 비는 지령 2 × 바닥까지(꼬리는 따로), 정속은 바닥 진입까지 */
                 float v = (float)D.vin_out, flo = (float)stop_min_rpm();
-                if ((td < 0) && (D.tape_step <= 2) && (v < vprev) && (vprev > flo)) { td = t; r->dec_deg = rem; }
+                if ((td < 0) && (D.tape_step <= 2) && (v < vprev) && (vprev > flo)) { td = t; r->dec_deg = rem; r->drop_min = 1.0f; }
                 if ((td >= 0) && (tf < 0) && (D.tape_step <= 2)) {
                     if (v <= flo) { tf = t; r->floor_deg = rem; }
                     else if (t > td) {
                         float a = vprev - v;
                         if (a <= 0.0f) { zero++; }
-                        else {
+                        if ((tw < 0) && (v <= 2.0f * flo)) { tw = t; }
+                        if ((tw < 0) && (a > 0.0f)) {
                             if ((nd == 0) || (a < r->a_min)) { r->a_min = a; }
                             if ((nd == 0) || (a > r->a_max)) { r->a_max = a; }
+                            if ((nd > 0) && (aprev > 0.0f)) {
+                                if (a < 0.8f * aprev) { r->drop_n++; }
+                                if (a / aprev < r->drop_min) { r->drop_min = a / aprev; }
+                            }
                             nd++;
                         }
+                        aprev = a;
                     }
                 }
+                if ((tw >= 0) && (D.tape_step <= 2)) { r->tail_s += 0.01f; r->tail_ang += fabsf(s_v.th - th_prev) * 180.0f / PI_F; }
                 if (!seen0 && (D.tape_step >= 1) && (D.tape_step <= 2) && !D.guide_all_off && (rem < 60.0f)) { seen0 = 1; r->line_v = v; r->line_at = rem; }
                 if ((D.tape_step <= 2) && (td >= 0) && (v <= flo) && (v > 0.0f)) { r->floor_s += 0.01f; r->floor_ang += fabsf(s_v.th - th_prev) * 180.0f / PI_F; }
                 if ((td >= 0) && (r->stop_s == 0.0f) && (D.tape_step == TAPE_STEP_SETTLE)) { r->stop_s = (float)(t - td) * 0.01f; }
@@ -683,9 +693,10 @@ static void turn_sim(float gd, int leds, float tau, float slip, int tns, int dcc
 static void turn_line(int gd, int leds, int tau, float sl, int tns, int dcc, const turn_res_t *r)
 {
     printf("TURN GD%d/L%d/t%d/s%.2f/T%d/D%d | done %d err %d vcenter %.0f fix %d time %.2f reacc %d linedeg %.2f decmax %.0f"
-           " | dec %.1f line %.0f@%.1f floor %.1f fs %.2f fa %.2f stop %.2f ratio %.2f const %.2f a %.0f-%.0f\n",
+           " | dec %.1f line %.0f@%.1f floor %.1f fs %.2f fa %.2f stop %.2f ratio %.2f const %.2f a %.0f-%.0f tail %.2f ta %.2f drop %d dmin %.2f\n",
            gd, leds, tau, sl, tns, dcc, r->done, r->err, r->v_center, r->fix, r->t_turn, r->reacc, r->line_deg, r->dec_max,
-           r->dec_deg, r->line_v, r->line_at, r->floor_deg, r->floor_s, r->floor_ang, r->stop_s, r->ratio, r->const_s, r->a_min, r->a_max);
+           r->dec_deg, r->line_v, r->line_at, r->floor_deg, r->floor_s, r->floor_ang, r->stop_s, r->ratio, r->const_s, r->a_min, r->a_max,
+           r->tail_s, r->tail_ang, r->drop_n, r->drop_min);
 }
 
 static void turn_table(int full)
@@ -1450,7 +1461,9 @@ int main(int argc, char **argv)
             turn_sim((i & 1) ? 500.0f : 250.0f, (i & 2) ? 16 : 32, 0.15f, (i & 1) ? 0.8f : 1.25f, 13, 40, &tr);
             printf("  정렬 회전 GD %d L%d: 가운데 %.0f rpm, 선 기준 각 %.2f도, 보정 %d, %.2f s\n", (i & 1) ? 500 : 250, (i & 2) ? 16 : 32,
                    tr.v_center, tr.line_deg, tr.fix, tr.t_turn);
-            assert(tr.done && (tr.err == 0) && (tr.v_center <= (float)stop_min_rpm()) && (tr.reacc == 0) && (fabsf(tr.line_deg) < 1.0f) && (tr.fix <= 1));
+            /* v0.38.0: GD 500·슬립 0.8 은 라인 전 엔코더 끝점으로 감속해 보정 2번(지시 조건 GD 250 108 + 12 는 0) */
+            assert(tr.done && (tr.err == 0) && (tr.v_center <= (float)stop_min_rpm()) && (tr.reacc == 0) && (fabsf(tr.line_deg) < 1.0f) && (tr.fix <= ((i & 1) ? 2 : 0)));
+            assert((tr.const_s == 0.0f) && (tr.floor_s <= 1.0f) && (tr.drop_n == 0));   /* v0.38.0: 감속 시작 뒤 정속 없음, 칸 바뀜에 감속이 안 꺼짐 */
         }
     }
 #if AGV_DEV_TESTS
@@ -1460,6 +1473,12 @@ int main(int argc, char **argv)
         gs_flow(5.0f, 25.0f, 15, 1, 77u, &gsp, &tm, &ed);
         printf("  GS 전 과정 P 5 ms: GSN %d GSL %d GSP %d, %.1f s, 끝 각 %.2f도\n", agv_gs.gsn, agv_gs.gsl, gsp, tm / 1000.0f, ed);
         assert((agv_gs.state == 2) && (abs(gsp - 50) <= 1) && (fabsf(ed) < 1.0f) && (D.system_err == 0) && (D.stop_err == 0));
+        {   /* 결과 쪽 첫 칸 GN + 세 자리 */
+            uint16_t d[5];
+            ui_digits(d);
+            assert((d[0] == 11u + ('G' - 'A')) && (d[1] == 11u + ('N' - 'A')) && (d[2] == (uint16_t)(agv_gs.gsn / 100))
+                   && (d[3] == (uint16_t)((agv_gs.gsn / 10) % 10)) && (d[4] == (uint16_t)(agv_gs.gsn % 10)));
+        }
         gs_flow(0.0f, 25.0f, 15, 1, 78u, &gsp, &tm, &ed);
         assert((agv_gs.state == 2) && (gsp == TUNE_NO_DATA) && (agv_gs.gsn > 50) && (fabsf(ed) < 1.0f));
         gs_flow(5.0f, 25.0f, 15, 0, 79u, &gsp, &tm, &ed);     /* 라인 없음: 돌지 않고 바로 없음 */

@@ -33,7 +33,7 @@ enum { TUNE_DEV_IDENT = 1, TUNE_DEV_RPM, TUNE_DEV_TOP, TUNE_DEV_ALL, TUNE_DEV_TE
 #define TUNE_RPM_PAGES 3          /* 최고 속도·통합 결과 쪽: 0 OK/F, 1 좌 rpm, 2 우 rpm */
 #define TUNE_RPMT_PAGES 4         /* 바닥 rpm 결과 쪽: 0 OK/F, 1 L 저속 최저 rpm, 2 B 출발 DAC, 3 A 앰프 추정 S·T */
 #define TUNE_GR_PAGES 3           /* 응답 시험 결과 쪽: GRL 최소, GRS 안정 주기, GRH 최대 */
-#define TUNE_GS_PAGES 3           /* 스캔 주기 시험 결과 쪽: GSN 변화 횟수, GSL 간격 최소, GSP 스캔 주기 */
+#define TUNE_GS_PAGES 3           /* 스캔 주기 시험 결과 쪽: GN 변화 횟수(세 자리), GSL 간격 최소, GSP 스캔 주기 */
 #define TUNE_HS_PAGES 5           /* 고속 스윕 결과 쪽: 0 OK(+가장 좋은 후보)/F, 1~4 후보 평균 편차 RMS */
 
 /* EEPROM (128 워드 칩 기준). 0~50 파라미터·표시, 51~109 KEEP(77~81 은 공차 파라미터), 115~118 체크섬 밖 파라미터, 120~124 OUT 큐와 겹치지 않는다.

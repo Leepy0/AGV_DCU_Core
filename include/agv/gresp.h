@@ -38,7 +38,7 @@ typedef struct {
 #define GS_WAIT_MS    20
 typedef struct {
     int16_t  state;          /* 0 안 함, 1 진행, 2 끝, 3 없음(시작 때 라인 없음·무응답·회전 못 함) */
-    int16_t  gsn;            /* GSN 변화 횟수(버퍼를 넘어도 센다) */
+    int16_t  gsn;            /* FND GN: 변화 횟수(버퍼를 넘어도 센다) */
     int16_t  gsl;            /* GSL 연속한 두 변화 간격 최소, 0.1 ms. TUNE_NO_DATA = 없음 */
     int16_t  gsp;            /* GSP 추정 스캔 주기, 0.1 ms. TUNE_NO_DATA = 못 찾음(약 3 ms 이하이거나 요청마다 새로 읽음) */
     int16_t  p100;           /* 고른 P, 0.01 ms. 0 = 없음 */
