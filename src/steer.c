@@ -207,6 +207,74 @@ static void est_run(int16_t limit)
     D.add_speed_l = (int16_t)((int16_t)out + D.offset_kp);
     D.add_speed_r = (int16_t)(-(int16_t)out - D.offset_kp);
 }
+
+/* 반응형 곡선 속도 상한(시험, speed_curve_test 1). motor.c 가 주행 목표를 min(지령, 상한)으로 한다. 단위 rpm.
+ * 곡률 κ: 추정 조향이 돌면 κ 추정값, 아니면 실측 좌우 rpm 차로 본 차체 곡률(거른 값).
+ * (a) 곡률: 필요한 바퀴 차의 절반 |κ|·wb·v/2 ≤ SC_BETA × 조향 한계 1500 rpm,
+ *     그리고 바퀴 지연 τ 동안 곡률을 못 따라간 옆 어긋남 |κ|(vτ)²/2 ≤ SC_DELAY_E × 센서 반폭.
+ * (b) 편차: |위치|/반폭이 SC_D0 를 넘으면 낮추기 시작해 SC_D1 에서 LLOW.
+ * 내릴 때는 바로, 올릴 때는 틱당 (지령 - LLOW)/SC_RISE_TICKS 씩(출구에서 들썩이지 않게). 감·가속은 주행 S커브가 한다.
+ * 교차선·끊김(전부 켜짐·꺼짐·가장자리·유지) 동안은 직전 상한을 그대로 둔다 */
+#define SC_BETA         0.7f
+#define SC_DELAY_E      0.25f
+#define SC_TAU          0.2f      /* s. 실차 바퀴 지연 가정(44차 회전 끝 τ 와 같음) */
+#define SC_D0           0.25f
+#define SC_D1           0.6f
+#ifndef SC_RISE_TICKS
+#define SC_RISE_TICKS   300.0f    /* 상한 되올림: (지령 - LLOW) 전체를 3 s */
+#endif
+#ifndef SC_HYS
+#define SC_HYS          0.2f      /* 모의 완만 곡선 37차 일반 센서: 0 이면 속도 지령 방향 바뀜 최대 39, 0.2·3 s 면 3 */
+#endif
+#define SC_K_LPF        0.2f
+#ifndef SC_D_LPF
+#define SC_D_LPF        0.1f      /* 편차 비 거르기(틱당). 37차 곡선 안 위치가 칸마다 오르내려 상한이 들썩이지 않게 */
+#endif
+
+int16_t speed_curve_test;
+static struct { float k, d, lim; } s_sc;
+
+int16_t steer_curve_vlim(void)
+{
+    float cmd = (float)D.speed_cmd, lo = (float)P.llow_speed, half = D.guide_wide ? 32.0f : 16.0f;
+    float wb = (float)param_get(P_WHEEL_BASE_MM) * 10.0f * tune_turn_scale();
+    float k, t, d, r;
+
+    if (lo > cmd) { lo = cmd; }
+    if ((s_sc.lim <= 0.0f) || (s_sc.lim > cmd)) { s_sc.lim = cmd; }
+    if (D.guide_all_off || D.guide_all_on || (D.guide_track != GUIDE_TRK_NORMAL)) { return (int16_t)s_sc.lim; }
+    r = (float)(D.rpm_avg[0] + D.rpm_avg[1]);
+    if (r > 100.0f) { s_sc.k += SC_K_LPF * ((2000.0f * (float)(D.rpm_avg[0] - D.rpm_avg[1]) / (r * wb)) - s_sc.k); }
+    k = ((steer_alg_test == 1) && s_est.ran) ? s_est.k : s_sc.k;
+    if (k < 0.0f) { k = -k; }
+    t = cmd;
+    if (k > 0.05f) {
+        float v1 = SC_BETA * 1500.0f * 2000.0f / (k * wb), x;
+        if (v1 < t) { t = v1; }
+        /* x = (v2 / t)², v2 = √(2e/κ)/τ 를 rpm 으로. sqrtf(라이브러리 117 워드) 대신 t·√x 를 뉴턴 2번(위에서 다가가 1~3% 크다) */
+        x = (2000.0f * SC_DELAY_E * half * GUIDE_UNIT_MM / k) * (0.0036f / (SC_TAU * SC_TAU)) * P.one_meter_rpm * P.one_meter_rpm / (t * t);
+        if (x < 1.0f) {
+            float q = 0.5f * (1.0f + x);
+            t *= 0.5f * (q + (x / q));
+        }
+    }
+    s_sc.d += SC_D_LPF * (((float)((D.guide_pos >= 0) ? D.guide_pos : -D.guide_pos) / half) - s_sc.d);
+    d = s_sc.d;
+    if (d > SC_D0) {
+        float f = (d - SC_D0) / (SC_D1 - SC_D0), v3;
+        if (f > 1.0f) { f = 1.0f; }
+        v3 = cmd - (f * (cmd - lo));
+        if (v3 < t) { t = v3; }
+    }
+    if (t < lo) { t = lo; }
+    /* 지령-LLOW 의 SC_HYS 안 변화는 무시한다(편차↔속도 되먹임으로 상한이 오르내려 가감속이 되풀이되지 않게) */
+    if (t < s_sc.lim - (SC_HYS * (cmd - lo))) { s_sc.lim = t; }
+    else if ((t > s_sc.lim + (SC_HYS * (cmd - lo))) || (t >= cmd)) {
+        s_sc.lim += (cmd - lo) * (1.0f / SC_RISE_TICKS);
+        if (s_sc.lim > t) { s_sc.lim = t; }
+    }
+    return (int16_t)s_sc.lim;
+}
 #endif
 
 void steer_reset(void)
@@ -220,6 +288,9 @@ void steer_reset(void)
     s_steer.i_exit = 0;
 #if AGV_DEV_TESTS
     s_est.ran = 0;
+    s_sc.lim = 0.0f;
+    s_sc.k = 0.0f;
+    s_sc.d = 0.0f;
 #endif
 }
 
