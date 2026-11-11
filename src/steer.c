@@ -4,6 +4,7 @@
 #include "agv/guide.h"
 #include "agv/param.h"
 #include "agv/stop.h"
+#include "agv/tune.h"
 
 #define D agv_drive
 #define P param_dv
@@ -57,6 +58,10 @@ static struct {
     int16_t previous_speed;
     int16_t i_exit;         /* 곡선 편차를 지났다: 4단위 아래로 들어오면 적분을 뺀다 */
 } s_steer;
+
+#if AGV_DEV_TESTS
+int16_t steer_test_rpm;
+#endif
 
 void steer_reset(void)
 {
@@ -291,5 +296,13 @@ void steer_run(int16_t tuning_type)
 
         D.add_speed_l = (int16_t)((int16_t)out + D.offset_kp);
         D.add_speed_r = (int16_t)(-(int16_t)out - D.offset_kp);
+#if AGV_DEV_TESTS
+        if (steer_test_rpm != 0) {   /* t3.9 바퀴 지연 측정: 바퀴 지령 차를 시험이 준다. 적분은 쌓지 않고 복귀 때 이 값에서 계단 완화 */
+            s_steer.i_out = 0.0f;
+            D.p_pi_out = (float)steer_test_rpm;
+            D.add_speed_l = (int16_t)(steer_test_rpm + D.offset_kp);
+            D.add_speed_r = (int16_t)(-steer_test_rpm - D.offset_kp);
+        }
+#endif
     }
 }

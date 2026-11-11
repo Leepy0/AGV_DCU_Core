@@ -18,6 +18,7 @@
 #include "agv/storage.h"
 #include "agv/tagact.h"
 #include "agv/ui.h"
+#include "agv/wtest.h"
 
 #define D agv_drive
 
@@ -75,7 +76,8 @@ static const struct { char tag[2]; void (*start)(void); uint16_t run; } s_dev[] 
     { {'T', 'E'}, ident_start_temp, TUNE_TEMP },
     { {'H', 'S'}, hs_start,         TUNE_HS },
     { {'G', 'R'}, gr_start,         TUNE_GR },
-    { {'G', 'S'}, gs_start,         TUNE_GS }
+    { {'G', 'S'}, gs_start,         TUNE_GS },
+    { {'W', 'T'}, wtest_start,      TUNE_WT }
 };
 #define DEV_N ((uint16_t)(sizeof(s_dev) / sizeof(s_dev[0])))
 #define TUNE_CATS 3u
@@ -132,6 +134,7 @@ void tune_reset(void)
     clear_measure();
 #if AGV_DEV_TESTS
     gresp_reset();
+    wtest_reset();
 #endif
 }
 
@@ -693,9 +696,11 @@ int tune_key(uint16_t key)
     case TUNE_ALL_DONE:
     case TUNE_HS_DONE:
     case TUNE_GR_DONE:
-    case TUNE_GS_DONE: {
+    case TUNE_GS_DONE:
+    case TUNE_WT_DONE: {
         uint16_t n = (st == TUNE_RPM_DONE) ? TUNE_RPMT_PAGES : ((st == TUNE_HS_DONE) ? TUNE_HS_PAGES
-                   : (((st == TUNE_GR_DONE) || (st == TUNE_GS_DONE)) ? TUNE_GR_PAGES : TUNE_RPM_PAGES));
+                   : (((st == TUNE_GR_DONE) || (st == TUNE_GS_DONE)) ? TUNE_GR_PAGES
+                   : ((st == TUNE_WT_DONE) ? TUNE_WT_PAGES : TUNE_RPM_PAGES)));
         switch (key) {
         case KEY_UP:
         case KEY_MODE:  s_tune.page = (uint16_t)((s_tune.page + 1u) % n); return 1;
@@ -768,6 +773,9 @@ void tune_run(void)
     }
     else if (st == TUNE_GS) {
         if (!gscan_run()) { s_tune.state = TUNE_GS_DONE; }
+    }
+    else if (st == TUNE_WT) {
+        if (!wtest_run()) { s_tune.state = TUNE_WT_DONE; }
     }
     else if (dev_running(st)) {
         if (ident_run() != 0) { s_tune.state = (uint16_t)(st + 1u); }

@@ -27,10 +27,12 @@
 #include "agv/param.h"
 #include "agv/run.h"
 #include "agv/seq.h"
+#include "agv/steer.h"
 #include "agv/sys.h"
 #include "agv/tagact.h"
 #include "agv/tune.h"
 #include "agv/ui.h"
+#include "agv/wtest.h"
 #include "agv/stop.h"
 #include "hal_host.h"
 
@@ -1313,7 +1315,8 @@ static void gs_flow(float p_ms, float tape_mm, int tns, int line, uint32_t seed,
     for (t = 0; t < 120; t++) { gf_10ms(); }   /* EE 표시 1 s */
     gf_key(KEY_DOWN);                   /* t1 → t3 */
     gf_key(KEY_SET);                    /* t3.1 */
-    gf_key(KEY_DOWN);                   /* t3.1 → t3.8 */
+    gf_key(KEY_DOWN);                   /* t3.1 → t3.9 → t3.8 */
+    gf_key(KEY_DOWN);
     assert(tune_menu() == 3080);
     t0 = host.cycles;
     host.bus_in[BUS_IN_A] &= (uint16_t)~RAW_START;
@@ -1333,6 +1336,114 @@ static void gs_flow(float p_ms, float tape_mm, int tns, int line, uint32_t seed,
     }
     assert(!gscan_fast() && !gresp_busy());
     host.on_send = 0;
+}
+
+/* ---- t3.9 WT 전 과정 모의: 튜닝 메뉴 → START → LOS 정속 → 짝 펄스 → 복귀 → 정지. 직선 테이프, 10 ms 마다 센서 응답·차 모형·스캔.
+ * 차 모형 바퀴는 지령을 1차 지연 tau 로 따라간다(순수 지연 없음, 가감속 한계 ACC_LIM). 엔코더는 12펄스/회전 그대로 */
+typedef struct { float dev_max, dev_end, run_mm, t_s; } wt_res_t;
+
+static void wt_tick(int reply)
+{
+    float u = 0.0f, slant = 1.0f;
+    int seen = cross(&u, &slant);
+    if (seen && (fabsf(u) > (float)s_c->leds * PITCH_MM / 2.0f + TAPE_MM)) { seen = 0; }
+    if (reply) { sensor_reply(u, slant, seen); }
+    plant();
+    scan();
+}
+
+static void wt_key(uint16_t k)
+{
+    int i;
+    host.key = k;
+    for (i = 0; i < 10; i++) { wt_tick(0); }
+    host.key = 0;
+    for (i = 0; i < 10; i++) { wt_tick(0); }
+}
+
+static void wt_flow(float tau, int los, int leds, float kick, wt_res_t *r)
+{
+    static case_t c;
+    case_t c0 = { 32, 0.0f, 0.0f, 1, 20, 20, 30, 0.1f, 0, 0 };
+    float x0;
+    int t, ph = 0;
+
+    c = c0;
+    c.tau = tau;
+    c.los = los;
+    c.leds = leds;
+    memset(r, 0, sizeof(*r));
+    memset(&s_v, 0, sizeof(s_v));
+    s_c = &c;
+    s_gd = 250.0f;
+    s_x30w = 0.0f;
+    s_cross_w = 0.0f;
+    s_v.s = GD_MM;
+    host_reset();
+    memset(&D, 0, sizeof(D));
+    memset(seq_request_flag, 0, sizeof(seq_request_flag));
+    host.key = KEY_MODE + KEY_SET;      /* 튜닝 모드로 켠다 */
+    sys_boot();
+    host.adc = 300u << 4;
+    for (t = 0; t < 60; t++) { scan(); }
+    assert(sys_power_on() && tune_active());
+    host.key = 0;
+    assert(param_set_ram(P_GEAR_RATIO, 60) == 0);
+    assert(param_set_ram(P_WHEEL_BASE_MM, (int16_t)(WB_MM / 10.0f)) == 0);
+    assert(param_set_ram(P_GUIDE_DIST_MM, 250) == 0);
+    assert(param_set_ram(P_SPEED_HIGH, 30) == 0);
+    assert(param_set_ram(P_SPEED_LOW, (int16_t)los) == 0);
+    tune_turn_scale_set((int16_t)(TURN_SCALE * 1000.0f + 0.5f));
+    for (t = 0; t < 120; t++) { scan(); }   /* EE 표시 1 s */
+    wt_key(KEY_DOWN);                   /* t1 → t3 */
+    wt_key(KEY_SET);                    /* t3.1 */
+    wt_key(KEY_DOWN);                   /* t3.1 → t3.9 */
+    assert(tune_menu() == 3090);
+    host.bus_in[BUS_IN_A] &= (uint16_t)~RAW_START;
+    wt_tick(0);
+    host.bus_in[BUS_IN_A] |= RAW_START;
+    x0 = s_v.x;
+    for (t = 0; (t < 3000) && (tune_state() != TUNE_WT_DONE); t++) {
+        float dev;
+        if (agv_wt.phase == 2) { s_v.y -= kick; kick = 0.0f; }   /* 측정 시작에 옆으로 민다(실패 시험) */
+        wt_tick(1);
+        dev = fabsf(-s_v.y - GD_MM * sinf(s_v.th));   /* 센서 자리 옆 편차 mm(테이프 y = 0) */
+        if ((agv_wt.phase == 2) && (dev > r->dev_max)) { r->dev_max = dev; }
+        if ((ph == 3) && (agv_wt.phase == 4)) { r->dev_end = dev; }
+        ph = agv_wt.phase;
+    }
+    assert(tune_state() == TUNE_WT_DONE);
+    r->t_s = (float)t * 0.01f;
+    r->run_mm = s_v.x - x0;
+    assert(steer_test_rpm == 0);
+}
+
+/* 모형 tau 50·100·200·300 ms: 잰 τ 가 ±20%(또는 ±20 ms) 안, 순수 지연 -5~20 ms */
+static int wt_table(int los)
+{
+    static const int taus[4] = { 50, 100, 200, 300 };
+    int i, bad = 0;
+    printf("  WT LOS %d m/min, A %d rpm, T %d ms\n", los, WT_A_RPM, WT_T_TICKS * 10);
+    printf("  tau모형 |  TL  TR |  DL  DR | 계단(L R) | 옆편차 최대 끝 mm | 직선 mm | 시간 s\n");
+    for (i = 0; i < 4; i++) {
+        wt_res_t r;
+        int k, ok;
+        float tol;
+        wt_flow((float)taus[i] * 0.001f, los, 32, 0.0f, &r);
+        tol = (taus[i] * 0.2f > 20.0f) ? taus[i] * 0.2f : 20.0f;
+        ok = (agv_wt.state == 2) && (D.system_err == 0) && (D.stop_err == 0);
+        for (k = 0; k < 2; k++) {
+            int16_t tm = k ? agv_wt.wtr : agv_wt.wtl, dl = k ? agv_wt.wdr : agv_wt.wdl;
+            ok = ok && (fabsf((float)tm - (float)taus[i]) <= tol) && (dl >= -5) && (dl <= 20);
+        }
+        printf("  %6d  | %3d %3d | %3d %3d | %d %d | %5.1f %5.1f | %5.0f | %4.1f %s\n", taus[i], agv_wt.wtl, agv_wt.wtr,
+               agv_wt.wdl, agv_wt.wdr, agv_wt.used[0], agv_wt.used[1], r.dev_max, r.dev_end, r.run_mm, r.t_s, ok ? "" : "<-- 벗어남");
+        printf("          계단별 τ L %d %d %d R %d %d %d, 지연 L %d %d %d R %d %d %d\n",
+               agv_wt.tau[0][0], agv_wt.tau[0][1], agv_wt.tau[0][2], agv_wt.tau[1][0], agv_wt.tau[1][1], agv_wt.tau[1][2],
+               agv_wt.dead[0][0], agv_wt.dead[0][1], agv_wt.dead[0][2], agv_wt.dead[1][0], agv_wt.dead[1][1], agv_wt.dead[1][2]);
+        bad += !ok;
+    }
+    return bad;
 }
 #endif
 
@@ -1366,6 +1477,15 @@ int main(int argc, char **argv)
         printf("GSFLOW P %s tape %s TNS %s: state %d GSN %d GSL %d GSP %d p100 %d R %d pairs %d req %u err %u nt %u | %.0f ms, 끝 각 %.2f도, 오류 %d/%d\n",
                argv[2], argv[3], argv[4], agv_gs.state, agv_gs.gsn, agv_gs.gsl, gsp, agv_gs.p100, agv_gs.r1000, agv_gs.pairs,
                agv_gs.req, agv_gs.err, agv_gs.nt, tm, ed, D.system_err, D.stop_err);
+        return 0;
+    }
+    if ((argc > 1) && (strcmp(argv[1], "wt") == 0)) {   /* wt [tau_ms [LOS [leds [kick_mm]]]] */
+        wt_res_t wr;
+        if (argc < 3) { return wt_table(20) ? 1 : 0; }
+        wt_flow((float)atoi(argv[2]) * 0.001f, (argc > 3) ? atoi(argv[3]) : 20, (argc > 4) ? atoi(argv[4]) : 32, (argc > 5) ? (float)atof(argv[5]) : 0.0f, &wr);
+        printf("WT tau %s: state %d fail %d TL %d TR %d DL %d DR %d 계단 %d %d n %d 옆 최대 %.1f 끝 %.1f mm 직선 %.0f mm %.1f s v %d\n",
+               argv[2], agv_wt.state, agv_wt.fail, agv_wt.wtl, agv_wt.wtr, agv_wt.wdl, agv_wt.wdr, agv_wt.used[0], agv_wt.used[1],
+               agv_wt.n, wr.dev_max, wr.dev_end, wr.run_mm, wr.t_s, agv_wt.v_rpm);
         return 0;
     }
 #endif
@@ -1483,6 +1603,16 @@ int main(int argc, char **argv)
         assert((agv_gs.state == 2) && (gsp == TUNE_NO_DATA) && (agv_gs.gsn > 50) && (fabsf(ed) < 1.0f));
         gs_flow(5.0f, 25.0f, 15, 0, 79u, &gsp, &tm, &ed);     /* 라인 없음: 돌지 않고 바로 없음 */
         assert((agv_gs.state == 3) && (gsp == TUNE_NO_DATA) && (tm < 200.0f) && (fabsf(ed) < 0.01f));
+    }
+    {   /* t3.9 WT: 모형 tau 50·100·200·300 ms 전 과정, 결과 쪽, 측정 중 편차 넘침 → 복귀·정지·없음 */
+        wt_res_t wr;
+        uint16_t d[5];
+        assert(wt_table(20) == 0);
+        ui_digits(d);                   /* 첫 쪽 WTOK + 쓴 계단 수 */
+        assert((d[0] == 11u + ('W' - 'A')) && (d[1] == 11u + ('T' - 'A')) && (d[2] == 11u + ('O' - 'A')) && (d[3] == 11u + ('K' - 'A')) && (d[4] == 3u));
+        wt_flow(0.1f, 20, 16, 40.0f, &wr);
+        printf("  WT 측정 중 40 mm 밀림(일반 센서): state %d fail %d, 편차 최대 %.1f mm, %.1f s\n", agv_wt.state, agv_wt.fail, wr.dev_max, wr.t_s);
+        assert((agv_wt.state == 3) && (agv_wt.fail == 1) && (agv_wt.wtl == TUNE_NO_DATA) && (D.system_err == 0) && (D.stop_err == 0));
     }
 #endif
     printf("test_curve ok\n");

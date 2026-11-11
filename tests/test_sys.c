@@ -1580,6 +1580,8 @@ static void test_tune_menu(void)
     key(KEY_UP);
     assert(tune_menu() == 3080 && shows("T38GS"));
     key(KEY_UP);
+    assert(tune_menu() == 3090 && shows("T39WT"));
+    key(KEY_UP);
     assert(tune_ident_mode());
 #endif
     assert(D.ui_mode == UI_AUTO && tune_active() && !D.flag_jog_on);

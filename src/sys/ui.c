@@ -15,6 +15,7 @@
 #include "agv/tune.h"
 #include "agv/ident.h"
 #include "agv/rpmtest.h"
+#include "agv/wtest.h"
 
 #define D agv_drive
 #define P param_dv
@@ -867,6 +868,28 @@ static void show_gs(uint16_t page)
     }
     show_ms('S', (page == 1u) ? 'L' : 'P', (page == 1u) ? g->gsl : g->gsp);
 }
+
+/* 바퀴 지연 측정 결과: 0 WTOK + 쓴 계단 수(두 바퀴 중 적은 쪽) 또는 WTF + 까닭, 1~4 TL·TR(τ)·DL·DR(순수 지연) + ms 세 자리 */
+static void show_wt(uint16_t page)
+{
+    static const char n[4][2] = { {'T', 'L'}, {'T', 'R'}, {'D', 'L'}, {'D', 'R'} };
+    const wt_result_t *w = &agv_wt;
+    char c[DISP_DIGITS];
+    uint16_t i;
+
+    if (page == 0u) {
+        if (w->state == 2) {
+            show(letter('W'), letter('T'), letter('O'), letter('K'), (uint16_t)((w->used[0] < w->used[1]) ? w->used[0] : w->used[1]));
+        }
+        else { show(letter('W'), letter('T'), letter('F'), DIGIT_NONE, (uint16_t)w->fail); }
+        return;
+    }
+    page = (uint16_t)((page < 5u) ? page - 1u : 0u);
+    tune_value_text(c, n[page][0], n[page][1], (page == 0u) ? w->wtl : ((page == 1u) ? w->wtr : ((page == 2u) ? w->wdl : w->wdr)), 0);
+    for (i = 0; i < DISP_DIGITS; i++) {
+        s_ui.digit[i] = ((c[i] >= '0') && (c[i] <= '9')) ? (uint16_t)(c[i] - '0') : letter(c[i]);
+    }
+}
 #endif
 
 static void show_tune(void)
@@ -945,6 +968,12 @@ static void show_tune(void)
         break;
     case TUNE_GS_DONE:
         show_gs(tune_page());
+        break;
+    case TUNE_WT:       /* 1 가속·정속 대기, 2 측정, 3 복귀, 4 정지 */
+        show(letter('W'), letter('T'), DIGIT_NONE, DIGIT_NONE, (uint16_t)agv_wt.phase);
+        break;
+    case TUNE_WT_DONE:
+        show_wt(tune_page());
         break;
     case TUNE_RPM:      /* 회, 단계 */
         show(letter('R'), letter('P'), DIGIT_NONE, ident_pass(), ident_phase());
