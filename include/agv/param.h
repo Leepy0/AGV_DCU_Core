@@ -143,9 +143,10 @@ int16_t  param_active(uint16_t idx);
 
 #if AGV_DEV_TESTS
 /* TST(P_DEV_TEST) 임시 시험. 원래 값(LG·OPT·K_P)은 두고 RAM 에서만 덮는다.
- *  0 평소, 1 K_P 60 고정(param_get), 2 OPT_KF_POSITION(param_opt), 3 QUIRK_STEER_STEP(param_quirk, LG 256 과 같다),
- *  4 추정 조향, 5 추정 조향 + 교차선 유지, 6 교차선 유지, 7 rpm 피드백 평균 2표본, 8 추정 조향 + 교차선 유지 + 반응형 속도.
- * 1~3 은 읽을 때마다 반영된다. 나머지 전역과 D.p_kp 는 이 함수가 맞춘다: 부팅·TST 저장 때, 주행 시작 때(TST 0 이 아니면) */
+ * 번호는 가치·우선순위 순(v0.40.1):
+ *  0 평소(37차 조향), 1 추정 조향 + 교차선 유지 + 반응형 속도, 2 37차 + 교차선 유지, 3 추정 조향 + 교차선 유지, 4 추정 조향,
+ *  5 rpm 피드백 평균 2표본, 6 K_P 60 고정(param_get), 7 OPT_KF_POSITION(param_opt), 8 QUIRK_STEER_STEP(param_quirk, LG 256 과 같다).
+ * 6~8 은 읽을 때마다 반영된다. 나머지 전역과 D.p_kp 는 이 함수가 맞춘다: 부팅·TST 저장 때, 주행 시작 때(TST 0 이 아니면) */
 #define PARAM_TST_KP 60
 void     param_tst_apply(void);
 #endif

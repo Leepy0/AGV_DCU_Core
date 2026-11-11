@@ -45,19 +45,19 @@ int16_t param_digit(int16_t value, int16_t place)
 }
 
 #if AGV_DEV_TESTS
-/* TST 1~3 은 원래 값을 두고 읽기만 덮는다(param.h) */
+/* TST 6~8 은 원래 값을 두고 읽기만 덮는다(param.h) */
 int16_t param_get(uint16_t idx)
 {
-    if ((idx == P_STEER_KP) && (s_set[P_DEV_TEST] == 1)) { return PARAM_TST_KP; }
+    if ((idx == P_STEER_KP) && (s_set[P_DEV_TEST] == 6)) { return PARAM_TST_KP; }
     return (idx < P_COUNT) ? s_set[idx] : 0;
 }
 int16_t param_quirk(uint16_t bit)
 {
-    return ((((uint16_t)s_set[P_LEGACY_QUIRKS] | ((s_set[P_DEV_TEST] == 3) ? QUIRK_STEER_STEP : 0u)) & bit) != 0) ? 1 : 0;
+    return ((((uint16_t)s_set[P_LEGACY_QUIRKS] | ((s_set[P_DEV_TEST] == 8) ? QUIRK_STEER_STEP : 0u)) & bit) != 0) ? 1 : 0;
 }
 int16_t param_opt(uint16_t bit)
 {
-    return ((((uint16_t)s_set[P_OPT_FLAGS] | ((s_set[P_DEV_TEST] == 2) ? OPT_KF_POSITION : 0u)) & bit) != 0) ? 1 : 0;
+    return ((((uint16_t)s_set[P_OPT_FLAGS] | ((s_set[P_DEV_TEST] == 7) ? OPT_KF_POSITION : 0u)) & bit) != 0) ? 1 : 0;
 }
 
 #define TST_EST(alg, curve) { steer_alg_test = (int16_t)(alg); speed_curve_test = (int16_t)(curve); }   /* 추정 조향·반응형 속도(steer.h) */
@@ -65,10 +65,10 @@ int16_t param_opt(uint16_t bit)
 void param_tst_apply(void)
 {
     int16_t t = s_set[P_DEV_TEST];
-    D.p_kp = (float)param_get(P_STEER_KP);       /* TST 1 이면 60. 0 이면 steer.c 가 경사로 다시 잡는다 */
-    guide_hold_test = (int16_t)((t == 5) || (t == 6) || (t == 8));
-    rpm_avg_test = (int16_t)(t == 7);
-    TST_EST((t == 4) || (t == 5) || (t == 8), t == 8);
+    D.p_kp = (float)param_get(P_STEER_KP);       /* TST 6 이면 60. 0 이면 steer.c 가 경사로 다시 잡는다 */
+    guide_hold_test = (int16_t)((t >= 1) && (t <= 3));
+    rpm_avg_test = (int16_t)(t == 5);
+    TST_EST((t == 1) || (t == 3) || (t == 4), t == 1);
 }
 #else
 int16_t param_get(uint16_t idx)        { return (idx < P_COUNT) ? s_set[idx] : 0; }

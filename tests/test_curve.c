@@ -1827,19 +1827,19 @@ int main(int argc, char **argv)
         printf("  새것에서 선 잃음이 는 조건 %d\n", worse);
         return worse ? 1 : 0;
     }
-    if ((argc > 1) && (strcmp(argv[1], "kp") == 0)) {   /* kp: TST 1(K_P 60 고정)·고정 K_P 45·50 대 평소, 곡선 C 25 m/min wide, 지연 100·200·300 ms */
-        static const int kps[5] = { 0, -1, 50, 45, 35 };    /* 0 평소 경사, -1 TST 1 */
+    if ((argc > 1) && (strcmp(argv[1], "kp") == 0)) {   /* kp: TST 6(K_P 60 고정)·고정 K_P 45·50 대 평소, 곡선 C 25 m/min wide, 지연 100·200·300 ms */
+        static const int kps[5] = { 0, -1, 50, 45, 35 };    /* 0 평소 경사, -1 TST 6 */
         int k, d;
         printf("  K_P    tau | 편차최대 mm 선잃음틱 위험틱 오류 | 흔들림%% 바뀜/s 끝RMS\n");
         for (k = 0; k < 5; k++) {
             for (d = 100; d <= 300; d += 100) {
                 case_t c = { 32, 0.0f, 0.0f, 1, 25, 25, 31, (float)d * 0.001f, 0, 0, 0 };
                 c.r_mm = s_cur6[2].r; c.deg = s_cur6[2].deg; c.dir = s_cur6[2].dir;
-                s_tst = (kps[k] < 0) ? 1 : 0;
+                s_tst = (kps[k] < 0) ? 6 : 0;
                 s_kp = (kps[k] > 0) ? kps[k] : 0;
                 sim(&c, &r);
                 printf("  %4d %4d | %6.1f %5d %5d %d | %5.1f %4.1f %5.2f%s\n", kps[k], d, r.max, r.lost, r.risk, r.err,
-                       r.wob, r.wflip, r.tail_rms, (kps[k] < 0) ? "  (TST 1 = K_P 60)" : ((kps[k] == 0) ? "  (평소 경사)" : ""));
+                       r.wob, r.wflip, r.tail_rms, (kps[k] < 0) ? "  (TST 6 = K_P 60)" : ((kps[k] == 0) ? "  (평소 경사)" : ""));
             }
         }
         s_tst = s_kp = 0;

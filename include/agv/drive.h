@@ -42,13 +42,10 @@ enum { TAPE_STEP_SETTLE = 3, TAPE_STEP_FIX = 4 };   /* 정렬 회전: 중앙에�
 #define ERR_CROSS_NO_ACK    286
 #define ERR_PAUSE           290
 
-#define DRIVE_ALIGN_RAMP 24   /* 정렬 뒤 조향 상한을 0.24 s 에 걸쳐 푼다(steer.c 가 (32 - k)/32 로 셈한다: 24 에서 × 0.5) */
-#define DRIVE_ALIGN_HOLD 25   /* start_align 정렬 전 값 */
-#ifndef AGV_DEV_TESTS
-#define AGV_DEV_TESTS 1       /* tune.h 와 같은 기본값 */
-#endif
+#define DRIVE_ALIGN_RAMP 30   /* 정렬 뒤 조향 상한을 0.3 s 에 걸쳐 푼다(steer.c: (40 - k)/40, 30 에서 × 0.5) */
+#define DRIVE_ALIGN_HOLD 31   /* start_align 정렬 전 값 */
 #ifndef AGV_START_ALIGN
-#define AGV_START_ALIGN AGV_DEV_TESTS   /* 출발 정렬 단계. 현장 이미지(083)는 플래시(조향 상한만으로도 약 40워드)가 모자라 0 */
+#define AGV_START_ALIGN 1     /* 출발 정렬 단계(모든 빌드). 0 = 예전 출발 */
 #endif
 
 typedef struct {
@@ -89,7 +86,7 @@ typedef struct {
     int16_t drive_start_cnt;         /* Cnt_Driving_strat */
     /* 출발 정렬 단계(START·자동 출발·태그 정지 뒤 출발, run.c start_run). DRIVE_ALIGN_HOLD 이상 = 정렬 전: 조향 상한 |v_cmd| × 0.5,
      * DRIVE_ALIGN_HOLD 면 속도 상한 LLOW(선 없음 SPN). +1 은 튜닝(조향 상한만). 1~DRIVE_ALIGN_RAMP = 정렬 뒤 조향 상한을 ×2 로 푸는 틱. 0 = 평소.
-     * AGV_START_ALIGN 0(현장 이미지 기본)이면 쓰지 않는다(늘 0, run.c·steer.c 코드 없음) */
+     * AGV_START_ALIGN 0 이면 쓰지 않는다(늘 0, run.c·steer.c·motor.c 코드 없음) */
     int16_t start_align;
     int16_t immediate_stop;          /* DA_Rfid_Retry.ImmediateStop */
 

@@ -810,12 +810,6 @@ static void auto_speed_change(void)
 static void drive_pre(void)
 {
     start_low_speed();
-#if AGV_START_ALIGN
-    if (D.start_align == DRIVE_ALIGN_HOLD) {   /* 출발 정렬 전 속도 상한 LLOW, 선이 안 보이면 SPN. 정렬되면 start_low_speed 가 LOS 로 */
-        int16_t cap = D.guide_all_off ? P.min_speed : P.llow_speed;
-        if ((D.speed_cmd != cap) && ((D.speed_cmd > cap) || (D.speed_cmd == P.min_speed))) { D.speed_cmd = cap; D.step = DRIVE_CHANGE_SPEED; }
-    }
-#endif
     if (tune_active()) { return; }      /* 튜닝·식별 시험은 속도를 스스로 정한다 */
     start_switch_high();
     if (D.obs_use) { auto_speed_change(); }

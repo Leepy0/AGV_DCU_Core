@@ -1021,22 +1021,23 @@ static void test_tst(void)
     ui_param_text(P_DEV_TEST, 5, c);
     assert(memcmp(c, "TST 5", 5) == 0);
     assert(param_set(P_DEV_TEST, 9) != 0);
-    assert(param_set(P_DEV_TEST, 1) == 0 && param_get(P_STEER_KP) == PARAM_TST_KP && D.p_kp == (float)PARAM_TST_KP);
-    assert(param_set(P_DEV_TEST, 2) == 0 && param_opt(OPT_KF_POSITION) && param_get(P_OPT_FLAGS) == 0);
+    /* v0.40.1 번호: 1 추정+유지+반응형, 2 37차+유지, 3 추정+유지, 4 추정, 5 rpm 2표본, 6 K_P 60, 7 칼만 위치, 8 예전 조향 */
+    assert(param_set(P_DEV_TEST, 6) == 0 && param_get(P_STEER_KP) == PARAM_TST_KP && D.p_kp == (float)PARAM_TST_KP);
+    assert(param_set(P_DEV_TEST, 7) == 0 && param_opt(OPT_KF_POSITION) && param_get(P_OPT_FLAGS) == 0);
     assert(param_get(P_STEER_KP) == 0 && D.p_kp == 0.0f);
-    assert(param_set(P_DEV_TEST, 3) == 0 && param_quirk(QUIRK_STEER_STEP) && param_get(P_LEGACY_QUIRKS) == lg);
+    assert(param_set(P_DEV_TEST, 8) == 0 && param_quirk(QUIRK_STEER_STEP) && param_get(P_LEGACY_QUIRKS) == lg);
     assert(!param_opt(OPT_KF_POSITION));
     assert(param_set(P_DEV_TEST, 4) == 0 && steer_alg_test && !speed_curve_test && !guide_hold_test);
-    assert(param_set(P_DEV_TEST, 8) == 0 && steer_alg_test && speed_curve_test && guide_hold_test);
-    assert(param_set(P_DEV_TEST, 5) == 0 && guide_hold_test && steer_alg_test && !speed_curve_test && !param_quirk(QUIRK_STEER_STEP));
-    assert(param_set(P_DEV_TEST, 7) == 0 && !guide_hold_test && rpm_avg_test && !steer_alg_test);
+    assert(param_set(P_DEV_TEST, 1) == 0 && steer_alg_test && speed_curve_test && guide_hold_test);
+    assert(param_set(P_DEV_TEST, 3) == 0 && guide_hold_test && steer_alg_test && !speed_curve_test && !param_quirk(QUIRK_STEER_STEP));
+    assert(param_set(P_DEV_TEST, 5) == 0 && !guide_hold_test && rpm_avg_test && !steer_alg_test);
     ticks(100);
-    assert(host.ee[82] == 7);
-    boot_keys(0, 1);                                  /* 전원을 다시 켜도 7 */
-    assert(param_get(P_DEV_TEST) == 7 && rpm_avg_test);
+    assert(host.ee[82] == 5);
+    boot_keys(0, 1);                                  /* 전원을 다시 켜도 5 */
+    assert(param_get(P_DEV_TEST) == 5 && rpm_avg_test);
     assert(param_set(P_DEV_TEST, 0) == 0 && !rpm_avg_test && !guide_hold_test);
     boot();
-    assert(param_set(P_DEV_TEST, 6) == 0 && guide_hold_test);
+    assert(param_set(P_DEV_TEST, 2) == 0 && guide_hold_test && !steer_alg_test);
     guide_hold_test = 0;                              /* 주행 시작 때 다시 건다(guide_poll) */
     ticks(120);
     drive_up();

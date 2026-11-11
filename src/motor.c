@@ -398,6 +398,18 @@ void motor_drive_step(void)
 
     branch_run();
 
+#if AGV_START_ALIGN
+    /* 출발 정렬 단계: 정렬될 때까지 목표 = min(지령, LLOW), 선이 안 보이면 SPN. 지령은 그대로 두어 정렬 뒤 평소 S커브로 간다 */
+    if ((D.start_align == DRIVE_ALIGN_HOLD) && ((D.step == DRIVE_CRUISE) || (D.step == DRIVE_CHANGE_SPEED))) {
+        int16_t cap = D.guide_all_off ? P.min_speed : P.llow_speed;
+        if (cap < D.speed_cmd) {
+            D.step = DRIVE_CHANGE_SPEED;
+            D.cur_speed = motor_scv_speed(cap, P.acc, P.dcc);
+            motor_velocity(D.cur_speed);
+            return;
+        }
+    }
+#endif
 #if AGV_DEV_TESTS
     /* 반응형 곡선 속도: 순항·속도 바꿈 중 목표 = min(지령, 곡률·편차 상한). 감·가속은 주행 S커브 그대로 */
     if (speed_curve_test && ((D.step == DRIVE_CRUISE) || (D.step == DRIVE_CHANGE_SPEED))) {
