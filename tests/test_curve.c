@@ -114,6 +114,13 @@ static float s_st[6000], s_wd[6000], s_j[6000];
 static int   s_trace;       /* one ... 1: 틱마다 찍는다 */
 static int   s_gmask = 7;   /* cmp 에서 돌릴 조향(b0 새, b1 37차, b2 예전) */
 static int   s_sct;         /* 1: 모든 판에 speed_curve_test 1 */
+static int   s_tst, s_kp;   /* kp 표: TST 값, 고정 K_P(TST 0 일 때). 0 = 끔 */
+/* 출발 정렬 표(start): 출발 자세와 출발 뒤 지표. old 1 = 출발 정렬 단계 끔(D.start_align 0 유지) */
+static struct {
+    int   on, old, lost, al_n;
+    float off_u, th_deg, s0;            /* 옆 단위(+ 회전 중심이 오른쪽), 방향 어긋남 도, 곡선 위 출발 경로 자리 mm(0 = 직선) */
+    float run_mm, yaw_max, izero, dev_max, align_mm, align_s, th_prev;
+} s_sa;
 static int   s_scan63;      /* 1: 센서가 6.3 ms 마다만 LED 를 새로 읽는다(실측 스캔 주기). 응답은 마지막 스캔 때 자세 */
 static float s_hx[4], s_hy[4], s_hth[4];   /* 스캔 모의: 2 ms 전·4·6 ms 전 자세(0 = 지금) */
 #ifndef EST_FLIP_HYS
@@ -315,6 +322,19 @@ static void sim(const case_t *c, res_t *r)
     s_c = c;
     s_v.s = GD_MM;
     if (c->mode == 4) { s_v.y = -c->deg * GUIDE_UNIT_MM; jog = 1; }
+    if (s_sa.on) {      /* 출발 자세: 경로 s0(곡선 위면 접선 방향) + 오른쪽 off_u 단위 + 방향 th_deg */
+        float px, py, tx, ty;
+        path(s_sa.s0, &px, &py, &tx, &ty);
+        s_v.th = atan2f(ty, tx);
+        s_v.x = px + sinf(s_v.th) * s_sa.off_u * GUIDE_UNIT_MM;
+        s_v.y = py - cosf(s_v.th) * s_sa.off_u * GUIDE_UNIT_MM;
+        s_v.th += s_sa.th_deg * PI_F / 180.0f;
+        s_v.s = s_sa.s0 + GD_MM;
+        s_sa.run_mm = s_sa.yaw_max = s_sa.izero = s_sa.dev_max = 0.0f;
+        s_sa.align_mm = s_sa.align_s = -1.0f;
+        s_sa.lost = s_sa.al_n = 0;
+        s_sa.th_prev = s_v.th;
+    }
 
     host_reset();
     memset(&D, 0, sizeof(D));
@@ -333,6 +353,8 @@ static void sim(const case_t *c, res_t *r)
 #if AGV_DEV_TESTS
     steer_alg_test = (int16_t)c->alg;
     speed_curve_test = (int16_t)(c->sct | s_sct);
+    if (s_tst) { assert(param_set_ram(P_DEV_TEST, (int16_t)s_tst) == 0); }
+    else if (s_kp) { assert(param_set_ram(P_STEER_KP, (int16_t)s_kp) == 0); }
 #endif
 
     host.bus_in[BUS_IN_A] &= (uint16_t)~RAW_START;
@@ -372,8 +394,27 @@ static void sim(const case_t *c, res_t *r)
             s_v.x = x; s_v.y = y; s_v.th = th; s_v.s = s0;
         }
         else { sensor_reply(u, slant, seen); }
-        plant();
-        scan();
+        {   float x_was = s_v.x, y_was = s_v.y;
+            plant();
+            if (s_sa.on && s_sa.old) { D.start_align = 0; }
+            scan();
+            if (s_sa.on && D.flag_run) {    /* 출발 뒤 1 m 지표, 정렬(편차 ±3단위 10틱, 선 보임)까지 거리·시간 */
+                float yr = fabsf(s_v.th - s_sa.th_prev) * 100.0f * 180.0f / PI_F, d = fabsf(seen ? u : (float)c->leds * PITCH_MM / 2.0f);
+                s_sa.th_prev = s_v.th;
+                s_sa.run_mm += sqrtf((s_v.x - x_was) * (s_v.x - x_was) + (s_v.y - y_was) * (s_v.y - y_was));
+                if (s_sa.run_mm <= 1000.0f) {
+                    if (yr > s_sa.yaw_max) { s_sa.yaw_max = yr; }
+                    if ((D.vin_out > 0) && ((D.w_cmd[0] == 0) || (D.w_cmd[1] == 0))) { s_sa.izero += 0.01f; }
+                    if (d > s_sa.dev_max) { s_sa.dev_max = d; }
+                    if (D.guide_all_off) { s_sa.lost++; }
+                }
+                if (s_sa.align_mm < 0.0f) {
+                    s_sa.al_n = ((D.guide_pos <= 3) && (D.guide_pos >= -3) && !D.guide_all_off) ? s_sa.al_n + 1 : 0;
+                    if (s_sa.al_n > 10) { s_sa.align_mm = s_sa.run_mm; s_sa.align_s = (float)t * 0.01f; }
+                }
+                if (s_sa.run_mm > 2500.0f) { break; }
+            }
+        }
         if (!sped && D.flag_run && (s_v.s > 500.0f)) { tagact_speed((uint16_t)c->v_mpm); sped = 1; }
         if ((c->mode == 1) && (s_v.s > step_at)) { D.p_test = 4; }
         if ((c->mode == 2) && (s_v.s > step_at) && !jog) { s_v.y -= c->deg * GUIDE_UNIT_MM; jog = 1; }   /* 테이프가 왼쪽으로 deg 단위 꺾였다 */
@@ -1753,6 +1794,55 @@ int main(int argc, char **argv)
         sim(&c, &r);
         show((i < 6) ? s_cur6[i].name : "직선", &c, &r);
         printf("  흔들림 %.1f%% 바뀜 %.1f/s 넘침 %.1f 끝 RMS %.2f 중심 %.1f\n", r.wob, r.wflip, r.eover, r.tail_rms, r.cerr);
+        return 0;
+    }
+    if ((argc > 1) && (strcmp(argv[1], "start") == 0)) {   /* 출발 정렬 표: 예전(끔) 대 새것 */
+        static const struct { float off, th, s0; const char *name; } st[6] = {
+            { 5, 0, 0, "옆 5" }, { 10, 0, 0, "옆 10" }, { 15, 0, 0, "옆 15" },
+            { 0, 5, 0, "방향 5" }, { 0, 10, 0, "방향 10" }, { 0, 0, LEAD_MM + 300.0f, "곡선 위" } };
+        int l, a, i, o, worse = 0;
+        printf("  출발       센서 조향 | 회전율최대 도/s  안쪽0 s  편차최대 mm  정렬 mm(s)  잃음틱 | 예전 → 새것\n");
+        for (l = 16; l <= 32; l += 16) {
+            for (a = 0; a < 2; a++) {
+                for (i = 0; i < 6; i++) {
+                    float m[2][6];
+                    int lost[2];
+                    for (o = 1; o >= 0; o--) {
+                        case_t c = { l, 0.0f, 0.0f, 1, 25, 25, 30, 0.1f, 0, 0, a };
+                        if (st[i].s0 > 0.0f) { c.r_mm = s_cur6[2].r; c.deg = s_cur6[2].deg; c.dir = s_cur6[2].dir; }
+                        memset(&s_sa, 0, sizeof(s_sa));
+                        s_sa.on = 1; s_sa.old = o; s_sa.off_u = st[i].off; s_sa.th_deg = st[i].th; s_sa.s0 = st[i].s0;
+                        sim(&c, &r);
+                        m[o][0] = s_sa.yaw_max; m[o][1] = s_sa.izero; m[o][2] = s_sa.dev_max;
+                        m[o][3] = s_sa.align_mm; m[o][4] = s_sa.align_s; lost[o] = s_sa.lost;
+                    }
+                    if (lost[0] > lost[1]) { worse++; }
+                    printf("  %-8s L%2d %s | %5.1f → %5.1f  %4.2f → %4.2f  %5.1f → %5.1f  %4.0f(%.1f) → %4.0f(%.1f)  %3d → %3d\n",
+                           st[i].name, l, a ? "추정" : "37차", m[1][0], m[0][0], m[1][1], m[0][1], m[1][2], m[0][2],
+                           m[1][3], m[1][4], m[0][3], m[0][4], lost[1], lost[0]);
+                }
+            }
+        }
+        memset(&s_sa, 0, sizeof(s_sa));
+        printf("  새것에서 선 잃음이 는 조건 %d\n", worse);
+        return worse ? 1 : 0;
+    }
+    if ((argc > 1) && (strcmp(argv[1], "kp") == 0)) {   /* kp: TST 1(K_P 60 고정)·고정 K_P 45·50 대 평소, 곡선 C 25 m/min wide, 지연 100·200·300 ms */
+        static const int kps[5] = { 0, -1, 50, 45, 35 };    /* 0 평소 경사, -1 TST 1 */
+        int k, d;
+        printf("  K_P    tau | 편차최대 mm 선잃음틱 위험틱 오류 | 흔들림%% 바뀜/s 끝RMS\n");
+        for (k = 0; k < 5; k++) {
+            for (d = 100; d <= 300; d += 100) {
+                case_t c = { 32, 0.0f, 0.0f, 1, 25, 25, 31, (float)d * 0.001f, 0, 0, 0 };
+                c.r_mm = s_cur6[2].r; c.deg = s_cur6[2].deg; c.dir = s_cur6[2].dir;
+                s_tst = (kps[k] < 0) ? 1 : 0;
+                s_kp = (kps[k] > 0) ? kps[k] : 0;
+                sim(&c, &r);
+                printf("  %4d %4d | %6.1f %5d %5d %d | %5.1f %4.1f %5.2f%s\n", kps[k], d, r.max, r.lost, r.risk, r.err,
+                       r.wob, r.wflip, r.tail_rms, (kps[k] < 0) ? "  (TST 1 = K_P 60)" : ((kps[k] == 0) ? "  (평소 경사)" : ""));
+            }
+        }
+        s_tst = s_kp = 0;
         return 0;
     }
     if ((argc > 1) && (strcmp(argv[1], "wt") == 0)) {   /* wt [tau_ms [LOS [leds [kick_mm]]]] */

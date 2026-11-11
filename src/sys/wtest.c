@@ -3,6 +3,7 @@
 #if AGV_DEV_TESTS
 #include <string.h>
 #include "agv/drive.h"
+#include "agv/param.h"
 #include "agv/steer.h"
 #include "agv/tagact.h"
 
@@ -188,6 +189,9 @@ int wtest_run(void)
     case WT_STOP:
         if (!D.flag_ready && !D.flag_run && !D.flag_stopping) {
             W.phase = WT_OFF;
+            /* 정상(WTOK)이고 범위 안이면 FF 를 저장한다. 선 뒤라 주행 중 토크가 뛰지 않는다 */
+            W.ff_old = param_get(P_SPEED_FF);
+            if ((W.state == 2) && (W.ff >= 0) && (W.ff <= 999)) { (void)param_set(P_SPEED_FF, W.ff); }
             return 0;
         }
         break;

@@ -93,11 +93,10 @@ static void set_zero(stop_ctrl_t *c)
 
 /* 위치 제동 진입 혼합 비율 b. 감속도가 저크로 0 에서 필요 감속도까지 오르는 동안(속도는 거의 그대로) 가는 거리의 몫:
  * b ≈ v³·k² / (2·저크·남은²), k = 펄스/(rpm·틱). 이차 항(1 - b/2)은 뺐다(저크가 많아야 1/(1 - b/2) 배). 많아야 0.5.
- * 예전은 STOP_ENTRY_BLEND_PCT 고정 */
+ * 예전 고정 비율(STOP_ENTRY_BLEND_PCT, LG b11)은 v0.40.0 에서 뺐다(플래시) */
 static float entry_blend(const stop_ctrl_t *c, float scale)
 {
     float v = (float)c->braking_start_rpm, x = v * scale / (float)c->braking_start_pulses;
-    if (param_quirk(QUIRK_JERK_OLD)) { return (float)STOP_ENTRY_BLEND_PCT * 0.01f; }     /* 0~50 */
     x = x * x * v * ((float)STOP_JERK_DEN / (2.0f * (float)STOP_JERK_NUM));
     return (x > 0.5f) ? 0.5f : x;
 }

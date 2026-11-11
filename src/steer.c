@@ -481,6 +481,12 @@ void steer_run(int16_t tuning_type)
         }
 
         limit = (int16_t)(((D.v_cmd >= 0) ? D.v_cmd : (int16_t)(-D.v_cmd)) * 2);
+#if AGV_START_ALIGN   /* 출발 정렬 조향 상한(drive.h) */
+        if (D.start_align) {    /* 출발 정렬: × 0.5(최소 회전 반경 ≈ 휠 간격), 정렬 뒤 DRIVE_ALIGN_RAMP(24)틱에 × 2 로. (32 - k)/32 */
+            int16_t k = (D.start_align < DRIVE_ALIGN_RAMP) ? D.start_align : DRIVE_ALIGN_RAMP;
+            limit = (int16_t)(((int32_t)limit * (32 - k)) >> 5);
+        }
+#endif
         if (limit > STEER_LIMIT_RPM) { limit = STEER_LIMIT_RPM; }
 
         p_out = D.p_kp * (float)D.p_err * geom;

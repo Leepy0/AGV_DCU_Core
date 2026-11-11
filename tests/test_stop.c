@@ -512,10 +512,11 @@ int main(void)
     (void)param_set_ram(P_LEGACY_QUIRKS, QUIRK_JERK_OLD);
     stop_ctrl_begin(&c, STOP_REASON_COMMAND, 300, 1000, 10, 20, 0, 0.002f);
     assert(c.phase == STOP_PHASE_WAIT_QUIET);
-    /* 제동 계획 값. 예전: 진입 혼합 10% */
+    /* 제동 계획 값. LG b11(바닥 350)은 꼬리 없이 남은 거리 그대로. 진입 혼합은 v0.40.0 부터 늘 새 식(예전 10% 고정은 뺐다) */
     stop_ctrl_begin(&c, STOP_REASON_TAG_DOCKING, 2000, 2000, 10, 20, 1000, 0.002f);
     assert(c.braking_start_rpm == 2000 && c.braking_start_pulses == 1000);
-    assert(c.required_decel == 2000.0f * 2000.0f * 0.002f / (2.0f * 1000.0f * (1.0f - 0.1f * 0.5f)));
+    { float x = 2000.0f * 0.002f / 1000.0f, b = x * x * 2000.0f / 4.8f;
+      assert(fabsf(c.required_decel - 2000.0f * 2000.0f * 0.002f / (2.0f * 1000.0f * (1.0f - b * 0.5f))) < 0.01f); }
     (void)param_set_ram(P_LEGACY_QUIRKS, 0);
     /* 새: 계획 거리 = 남은 - 끝 꼬리(1122 rpm·틱 × 0.002 = 2 펄스) - STOP_TAIL_MARGIN.
      * 진입 혼합 b = (v·k/계획)²·v / (2·2.4). 2000 rpm, 996 펄스면 0.0067. 짧을수록 커지고 많아야 0.5 */

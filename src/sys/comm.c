@@ -214,6 +214,7 @@ static void speed_command(const uint16_t *b, int16_t num)
 
     if (b[2] == '1') {
         int16_t low, up;
+        if (num == 0) { return; }                       /* 1S00 은 무시(예전에는 LOS 를 하한으로 저장했다) */
         param_limit(P_SPEED_LOW, &low, &up);
         if (num < low) { num = low; }
         if (num > param_get(P_SPEED_HIGH)) { num = param_get(P_SPEED_HIGH); }

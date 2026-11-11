@@ -1026,8 +1026,10 @@ static void test_tst(void)
     assert(param_get(P_STEER_KP) == 0 && D.p_kp == 0.0f);
     assert(param_set(P_DEV_TEST, 3) == 0 && param_quirk(QUIRK_STEER_STEP) && param_get(P_LEGACY_QUIRKS) == lg);
     assert(!param_opt(OPT_KF_POSITION));
-    assert(param_set(P_DEV_TEST, 5) == 0 && guide_hold_test && !param_quirk(QUIRK_STEER_STEP));
-    assert(param_set(P_DEV_TEST, 7) == 0 && !guide_hold_test && rpm_avg_test);
+    assert(param_set(P_DEV_TEST, 4) == 0 && steer_alg_test && !speed_curve_test && !guide_hold_test);
+    assert(param_set(P_DEV_TEST, 8) == 0 && steer_alg_test && speed_curve_test && guide_hold_test);
+    assert(param_set(P_DEV_TEST, 5) == 0 && guide_hold_test && steer_alg_test && !speed_curve_test && !param_quirk(QUIRK_STEER_STEP));
+    assert(param_set(P_DEV_TEST, 7) == 0 && !guide_hold_test && rpm_avg_test && !steer_alg_test);
     ticks(100);
     assert(host.ee[82] == 7);
     boot_keys(0, 1);                                  /* 전원을 다시 켜도 7 */
@@ -1042,6 +1044,51 @@ static void test_tst(void)
     assert(D.flag_run && guide_hold_test);
     (void)param_set(P_DEV_TEST, 0);
     printf("  TST ok\n");
+}
+
+/* 속도 조정 태그 'S'(실제 수신 경로 'E' 프레임). [2] 0 = 임시(RAM, 전원 재투입 때 저장된 LOS), 1 = LOS 저장,
+ * 0S00 = 저장된 LOS 로 복원, 1S00 = 무시. 묶음: 0 은 SPN~DRS(rpm), 1 은 LOS 하한~DRS(m/min) */
+static void s_tag(char sub, int num)
+{
+    char b[32];
+    sprintf(b, "E%cA%02dS%03d00000000", sub, AGV_ID, num);
+    send_frame(b, 0);
+    run_scan(1);
+}
+
+static void test_s_tag(void)
+{
+    int16_t los0, lo, up;
+    boot();
+    drive_up();
+    run_scan(50);
+    assert(D.start_align == 0);                       /* 출발 정렬이 끝난 뒤(정렬 전에는 LLOW 상한이 지령을 누른다) */
+    los0 = param_get(P_SPEED_LOW);
+    param_limit(P_SPEED_LOW, &lo, &up);
+    s_tag('0', 20);                                   /* 임시 */
+    assert(P.low_speed == param_rpm(20) && D.speed_cmd == P.low_speed && param_get(P_SPEED_LOW) == los0);
+    s_tag('0', 99);                                   /* DRS 로 묶임 */
+    assert(P.low_speed == P.target_speed);
+    s_tag('0', 1);                                    /* SPN 으로 묶임 */
+    assert(P.low_speed == P.min_speed);
+    s_tag('0', 0);                                    /* 0S00 복원 */
+    assert(P.low_speed == param_rpm(los0) && param_get(P_SPEED_LOW) == los0);
+    s_tag('1', 22);                                   /* 저장 */
+    assert(param_get(P_SPEED_LOW) == 22 && P.low_speed == param_rpm(22) && D.speed_cmd == P.low_speed);
+    s_tag('1', 0);                                    /* 1S00 무시 */
+    assert(param_get(P_SPEED_LOW) == 22);
+    s_tag('1', 50);                                   /* DRS 로 묶임 */
+    assert(param_get(P_SPEED_LOW) == param_get(P_SPEED_HIGH));
+    s_tag('1', 1);                                    /* LOS 하한으로 묶임 */
+    assert(param_get(P_SPEED_LOW) == lo);
+    s_tag('1', 21);
+    s_tag('0', 15);                                   /* 임시로 바꾼 채 전원 재투입 */
+    assert(P.low_speed == param_rpm(15));
+    ticks(100);
+    assert(host.ee[P_SPEED_LOW] == 21);
+    boot_keys(0, 1);
+    assert(param_get(P_SPEED_LOW) == 21 && P.low_speed == param_rpm(21));   /* 저장한 LOS 로 돌아온다 */
+    printf("  S tag ok\n");
 }
 
 /* t3.9 WT FF 추천: 측정 직전 정속 0.5 s 의 두 바퀴 토크 지령 합 ÷ 지령 rpm 합 × 1000. 호스트 엔코더는 고정 주기라 토크 값은
@@ -1068,6 +1115,17 @@ static void test_wt_ff(void)
     printf("  WT FF 추천 %d (토크 합 %.0f, rpm 합 %.0f)\n", agv_wt.ff, st, sw);
     assert((sw > 0.0f) && (agv_wt.ff == (int16_t)(st / sw * 1000.0f + 0.5f)));
     steer_test_rpm = 0;
+    /* 자동 저장: 선 뒤(WT_STOP → 끝) 정상이고 0~999 면 FF 에 쓴다. 범위 밖·실패는 그대로 */
+    D.flag_run = D.flag_ready = D.flag_stopping = 0;
+    agv_wt.phase = 4; agv_wt.state = 2; agv_wt.ff = 1000;
+    assert(wtest_run() == 0 && param_get(P_SPEED_FF) == 0 && agv_wt.ff_old == 0);
+    agv_wt.phase = 4; agv_wt.state = 3; agv_wt.ff = 123;
+    assert(wtest_run() == 0 && param_get(P_SPEED_FF) == 0);
+    agv_wt.phase = 4; agv_wt.state = 2;
+    assert(wtest_run() == 0 && param_get(P_SPEED_FF) == 123 && agv_wt.ff_old == 0);
+    ticks(50);
+    assert(host.ee[117] == 123);
+    (void)param_set(P_SPEED_FF, 0);
     wtest_reset();
     printf("  WT FF ok\n");
 }
@@ -2793,7 +2851,8 @@ static int hold_cross_run(int hold, int *risk)
     assert(param_set_ram(P_LEGACY_QUIRKS, 0) == 0);
     guide_hold_test = (int16_t)hold;
     drive_up();
-    for (k = 0; k < 400; k++) { sl_scan(0x0C00u); }                /* 11·12번 칸: 위치 +6 */
+    for (k = 0; k < 100; k++) { sl_scan(LED_CENTER); }             /* 가운데에서 출발 정렬을 마친다 */
+    for (k = 0; k < 300; k++) { sl_scan(0x0C00u); }                /* 11·12번 칸: 위치 +6 */
     assert(D.vin_out > 1000 && D.risk_stop == 0 && D.guide_track == GUIDE_TRK_NORMAL && D.guide_pos == 6);
     *risk = 0;
     for (j = 0; j < 4; j++) {
@@ -2851,6 +2910,7 @@ int main(void)
     test_ui();
     test_menu5();
 #if AGV_DEV_TESTS
+    test_s_tag();                       /* 'S' 처리는 두 빌드 같다(comm.c). 개발 빌드에서만 돌린다 */
     test_tst();
     test_wt_ff();
 #endif

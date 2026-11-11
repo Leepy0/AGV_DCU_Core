@@ -280,14 +280,15 @@ int16_t motor_scv_core(int16_t vin, int16_t *vout, int16_t acc, int16_t dcc, int
 {
     int16_t low_acc = param_quirk(QUIRK_LOW_ACC) ? SCV_LOW_ACC_MIN : (int16_t)(acc / SCV_LOW_ACC_DIV);
     int16_t v = *vout, a, m, s = (vin >= v) ? 1 : -1, n, j = 1;
-    int16_t old_jerk = (int16_t)((flags & SCV_JERK_OLD) || param_quirk(QUIRK_JERK_OLD));
     int16_t lim = ((v >= 0) == (s > 0)) ? (((v > llow) || (acc < SCV_LOW_ACC_MIN)) ? acc
                 : ((low_acc > SCV_LOW_ACC_MIN) ? low_acc : SCV_LOW_ACC_MIN)) : dcc;
     /* 주행 저크 = min(2.4, 예전 한계/8): 한계 24 미만(예전 저크 1·2)은 예전 저크 그대로라 출발이 예전보다 날카롭지 않다.
-     * 정지 램프(llow -1)는 2.4 그대로: 위치 정지 끝 꼬리(STOP_TAIL_RPM_TICKS)가 저크 2.4 로 계산돼 있다 */
-    int16_t slow = (int16_t)(old_jerk || ((llow >= 0) && (lim < 3 * STOP_JERK_DIV)));
+     * 정지 램프(llow -1)는 2.4 그대로: 위치 정지 끝 꼬리(STOP_TAIL_RPM_TICKS)가 저크 2.4 로 계산돼 있다.
+     * SCV_JERK_OLD(위험 감속)는 늘 예전 저크. 예전 되돌림 비트(LG b11)의 저크·바닥 계단은 v0.40.0 에서 뺐다(플래시) */
+    int16_t slow = (int16_t)((flags & SCV_JERK_OLD) || ((llow >= 0) && (lim < 3 * STOP_JERK_DIV)));
 
     (void)min_speed;
+    (void)stop_floor;
 
     if (v == 0) { *accel = 0; }
     a = *accel;
@@ -316,11 +317,6 @@ int16_t motor_scv_core(int16_t vin, int16_t *vout, int16_t acc, int16_t dcc, int
     v = (int16_t)(v + a);
     if ((v - vin) * s >= 0) {                             /* 목표에 닿거나 넘었다 */
         v = vin;
-        a = 0;
-    }
-    /* 예전: 목표 0 이고 바닥 아래면 0 으로 한 번에. 지금은 감속도를 풀며 0 에 닿는다 */
-    if (old_jerk && (vin == 0) && (((v >= 0) ? v : -v) < stop_floor)) {
-        v = 0;
         a = 0;
     }
     *accel = a;

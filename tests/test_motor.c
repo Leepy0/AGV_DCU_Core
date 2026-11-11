@@ -149,14 +149,10 @@ int main(void)
       }
       assert(v == 0 && a == 0);
       assert(max_dec_low <= 60); }
-    /* 바닥: |v| < stop_floor 이고 목표 0 이면 즉시 0 */
+    /* 바닥 아래 0 으로 한 번에(예전 계단)는 v0.40.0 에서 뺐다: 예전 저크도 감속도를 풀며 0 에 닿는다 */
     v = 299; a = -3;
     motor_scv_core(0, &v, 10, 20, 500, 100, 300, SCV_JERK_OLD, &a);
-    assert(v == 0 && a == 0);
-    /* 후진 값도 절댓값으로 비교 */
-    v = -299; a = 0;
-    motor_scv_core(0, &v, 10, 20, 500, 100, 300, SCV_JERK_OLD, &a);
-    assert(v == 0);
+    assert(v > 0 && v < 299);
     /* 정지 상태에서 가속도 리셋 */
     v = 0; a = 40;
     motor_scv_core(100, &v, 8, 20, 500, 100, 0, SCV_JERK_OLD, &a);
@@ -188,7 +184,7 @@ int main(void)
 
     /* 새 저크(기본): 2.4 rpm/틱² 고정, DCC 는 상한. 31 m/min(2930 rpm) 은 25틱 만에 60, 6 m/min(567) 은 상한 전에 풀려 √(2.4 × 567) ≈ 37,
      * 목표 0 이면 바닥에서 뛰지 않고 감속도를 풀며 0 에 닿는다(stop_floor 300 이어도). QUIRK_JERK_OLD 면 예전과 같다 */
-    for (int q = 0; q < 2; q++) {
+    for (int q = 0; q < 1; q++) {          /* v0.40.0: LG b11 의 예전 저크는 뺐다(q 1 은 돌지 않는다) */
         static const int16_t dv[3] = { 567, 2930, 189 };
         if (q) { assert(param_set(P_LEGACY_QUIRKS, QUIRK_JERK_OLD) == 0); }
         for (int c = 0; c < 3; c++) {

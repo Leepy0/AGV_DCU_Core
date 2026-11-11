@@ -3,6 +3,7 @@
 #include "agv/drive.h"
 #include "agv/guide.h"      /* guide_hold_test (TST) */
 #include "agv/motor.h"      /* rpm_avg_test (TST) */
+#include "agv/steer.h"      /* steer_alg_test·speed_curve_test (TST) */
 
 #define D    agv_drive
 #define PI_F 3.14159265f
@@ -59,8 +60,7 @@ int16_t param_opt(uint16_t bit)
     return ((((uint16_t)s_set[P_OPT_FLAGS] | ((s_set[P_DEV_TEST] == 2) ? OPT_KF_POSITION : 0u)) & bit) != 0) ? 1 : 0;
 }
 
-/* 2단계(v46-est 병합) 때 이 한 줄을 { steer_alg_test = (alg); speed_curve_test = (curve); } 로 바꾼다 */
-#define TST_EST(alg, curve) ((void)(alg), (void)(curve))   /* 추정 조향·반응형 속도 아직 없음: 비워 둔다 */
+#define TST_EST(alg, curve) { steer_alg_test = (int16_t)(alg); speed_curve_test = (int16_t)(curve); }   /* 추정 조향·반응형 속도(steer.h) */
 
 void param_tst_apply(void)
 {

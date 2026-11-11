@@ -237,6 +237,9 @@ static void tape_clear(void)
 static void start_run(void)
 {
     D.flag_ready = 1;
+#if AGV_START_ALIGN
+    D.start_align = (int16_t)(DRIVE_ALIGN_HOLD + (tune_active() ? 1 : 0));   /* 튜닝은 속도를 스스로 정한다: 조향 상한만 */
+#endif
     s_run.init_step = 0;
     s_run.init_cnt = 0;
     s_run.drive_started = 0;
@@ -725,15 +728,27 @@ static int16_t guide_within(int16_t range)
     return (D.guide_pos <= range) && (D.guide_pos >= (int16_t)-range);
 }
 
+#if AGV_START_ALIGN
+#define ALIGN_SEEN() (!D.guide_all_off)    /* 출발 정렬은 선이 보여야 끝난다 */
+#else
+#define ALIGN_SEEN() 1
+#endif
+
 static void start_low_speed(void)
 {
     int16_t tag_clear = D.backward ? !D.tag_r : !D.tag_l;
 
+#if AGV_START_ALIGN
+    if ((D.start_align > 0) && (D.start_align <= DRIVE_ALIGN_RAMP)) { D.start_align--; }   /* 정렬 뒤 조향 상한 풀기 */
+#endif
     if (s_run.init_step >= START_LOW_DONE) { return; }
     if (tag_clear) { s_run.init_step = 1; }
     if (s_run.init_step == 1) {
-        if (guide_within(START_ALIGN_RANGE)) {
+        if (guide_within(START_ALIGN_RANGE) && ALIGN_SEEN()) {
             if (++s_run.init_cnt > START_ALIGN_TICKS) {
+#if AGV_START_ALIGN
+                D.start_align = DRIVE_ALIGN_RAMP;
+#endif
                 D.speed_cmd = P.low_speed;
                 D.step = DRIVE_CHANGE_SPEED;
                 s_run.init_step = START_LOW_DONE;
@@ -795,6 +810,12 @@ static void auto_speed_change(void)
 static void drive_pre(void)
 {
     start_low_speed();
+#if AGV_START_ALIGN
+    if (D.start_align == DRIVE_ALIGN_HOLD) {   /* 출발 정렬 전 속도 상한 LLOW, 선이 안 보이면 SPN. 정렬되면 start_low_speed 가 LOS 로 */
+        int16_t cap = D.guide_all_off ? P.min_speed : P.llow_speed;
+        if ((D.speed_cmd != cap) && ((D.speed_cmd > cap) || (D.speed_cmd == P.min_speed))) { D.speed_cmd = cap; D.step = DRIVE_CHANGE_SPEED; }
+    }
+#endif
     if (tune_active()) { return; }      /* 튜닝·식별 시험은 속도를 스스로 정한다 */
     start_switch_high();
     if (D.obs_use) { auto_speed_change(); }

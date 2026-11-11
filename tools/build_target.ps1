@@ -1,5 +1,6 @@
 # Target build: powershell -File tools/build_target.ps1 [-Site examples/empty_site] [-Out build/c28/agv_empty]
-#   [-ObjDir build/c28] [-CoreCache] [-CoreLib <path>] [-CoreOnly]
+#   [-ObjDir build/c28] [-CoreCache] [-CoreLib <path>] [-CoreOnly] [-SiteDef NAME=1,NAME2=0]
+# -SiteDef adds -D defines to the site files only (for example AGV_NO_RUNPROC=1 for a dev image).
 # Core objects go to <ObjDir>/core, site objects to <ObjDir>/site.
 # -CoreCache reuses existing core objects. Use it only when the core tree cannot change for that ObjDir
 #   (for example an app keys ObjDir by the hash of its vendored core). Site files are always compiled.
@@ -8,7 +9,8 @@
 # -CoreLib archives the core objects into that library and links the site objects against it
 #   (the same way an IDE project that links the core library does). -CoreOnly stops after the library.
 param([string]$Site = 'examples/empty_site', [string]$Out = 'build/c28/agv_empty',
-      [string]$ObjDir = 'build/c28', [switch]$CoreCache, [string]$CoreLib = '', [switch]$CoreOnly)
+      [string]$ObjDir = 'build/c28', [switch]$CoreCache, [string]$CoreLib = '', [switch]$CoreOnly,
+      [string]$SiteDef = '')
 $ErrorActionPreference = 'Stop'
 Set-Location (Split-Path -Parent $PSScriptRoot)
 
@@ -70,7 +72,7 @@ if ($CoreLib -ne '') {
 
 $siteObjs = @()
 foreach ($f in @(Get-ChildItem "$Site/*.c")) {
-    $siteObjs += Compile $f $siteDir (@("-I$Site") + $devFlag)
+    $siteObjs += Compile $f $siteDir (@("-I$Site") + $devFlag + @($SiteDef -split ',' | Where-Object { $_ } | ForEach-Object { "-D$_" }))
 }
 if ($failed -ne 0) { Write-Output "COMPILE FAILED: $failed"; exit 1 }
 
