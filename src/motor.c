@@ -37,7 +37,7 @@ float atanf(float x);
 /* 회전 끝 등감속(v0.35.0). 모의(test_curve turn: GD 250·500, wide·일반, 바퀴 지연 100·150 ms, 슬립 0.8~1.25)에서
  * 0.75·10틱은 가운데 도달 지령이 바닥(150) 위 최대 346 rpm, 0.5·20틱은 모두 150 */
 #ifndef TAPE_DECEL_SHARE
-#define TAPE_DECEL_SHARE     0.35f   /* 감속도 = 회전 감속(v0.36.0 부터 DCC) × 이 값 */
+#define TAPE_DECEL_SHARE     1.0f    /* 감속도 = 회전 감속(DCC) × 이 값. v0.36.1: 1.0(실차 시험값). v0.36.0 은 0.35 */
 #endif
 #ifndef TAPE_NOISE_MARGIN
 #define TAPE_NOISE_MARGIN    4       /* 잡음 각: 센서 끝 이만큼 단위 안쪽(가장자리 포화·덩어리 판정 여유) */
