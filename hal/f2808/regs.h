@@ -47,6 +47,13 @@ extern cregister volatile unsigned int IFR;
 #define T0_TPR      R16(0x0C06)
 #define T0_TPRH     R16(0x0C07)
 
+/* CPU Timer1: 자유 카운터(hal_cycles). 인터럽트 없음 */
+#define T1_TIM      R32(0x0C08)
+#define T1_PRD      R32(0x0C0A)
+#define T1_TCR      R16(0x0C0C)
+#define T1_TPR      R16(0x0C0E)
+#define T1_TPRH     R16(0x0C0F)
+
 /* GPIO 제어 */
 #define GPAMUX1     R32(0x6F86)
 #define GPAMUX2     R32(0x6F88)

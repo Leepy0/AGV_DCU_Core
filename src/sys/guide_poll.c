@@ -3,6 +3,7 @@
 #include "agv/guide.h"
 #include "agv/drive.h"
 #include "agv/frame.h"
+#include "agv/gresp.h"
 #include "agv/hal.h"
 #include "agv/log.h"
 #include "agv/param.h"
@@ -195,6 +196,7 @@ void guide_poll(void)
         if (s_prev_back != PREV_UNKNOWN) { guide_on_sensor_switch(); }
         s_prev_back = D.backward;
     }
+    if (gresp_busy()) { return; }    /* 응답 시험(t3.7)이 SCI-B 를 쓴다. 끝나면 평상시대로 */
     n = hal_sci_take_errors(HAL_SCI_B);
     if (n != 0u) { log_event(LOG_SCI_ERROR, HAL_SCI_B, (int16_t)n); }
 

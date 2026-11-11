@@ -9,6 +9,7 @@
 #include <math.h>
 #include "agv/tune.h"
 #include "agv/drive.h"
+#include "agv/gresp.h"
 #include "agv/guide.h"
 #include "agv/ident.h"
 #include "agv/param.h"
@@ -62,6 +63,7 @@ static const struct { char tag[2]; uint16_t mask; } s_check[] = {
 
 #if AGV_DEV_TESTS
 static void hs_start(void);
+static void gr_start(void);
 
 /* t3 개발 시험. 줄을 더하면 t3.n 이 는다. run 다음 상태가 끝 상태이고 ui.c 가 둘을 그린다 */
 static const struct { char tag[2]; void (*start)(void); uint16_t run; } s_dev[] = {
@@ -70,7 +72,8 @@ static const struct { char tag[2]; void (*start)(void); uint16_t run; } s_dev[] 
     { {'T', 'P'}, ident_start_top,  TUNE_TOP },
     { {'A', 'L'}, ident_start_all,  TUNE_ALL },
     { {'T', 'E'}, ident_start_temp, TUNE_TEMP },
-    { {'H', 'S'}, hs_start,         TUNE_HS }
+    { {'H', 'S'}, hs_start,         TUNE_HS },
+    { {'G', 'R'}, gr_start,         TUNE_GR }
 };
 #define DEV_N ((uint16_t)(sizeof(s_dev) / sizeof(s_dev[0])))
 #define TUNE_CATS 3u
@@ -150,6 +153,13 @@ int      tune_hs_mode(void)    { return dev_pick(TUNE_DEV_HS); }
 int16_t  tune_hs_mpm(void)     { return s_tune.hs; }
 
 static void hs_start(void) { ident_start_hs(s_tune.hs ? s_tune.hs : param_get(P_SPEED_HIGH)); }
+
+/* 응답 시험은 달리지 않는다. START 로 생긴 출발 대기를 바로 세우고 SCI-B 를 시험에 넘긴다 */
+static void gr_start(void)
+{
+    tagact_stop();
+    gresp_start();
+}
 
 /* t3.6 입력 상한: 1번, 입력 L 이 있으면 그 L 에 측정 창이 들어가는 속도까지 */
 static void hs_enter(void)
@@ -669,8 +679,10 @@ int tune_key(uint16_t key)
     case TUNE_RPM_DONE:
     case TUNE_TOP_DONE:
     case TUNE_ALL_DONE:
-    case TUNE_HS_DONE: {
-        uint16_t n = (st == TUNE_RPM_DONE) ? TUNE_RPMT_PAGES : ((st == TUNE_HS_DONE) ? TUNE_HS_PAGES : TUNE_RPM_PAGES);
+    case TUNE_HS_DONE:
+    case TUNE_GR_DONE: {
+        uint16_t n = (st == TUNE_RPM_DONE) ? TUNE_RPMT_PAGES : ((st == TUNE_HS_DONE) ? TUNE_HS_PAGES
+                   : ((st == TUNE_GR_DONE) ? TUNE_GR_PAGES : TUNE_RPM_PAGES));
         switch (key) {
         case KEY_UP:
         case KEY_MODE:  s_tune.page = (uint16_t)((s_tune.page + 1u) % n); return 1;
@@ -725,6 +737,12 @@ void tune_run(void)
     if (++s_tune.alt >= 2u * ALT_TICKS) { s_tune.alt = 0; }
     if (s_tune.splash > 0u) { s_tune.splash--; }
     if (st == TUNE_WAIT) {
+#if AGV_DEV_TESTS                  /* 응답 시험은 첫 응답(주행 시작)을 기다리지 않는다. 센서가 없어도 '없음'으로 끝난다 */
+        if (dev_pick(TUNE_DEV_GR)) {
+            if (D.flag_ready && !D.flag_stopping) { start(); }
+            return;
+        }
+#endif
         if (D.flag_run && !D.flag_stopping) { start(); }
     }
     else if (st == TUNE_BLD) {
@@ -732,6 +750,9 @@ void tune_run(void)
         if (r != 0) { bld_finish(r); }
     }
 #if AGV_DEV_TESTS
+    else if (st == TUNE_GR) {
+        if (!gresp_busy()) { s_tune.state = TUNE_GR_DONE; }
+    }
     else if (dev_running(st)) {
         if (ident_run() != 0) { s_tune.state = (uint16_t)(st + 1u); }
     }

@@ -28,6 +28,7 @@ typedef struct {
     uint16_t rx[RING_SIZE];
     volatile uint16_t rx_head, rx_tail;
     volatile uint16_t errors;
+    volatile uint32_t rx_at;   /* 마지막으로 링에 넣은 바이트를 받은 hal_cycles */
 } sci_t;
 
 static sci_t s_sci[2];
@@ -82,6 +83,8 @@ int hal_sci_rx(uint16_t port, uint16_t *byte)
     s->rx_tail = (uint16_t)((tail + 1u) & (RING_SIZE - 1u));
     return 1;
 }
+
+uint32_t hal_sci_rx_stamp(uint16_t port) { return s_sci[port].rx_at; }   /* 32비트 읽기 한 번(MOVL)이라 ISR 과 갈리지 않는다 */
 
 uint16_t hal_sci_take_errors(uint16_t port)
 {
@@ -151,6 +154,7 @@ __interrupt void hal_scib_rx_isr(void)
         if (((w & RXBUF_ERR) == 0u) && (next != s->rx_tail)) {
             s->rx[s->rx_head] = w & 0xFFu;
             s->rx_head = next;
+            s->rx_at = hal_cycles();
         }
     }
     rx_recover(s);

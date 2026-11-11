@@ -1576,6 +1576,8 @@ static void test_tune_menu(void)
     key(KEY_RESET);
     assert(tune_menu() == 3060);
     key(KEY_UP);
+    assert(tune_menu() == 3070 && shows("T37GR"));
+    key(KEY_UP);
     assert(tune_ident_mode());
 #endif
     assert(D.ui_mode == UI_AUTO && tune_active() && !D.flag_jog_on);
@@ -1974,6 +1976,188 @@ static void test_tune_t24_amp(void)
 }
 
 /* 연속 시험 중 가이드 측정: 'h' 부호가 반대이고 배율이 2 이면 저장 뒤 되살아난다. 튜닝 중 저전압은 보이지 않는다 */
+#if AGV_DEV_TESTS
+/* ---- 가이드 센서 응답 시험(t3.7 GR) ----
+ * 모의 센서: 'H' 요청 송신이 끝난 뒤 지연 + 흔들림(0~jitter) 뒤에 'h' 응답 8바이트를 115200 bps 바이트 간격으로 낸다.
+ * 앞 응답을 다 내기 전에 온 요청은 무시한다(센서가 바쁨). bad_at 번째 응답(또는 bad_every 마다)은 체크섬을 깬다 */
+#define GM_BYTE 8681UL               /* 115200 bps 10비트 = 86.8 us (100 MHz 카운트) */
+static struct { uint32_t delay, jitter, busy, seed; int on, line, bad_at, bad_every, count; } s_gm;
+
+static void gm_send(uint16_t port, const uint16_t *buf, uint16_t n)
+{
+    host_sci_t *b = &host.sci[HAL_SCI_B];
+    uint16_t f[8], sum, leds = s_gm.line ? 0x0180u : 0u;
+    uint32_t t;
+    int i, k;
+
+    if ((port != HAL_SCI_B) || !s_gm.on || (n < 2) || (buf[1] != 'H')) { return; }
+    t = host.cycles + n * GM_BYTE;
+    if ((int32_t)(t - s_gm.busy) < 0) { return; }
+    s_gm.seed = s_gm.seed * 1103515245UL + 12345UL;
+    t += s_gm.delay + ((s_gm.jitter > 0) ? ((s_gm.seed >> 8) % (s_gm.jitter + 1UL)) : 0UL);
+    s_gm.count++;
+    f[0] = 2;
+    f[1] = 'h';
+    for (i = 0; i < 4; i++) {
+        uint16_t v = (uint16_t)((leds >> (4 * i)) & 0xFu);
+        f[2 + i] = (uint16_t)((v < 10) ? ('0' + v) : ('a' + v - 10));
+    }
+    sum = (uint16_t)((f[1] + f[2] + f[3] + f[4] + f[5]) & 0xF);
+    if ((s_gm.count == s_gm.bad_at) || (s_gm.bad_every && (s_gm.count % s_gm.bad_every == 0))) { sum = (uint16_t)((sum + 1) & 0xF); }
+    f[6] = (uint16_t)((sum < 10) ? ('0' + sum) : ('a' + sum - 10));
+    f[7] = 3;
+    k = b->rx_len - b->rx_pos;           /* 남은 바이트를 앞으로 당긴다 */
+    memmove(b->rx, &b->rx[b->rx_pos], (size_t)k * sizeof(b->rx[0]));
+    memmove(b->rx_at, &b->rx_at[b->rx_pos], (size_t)k * sizeof(b->rx_at[0]));
+    b->rx_len = (uint16_t)k;
+    b->rx_pos = 0;
+    for (i = 0; i < 8; i++) {
+        t += GM_BYTE;
+        b->rx[b->rx_len] = f[i];
+        b->rx_at[b->rx_len++] = t;
+    }
+    s_gm.busy = t;
+}
+
+/* 10 us 마다 메인 루프, 2 ms 마다 틱. 결과가 나올 때까지 걸린 ms */
+static uint32_t gr_run(void)
+{
+    uint32_t t0 = host.cycles, i = 0;
+    host.sci[HAL_SCI_B].tx_len = 0;
+    while (tune_state() != TUNE_GR_DONE) {
+        host.cycles += 1000u;
+        if ((++i % 200u) == 0u) { sys_tick_2ms(); }
+        sys_scan();
+        assert(D.vin_out == 0);                       /* 달리지 않는다 */
+        assert(i < 2000000u);                         /* 20 s */
+    }
+    return (host.cycles - t0) / 100000u;
+}
+
+/* 튜닝으로 켜서 t3.7 로 간다 */
+static void gr_menu(void)
+{
+    int i;
+    boot_keys(KEY_MODE + KEY_SET, 0);
+    key(KEY_DOWN);                                    /* t1 → t3 */
+    key(KEY_SET);
+    for (i = 0; i < 6; i++) { key(KEY_UP); }
+    assert(tune_menu() == 3070 && shows("T37GR"));
+}
+
+/* START 한 번. 서 있는 그대로 끝나고 달리지 않는다 */
+static uint32_t gr_go(void)
+{
+    uint32_t ms;
+    int i;
+
+    host.on_send = gm_send;
+    press_start();                                    /* 출발 대기를 바로 세운다 */
+    assert(tune_state() == TUNE_GR);
+    ms = gr_run();
+    for (i = 0; i < 20; i++) {
+        assert(D.vin_out == 0);
+        tick();
+    }
+    assert(!D.flag_ready && !D.flag_run && !D.flag_stopping && (D.stop_err == 0) && (D.system_err == 0));
+    return ms;
+}
+
+static void gm_set(uint32_t delay_us, uint32_t jitter_us, int line, int on)
+{
+    memset(&s_gm, 0, sizeof(s_gm));
+    s_gm.delay = delay_us * 100u;
+    s_gm.jitter = jitter_us * 100u;
+    s_gm.line = line;
+    s_gm.on = on;
+    s_gm.seed = 7;
+}
+
+static void test_tune_gr(void)
+{
+    const gresp_result_t *g = &agv_all.gr;
+    uint32_t ms;
+    uint16_t i, tx;
+
+    /* 1 지연 1.0 ms + 흔들림 0~0.3 ms: 응답 = 요청 4바이트 0.35 + 지연 + 응답 8바이트 0.69 = 2.04~2.34 ms.
+     *   2 ms 간격은 앞 응답이 끝나기 전이라 무응답 → 안정 3 ms */
+    gr_menu();
+    gm_set(1000, 300, 1, 1);
+    ms = gr_go();
+    printf("  GR delay 1.0+0~0.3: GRL %d GRS %d GRH %d n %d err %d step %d, %u ms\n", g->grl, g->grs, g->grh, g->n, g->err, g->step, (unsigned)ms);
+    assert(g->state == 2 && g->n == GR_N);
+    assert(g->grl >= 20 && g->grl <= 21 && g->grh >= 22 && g->grh <= 24 && g->grs == 30);
+    assert(g->err > 0 && g->step == 7);
+    assert(ms < 4000u);
+    assert(shows("GRL20") || shows("GRL21"));
+    key(KEY_UP);
+    assert(shows("GRS30"));
+    key(KEY_UP);
+    assert(shows("GRH22") || shows("GRH23") || shows("GRH24"));
+    key(KEY_UP);
+    assert(shows("GRL20") || shows("GRL21"));         /* 처음으로 */
+    key(KEY_DOWN);
+    assert(shows("GRH22") || shows("GRH23") || shows("GRH24"));
+    for (i = 0; i < host.sci[HAL_SCI_B].tx_len; i += 4) { assert(host.sci[HAL_SCI_B].tx[i + 1] == 'H'); }   /* 시험 요청만 */
+    key(KEY_RESET);
+    assert(tune_state() == TUNE_WAIT && shows("T37GR"));
+
+    /* 2 빠른 센서(지연 0.2 ms, 흔들림 없음): 2 ms 까지 통과, 바로 재요청 주기 = 응답 1.24 ms(+ 메인 루프 10 us) */
+    gr_menu();
+    gm_set(200, 0, 1, 1);
+    ms = gr_go();
+    printf("  GR delay 0.2: GRL %d GRS %d GRH %d err %d step %d, %u ms\n", g->grl, g->grs, g->grh, g->err, g->step, (unsigned)ms);
+    assert(g->state == 2 && g->grl == 12 && g->grh == 12 && g->err == 0 && g->step == 8);
+    assert(g->grs >= 12 && g->grs <= 13);
+    assert(shows("GRL12"));
+
+    /* 3 잡음 한 번(20번째 응답 체크섬): 그 간격을 다시 해서 결과는 같고 오류만 센다 */
+    gr_menu();
+    gm_set(200, 0, 1, 1);
+    s_gm.bad_at = 20;
+    ms = gr_go();
+    printf("  GR noise once: GRL %d GRS %d GRH %d err %d, %u ms\n", g->grl, g->grs, g->grh, g->err, (unsigned)ms);
+    assert(g->state == 2 && g->err == 1 && g->grl == 12 && g->grs >= 12 && g->grs <= 13);
+
+    /* 4 잡음 잦음(30번째마다): 안정 주기는 없음(--), 응답 시간과 오류 수는 남긴다(시험을 버리지 않는다) */
+    gr_menu();
+    gm_set(200, 0, 1, 1);
+    s_gm.bad_every = 30;
+    ms = gr_go();
+    printf("  GR noise 1/30: GRL %d GRS %d GRH %d n %d err %d, %u ms\n", g->grl, g->grs, g->grh, g->n, g->err, (unsigned)ms);
+    assert(g->state == 2 && g->grs == TUNE_NO_DATA && g->grl == 12 && g->err >= 3 && g->n >= 90);
+    key(KEY_UP);
+    assert(shows("GRS--"));
+
+    /* 5 무응답: 없음, 오류 아님, 곧 끝난다 */
+    gr_menu();
+    gm_set(1000, 0, 1, 0);
+    ms = gr_go();
+    printf("  GR no reply: state %d, %u ms\n", g->state, (unsigned)ms);
+    assert(g->state == 3 && g->grl == TUNE_NO_DATA && g->grs == TUNE_NO_DATA && g->grh == TUNE_NO_DATA && ms < 200u);
+    assert(shows("GRL--"));
+
+    /* 6 라인 없음(LED 모두 꺼짐): 없음 */
+    gr_menu();
+    gm_set(1000, 0, 0, 1);
+    ms = gr_go();
+    printf("  GR no line: state %d, %u ms\n", g->state, (unsigned)ms);
+    assert(g->state == 3 && g->grh == TUNE_NO_DATA);
+
+    /* 7 시험 뒤 평상시 조회: 10 ms 마다 요청 하나, 응답 처리, 오류 없음 */
+    host.on_send = 0;
+    tune_reset();
+    (void)param_set_ram(P_LEGACY_QUIRKS, QUIRK_SRC_A);
+    host.sci[HAL_SCI_B].rx_len = host.sci[HAL_SCI_B].rx_pos = 0;
+    drive_up();
+    tx = host.sci[HAL_SCI_B].tx_len;
+    run_scan(10);
+    assert(host.sci[HAL_SCI_B].tx_len == tx + 40u);
+    assert(host.sci[HAL_SCI_B].tx[tx + 1] == 'A' && D.flag_run && (D.stop_err == 0));
+    printf("  tune GR ok\n");
+}
+#endif
+
 static void test_tune_guide(void)
 {
     guide_rx_t rx;
@@ -2472,6 +2656,9 @@ int main(void)
     test_tune_t2_compare();
     test_tune_t24_amp();
     test_tune_guide();
+#if AGV_DEV_TESTS
+    test_tune_gr();
+#endif
     test_guide_h_only();
     test_curvelog();
     test_edge_release();

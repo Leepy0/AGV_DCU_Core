@@ -831,6 +831,23 @@ static void show_wide(char name, int16_t v)
     if (v > 9999) { show(letter(name), letter('O'), letter('V'), letter('E'), letter('R')); }
     else { show(letter(name), digit_of(v, 1000), digit_of(v, 100), digit_of(v, 10), digit_of(v, 1)); }
 }
+
+/* 응답 시험 결과: 이름 세 글자 + 두 자리. 9.9 ms 까지는 넷째 자리 점(0.1 ms), 99 ms 까지는 ms, 넘으면 OV, 없음 -- */
+static void show_gr(uint16_t page)
+{
+    static const char name[TUNE_GR_PAGES][3] = { {'G', 'R', 'L'}, {'G', 'R', 'S'}, {'G', 'R', 'H'} };
+    const gresp_result_t *g = &agv_all.gr;
+    int16_t v = (page == 0u) ? g->grl : ((page == 1u) ? g->grs : g->grh);
+    const char *n = name[(page < TUNE_GR_PAGES) ? page : 0u];
+
+    show(letter(n[0]), letter(n[1]), letter(n[2]), DIGIT_MINUS, DIGIT_MINUS);
+    if ((v == TUNE_NO_DATA) || (v < 0)) { return; }
+    if (v > 999) { s_ui.digit[3] = letter('O'); s_ui.digit[4] = letter('V'); return; }
+    if (v > 99) { v = (int16_t)((v + 5) / 10); }
+    else { s_ui.dot |= 0x08u; }
+    s_ui.digit[3] = digit_of(v, 10);
+    s_ui.digit[4] = digit_of(v, 1);
+}
 #endif
 
 static void show_tune(void)
@@ -897,6 +914,12 @@ static void show_tune(void)
             if (v < 0) { s_ui.digit[2] = s_ui.digit[3] = s_ui.digit[4] = DIGIT_MINUS; }
             if (v > 999) { s_ui.digit[2] = letter('O'); s_ui.digit[3] = letter('V'); s_ui.digit[4] = letter('F'); }
         }
+        break;
+    case TUNE_GR:       /* 간격 단계 1~8 */
+        show(letter('G'), letter('R'), DIGIT_NONE, DIGIT_NONE, (uint16_t)agv_all.gr.step);
+        break;
+    case TUNE_GR_DONE:
+        show_gr(tune_page());
         break;
     case TUNE_RPM:      /* 회, 단계 */
         show(letter('R'), letter('P'), DIGIT_NONE, ident_pass(), ident_phase());

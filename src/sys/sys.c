@@ -6,6 +6,7 @@
 #include "agv/curvelog.h"
 #include "agv/drive.h"
 #include "agv/frame.h"
+#include "agv/gresp.h"
 #include "agv/guide.h"
 #include "agv/hal.h"
 #include "agv/ident.h"
@@ -150,6 +151,9 @@ void sys_scan(void)
         s_alive = 1;
     }
     storage_poll();
+#if AGV_DEV_TESTS
+    gresp_poll();                  /* 응답 시험은 틱보다 잘게 돈다 */
+#endif
     /* 타이머가 죽으면 차지 않아 리셋된다 */
     if (s_alive) {
         s_alive = 0;

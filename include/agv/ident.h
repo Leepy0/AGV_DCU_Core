@@ -14,6 +14,7 @@
 #ifndef AGV_IDENT_H
 #define AGV_IDENT_H
 #include "agv/types.h"
+#include "agv/gresp.h"
 
 #define IDENT_LEVELS 3
 #define IDENT_PASSES 6
@@ -152,6 +153,9 @@ typedef struct {
     float   elapsed_s;       /* START 부터 끝까지 */
     float   need_mm;         /* 고속 스윕: 이 속도에 필요한 최소 L. 0 = 고속 스윕 아님 */
     sweep_t sw[SWEEP_MAX];
+#if AGV_DEV_TESTS
+    gresp_result_t gr;       /* 가이드 센서 응답 시험(t3.7 GR). 뒤에 붙여 앞 필드 주소를 옮기지 않는다. 다른 시험이 시작해도 남긴다 */
+#endif
 } all_result_t;
 
 extern all_result_t agv_all;

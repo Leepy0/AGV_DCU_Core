@@ -497,8 +497,14 @@ static void opt_restore(void)
 static void all_begin(const sweep_cand_t *list, uint16_t n)
 {
     uint16_t k;
+#if AGV_DEV_TESTS
+    gresp_result_t gr = agv_all.gr;
+#endif
 
     memset(&agv_all, 0, sizeof(agv_all));
+#if AGV_DEV_TESTS
+    agv_all.gr = gr;
+#endif
     agv_all.state = 1;
     agv_all.stage = 1;
     agv_all.opt_saved = param_get(P_OPT_FLAGS);

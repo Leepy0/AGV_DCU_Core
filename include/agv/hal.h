@@ -45,6 +45,11 @@ void     hal_sci_init(uint16_t port, uint16_t ccr, uint16_t brr);
 int      hal_sci_send(uint16_t port, const uint16_t *buf, uint16_t n);   /* 통째로 넣으면 1 */
 int      hal_sci_rx(uint16_t port, uint16_t *byte);                      /* 꺼내면 1 */
 uint16_t hal_sci_take_errors(uint16_t port);                             /* 오버런·수신 오류 복구 횟수 */
+uint32_t hal_sci_rx_stamp(uint16_t port);   /* 마지막으로 링에 넣은 바이트를 받은 때(hal_cycles). 수신 ISR 이 찍는다 */
+
+/* 자유 카운터: SYSCLK 로 올라가고 약 43 s 마다 넘친다. 경과는 부호 없는 뺄셈으로 잰다(F2808 CPU Timer1) */
+#define HAL_CYCLES_PER_MS 100000UL
+uint32_t hal_cycles(void);
 
 /* Microwire EEPROM. 쓰기는 시작·끝을 나눠 칩의 쓰기 시간 동안 CPU 를 막지 않는다 */
 #define HAL_EE_WRITE_US 5000u

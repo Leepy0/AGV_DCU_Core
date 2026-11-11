@@ -176,7 +176,16 @@ void hal_sys_init(void)
     T0_TPR = 0;
     T0_TPRH = 0;
     T0_TCR = 0x4C30u;                   /* TIE, SOFT, FREE, TRB, TSS */
+
+    T1_TCR = 0x0010u;                   /* 자유 카운터: 멈추고 주기 최대, 분주 없음 */
+    T1_PRD = 0xFFFFFFFFUL;
+    T1_TPR = 0;
+    T1_TPRH = 0;
+    T1_TCR = 0x0C20u;                   /* SOFT, FREE, TRB. 인터럽트 없이 바로 돈다 */
 }
+
+/* Timer1 은 내려 센다. 뒤집어 올라가는 값으로 낸다 */
+uint32_t hal_cycles(void) { return ~T1_TIM; }
 
 void hal_start(void)
 {

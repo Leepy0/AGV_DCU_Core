@@ -21,6 +21,7 @@ void host_reset(void)
 }
 
 void hal_sys_init(void)           { }
+uint32_t hal_cycles(void)         { return host.cycles; }
 void hal_start(void)              { host.started = 1; }
 void hal_wdog_kick(void)          { host.wdog_kicks++; }
 void hal_delay_us(uint16_t us)    { (void)us; }
@@ -61,15 +62,20 @@ int hal_sci_send(uint16_t port, const uint16_t *buf, uint16_t n)
     for (i = 0; i < n; i++) {
         if (host.sci[port].tx_len < HOST_SCI_BUF) { host.sci[port].tx[host.sci[port].tx_len++] = buf[i]; }
     }
+    if (host.on_send != 0) { host.on_send(port, buf, n); }
     return 1;
 }
 
 int hal_sci_rx(uint16_t port, uint16_t *byte)
 {
-    if (host.sci[port].rx_pos >= host.sci[port].rx_len) { return 0; }
-    *byte = host.sci[port].rx[host.sci[port].rx_pos++];
+    host_sci_t *s = &host.sci[port];
+    if ((s->rx_pos >= s->rx_len) || ((int32_t)(s->rx_at[s->rx_pos] - host.cycles) > 0)) { return 0; }
+    s->rx_stamp = s->rx_at[s->rx_pos];
+    *byte = s->rx[s->rx_pos++];
     return 1;
 }
+
+uint32_t hal_sci_rx_stamp(uint16_t port) { return host.sci[port].rx_stamp; }
 
 uint16_t hal_sci_take_errors(uint16_t port) { (void)port; return 0; }
 
