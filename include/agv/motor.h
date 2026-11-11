@@ -36,8 +36,11 @@ int16_t motor_raw_rpm(uint16_t wheel);          /* 스파이크 컷 전 rpm. 327
 void    motor_spike_set(int16_t rpm);           /* 측정 rpm 스파이크 컷. 0 = 기본 MOTOR_RPM_SPIKE */
 int16_t motor_spike(void);
 
-/* DA_SCV_Speed_Core. 상태를 인자로 받는 순수 함수 */
+/* DA_SCV_Speed_Core. 상태를 인자로 받는 순수 함수. 저크 고정 2.4 rpm/틱², acc·dcc 는 가감속도 상한.
+ * flags SCV_JERK_OLD = 예전 저크(한계/8)와 목표 0 일 때 stop_floor 아래 0 으로 한 번에(QUIRK_JERK_OLD 도 같다).
+ * b0(예전 DCC 하한 20)과 min_speed 는 쓰지 않는다: P_DCC 한계가 20~60 이라 늘 DCC 그대로였다 */
+#define SCV_JERK_OLD         0x02
 int16_t motor_scv_core(int16_t vin, int16_t *vout, int16_t acc, int16_t dcc, int16_t llow,
-                       int16_t min_speed, int16_t stop_floor, int16_t use_dcc_floor, int16_t *accel);
+                       int16_t min_speed, int16_t stop_floor, int16_t flags, int16_t *accel);
 
 #endif /* AGV_MOTOR_H */

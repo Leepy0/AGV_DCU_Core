@@ -2,6 +2,7 @@
 #include <assert.h>
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include "agv/branch.h"
 #include "agv/guide.h"
@@ -125,13 +126,13 @@ int main(void)
     motor_speed_pi(500);
     assert(D.w_cmd[0] == 0 && D.w_cmd[1] == 520);
 
-    /* S커브: 저속 가속 상한 ACC/2, 목표 도달, 오버슈트 없음, 가속도 연속 */
+    /* S커브 예전 저크(SCV_JERK_OLD = QUIRK_JERK_OLD, 레거시와 같은 출력): 저속 가속 상한 ACC/2, 목표 도달, 오버슈트 없음, 가속도 연속 */
     setup();
     v = 0; a = 0;
     { int16_t prev_a = 0;
       for (int i = 0; i < 5000 && v != 2000; i++) {
           int16_t before = v;
-          motor_scv_core(2000, &v, 60, 60, 500, 300, 300, 1, &a);
+          motor_scv_core(2000, &v, 60, 60, 500, 300, 300, SCV_JERK_OLD, &a);
           assert(v <= 2000 && v >= before);
           if (v != 2000) { assert((a - prev_a <= 7) && (a - prev_a >= -7)); }     /* jerk = 60/8 */
           if (before <= 500) { assert(a <= 30); }
@@ -142,7 +143,7 @@ int main(void)
     { int16_t max_dec_low = 0;
       for (int i = 0; i < 5000 && v != 0; i++) {
           int16_t before = v;
-          motor_scv_core(0, &v, 60, 60, 500, 300, 300, 1, &a);
+          motor_scv_core(0, &v, 60, 60, 500, 300, 300, SCV_JERK_OLD, &a);
           if (before <= 600 && (before - v) > max_dec_low && v != 0) { max_dec_low = (int16_t)(before - v); }
           assert(v >= 0);
       }
@@ -150,15 +151,15 @@ int main(void)
       assert(max_dec_low <= 60); }
     /* 바닥: |v| < stop_floor 이고 목표 0 이면 즉시 0 */
     v = 299; a = -3;
-    motor_scv_core(0, &v, 10, 20, 500, 100, 300, 1, &a);
+    motor_scv_core(0, &v, 10, 20, 500, 100, 300, SCV_JERK_OLD, &a);
     assert(v == 0 && a == 0);
     /* 후진 값도 절댓값으로 비교 */
     v = -299; a = 0;
-    motor_scv_core(0, &v, 10, 20, 500, 100, 300, 1, &a);
+    motor_scv_core(0, &v, 10, 20, 500, 100, 300, SCV_JERK_OLD, &a);
     assert(v == 0);
     /* 정지 상태에서 가속도 리셋 */
     v = 0; a = 40;
-    motor_scv_core(100, &v, 8, 20, 500, 100, 0, 1, &a);
+    motor_scv_core(100, &v, 8, 20, 500, 100, 0, SCV_JERK_OLD, &a);
     assert(a == 1);
     /* 저속 구간 가속 한계 max(5, ACC/2): ACC 50·LOS 31 에서 0 → 400 rpm 이 예전(5) 의 1/3 이하, 첫 틱은 저크로 오른다 */
     { int16_t llow = (int16_t)(31.0f * P.one_meter_rpm / 2.0f);
@@ -167,23 +168,63 @@ int main(void)
       v = 0; a = 0;
       for (; t_new < 1000 && v < 400; t_new++) {
           int16_t prev_a = a;
-          motor_scv_core(2000, &v, 50, 50, llow, 300, 300, 1, &a);
+          motor_scv_core(2000, &v, 50, 50, llow, 300, 300, SCV_JERK_OLD, &a);
           assert(a - prev_a <= 50 / 2 / 8 && a <= 25);   /* 저크 = (ACC/2)/8, 급발진 없음 */
           if (t_new == 0) { assert(a <= 3); }
       }
       v = 0; a = 0;
-      for (; t_old < 1000 && v < 400; t_old++) { motor_scv_core(2000, &v, 5, 50, llow, 300, 300, 1, &a); }
+      for (; t_old < 1000 && v < 400; t_old++) { motor_scv_core(2000, &v, 5, 50, llow, 300, 300, SCV_JERK_OLD, &a); }
       printf("scv 0->400 rpm: ACC 50 %d ticks, low 5 %d ticks\n", t_new, t_old);
       assert(v >= 400 && t_new * 3 <= t_old);
       /* 작은 ACC(4)는 그대로 4 */
       v = 0; a = 0;
-      for (int i = 0; i < 200; i++) { motor_scv_core(2000, &v, 4, 50, llow, 300, 300, 1, &a); assert(a <= 4); }
+      for (int i = 0; i < 200; i++) { motor_scv_core(2000, &v, 4, 50, llow, 300, 300, SCV_JERK_OLD, &a); assert(a <= 4); }
       assert(a == 4);
       /* LG b10(QUIRK_LOW_ACC): 예전처럼 저속 구간 5 */
       assert(param_set(P_LEGACY_QUIRKS, QUIRK_LOW_ACC) == 0);
       v = 0; a = 0;
-      for (int i = 0; i < 40; i++) { motor_scv_core(2000, &v, 50, 50, llow, 300, 300, 1, &a); assert(a <= 5); }
+      for (int i = 0; i < 40; i++) { motor_scv_core(2000, &v, 50, 50, llow, 300, 300, SCV_JERK_OLD, &a); assert(a <= 5); }
       assert(param_set(P_LEGACY_QUIRKS, 0) == 0); }
+
+    /* 새 저크(기본): 2.4 rpm/틱² 고정, DCC 는 상한. 31 m/min(2930 rpm) 은 25틱 만에 60, 6 m/min(567) 은 상한 전에 풀려 √(2.4 × 567) ≈ 37,
+     * 목표 0 이면 바닥에서 뛰지 않고 감속도를 풀며 0 에 닿는다(stop_floor 300 이어도). QUIRK_JERK_OLD 면 예전과 같다 */
+    for (int q = 0; q < 2; q++) {
+        static const int16_t dv[3] = { 567, 2930, 189 };
+        if (q) { assert(param_set(P_LEGACY_QUIRKS, QUIRK_JERK_OLD) == 0); }
+        for (int c = 0; c < 3; c++) {
+            int16_t peak = 0, prev_a = 0, jmax = 0, last = 0;
+            int t = 0, t60 = -1;
+            v = dv[c]; a = 0;
+            for (; (t < 500) && (v != 0); t++) {
+                int16_t before = v;
+                motor_scv_core(0, &v, 60, 60, 500, 300, 300, 0, &a);
+                assert(v >= 0 && v <= before);
+                if (abs(a - prev_a) > jmax) { jmax = (int16_t)abs(a - prev_a); }
+                if (-a > peak) { peak = (int16_t)(-a); }
+                if ((t60 < 0) && (a == -60)) { t60 = t; }
+                last = (int16_t)(before - v);
+                prev_a = a;
+            }
+            printf("scv %s %4d -> 0 rpm: %d ticks, peak %d, jerk %d, end step %d\n", q ? "old" : "new", dv[c], t, peak, jmax, last);
+            assert(v == 0 && a == 0);
+            if (q) { assert(last > 100); continue; }       /* 예전: 바닥(300) 아래에서 0 으로 한 번에 */
+            assert(jmax <= 3 && last <= 3);
+            if (c == 0) { assert(peak >= 34 && peak <= 41); }
+            if (c == 1) { assert(peak == 60 && t60 >= 23 && t60 <= 26); }
+        }
+        /* 가속도 같다: 0 → 2000, 저속 구간(llow 500 아래) 상한 ACC/2 = 30 */
+        v = 0; a = 0;
+        { int16_t prev_a = 0;
+          for (int i = 0; (i < 500) && (v != 2000); i++) {
+              int16_t before = v;
+              motor_scv_core(2000, &v, 60, 60, 500, 300, 300, 0, &a);
+              assert(v >= before && v <= 2000 && a - prev_a <= (q ? 7 : 3));
+              if (before <= 500) { assert(a <= 30); }
+              prev_a = a;
+          } }
+        assert(v == 2000 && a == 0);
+    }
+    assert(param_set(P_LEGACY_QUIRKS, 0) == 0);
 
     /* 주행 단계: 400 → 401 정속 */
     setup();
@@ -196,6 +237,10 @@ int main(void)
     D.guide_pos = 10;
     motor_drive_step();
     assert(D.step == DRIVE_RISK_STOP && D.risk_stop == 1);
+    /* 위험 감속은 예전 저크(DCC 60/8 = 7 rpm/틱²). 새 저크면 4틱 뒤 -9 */
+    assert(D.scv_accel == -7);
+    for (int i = 0; i < 3; i++) { motor_drive_step(); }
+    assert(D.scv_accel == -28);
     for (int i = 0; i < 2000; i++) { motor_drive_step(); }
     assert(D.vin_out == (int16_t)((float)P.low_speed * 0.7f));
     D.guide_pos = 3;
@@ -433,7 +478,8 @@ int main(void)
         }
         /* v0.38.0: 엔코더 끝점으로 바닥까지 한 번에 줄이고, 그때까지 라인이 없으면 v_잡음으로 찾는다(tape_plan_min -1) */
         printf("  정렬 회전 라인 못 봄: 최저 %d rpm, 끝 속도 %d rpm(회전 속도 %d)\n", vmin, D.vin_out, P.turn_speed);
-        assert((vmin <= stop_min_rpm() + 20) && (D.tape_plan_min == -1) && (D.vin_out > stop_min_rpm()) && (D.vin_out < P.turn_speed));
+        /* 새 저크(2.4)는 바닥까지 마지막 S커브가 느려 v_잡음으로 바뀌기 전 최저가 바닥 + 21(예전 + 8) */
+        assert((vmin <= stop_min_rpm() + 30) && (D.tape_plan_min == -1) && (D.vin_out > stop_min_rpm()) && (D.vin_out < P.turn_speed));
     }
     /* 편차 → 각 환산: atan(편차 mm / GD). 1단위 = 6.89 / 2 mm. GD 250, 1도 10 펄스 */
     { static const struct { int16_t pos; float lo, hi; } cv[2] = { { 15, 115.0f, 118.0f }, { 31, 229.0f, 233.0f } };

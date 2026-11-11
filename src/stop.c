@@ -30,6 +30,8 @@ static struct {
 
 /* ---- 제어기 ---- */
 
+static int32_t plan_pulses(const stop_ctrl_t *c, int32_t remaining, float scale);
+
 int16_t stop_is_position(int16_t reason)
 {
     return (reason >= STOP_REASON_TAG_POSITION) && (reason <= STOP_REASON_TRAFFIC_POSITION);
@@ -89,15 +91,25 @@ static void set_zero(stop_ctrl_t *c)
     c->phase = STOP_PHASE_WAIT_QUIET;
 }
 
+/* 위치 제동 진입 혼합 비율 b. 감속도가 저크로 0 에서 필요 감속도까지 오르는 동안(속도는 거의 그대로) 가는 거리의 몫:
+ * b ≈ v³·k² / (2·저크·남은²), k = 펄스/(rpm·틱). 이차 항(1 - b/2)은 뺐다(저크가 많아야 1/(1 - b/2) 배). 많아야 0.5.
+ * 예전은 STOP_ENTRY_BLEND_PCT 고정 */
+static float entry_blend(const stop_ctrl_t *c, float scale)
+{
+    float v = (float)c->braking_start_rpm, x = v * scale / (float)c->braking_start_pulses;
+    if (param_quirk(QUIRK_JERK_OLD)) { return (float)STOP_ENTRY_BLEND_PCT * 0.01f; }     /* 0~50 */
+    x = x * x * v * ((float)STOP_JERK_DEN / (2.0f * (float)STOP_JERK_NUM));
+    return (x > 0.5f) ? 0.5f : x;
+}
+
 /* 목표에서 0 이 되도록 제동을 계획한다. 바닥 속도는 결과 지령에만 적용한다 */
 static void start_distance_brake(stop_ctrl_t *c, int32_t remaining, float scale)
 {
-    float blend, normalization;
+    float normalization;
     if ((remaining <= 0) || (scale <= 0.0f) || (c->command_rpm <= c->floor_rpm)) { return; }
     c->braking_start_rpm = c->command_rpm;
     c->braking_start_pulses = remaining;
-    blend = (float)stop_clamp(STOP_ENTRY_BLEND_PCT, 0, 50) * 0.01f;
-    normalization = 1.0f - blend * 0.5f;
+    normalization = 1.0f - entry_blend(c, scale) * 0.5f;
     c->required_decel = (float)c->braking_start_rpm * (float)c->braking_start_rpm * scale /
                         (2.0f * (float)remaining * normalization);
     c->braking_rate_limited = (c->required_decel > (float)c->decel_limit) ? 1 : 0;
@@ -134,54 +146,37 @@ void stop_ctrl_begin(stop_ctrl_t *c, int16_t reason, int16_t entry_rpm, int16_t 
             c->phase = STOP_PHASE_FAILED;
         }
         else if (c->phase != STOP_PHASE_CRUISE) {
-            start_distance_brake(c, remaining, pulse_scale);
+            start_distance_brake(c, plan_pulses(c, remaining, pulse_scale), pulse_scale);
         }
     }
     else {
         c->decel_limit = stop_clamp((int16_t)(dcc / STOP_RAPID_DCC_DIV), 1, STOP_RAPID_DCC_MAX);
         c->phase = STOP_PHASE_DECELERATE;
+        /* 위치 없는 정지는 바닥 0: S커브로 감속도를 풀며 0 에 닿는다. 예전(QUIRK_JERK_OLD, 바닥 350)은 바닥에서 0 으로 한 번에 */
+        if (c->floor_rpm == STOP_FLOOR_RPM) { c->floor_rpm = 0; }
         if (c->command_rpm <= c->floor_rpm) { set_zero(c); }
     }
 }
 
 static int16_t ramp(stop_ctrl_t *c, int16_t target)
 {
-    int16_t difference, limit, jerk, magnitude, ease_ticks, desired;
-    int32_t easing;
+    /* 지령은 0 이상이라 목표가 크거나 같으면 가속 한계, 아니면 감속 한계. 저속 가속 상한·바닥·DCC 하한은 끈다(llow -1, 0, 0, 0) */
+    return motor_scv_core(target, &c->command_rpm, c->accel_limit, c->decel_limit, -1, 0, 0, 0, &c->acceleration);
+}
 
-    difference = (int16_t)(target - c->command_rpm);
-    limit = (difference > 0) ? c->accel_limit : c->decel_limit;
-    jerk = (int16_t)(limit / STOP_JERK_DIV);
-    if (jerk < 1) { jerk = 1; }
-    magnitude = (c->acceleration >= 0) ? c->acceleration : (int16_t)(-c->acceleration);
-    ease_ticks = (int16_t)((magnitude + jerk - 1) / jerk);
-    easing = (int32_t)magnitude * (ease_ticks + 1) / 2;
-    if (((difference >= 0) && ((int32_t)difference <= easing)) ||
-        ((difference < 0) && ((int32_t)(-difference) <= easing))) {
-        desired = 0;
-    }
-    else {
-        desired = (difference > 0) ? limit : (int16_t)(-limit);
-    }
-    if (c->acceleration < desired) {
-        c->acceleration = (int16_t)(c->acceleration + jerk);
-        if (c->acceleration > desired) { c->acceleration = desired; }
-    }
-    else if (c->acceleration > desired) {
-        c->acceleration = (int16_t)(c->acceleration - jerk);
-        if (c->acceleration < desired) { c->acceleration = desired; }
-    }
-    c->command_rpm = (int16_t)(c->command_rpm + c->acceleration);
-    if (((difference >= 0) && (c->command_rpm >= target)) ||
-        ((difference < 0) && (c->command_rpm <= target))) {
-        c->command_rpm = target;
-        c->acceleration = 0;
-    }
-    return c->command_rpm;
+/* 위치 정지 계획 거리(펄스). 바닥이 STOP_FLOOR_RPM 그대로면 바닥에서 0 까지 감속 한계·저크로 S커브로 가는 꼬리와
+ * STOP_TAIL_MARGIN 만큼 목표를 앞당긴다. 거리 제동은 앞당긴 목표에서 바닥이 되고(펄스 단위 떨림에도 꼬리 전에 바닥에 든다),
+ * 계획 거리가 -STOP_TAIL_MARGIN(실제 남은 = 꼬리)이 되면 꼬리로 감속도를 풀며 0 에 내려 실제 목표에 닿는다(바닥에서 0 으로 뛰지 않는다).
+ * 바닥을 배워 올렸으면 그 아래는 바퀴가 서므로 앞당기지 않고 예전처럼 바닥으로 목표까지 가서 0 이다.
+ * 예전(QUIRK_JERK_OLD = QUIRK_FLOOR_350)은 바닥 350 이라 꼬리가 없다. 꼬리는 감속 한계(20 이상)에 닿지 않아 STOP_TAIL_RPM_TICKS 하나다 */
+static int32_t plan_pulses(const stop_ctrl_t *c, int32_t remaining, float scale)
+{
+    if (c->floor_rpm > STOP_FLOOR_RPM) { return remaining; }
+    return remaining - (int32_t)((float)STOP_TAIL_RPM_TICKS * scale) - STOP_TAIL_MARGIN;
 }
 
 /* 바닥 위에서는 rpm 제곱이 남은 거리에 비례해 줄어든다. 진입 구간만 가속도를 섞는다 */
-static int16_t distance_brake_speed(stop_ctrl_t *c, int32_t remaining)
+static int16_t distance_brake_speed(stop_ctrl_t *c, int32_t remaining, float scale)
 {
     float ratio, progress, blend, normalization, fraction, nominal;
     int16_t target;
@@ -191,7 +186,7 @@ static int16_t distance_brake_speed(stop_ctrl_t *c, int32_t remaining)
     if (ratio > 1.0f) { ratio = 1.0f; }
     if (ratio < 0.0f) { ratio = 0.0f; }
     progress = 1.0f - ratio;
-    blend = (float)stop_clamp(STOP_ENTRY_BLEND_PCT, 0, 50) * 0.01f;
+    blend = entry_blend(c, scale);
     normalization = 1.0f - blend * 0.5f;
     if ((blend > 0.0f) && (progress < blend)) {
         fraction = progress * progress / (2.0f * blend * normalization);
@@ -222,6 +217,8 @@ static float braking_pulses(const stop_ctrl_t *c, float scale)
     int16_t jerk, transition;
 
     if (speed <= floor_rpm) { return 0.0f; }
+    /* 여유 틱(transition + 8 + 지연)은 예전 저크(한계/8) 그대로 둔다. 새 저크의 진입 혼합이 더 쓰는 거리는
+     * 속도 × (감속도/저크)/2 = DCC 60 에서 12.5틱이고 여유 21틱 안이다. 끝 꼬리는 계획 거리(plan_pulses)가 뺀다 */
     jerk = (int16_t)(c->decel_limit / STOP_JERK_DIV);
     if (jerk < 1) { jerk = 1; }
     transition = (int16_t)((c->decel_limit + c->acceleration + jerk - 1) / jerk);
@@ -254,6 +251,7 @@ static int16_t stalled(const stop_ctrl_t *c, int16_t idle)
 int16_t stop_ctrl_update(stop_ctrl_t *c, const stop_feedback_t *fb)
 {
     int16_t both_idle, one_stalled, ceiling;
+    stop_feedback_t f;
 
     c->pred_rpm += ((float)c->command_rpm - c->pred_rpm) * STOP_PRED_LAG;
 
@@ -262,14 +260,15 @@ int16_t stop_ctrl_update(stop_ctrl_t *c, const stop_feedback_t *fb)
         return 0;
     }
     if (c->phase == STOP_PHASE_WAIT_QUIET) {
+        /* 위치 정지 끝 꼬리. 꼬리 길이만큼 앞에서 시작했으니 실제 목표 도달로 끊지 않는다(끊으면 계단). 0 에 닿고 나서 조용함을 센다 */
+        if (c->command_rpm > 0) { return ramp(c, 0); }
         if (c->zero_command_ticks < STOP_QUIET_TICKS) { c->zero_command_ticks++; }
         if (both_idle && (c->zero_command_ticks >= STOP_QUIET_TICKS)) { c->phase = STOP_PHASE_COMPLETE; }
         return 0;
     }
     if (c->elapsed_ticks < 30000) { c->elapsed_ticks++; }
     if (!stop_is_position(c->reason)) {
-        (void)ramp(c, c->floor_rpm);
-        if (c->command_rpm <= c->floor_rpm) { set_zero(c); }
+        if (ramp(c, c->floor_rpm) <= c->floor_rpm) { set_zero(c); }
         return c->command_rpm;
     }
     /* 목표 도달은 학습·가속보다 항상 먼저다 */
@@ -289,10 +288,17 @@ int16_t stop_ctrl_update(stop_ctrl_t *c, const stop_feedback_t *fb)
         set_zero(c);
         return 0;
     }
+    f = *fb;                     /* 제동 계획은 꼬리만큼 앞당긴 거리로(plan_pulses) */
+    f.remaining_pulses = plan_pulses(c, f.remaining_pulses, f.pulses_per_rpm_tick);
     if (c->phase == STOP_PHASE_CRUISE) {
-        if (cruise_left(c, fb)) { return ramp(c, c->maximum_rpm); }
+        if (cruise_left(c, &f)) { return ramp(c, c->maximum_rpm); }
         c->phase = STOP_PHASE_DECELERATE;
-        start_distance_brake(c, fb->remaining_pulses, fb->pulses_per_rpm_tick);
+        start_distance_brake(c, f.remaining_pulses, f.pulses_per_rpm_tick);
+    }
+    /* 실제 남은 거리가 꼬리가 됐다: 끝 꼬리로. 학습 중에는 바닥으로 간다 */
+    if ((f.remaining_pulses <= -STOP_TAIL_MARGIN) && (c->phase != STOP_PHASE_LEARN_FLOOR)) {
+        c->phase = STOP_PHASE_WAIT_QUIET;
+        return ramp(c, 0);
     }
     one_stalled = stalled(c, fb->idle_left) || stalled(c, fb->idle_right);
     /* 바닥이 낮아 제동 곡선 위에서 바퀴가 멈출 수 있다(짐·마찰). 그 지령부터 바닥을 배운다. 예전(바닥 350)은 300 틱 뒤 실패 */
@@ -346,7 +352,7 @@ int16_t stop_ctrl_update(stop_ctrl_t *c, const stop_feedback_t *fb)
     if (c->phase == STOP_PHASE_APPROACH) {
         return ramp(c, c->floor_rpm);
     }
-    if (c->braking_start_pulses > 0) { (void)distance_brake_speed(c, fb->remaining_pulses); }
+    if (c->braking_start_pulses > 0) { (void)distance_brake_speed(c, f.remaining_pulses, f.pulses_per_rpm_tick); }
     else                             { (void)ramp(c, c->floor_rpm); }
     if (c->command_rpm == c->floor_rpm) { c->phase = STOP_PHASE_APPROACH; }
     return c->command_rpm;
@@ -592,7 +598,7 @@ static void resume_at(int16_t entry, int16_t accel)
         stop_begin_runtime(STOP_REASON_COMMAND);
     }
     else {
-        /* 주행 램프가 지금 지령·가속도에서 이어받는다. 램프는 가속 쪽 저크(acc/8)로 감속도를 풀므로
+        /* 주행 램프가 지금 지령·가속도에서 이어받는다. 램프는 저크로 감속도를 풀므로
          * 제동 감속도를 그대로 넘기면 한참 더 떨어지고 저속에서는 0 을 넘는다. acc 안으로 묶어 넘긴다 */
         stop_ctrl_reset(&s_ctrl);
         s_lt.reason = STOP_REASON_NONE;
@@ -737,7 +743,7 @@ int16_t stop_run(void)
     if (D.control != RUN_JOG) { D.amp_dir = D.motion; }
     if (D.immediate_stop && resumable(s_ctrl.reason)) {
         D.stop_pulses = 0;
-        if ((s_ctrl.phase != STOP_PHASE_WAIT_QUIET) && (s_ctrl.phase != STOP_PHASE_COMPLETE)) { set_zero(&s_ctrl); }
+        if ((s_ctrl.phase < STOP_PHASE_WAIT_QUIET) || (s_ctrl.command_rpm != 0)) { set_zero(&s_ctrl); }   /* 꼬리도 끊는다 */
     }
     get_feedback(&fb, s_ctrl.reason);
     D.cur_speed = (int16_t)(s_command_sign * stop_ctrl_update(&s_ctrl, &fb));
@@ -750,7 +756,7 @@ int16_t stop_run(void)
     }
     else if (s_ctrl.reason == STOP_REASON_TRAFFIC_POSITION) {
         /* 목표에 섰다. 다음 틱부터 교차로 유지(STOP_REASON_TRAFFIC)가 허가까지 세운다 */
-        if ((s_ctrl.phase == STOP_PHASE_WAIT_QUIET) || (s_ctrl.phase == STOP_PHASE_COMPLETE)) { acs_cross_hold(); }
+        if ((s_ctrl.phase >= STOP_PHASE_WAIT_QUIET) && (s_ctrl.command_rpm == 0)) { acs_cross_hold(); }   /* 꼬리가 끝난 뒤 */
     }
     else if (s_ctrl.phase == STOP_PHASE_COMPLETE) {
         /* 정지가 끝나면 위험 감속 표시도 끝이다. 남으면 다음 주행 내내 적분 0·커브 모드가 된다 */
@@ -760,23 +766,22 @@ int16_t stop_run(void)
     return 1;
 }
 
-int16_t stop_alignment_speed(int16_t target_rpm)
+/* 회전 속도 경사. 바닥 아래 목표는 정지 바닥으로, 0 이하는 0. 주행과 같은 S커브 */
+static int16_t turn_ramp(int16_t target_rpm, int16_t acc, int16_t dcc)
 {
     if (target_rpm <= 0) { return 0; }
     if (target_rpm < stop_min_rpm()) { target_rpm = stop_min_rpm(); }
-    return motor_scv_speed(target_rpm, P.acc, P.dcc);
+    return motor_scv_speed(target_rpm, acc, dcc);
 }
+
+int16_t stop_alignment_speed(int16_t target_rpm) { return turn_ramp(target_rpm, P.acc, P.dcc); }
 
 int16_t stop_turn_dcc(void) { return turn_dcc(P.dcc); }
 
 int16_t stop_turn_speed(int16_t target_rpm)
 {
     int16_t dcc = stop_turn_dcc();
-    int16_t acc = (P.acc < dcc) ? P.acc : dcc;
-
-    if (target_rpm <= 0) { return 0; }
-    if (target_rpm < stop_min_rpm()) { target_rpm = stop_min_rpm(); }
-    return motor_scv_core(target_rpm, &D.vin_out, acc, dcc, P.llow_speed, P.min_speed, P.min_speed, 0, &D.scv_accel);
+    return turn_ramp(target_rpm, (P.acc < dcc) ? P.acc : dcc, dcc);
 }
 
 void stop_now(void)

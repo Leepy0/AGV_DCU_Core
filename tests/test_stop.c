@@ -2,6 +2,7 @@
 #include <assert.h>
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include "agv/acs.h"
 #include "agv/motor.h"
@@ -374,6 +375,36 @@ static void test_stop_last(void)
     assert(stop_last.n == n0 + 2);
 }
 
+/* 정지 끝 계단 없음: 급정지·위치 정지(태그) 모두 바닥 아래로 감속도를 풀며 0 에 닿고, 태그는 목표 3 mm 안.
+ * 예전(QUIRK_JERK_OLD, 바닥 350)은 바닥에서 0 으로 한 번에 */
+static void test_end_step(void)
+{
+    for (int q = 0; q < 2; q++) {
+        for (int k = 0; k < 2; k++) {
+            int16_t prev, step = 0;
+            long from;
+            int t = 0;
+            setup(2000);
+            if (q) { (void)param_set(P_LEGACY_QUIRKS, QUIRK_JERK_OLD); }
+            for (; t < 50; t++) { tick(0); }
+            from = s_travel;
+            D.flag_stopping = 1;
+            if (k) { D.stop_pulses = 600; stop_request_tag(); }
+            else   { stop_request_rapid(STOP_REASON_COMMAND); }
+            prev = D.last_input;
+            for (t = 0; D.flag_run && (t < 3000); t++) {
+                tick(0);
+                if ((D.last_input == 0) && (prev > 0)) { step = prev; }       /* 0 이 되기 직전 지령 */
+                prev = D.last_input;
+            }
+            printf("  끝 계단 %s %s: %d rpm/틱, %.1f mm\n", q ? "예전" : "새", k ? "태그 600 p" : "급정지", step, travel_mm(from));
+            assert(!D.flag_run && (q ? (step >= STOP_MIN_RPM) : (step <= 5)));
+            if (k) { assert(fabsf(travel_mm(from) - 600.0f / P.one_length_pulse) < STOP_DISTANCE_TOL_MM); }
+        }
+    }
+    (void)param_set(P_LEGACY_QUIRKS, 0);
+}
+
 /* OPT_PAUSE_RESUME_SMOOTH: 감속 중 원인이 풀리면 0 까지 가지 않는다 */
 static void pause_begin(int16_t opt)
 {
@@ -465,13 +496,43 @@ int main(void)
     stop_ctrl_begin(&c, STOP_REASON_TURN_ANGLE, 0, 1000, 60, 60, 500, 0.004f);
     assert(c.decel_limit == 10 && c.accel_limit == 10);
     (void)param_set_ram(P_LEGACY_QUIRKS, 0);
-    /* 일반 정지: 바닥 이하면 바로 0 */
+    /* 일반 정지: 바닥 0 이라 바닥 아래 지령도 S커브로 감속도를 풀며 0 에 닿는다(저크 2.4, 끝 계단 없음).
+     * 예전(QUIRK_JERK_OLD)은 바닥(350) 이하면 바로 0 */
     stop_ctrl_begin(&c, STOP_REASON_COMMAND, 100, 1000, 10, 20, 0, 0.002f);
+    assert(c.phase == STOP_PHASE_DECELERATE && c.floor_rpm == 0);
+    memset(&fb, 0, sizeof(fb));
+    { int16_t prev = c.command_rpm, n = 0;
+      while ((c.phase == STOP_PHASE_DECELERATE) && (n < 100)) {
+          int16_t a0 = c.acceleration, v = stop_ctrl_update(&c, &fb);
+          assert((v <= prev) && (prev - v <= 20) && (abs(c.acceleration - a0) <= 3));
+          prev = v;
+          n++;
+      }
+      assert(c.phase == STOP_PHASE_WAIT_QUIET && c.command_rpm == 0 && n > 5); }
+    (void)param_set_ram(P_LEGACY_QUIRKS, QUIRK_JERK_OLD);
+    stop_ctrl_begin(&c, STOP_REASON_COMMAND, 300, 1000, 10, 20, 0, 0.002f);
     assert(c.phase == STOP_PHASE_WAIT_QUIET);
-    /* 제동 계획 값 */
+    /* 제동 계획 값. 예전: 진입 혼합 10% */
     stop_ctrl_begin(&c, STOP_REASON_TAG_DOCKING, 2000, 2000, 10, 20, 1000, 0.002f);
     assert(c.braking_start_rpm == 2000 && c.braking_start_pulses == 1000);
     assert(c.required_decel == 2000.0f * 2000.0f * 0.002f / (2.0f * 1000.0f * (1.0f - 0.1f * 0.5f)));
+    (void)param_set_ram(P_LEGACY_QUIRKS, 0);
+    /* 새: 계획 거리 = 남은 - 끝 꼬리(1122 rpm·틱 × 0.002 = 2 펄스) - STOP_TAIL_MARGIN.
+     * 진입 혼합 b = (v·k/계획)²·v / (2·2.4). 2000 rpm, 996 펄스면 0.0067. 짧을수록 커지고 많아야 0.5 */
+    stop_ctrl_begin(&c, STOP_REASON_TAG_DOCKING, 2000, 2000, 10, 20, 1000, 0.002f);
+    assert(c.braking_start_pulses == 1000 - 2 - STOP_TAIL_MARGIN);
+    { float x = 2000.0f * 0.002f / 996.0f, b = x * x * 2000.0f / 4.8f;
+      assert(fabsf(c.required_decel - 2000.0f * 2000.0f * 0.002f / (2.0f * 996.0f * (1.0f - b * 0.5f))) < 1e-4f); }
+    stop_ctrl_begin(&c, STOP_REASON_TAG_DOCKING, 2000, 2000, 10, 20, 50, 0.002f);
+    assert(fabsf(c.required_decel - 2000.0f * 2000.0f * 0.002f / (2.0f * 46.0f * 0.75f)) < 1e-3f);
+    /* 끝 꼬리 상수 = 바닥 150 에서 0 까지 저크 S커브(감속 한계 20 이상이면 한계에 안 닿는다) */
+    for (int16_t dl = 20; dl <= 60; dl += 40) {
+        int16_t v = STOP_FLOOR_RPM, a = 0, n = 0;
+        long sum = 0;
+        while ((v > 0) && (n < 100)) { motor_scv_core(0, &v, 0, dl, -1, 0, 0, 0, &a); sum += v; n++; assert(-a < dl); }
+        printf("  끝 꼬리 %d 틱, %ld rpm·틱\n", n, sum);
+        assert(sum == STOP_TAIL_RPM_TICKS);
+    }
 
     /* 위치 진행 없음 300 틱 → 실패 */
     stop_ctrl_begin(&c, STOP_REASON_TAG_DOCKING, 400, 2000, 10, 20, 1000, 0.002f);
@@ -704,6 +765,7 @@ int main(void)
     test_traffic_out();
     test_smooth_resume();
     test_stop_last();
+    test_end_step();
     puts("test_stop ok");
     return 0;
 }
