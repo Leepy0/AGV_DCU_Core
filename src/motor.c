@@ -34,16 +34,13 @@ float atanf(float x);
 #define TAPE_SLOW_POS        12      /* 새 라인이 이 안에 들면 라인을 잡은 것(단계 2) */
 #define TAPE_CENTER_POS      1       /* 이 안이면 회전을 끝낸다 */
 #define TAPE_CREEP_DEG       2.0f    /* 예전(QUIRK_FLOOR_350): 최저 속도로 도는 마지막 각 */
-/* 회전 끝 등감속(v0.35.0). 모의(test_curve turn: GD 250·500, wide·일반, 바퀴 지연 100·150 ms, 슬립 0.8~1.25)에서
- * 0.75·10틱은 가운데 도달 지령이 바닥(150) 위 최대 346 rpm, 0.5·20틱은 모두 150 */
-#ifndef TAPE_DECEL_SHARE
-#define TAPE_DECEL_SHARE     1.0f    /* 감속도 = 회전 감속(DCC) × 이 값. v0.36.1: 1.0(실차 시험값). v0.36.0 은 0.35 */
+/* 회전 끝 한 번의 등감속(v0.38.0, tape_brake). 지령이 v 에서 0 으로 가는 동안 실제가 더 가는 거리 = τ·v_실제(1차 지연·순수 지연 모두) */
+#ifndef TAPE_LAG_TICKS
+#define TAPE_LAG_TICKS       20      /* τ: 지령 → 실제 회전 지연 틱(바퀴 + 센서 10 ms + 응답 1.6 ms) */
 #endif
+#define TAPE_PLAN_SHARE      0.85f   /* 정속에서 필요 감속도가 회전 감속(DCC) × 이 값에 닿으면 감속을 시작한다. 나머지는 늦은 추정 보정 여유 */
 #ifndef TAPE_NOISE_MARGIN
 #define TAPE_NOISE_MARGIN    4       /* 잡음 각: 센서 끝 이만큼 단위 안쪽(가장자리 포화·덩어리 판정 여유) */
-#endif
-#ifndef TAPE_DELAY_TICKS
-#define TAPE_DELAY_TICKS     40      /* 응답 지연(센서 + 바퀴 + 회전 램프) 틱 */
 #endif
 #define TAPE_PLAN_DCC        0.75f   /* 예전(QUIRK_FLOOR_350) 감속 계획 = 회전 감속(DCC/4, 많아야 10) × 이 값. S커브 지연 여유 */
 #define TAPE_SETTLE_TICKS    20      /* 중앙에서 선 뒤 0.2 s 기다리고 바퀴가 서면 편차를 본다 */
@@ -71,8 +68,8 @@ static struct {
 
 /* 정렬 회전 끝: 라인을 잡은 뒤 남은 각(tape_left_guide) */
 static struct { int16_t have, prev; int32_t at; float left; } s_tr;
-/* 정렬 회전 감속 시작 각(tape_start_plan). 펄스 */
-static struct { float th_start, th_noise; int16_t v_noise; } s_ta;
+/* 정렬 회전 끝: 이번 틱 지령을 tape_brake 가 직접 정했다(S커브를 거치지 않는다) */
+static int16_t s_direct;
 
 void motor_reset(void)
 {
@@ -91,7 +88,6 @@ void motor_reset(void)
     s_motor.forcing = 0;
     s_motor.spike = 0;
     s_tr.have = 0;
-    s_ta.th_noise = 0.0f;
 }
 
 static int16_t dac_clamp(int16_t v) { return (v < 0) ? 0 : ((v > MOTOR_DAC_MAX) ? MOTOR_DAC_MAX : v); }
@@ -477,17 +473,38 @@ static float guide_offset_to_pulse_f(float guide)
     return atanf(guide * guide_h_scale() * GUIDE_UNIT_MM / P.guide_dist_mm) * (180.0f / PI_F) * tape_deg_pulse();
 }
 
-/* 정렬 회전 끝 등감속: 남은 펄스 left 에서 0 이 되게 v² = 2·a·(left/k - v·T). a = 회전 감속 × TAPE_DECEL_SHARE(rpm/틱),
- * k = rpm·틱당 두 바퀴 펄스, T = TAPE_DELAY_TICKS. 가운데 1단위 안에 들 때 바닥 속도가 되게 그만큼 빼고 푼다.
- * 정지 바닥 아래는 바닥 속도로 가다 가운데(0 칸, 또는 넘어 부호가 바뀐 때)에서 0(tape_stop). 최저 회전 속도 기어가기는 없다 */
+/* 남은 펄스 left 에서 감속도 a = TAPE_PLAN_SHARE × 회전 감속, 지연 τ = TAPE_LAG_TICKS 로 설 수 있는 가장 큰 지령: v² = 2·a·(left/k - τ·v).
+ * k = rpm·틱당 두 바퀴 펄스. 가운데 1단위 안에 들 때 바닥 속도가 되게 그만큼 뺀다. 보정 회전과 라인 찾기 속도(v_잡음)에 쓴다 */
 static int16_t tape_decel(float left)
 {
     float k = ((float)STOP_ENCODER_PPR / 6000.0f) * 2.0f;
-    float a = TAPE_DECEL_SHARE * (float)stop_turn_dcc(), at = a * (float)TAPE_DELAY_TICKS, v;
+    float a = TAPE_PLAN_SHARE * (float)stop_turn_dcc(), at = a * (float)TAPE_LAG_TICKS, v;
     left -= guide_offset_to_pulse_f((float)TAPE_CENTER_POS);
     v = (left > 0.0f) ? (sqrtf((at * at) + (2.0f * a * left / k)) - at) : 0.0f;
     if (v < (float)stop_min_rpm()) { return stop_min_rpm(); }
     return (v >= (float)P.turn_speed) ? P.turn_speed : (int16_t)v;
+}
+
+/* 정렬 회전 끝 한 번의 등감속. 매 틱 필요 감속도 a = v_지령² / (2·(left/k - τ·v_실제)), v_실제 = 두 바퀴 rpm 평균.
+ * 정속에서 a 가 TAPE_PLAN_SHARE × 회전 감속에 닿으면 시작하고, 그 뒤는 지령을 a(0~회전 감속으로 묶음)만큼 직접 줄인다.
+ * 다시 올리지 않고 정지 바닥 아래로 내리지 않는다. 바닥은 가운데 1단위 안에서 닿는다(left 에서 그만큼 뺀다).
+ * 반환 -1 = 아직 감속 전. D.tape_plan_min: 0 감속 전, > 0 감속 중(마지막 지령), -1 라인 찾기(v_잡음) */
+static int16_t tape_brake(float left)
+{
+    float k = ((float)STOP_ENCODER_PPR / 6000.0f) * 2.0f, dcc = (float)stop_turn_dcc();
+    float vc = (float)D.vin_out, vr = 0.5f * (float)(abs32(D.rpm[0]) + abs32(D.rpm[1]));
+    float d = (left - guide_offset_to_pulse_f((float)TAPE_CENTER_POS)) / k - (float)TAPE_LAG_TICKS * vr;
+    float a = (d > 0.0f) ? ((vc * vc) / (2.0f * d)) : dcc;
+    float v;
+
+    if (D.tape_plan_min <= 0) {
+        if (a < TAPE_PLAN_SHARE * dcc) { return -1; }
+    }
+    else if (vc > (float)D.tape_plan_min) { vc = (float)D.tape_plan_min; }
+    v = vc - ((a > dcc) ? dcc : a) + 0.5f;
+    if (v < (float)stop_min_rpm()) { v = (float)stop_min_rpm(); }
+    D.tape_plan_min = (int16_t)v;
+    return D.tape_plan_min;
 }
 
 static int16_t s_fix_side;   /* 보정 시작 때 편차 부호 */
@@ -502,33 +519,10 @@ static int16_t tape_centered(int32_t pos)
     }
 }
 
-/* 감속 시작 각(정렬 회전 시작 때 한 번). 회전 속도 v 에서 0 까지 θ_시작 = v·T + v²/(2a).
- * θ_잡음 = atan((센서 반폭 - 여유) / GD) 은 새 라인이 센서에 보이기 시작하는 각. θ_시작 ≤ θ_잡음 이면 라인을 볼 때까지 회전 속도 그대로.
- * 넘으면 엔코더 끝점(슬립 최악 TAPE_SLIP_HIGH 로 앞당김)에서 θ_잡음 앞에 v_잡음(θ_잡음 = v·T + v²/2a 의 해)이 되게 미리 줄인다.
- * 라인을 못 본 채 끝점을 지나면 v_잡음으로 찾는다. 펄스 단위. CCS 로 본다 */
-
-static void tape_start_plan(void)
+/* 라인 찾기 속도 v_잡음: 새 라인이 센서에 보이기 시작하는 각 θ_잡음 = atan((센서 반폭 - 여유) / GD) 안에 설 수 있는 지령 */
+static int16_t tape_noise_speed(void)
 {
-    float k = ((float)STOP_ENCODER_PPR / 6000.0f) * 2.0f;
-    float a = TAPE_DECEL_SHARE * (float)stop_turn_dcc(), v = (float)P.turn_speed, at = a * (float)TAPE_DELAY_TICKS;
-    s_ta.th_start = (v * k * (float)TAPE_DELAY_TICKS) + (v * v * k / (2.0f * a));
-    s_ta.th_noise = guide_offset_to_pulse_f((float)((D.guide_wide ? 32 : 16) - TAPE_NOISE_MARGIN));
-    v = sqrtf((at * at) + (2.0f * a * s_ta.th_noise / k)) - at;
-    s_ta.v_noise = (s_ta.th_start <= s_ta.th_noise) ? P.turn_speed : (int16_t)v;
-    if (s_ta.v_noise < stop_min_rpm()) { s_ta.v_noise = stop_min_rpm(); }
-}
-
-/* 라인을 잡기 전 속도 상한. left = 엔코더 끝점까지 남은 펄스(슬립 최악으로 앞당김) */
-static int16_t tape_pre_speed(float left)
-{
-    float k = ((float)STOP_ENCODER_PPR / 6000.0f) * 2.0f, a = TAPE_DECEL_SHARE * (float)stop_turn_dcc();
-    float d, vn, v;
-    if (s_ta.th_noise <= 0.0f) { tape_start_plan(); }      /* 단계 0 을 거치지 않은 회전 */
-    d = left - s_ta.th_noise;
-    vn = (float)s_ta.v_noise;
-    if (s_ta.v_noise >= P.turn_speed) { return P.turn_speed; }
-    v = (d > 0.0f) ? sqrtf((vn * vn) + (2.0f * a * d / k)) : vn;
-    return (v >= (float)P.turn_speed) ? P.turn_speed : (int16_t)v;
+    return tape_decel(guide_offset_to_pulse_f((float)((D.guide_wide ? 32 : 16) - TAPE_NOISE_MARGIN)));
 }
 
 /* 라인을 잡은 뒤 남은 각: 위치가 바뀐 순간 두 칸 경계로 잡고, 그 사이는 엔코더로 뺀다(계단 없이). 지금 칸 ±0.5 안으로 묶는다 */
@@ -638,7 +632,6 @@ static int16_t tape_adjust(void)
 
     switch (D.tape_step) {
     case 0:     /* 출발 라인에서 멀어지는 동안 슬립비를 잰다 */
-        tape_start_plan();
         s_tr.have = 0;
         if (!D.guide_all_off) {
             D.tape_lost_cnt = 0;
@@ -690,31 +683,50 @@ static int16_t tape_adjust(void)
     default:
         break;
     }
-    if (D.tape_align) {
-        int16_t plan = param_quirk(QUIRK_FLOOR_350) ? tape_plan(D.tape_end_cnt - (float)turned)
-                     : (s_tr.have ? tape_decel(D.tape_end_cnt - (float)turned)
-                                  : tape_pre_speed((D.tape_end_cnt / TAPE_SLIP_HIGH) - (float)turned));
-        /* 감속을 시작하면 다시 올리지 않는다. 새 라인으로 끝점이 멀어져도 지금 속도로 가다가 마지막만 최저 속도 */
+    if (D.tape_align && param_quirk(QUIRK_FLOOR_350)) {    /* 예전: 거리 계획 + 라인 위 마지막 TAPE_CREEP_DEG 를 남은 각에 비례 */
+        int16_t plan = tape_plan(D.tape_end_cnt - (float)turned);
         if ((D.tape_plan_min > 0) && (plan > D.tape_plan_min)) { plan = D.tape_plan_min; }
         D.tape_plan_min = plan;
         if (plan < speed) { speed = plan; }
-        if (param_quirk(QUIRK_FLOOR_350) && (D.tape_step == 2) && seen) {      /* 예전: 라인 위 마지막 TAPE_CREEP_DEG 를 남은 각에 비례 */
+        if ((D.tape_step == 2) && seen) {
             float g = (float)abs32(guide_offset_to_pulse(D.guide_pos));
             if ((g < TAPE_CREEP_DEG * tape_deg_pulse()) && (tape_end_speed(g) < speed)) { speed = tape_end_speed(g); }
         }
+    }
+    else if (D.tape_align) {
+        /* 남은 각: 라인 전 엔코더 끝점(회전 보정비·출발 라인 슬립비), 라인 뒤 가이드 경계 + 엔코더 보간(tape_refine) */
+        int16_t v;
+        if ((D.tape_plan_min < 0) && !s_tr.have) {          /* 라인 찾기: 바닥까지 줄었는데 라인을 못 봤다. v_잡음으로 */
+            v = tape_noise_speed();
+            return (v < speed) ? v : speed;
+        }
+        if (D.tape_plan_min < 0) { D.tape_plan_min = 0; }   /* 찾았다. 같은 식으로 감속한다 */
+        v = tape_brake(D.tape_end_cnt - (float)turned);
+        if (v < 0) { return speed; }
+        if ((v <= stop_min_rpm()) && !s_tr.have && (D.tape_step <= 1)) {
+            D.tape_plan_min = -1;                            /* 대비: 끝점까지 줄었는데 라인이 없다 */
+            return stop_min_rpm();
+        }
+        D.vin_out = v;
+        D.scv_accel = 0;
+        s_direct = 1;
+        return v;
     }
     return speed;
 }
 
 int16_t motor_turn_adjust(void)
 {
-    int16_t aligning = D.tape_align;
-    int16_t speed = aligning ? tape_adjust() : P.turn_speed;
+    int16_t aligning = D.tape_align, speed;
+
+    s_direct = 0;
+    speed = aligning ? tape_adjust() : P.turn_speed;
 
     if ((D.turn_obs_use == 1)
         && (((P.for_obs == 1) && !D.backward && D.obs_f) || ((P.back_obs == 1) && (D.backward == 1) && D.obs_b))) {
         return stop_alignment_speed(0);
     }
+    if (s_direct) { return speed; }          /* 등감속 지령은 S커브를 거치지 않는다 */
     return aligning ? stop_turn_speed(speed) : stop_alignment_speed(speed);
 }
 

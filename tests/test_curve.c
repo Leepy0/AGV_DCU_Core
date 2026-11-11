@@ -556,14 +556,20 @@ static void tape_sim(int kind, float gd, int dcc, float tau, float w, tape_res_t
 /* 정렬 회전 모의: 교차 테이프(90도 선)를 찾아 회전 중심을 그 위에 세우고 CW 90도 정렬 회전.
  * 슬립 = 실제 회전 / 엔코더 회전의 역수(s_m.wbx). 결과: 각-속도 곡선 v² 직선 적합도(R²), 중앙 도달 지령 rpm, 최종 각 오차,
  * 보정 횟수, 회전 시간, 감속 중 재가속 횟수 */
-typedef struct { float r2, v_center, err_deg, t_turn, a_fit, line_deg, ctr_mm, dec_max; int fix, reacc, err, done; } turn_res_t;
+typedef struct {
+    float r2, v_center, err_deg, t_turn, a_fit, line_deg, ctr_mm, dec_max; int fix, reacc, err, done;
+    /* 등감속 지표(v0.38.0). 각은 회전 끝(실제 90도)까지 남은 도 */
+    float dec_deg, line_v, line_at, floor_deg, floor_s, floor_ang, stop_s;   /* 감속 시작 각, 라인 감지 때 지령 rpm·남은 각, 바닥 진입 각, 바닥 구간 s·도, 감속 시작 → 정지 s */
+    float ratio, const_s, a_min, a_max;   /* 감속 시작 → 바닥 진입 지령 감속도(rpm/틱) 최소/최대 비, 그 안 정속(감속 0) s */
+} turn_res_t;
+static int s_ttrace;            /* turn 궤적 찍기 */
 
 static void turn_sim(float gd, int leds, float tau, float slip, int tns, int dcc, turn_res_t *r)
 {
     static const case_t c0 = { 32, 0.0f, 0.0f, 1, 20, 20, 30, 0.1f, 0, 0 };
     case_t c = c0;
-    int t, armed = 0, phase = 0, t0 = 0;
-    float sx = 0, sy = 0, sxx = 0, sxy = 0, syy = 0, n = 0, prev_v = 1e9f, vpeak_dec = 0.0f, v_peak = 0.0f;
+    int t, armed = 0, phase = 0, t0 = 0, td = -1, tf = -1, seen0 = 0, zero = 0, nd = 0;
+    float sx = 0, sy = 0, sxx = 0, sxy = 0, syy = 0, n = 0, prev_v = 1e9f, vpeak_dec = 0.0f, v_peak = 0.0f, vprev = 0.0f, th_prev = 0.0f;
 
     c.tau = tau;
     c.leds = leds;
@@ -626,11 +632,35 @@ static void turn_sim(float gd, int leds, float tau, float slip, int tns, int dcc
             }
             if ((D.tape_step == TAPE_STEP_SETTLE) && (r->v_center == 0.0f)) { r->v_center = (vpeak_dec > 0.0f) ? vpeak_dec : 0.01f; }
             if (D.tape_step <= 2) { vpeak_dec = (float)D.vin_out; }     /* 중앙에서 서기 직전 지령 */
+            {   /* 등감속 지표: 감속 시작(지령이 처음 줄어든 틱)부터 바닥 진입(지령 ≤ 바닥)까지 */
+                float v = (float)D.vin_out, flo = (float)stop_min_rpm();
+                if ((td < 0) && (D.tape_step <= 2) && (v < vprev) && (vprev > flo)) { td = t; r->dec_deg = rem; }
+                if ((td >= 0) && (tf < 0) && (D.tape_step <= 2)) {
+                    if (v <= flo) { tf = t; r->floor_deg = rem; }
+                    else if (t > td) {
+                        float a = vprev - v;
+                        if (a <= 0.0f) { zero++; }
+                        else {
+                            if ((nd == 0) || (a < r->a_min)) { r->a_min = a; }
+                            if ((nd == 0) || (a > r->a_max)) { r->a_max = a; }
+                            nd++;
+                        }
+                    }
+                }
+                if (!seen0 && (D.tape_step >= 1) && (D.tape_step <= 2) && !D.guide_all_off && (rem < 60.0f)) { seen0 = 1; r->line_v = v; r->line_at = rem; }
+                if ((D.tape_step <= 2) && (td >= 0) && (v <= flo) && (v > 0.0f)) { r->floor_s += 0.01f; r->floor_ang += fabsf(s_v.th - th_prev) * 180.0f / PI_F; }
+                if ((td >= 0) && (r->stop_s == 0.0f) && (D.tape_step == TAPE_STEP_SETTLE)) { r->stop_s = (float)(t - td) * 0.01f; }
+                if (s_ttrace) { printf("    t %4d step %d vin %5.0f rpm %5d/%5d plant %5.0f rem %7.2f pos %3d\n", t - t0, D.tape_step, v, D.rpm[0], D.rpm[1], s_v.rpm[0], rem, D.guide_pos); }
+                vprev = v;
+                th_prev = s_v.th;
+            }
             if (!D.tape_align && !D.flag_turn) { phase = 2; r->t_turn = (float)(t - t0) * 0.01f; break; }
         }
         if (D.system_err || D.stop_err) { break; }
     }
     (void)vpeak_dec;
+    r->const_s = (float)zero * 0.01f;
+    r->ratio = (r->a_max > 0.0f) ? r->a_min / r->a_max : 0.0f;
     if (n > 3.0f) {
         float mx = sx / n, my = sy / n, cxy = sxy / n - mx * my, cxx = sxx / n - mx * mx, cyy = syy / n - my * my;
         r->r2 = (cxx > 0.0f && cyy > 0.0f) ? (cxy * cxy) / (cxx * cyy) : 0.0f;
@@ -648,6 +678,14 @@ static void turn_sim(float gd, int leds, float tau, float slip, int tns, int dcc
     s_x30w = 0.0f; s_xa = 30.0f; s_gd = 250.0f; s_m.wbx = 1.0f;
 }
 
+static void turn_line(int gd, int leds, int tau, float sl, int tns, int dcc, const turn_res_t *r)
+{
+    printf("TURN GD%d/L%d/t%d/s%.2f/T%d/D%d | done %d err %d vcenter %.0f fix %d time %.2f reacc %d linedeg %.2f decmax %.0f"
+           " | dec %.1f line %.0f@%.1f floor %.1f fs %.2f fa %.2f stop %.2f ratio %.2f const %.2f a %.0f-%.0f\n",
+           gd, leds, tau, sl, tns, dcc, r->done, r->err, r->v_center, r->fix, r->t_turn, r->reacc, r->line_deg, r->dec_max,
+           r->dec_deg, r->line_v, r->line_at, r->floor_deg, r->floor_s, r->floor_ang, r->stop_s, r->ratio, r->const_s, r->a_min, r->a_max);
+}
+
 static void turn_table(int full)
 {
     static const float sl[3] = { 0.8f, 1.0f, 1.25f };
@@ -660,8 +698,14 @@ static void turn_table(int full)
                     turn_res_t r;
                     int tns = full ? tn[a] : 13, dcc = full ? dc[b] : 40;
                     turn_sim(g ? 500.0f : 250.0f, l ? 16 : 32, t ? 0.15f : 0.1f, sl[k], tns, dcc, &r);
-                    printf("TURN GD%d/L%d/t%d/s%.2f/T%d/D%d | done %d err %d r2 %.3f vcenter %.0f errdeg %.2f fix %d time %.2f reacc %d linedeg %.2f ctr %.1f decmax %.0f\n",
-                           g ? 500 : 250, l ? 16 : 32, t ? 150 : 100, sl[k], tns, dcc, r.done, r.err, r.r2, r.v_center, r.err_deg, r.fix, r.t_turn, r.reacc, r.line_deg, r.ctr_mm, r.dec_max);
+                    turn_line(g ? 500 : 250, l ? 16 : 32, t ? 150 : 100, sl[k], tns, dcc, &r);
+                }
+                if (full) {         /* v0.38.0: TNS 25 · DCC 60(5호기 t1 결과) */
+                    for (k = 0; k < 3; k++) {
+                        turn_res_t r;
+                        turn_sim(250.0f, l ? 16 : 32, t ? 0.15f : 0.1f, sl[k], 25, 60, &r);
+                        turn_line(250, l ? 16 : 32, t ? 150 : 100, sl[k], 25, 60, &r);
+                    }
                 }
             }
         }
@@ -1019,6 +1063,14 @@ int main(int argc, char **argv)
     if ((argc > 1) && (strcmp(argv[1], "acc2") == 0))  { acceptance2(); return 0; }
     if ((argc > 1) && (strcmp(argv[1], "tape") == 0))  { tape_table(); return 0; }
     if ((argc > 1) && (strcmp(argv[1], "turn") == 0))  { turn_table(argc > 2); return 0; }
+    if ((argc > 6) && (strcmp(argv[1], "turn1") == 0)) {   /* turn1 GD leds tau_ms TNS DCC [slip] [trace] */
+        turn_res_t tr;
+        float sl = (argc > 7) ? (float)atof(argv[7]) : 1.0f;
+        s_ttrace = (argc > 8);
+        turn_sim((float)atoi(argv[2]), atoi(argv[3]), (float)atoi(argv[4]) * 0.001f, sl, atoi(argv[5]), atoi(argv[6]), &tr);
+        turn_line(atoi(argv[2]), atoi(argv[3]), atoi(argv[4]), sl, atoi(argv[5]), atoi(argv[6]), &tr);
+        return 0;
+    }
     if ((argc > 1) && (strcmp(argv[1], "cmp") == 0))   { if (argc > 2) { s_gmask = atoi(argv[2]); } compare(argc > 3); return 0; }
     if ((argc > 6) && (strcmp(argv[1], "one") == 0)) {  /* one LG 곡선(0~5, 직선은 6 + 모드) v tau_ms leds */
         int i = atoi(argv[3]);
