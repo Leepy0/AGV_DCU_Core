@@ -384,6 +384,9 @@ void motor_drive_step(void)
 
     if (!D.obs_on && !D.flag_stopping
         && ((D.step == DRIVE_CRUISE) || (D.step == DRIVE_CHANGE_SPEED) || (D.step == DRIVE_RISK_RESUME))) {
+#if AGV_DEV_TESTS   /* 반응형 곡선 속도 중에는 안전 바닥으로만: 편차가 센서 반폭(일반 16·wide 32단위)의 80% 넘을 때 */
+        if (!speed_curve_test || ((D.guide_pos > (D.guide_wide ? 25 : 12)) || (D.guide_pos < (D.guide_wide ? -25 : -12))))
+#endif
         if ((D.vin_out >= P.llow_speed)
             && ((D.guide_pos >= GUIDE_RISK_THRESHOLD) || (D.guide_pos <= -GUIDE_RISK_THRESHOLD))
 #if AGV_DEV_TESTS
@@ -399,6 +402,18 @@ void motor_drive_step(void)
 
     branch_run();
 
+#if AGV_DEV_TESTS
+    /* 반응형 곡선 속도: 순항·속도 바꿈 중 목표 = min(지령, 곡률·편차 상한). 감·가속은 주행 S커브 그대로 */
+    if (speed_curve_test && ((D.step == DRIVE_CRUISE) || (D.step == DRIVE_CHANGE_SPEED))) {
+        int16_t lim = steer_curve_vlim();
+        if (lim < D.speed_cmd) {
+            D.step = DRIVE_CHANGE_SPEED;
+            D.cur_speed = motor_scv_speed(lim, P.acc, GUIDE_RISK_DCC);   /* 위험 감속과 같은 감속 */
+            motor_velocity(D.cur_speed);
+            return;
+        }
+    }
+#endif
     switch (D.step) {
     case DRIVE_CHANGE_SPEED:
         step_change_speed();
