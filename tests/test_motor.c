@@ -225,6 +225,23 @@ int main(void)
         assert(v == 2000 && a == 0);
     }
     assert(param_set(P_LEGACY_QUIRKS, 0) == 0);
+    /* 주행 저크 = min(2.4, 예전 한계/8): 0 ↔ 2930 rpm(31 m/min), llow 500. 어느 한계에서도 최고 저크가 예전 이하 */
+    { static const int16_t lims[7] = { 8, 20, 37, 58, 20, 40, 60 };
+      for (int c = 0; c < 7; c++) {
+          int16_t jm[2] = { 0, 0 }, dec = (int16_t)(c >= 4);
+          for (int q = 0; q < 2; q++) {
+              int16_t prev_a = 0;
+              v = dec ? 2930 : 0; a = 0;
+              for (int i = 0; (i < 3000) && (v != (dec ? 0 : 2930)); i++) {
+                  motor_scv_core(dec ? 0 : 2930, &v, lims[c], lims[c], 500, 300, 0, (int16_t)(q ? SCV_JERK_OLD : 0), &a);
+                  if ((v != (dec ? 0 : 2930)) && (abs(a - prev_a) > jm[q])) { jm[q] = (int16_t)abs(a - prev_a); }
+                  prev_a = a;
+              }
+              assert(v == (dec ? 0 : 2930));
+          }
+          printf("scv jerk %s %2d: old %d new %d\n", dec ? "DCC" : "ACC", lims[c], jm[1], jm[0]);
+          assert(jm[0] <= jm[1]);
+      } }
 
     /* 주행 단계: 400 → 401 정속 */
     setup();

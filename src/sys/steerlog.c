@@ -105,6 +105,7 @@ static void start(void)
     c->dcc = P.dcc;
     c->obs_use = D.obs_use;
     c->speed_high = param_get(P_SPEED_HIGH);
+    c->tst = param_get(P_DEV_TEST);
     s_sl.dist = 0.0f;
     s_sl.prev_at = 0;
     s_sl.active = 1;

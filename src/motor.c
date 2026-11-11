@@ -54,6 +54,9 @@ float atanf(float x);
 #define PI_F                 3.14159265f
 
 agv_drive_t agv_drive;
+#if AGV_DEV_TESTS
+int16_t rpm_avg_test;       /* motor.h */
+#endif
 
 static struct {
     volatile uint16_t pulse_seq[2];
@@ -147,6 +150,9 @@ void motor_feedback_update(void)
 
         D.rpm_avg[i] = (int16_t)((D.rpm[i] + s_motor.hist[i][0] + s_motor.hist[i][1] + s_motor.hist[i][2]
                                   + s_motor.hist[i][3] + s_motor.hist[i][4]) / 6);
+#if AGV_DEV_TESTS
+        if (rpm_avg_test) { D.rpm_avg[i] = (int16_t)((D.rpm[i] + s_motor.hist[i][0]) / 2); }
+#endif
         D.rpm_flt[i] = (int16_t)(((float)D.rpm_flt[i] * 0.9f) + ((float)D.rpm_avg[i] * 0.1f));
 
         s_motor.hist[i][4] = s_motor.hist[i][3];
@@ -277,13 +283,16 @@ int16_t motor_scv_core(int16_t vin, int16_t *vout, int16_t acc, int16_t dcc, int
     int16_t old_jerk = (int16_t)((flags & SCV_JERK_OLD) || param_quirk(QUIRK_JERK_OLD));
     int16_t lim = ((v >= 0) == (s > 0)) ? (((v > llow) || (acc < SCV_LOW_ACC_MIN)) ? acc
                 : ((low_acc > SCV_LOW_ACC_MIN) ? low_acc : SCV_LOW_ACC_MIN)) : dcc;
+    /* 주행 저크 = min(2.4, 예전 한계/8): 한계 24 미만(예전 저크 1·2)은 예전 저크 그대로라 출발이 예전보다 날카롭지 않다.
+     * 정지 램프(llow -1)는 2.4 그대로: 위치 정지 끝 꼬리(STOP_TAIL_RPM_TICKS)가 저크 2.4 로 계산돼 있다 */
+    int16_t slow = (int16_t)(old_jerk || ((llow >= 0) && (lim < 3 * STOP_JERK_DIV)));
 
     (void)min_speed;
 
     if (v == 0) { *accel = 0; }
     a = *accel;
     m = (a >= 0) ? a : (int16_t)(-a);
-    if (old_jerk) {     /* 예전: 지금 가속도를 0 까지 푸는 동안 바뀌는 속도(넉넉히) */
+    if (slow) {         /* 예전: 지금 가속도를 0 까지 푸는 동안 바뀌는 속도(넉넉히) */
         j = (int16_t)(lim / STOP_JERK_DIV);
         if (j < 1) { j = 1; }
         n = (int16_t)((m + j - 1) / j);
@@ -297,7 +306,7 @@ int16_t motor_scv_core(int16_t vin, int16_t *vout, int16_t acc, int16_t dcc, int
     n = ((int16_t)((vin - v) * s) <= n) ? 0 : (int16_t)(lim * s);
     if (a != n) {
         int16_t up = (a < n) ? 1 : -1;
-        if (old_jerk) { a = (int16_t)(a + up * j); }
+        if (slow) { a = (int16_t)(a + up * j); }
         else {      /* 가속도 칸 k = 가속도 ÷ 2.4 반올림. 한 칸씩 옮겨(2 또는 3) 평균 2.4 */
             j = (int16_t)((m * STOP_JERK_DEN + STOP_JERK_NUM / 2) / STOP_JERK_NUM);
             a = (int16_t)((((a < 0) ? -j : j) + up) * STOP_JERK_NUM / STOP_JERK_DEN);

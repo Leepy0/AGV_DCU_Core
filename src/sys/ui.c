@@ -53,8 +53,16 @@ static const uint16_t s_seg[] = {
 #define SEG_COUNT (sizeof(s_seg) / sizeof(s_seg[0]))
 
 /* 메뉴 순서 → 파라미터 번호. 묶음 다섯 개를 이어 둔다. 15·29·30·42번과 TAG·GSR·BRM(미사용)는 메뉴에 없다(값은 EEPROM 에 그대로) */
+#if AGV_DEV_TESTS
+#define MENU_TST 1                /* TST(임시 시험)가 1 묶음 첫 칸이다 */
+#else
+#define MENU_TST 0
+#endif
 static const uint16_t s_menu[] = {
     /* 1 속도 */
+#if AGV_DEV_TESTS
+    P_DEV_TEST,
+#endif
     P_SPEED_HIGH, P_SPEED_LOW, P_SPEED_TURN, P_EMPTY_SPEED, P_EMPTY_TURN, P_ACC, P_DCC, P_SPEED_JOG,
     P_EMPTY_ACC, P_EMPTY_DCC, P_SPEED_MIN,
     /* 2 주행·안전 */
@@ -73,7 +81,7 @@ static const uint16_t s_menu[] = {
 };
 #define MENU_COUNT ((int16_t)(sizeof(s_menu) / sizeof(s_menu[0])))
 #define MENU_HIDDEN_FIRST (MENU_COUNT - 3)
-static const int16_t s_group_end[UI_GROUP_COUNT] = { 11, 23, 32, 47, MENU_COUNT };   /* 묶음 다음 첫 칸 */
+static const int16_t s_group_end[UI_GROUP_COUNT] = { 11 + MENU_TST, 23 + MENU_TST, 32 + MENU_TST, 47 + MENU_TST, MENU_COUNT };   /* 묶음 다음 첫 칸 */
 static const char s_group_name[UI_GROUP_COUNT][DISP_DIGITS] = {
     {'P','1','S','P','D'}, {'P','2','R','U','N'}, {'P','3','C','A','R'}, {'P','4','C','O','M'}, {'P','5','I','N','F'}
 };
@@ -90,6 +98,9 @@ static const para_view_t s_view[P_COUNT] = {
     {"INT", 2}, {"V_ ", 3}, {"VT ", 3}, {"CR ", 3},
     {"GD ", 3}, {"OPT", 2}, {"FF ", 3}, {"ES ", 2},
     {"EDS", 2}, {"ETN", 2}, {"EAC", 2}, {"EDC", 2}, {"LDS", 0}
+#if AGV_DEV_TESTS
+    , {"TST", 1}
+#endif
 };
 static const char s_lamp_name[UI_LAMP_EXT_COUNT] = { 'G', 'R', 'Y' };
 
@@ -869,11 +880,13 @@ static void show_gs(uint16_t page)
     show_ms('S', (page == 1u) ? 'L' : 'P', (page == 1u) ? g->gsl : g->gsp);
 }
 
-/* 바퀴 지연 측정 결과: 0 WTOK + 쓴 계단 수(두 바퀴 중 적은 쪽) 또는 WTF + 까닭, 1~4 TL·TR(τ)·DL·DR(순수 지연) + ms 세 자리 */
+/* 바퀴 지연 측정 결과: 0 WTOK + 쓴 계단 수(두 바퀴 중 적은 쪽) 또는 WTF + 까닭, 1~4 TL·TR(τ)·DL·DR(순수 지연) + ms 세 자리,
+ * 5 FF 추천(파라미터 FF 와 같은 세 자리) */
 static void show_wt(uint16_t page)
 {
-    static const char n[4][2] = { {'T', 'L'}, {'T', 'R'}, {'D', 'L'}, {'D', 'R'} };
+    static const char n[5][2] = { {'T', 'L'}, {'T', 'R'}, {'D', 'L'}, {'D', 'R'}, {'F', 'F'} };
     const wt_result_t *w = &agv_wt;
+    const int16_t v[5] = { w->wtl, w->wtr, w->wdl, w->wdr, w->ff };
     char c[DISP_DIGITS];
     uint16_t i;
 
@@ -884,8 +897,8 @@ static void show_wt(uint16_t page)
         else { show(letter('W'), letter('T'), letter('F'), DIGIT_NONE, (uint16_t)w->fail); }
         return;
     }
-    page = (uint16_t)((page < 5u) ? page - 1u : 0u);
-    tune_value_text(c, n[page][0], n[page][1], (page == 0u) ? w->wtl : ((page == 1u) ? w->wtr : ((page == 2u) ? w->wdl : w->wdr)), 0);
+    page = (uint16_t)((page < TUNE_WT_PAGES) ? page - 1u : 0u);
+    tune_value_text(c, n[page][0], n[page][1], v[page], 0);
     for (i = 0; i < DISP_DIGITS; i++) {
         s_ui.digit[i] = ((c[i] >= '0') && (c[i] <= '9')) ? (uint16_t)(c[i] - '0') : letter(c[i]);
     }

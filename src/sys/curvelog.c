@@ -410,6 +410,9 @@ static void param_back(void)
 {
     curve_group_t *g = &agv_curvelog.g[agv_curvelog.group - 1];
     int16_t lg = param_get(P_LEGACY_QUIRKS), opt = param_get(P_OPT_FLAGS);
+#if AGV_DEV_TESTS
+    opt = (int16_t)(opt | (param_get(P_DEV_TEST) << 8));   /* TST 가 바뀌어도 넘긴다. opt b8~11 = TST(curvelog.h) */
+#endif
 
     if ((g->lg == lg) && (g->opt == opt)) { return; }
     if (g->n == 0) {

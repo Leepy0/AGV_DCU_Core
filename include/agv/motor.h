@@ -36,7 +36,10 @@ int16_t motor_raw_rpm(uint16_t wheel);          /* 스파이크 컷 전 rpm. 327
 void    motor_spike_set(int16_t rpm);           /* 측정 rpm 스파이크 컷. 0 = 기본 MOTOR_RPM_SPIKE */
 int16_t motor_spike(void);
 
-/* DA_SCV_Speed_Core. 상태를 인자로 받는 순수 함수. 저크 고정 2.4 rpm/틱², acc·dcc 는 가감속도 상한.
+/* rpm 피드백 평균 시험(TST 7, AGV_DEV_TESTS 에서만 정의). 0 = 6표본 평균, 1 = 최근 2표본 평균(D.rpm_avg, 속도 PI 피드백) */
+extern int16_t rpm_avg_test;
+
+/* DA_SCV_Speed_Core. 상태를 인자로 받는 순수 함수. 저크 min(2.4, 한계/8) rpm/틱²(정지 램프 llow -1 은 2.4), acc·dcc 는 가감속도 상한.
  * flags SCV_JERK_OLD = 예전 저크(한계/8)와 목표 0 일 때 stop_floor 아래 0 으로 한 번에(QUIRK_JERK_OLD 도 같다).
  * b0(예전 DCC 하한 20)과 min_speed 는 쓰지 않는다: P_DCC 한계가 20~60 이라 늘 DCC 그대로였다 */
 #define SCV_JERK_OLD         0x02

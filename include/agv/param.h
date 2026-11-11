@@ -9,6 +9,10 @@
 
 #include "agv/types.h"
 
+#ifndef AGV_DEV_TESTS
+#define AGV_DEV_TESTS 1      /* tune.h 와 같은 기본값. P_DEV_TEST 가 이것으로 갈린다 */
+#endif
+
 enum {
     P_SPEED_HIGH = 1, P_SPEED_LOW, P_SPEED_TURN, P_AUTO_DRIVE_MODE, P_INTERFACE_MODE, P_SOUND,
     P_BUMPER_USE, P_OBS_USE, P_DISPLAY_MODE, P_BAT_OFFSET_DV, P_SPEED_JOG, P_ACC, P_DCC,
@@ -41,6 +45,9 @@ enum {
     P_EMPTY_ACC,            /* 56 EAC: 공차 가속 (적재 12번) */
     P_EMPTY_DCC,            /* 57 EDC: 공차 감속 (적재 13번) */
     P_LOAD_DETECT,          /* 58 LDS: 적재 감지 사용. 0 = 늘 적재(예전과 같다) */
+#if AGV_DEV_TESTS
+    P_DEV_TEST,             /* 59 TST: 임시 시험 고르기 0~8(param_tst_apply). 체크섬 밖 EEPROM 82(KEEP 빈 칸). 개발 이미지에만 */
+#endif
     P_COUNT
 };
 #define P_SAVED_LAST 45   /* 이 번호까지 EEPROM 에 저장한다 */
@@ -133,5 +140,14 @@ void     param_profile(int16_t empty);
 int16_t  param_profile_empty(void);
 /* 1·3·12·13번의 지금 프로필 값. 공차이고 공차 값이 쓸 만하면 54~57번, 아니면 그 번호 값 */
 int16_t  param_active(uint16_t idx);
+
+#if AGV_DEV_TESTS
+/* TST(P_DEV_TEST) 임시 시험. 원래 값(LG·OPT·K_P)은 두고 RAM 에서만 덮는다.
+ *  0 평소, 1 K_P 60 고정(param_get), 2 OPT_KF_POSITION(param_opt), 3 QUIRK_STEER_STEP(param_quirk, LG 256 과 같다),
+ *  4 추정 조향, 5 추정 조향 + 교차선 유지, 6 교차선 유지, 7 rpm 피드백 평균 2표본, 8 추정 조향 + 교차선 유지 + 반응형 속도.
+ * 1~3 은 읽을 때마다 반영된다. 나머지 전역과 D.p_kp 는 이 함수가 맞춘다: 부팅·TST 저장 때, 주행 시작 때(TST 0 이 아니면) */
+#define PARAM_TST_KP 60
+void     param_tst_apply(void);
+#endif
 
 #endif /* AGV_PARAM_H */

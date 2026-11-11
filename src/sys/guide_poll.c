@@ -164,6 +164,9 @@ static void on_rx(const guide_rx_t *rx)
     }
     /* 첫 유효 응답이 주행 시작 신호다 */
     if (D.flag_ready) {
+#if AGV_DEV_TESTS
+        if (param_get(P_DEV_TEST) != 0) { param_tst_apply(); }   /* TST 시험을 주행마다 다시 건다(0 은 시험 스위치를 건드리지 않는다) */
+#endif
         D.control = RUN_DRIVE;
         D.flag_run = 1;
         D.flag_ready = 0;

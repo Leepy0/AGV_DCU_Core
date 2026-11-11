@@ -41,7 +41,7 @@ typedef struct {
 } curve_rec_t;
 
 typedef struct {
-    int16_t lg, opt;        /* 이 묶음을 시작할 때의 LG·OPT */
+    int16_t lg, opt;        /* 이 묶음을 시작할 때의 LG·OPT. 개발 이미지(AGV_DEV_TESTS)는 opt b8~11 에 TST 를 함께 둔다 */
     int16_t n;              /* 이 묶음에서 본 곡선 수. CURVELOG_CURVES 를 넘으면 앞 것만 남는다 */
     curve_rec_t c[CURVELOG_CURVES];
 } curve_group_t;

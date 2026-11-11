@@ -32,6 +32,8 @@ typedef struct {
     int16_t dev_max;            /* 측정 중 편차 절대값 최대(단위) */
     int16_t dev_end;            /* 정지를 건 때 편차(단위) */
     int16_t v_rpm;              /* 측정 때 평균 지령 rpm */
+    int16_t ff;                 /* FND FF: 측정 직전 정속 0.5 s 의 FF(파라미터 FF) 추천 = 두 바퀴 토크 지령 합 ÷ 지령 rpm 합 × 1000.
+                                 * tq_cmd 는 PI + 지금 FF × w_cmd 라 FF 를 켠 채 재도 (지금 FF + PI 몫) 이 된다. TUNE_NO_DATA = 없음 */
     int16_t rpm[2][WT_N];       /* 원시 rpm. [WT_PRE + 1] 이 첫 계단 시각(그 틱 지령 전 실측) */
 } wt_result_t;
 

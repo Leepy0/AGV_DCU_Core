@@ -1665,10 +1665,15 @@ static int build_next(void)
         point(&agv_coast.state, &agv_coast.fail, &agv_coast.pass, &agv_coast.phase, &agv_all.track_mm);
         srch_begin(&s_dcc, P.dcc, dcc_cap(), &agv_build.dcc_max, &agv_build.dcc_rec);
         break;
-    case 5:
+    case 5: {
+        uint16_t i;
         point(&agv_stopt.state, &agv_stopt.fail, &agv_stopt.pass, &agv_stopt.phase, &agv_all.track_mm);
         stopt_profile(1);
+        /* CD 는 운행 속도(1번)에서 찾아야 한다. 앞 단계(가감속 찾기)가 창 때문에 낮춘 속도 상한을 물려받으면
+         * 낮은 속도에서 짧은 CD 를 고르고 운행 속도에서는 지나친다 */
+        for (i = 0; i < IDENT_LEVELS; i++) { s_id.cap[i] = 0x7FFF; }
         break;
+    }
     default:
         agv_all.pass = agv_all.phase = 0;
         point(&agv_all.state, &agv_all.fail, &agv_all.pass, &agv_all.phase, &agv_all.track_mm);

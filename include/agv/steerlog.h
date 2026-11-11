@@ -66,6 +66,7 @@ typedef struct {             /* 출발 때 설정 */
     int16_t  los, drs, acc, dcc;        /* P.low_speed, P.target_speed rpm, P.acc, P.dcc */
     int16_t  obs_use;        /* D.obs_use. 0 이면 auto_speed_change 가 안 돈다 */
     int16_t  speed_high;     /* param P_SPEED_HIGH(m/min). 자동 감속은 이 값 범위에서만 */
+    int16_t  tst;            /* TST(P_DEV_TEST) 임시 시험 번호. 뒤에 1워드 채움(int32 정렬): cfg 14워드 */
 } steerlog_cfg_t;
 
 typedef struct {

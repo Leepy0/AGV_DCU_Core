@@ -23,7 +23,7 @@ enum { WT_OFF = 0, WT_WAIT, WT_MEAS, WT_BACK, WT_STOP };
 #pragma DATA_SECTION(s_wt, "gscan_ram")
 #endif
 wt_result_t agv_wt;
-static struct { int16_t t, steady; } s_wt;
+static struct { int16_t t, steady; float tq, w; } s_wt;   /* tq·w: 정속 구간 두 바퀴 토크 지령·지령 rpm 합 */
 
 #define W agv_wt
 
@@ -50,9 +50,10 @@ void wtest_start(void)
 {
     memset(&W, 0, sizeof(W));
     s_wt.t = s_wt.steady = 0;
+    s_wt.tq = s_wt.w = 0.0f;
     W.state = 1;
     W.phase = WT_WAIT;
-    W.wtl = W.wtr = W.wdl = W.wdr = TUNE_NO_DATA;
+    W.wtl = W.wtr = W.wdl = W.wdr = W.ff = TUNE_NO_DATA;
     steer_test_rpm = 0;
     tagact_speed(1);                 /* LOS */
 }
@@ -137,12 +138,21 @@ int wtest_run(void)
         if (!driving) { abort_wt(4); break; }
         if (s_wt.t > WT_WAIT_TICKS) { abort_wt(2); break; }
         if ((D.step == DRIVE_CRUISE) && (D.vin_out == D.speed_cmd) && !D.guide_all_off && !D.risk_stop
-            && (D.branch_start == 0) && (dev <= WT_STEADY_DEV)) { s_wt.steady++; }
-        else { s_wt.steady = 0; }
+            && (D.branch_start == 0) && (dev <= WT_STEADY_DEV)) {
+            s_wt.steady++;
+            s_wt.tq += (float)(D.tq_cmd[0] + D.tq_cmd[1]);
+            s_wt.w += (float)(D.w_cmd[0] + D.w_cmd[1]);
+        }
+        else { s_wt.steady = 0; s_wt.tq = s_wt.w = 0.0f; }
         if (s_wt.steady > WT_STEADY_TICKS - WT_PRE - 1) { take((int16_t)(s_wt.steady - (WT_STEADY_TICKS - WT_PRE))); }
         if (s_wt.steady >= WT_STEADY_TICKS) {
             W.phase = WT_MEAS;
             W.v_rpm = D.vin_out;
+            /* FF 추천: 1000 rpm 당 토크(파라미터 FF 단위, param.c speed_ff = FF/1000). 9999 에서 자른다(표시 OVF) */
+            if (s_wt.w > 0.0f) {
+                float f = s_wt.tq / s_wt.w * 1000.0f + 0.5f;
+                W.ff = (int16_t)((f > 9999.0f) ? 9999.0f : f);
+            }
             s_wt.t = 0;
             steer_test_rpm = WT_A_RPM;
         }

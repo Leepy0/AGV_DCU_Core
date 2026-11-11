@@ -1,5 +1,7 @@
 /* test_sys.c - 2·3단계 통합 시험. hal/host 위에서 부팅부터 10 ms 스캔까지 돌린다 */
 #include "agv/tune.h"
+#include "agv/steer.h"
+#include "agv/wtest.h"
 #include <assert.h>
 #include <signal.h>
 #include <unistd.h>
@@ -868,6 +870,10 @@ static void test_ui(void)
     assert(d[0] == 26);                               /* P */
     key(KEY_SET);                                     /* P1SPD */
     key(KEY_SET);                                     /* 첫 번호 */
+#if AGV_DEV_TESTS
+    assert(ui_para_number() == P_DEV_TEST);           /* TST 가 DRS 앞 */
+    key(KEY_UP);
+#endif
     assert(ui_para_number() == P_SPEED_HIGH);
     key(KEY_UP);
     assert(ui_para_number() == P_SPEED_LOW);
@@ -893,7 +899,11 @@ static int shows(const char *t);
 /* 파라미터 메뉴 5묶음: 상하키로 묶음, SET 들어가기, UP 항목, RESET 나오기. 5번 묶음 SHIFT 2 s 숨김 */
 static void test_menu5(void)
 {
+#define TM AGV_DEV_TESTS              /* TST 칸(개발 이미지) */
     static const uint16_t want[] = {
+#if AGV_DEV_TESTS
+        P_DEV_TEST,
+#endif
         P_SPEED_HIGH, P_SPEED_LOW, P_SPEED_TURN, P_EMPTY_SPEED, P_EMPTY_TURN, P_ACC, P_DCC, P_SPEED_JOG,
         P_EMPTY_ACC, P_EMPTY_DCC, P_SPEED_MIN,
         P_STOP_LEN_MM, P_CROSS_IN_CM, P_AUTO_START_SEC, P_OBS_USE, P_BUMPER_USE, P_STOP_LEN_FWD_MM, P_LOAD_DETECT,
@@ -905,7 +915,7 @@ static void test_menu5(void)
         P_BAT_DV, P_BAT_PERCENT, P_VERSION, P_PARA_INIT,
         P_AUTO_DRIVE_MODE, P_STEER_RPM_OFFSET, P_LEGACY_QUIRKS
     };
-    static const int ends[5] = { 11, 23, 32, 47, 54 };
+    static const int ends[5] = { 11 + TM, 23 + TM, 32 + TM, 47 + TM, 54 + TM };
     static const struct { uint16_t idx; char c[4]; } names[] = {
         { P_SPEED_MIN, "SPN" }, { P_GUIDE_TIMEOUT, "GTO" }, { P_COMM_LINK, "CML" }, { P_STEER_RPM_OFFSET, "SR " },
         { P_GUIDE_CURVE_DETECT, "GSR" }, { P_LEGACY_QUIRKS, "L  " }, { P_EMPTY_SPEED, "EDS" }, { P_EMPTY_TURN, "ETN" },
@@ -915,9 +925,9 @@ static void test_menu5(void)
     char l[3];
     int g, i, k = 0, n;
 
-    assert(sizeof(want) / sizeof(want[0]) == 54u);
+    assert(sizeof(want) / sizeof(want[0]) == 54u + TM);
     assert(ends[2] - ends[1] == 9);     /* P3CAR 9 항목 */
-    for (i = 0; i < 54; i++) {          /* 빠진 일곱. TAG·GSR·BRM 은 미사용 */
+    for (i = 0; i < 54 + TM; i++) {     /* 빠진 일곱. TAG·GSR·BRM 은 미사용 */
         assert(want[i] != P_STATION_NO && want[i] != P_SWITCH_START_NUM && want[i] != P_TAG_TYPE && want[i] != P_CROSS_MODE);
         assert(want[i] != P_TAG_DIGITS && want[i] != P_GUIDE_CURVE_DETECT && want[i] != P_BRANCH_MODE);
     }
@@ -997,6 +1007,71 @@ static void test_menu5(void)
     assert(D.ui_mode == UI_AUTO);
     printf("  menu 5 ok\n");
 }
+
+#if AGV_DEV_TESTS
+static void boot_keys(uint16_t keys, int keep);
+/* TST 임시 시험: 0~8, EEPROM 82 에 남아 부팅 뒤 되살아난다. LG·OPT·K_P 원래 값은 그대로 두고 읽기만 덮는다 */
+static void test_tst(void)
+{
+    char c[5];
+    int16_t lg;
+    boot();
+    lg = param_get(P_LEGACY_QUIRKS);
+    assert(!(lg & QUIRK_STEER_STEP) && param_get(P_DEV_TEST) == 0 && !guide_hold_test && !rpm_avg_test && param_get(P_STEER_KP) == 0);
+    ui_param_text(P_DEV_TEST, 5, c);
+    assert(memcmp(c, "TST 5", 5) == 0);
+    assert(param_set(P_DEV_TEST, 9) != 0);
+    assert(param_set(P_DEV_TEST, 1) == 0 && param_get(P_STEER_KP) == PARAM_TST_KP && D.p_kp == (float)PARAM_TST_KP);
+    assert(param_set(P_DEV_TEST, 2) == 0 && param_opt(OPT_KF_POSITION) && param_get(P_OPT_FLAGS) == 0);
+    assert(param_get(P_STEER_KP) == 0 && D.p_kp == 0.0f);
+    assert(param_set(P_DEV_TEST, 3) == 0 && param_quirk(QUIRK_STEER_STEP) && param_get(P_LEGACY_QUIRKS) == lg);
+    assert(!param_opt(OPT_KF_POSITION));
+    assert(param_set(P_DEV_TEST, 5) == 0 && guide_hold_test && !param_quirk(QUIRK_STEER_STEP));
+    assert(param_set(P_DEV_TEST, 7) == 0 && !guide_hold_test && rpm_avg_test);
+    ticks(100);
+    assert(host.ee[82] == 7);
+    boot_keys(0, 1);                                  /* 전원을 다시 켜도 7 */
+    assert(param_get(P_DEV_TEST) == 7 && rpm_avg_test);
+    assert(param_set(P_DEV_TEST, 0) == 0 && !rpm_avg_test && !guide_hold_test);
+    boot();
+    assert(param_set(P_DEV_TEST, 6) == 0 && guide_hold_test);
+    guide_hold_test = 0;                              /* 주행 시작 때 다시 건다(guide_poll) */
+    ticks(120);
+    drive_up();
+    run_scan(20);
+    assert(D.flag_run && guide_hold_test);
+    (void)param_set(P_DEV_TEST, 0);
+    printf("  TST ok\n");
+}
+
+/* t3.9 WT FF 추천: 측정 직전 정속 0.5 s 의 두 바퀴 토크 지령 합 ÷ 지령 rpm 합 × 1000. 호스트 엔코더는 고정 주기라 토크 값은
+ * 실차와 다르다(PI 적분이 쌓인 값). 창(마지막 WT_STEADY 50틱)과 식만 본다 */
+static void test_wt_ff(void)
+{
+    static float tq[50], w[50];
+    float st = 0.0f, sw = 0.0f;
+    int i, k = 0;
+    boot();
+    ticks(120);
+    drive_up();
+    run_scan(20);
+    wtest_start();
+    for (i = 0; (i < 900) && (agv_wt.phase == 1); i++) {
+        run_scan(1);
+        tq[k] = (float)(D.tq_cmd[0] + D.tq_cmd[1]);
+        w[k] = (float)(D.w_cmd[0] + D.w_cmd[1]);
+        k = (k + 1) % 50;
+        (void)wtest_run();
+    }
+    assert(agv_wt.phase == 2);
+    for (i = 0; i < 50; i++) { st += tq[i]; sw += w[i]; }
+    printf("  WT FF 추천 %d (토크 합 %.0f, rpm 합 %.0f)\n", agv_wt.ff, st, sw);
+    assert((sw > 0.0f) && (agv_wt.ff == (int16_t)(st / sw * 1000.0f + 0.5f)));
+    steer_test_rpm = 0;
+    wtest_reset();
+    printf("  WT FF ok\n");
+}
+#endif
 
 static void ext_in(uint16_t bit, int on)
 {
@@ -2775,6 +2850,10 @@ int main(void)
     test_status_report();
     test_ui();
     test_menu5();
+#if AGV_DEV_TESTS
+    test_tst();
+    test_wt_ff();
+#endif
     test_load_profile();
     test_load_while_running();
     test_para_init();

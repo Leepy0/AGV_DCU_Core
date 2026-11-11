@@ -1,6 +1,8 @@
 /* param.c - 파라미터 표, 한계, 기본값 3벌, 파생값, 1회 초기화 */
 #include "agv/param.h"
 #include "agv/drive.h"
+#include "agv/guide.h"      /* guide_hold_test (TST) */
+#include "agv/motor.h"      /* rpm_avg_test (TST) */
 
 #define D    agv_drive
 #define PI_F 3.14159265f
@@ -41,9 +43,38 @@ int16_t param_digit(int16_t value, int16_t place)
     return tmp ? (int16_t)(tmp / place) : 0;
 }
 
+#if AGV_DEV_TESTS
+/* TST 1~3 은 원래 값을 두고 읽기만 덮는다(param.h) */
+int16_t param_get(uint16_t idx)
+{
+    if ((idx == P_STEER_KP) && (s_set[P_DEV_TEST] == 1)) { return PARAM_TST_KP; }
+    return (idx < P_COUNT) ? s_set[idx] : 0;
+}
+int16_t param_quirk(uint16_t bit)
+{
+    return ((((uint16_t)s_set[P_LEGACY_QUIRKS] | ((s_set[P_DEV_TEST] == 3) ? QUIRK_STEER_STEP : 0u)) & bit) != 0) ? 1 : 0;
+}
+int16_t param_opt(uint16_t bit)
+{
+    return ((((uint16_t)s_set[P_OPT_FLAGS] | ((s_set[P_DEV_TEST] == 2) ? OPT_KF_POSITION : 0u)) & bit) != 0) ? 1 : 0;
+}
+
+/* 2단계(v46-est 병합) 때 이 한 줄을 { steer_alg_test = (alg); speed_curve_test = (curve); } 로 바꾼다 */
+#define TST_EST(alg, curve) ((void)(alg), (void)(curve))   /* 추정 조향·반응형 속도 아직 없음: 비워 둔다 */
+
+void param_tst_apply(void)
+{
+    int16_t t = s_set[P_DEV_TEST];
+    D.p_kp = (float)param_get(P_STEER_KP);       /* TST 1 이면 60. 0 이면 steer.c 가 경사로 다시 잡는다 */
+    guide_hold_test = (int16_t)((t == 5) || (t == 6) || (t == 8));
+    rpm_avg_test = (int16_t)(t == 7);
+    TST_EST((t == 4) || (t == 5) || (t == 8), t == 8);
+}
+#else
 int16_t param_get(uint16_t idx)        { return (idx < P_COUNT) ? s_set[idx] : 0; }
 int16_t param_quirk(uint16_t bit)      { return (((uint16_t)s_set[P_LEGACY_QUIRKS] & bit) != 0) ? 1 : 0; }
 int16_t param_opt(uint16_t bit)        { return (((uint16_t)s_set[P_OPT_FLAGS] & bit) != 0) ? 1 : 0; }
+#endif
 
 int16_t param_rpm(int16_t m_per_min)
 {
@@ -65,6 +96,9 @@ static const extra_t s_extra[] = {
     { P_EMPTY_ACC,   PARAM_EMPTY_ADDR0 + 2u, 0, 60, 0 },
     { P_EMPTY_DCC,   PARAM_EMPTY_ADDR0 + 3u, 0, 60, 0 },
     { P_LOAD_DETECT, PARAM_EMPTY_ADDR0 + 4u, 0, 1,  0 }
+#if AGV_DEV_TESTS
+    , { P_DEV_TEST,  PARAM_EMPTY_ADDR0 + 5u, 0, 8,  0 }   /* 82: 레거시 KEEP 빈 칸(77~88) */
+#endif
 };
 static int16_t s_empty;
 #define EXTRA_COUNT (sizeof(s_extra) / sizeof(s_extra[0]))
@@ -256,6 +290,9 @@ static void recalc_one(uint16_t i)
     case P_GUIDE_DIST_MM: param_dv.guide_dist_mm = (float)s_set[P_GUIDE_DIST_MM]; break;
     case P_SPEED_FF:      param_dv.speed_ff = (float)s_set[P_SPEED_FF] / 1000.0f; break;
     case P_ENC_STALL_TICKS: param_dv.stall_ticks = s_set[P_ENC_STALL_TICKS]; break;
+#if AGV_DEV_TESTS
+    case P_DEV_TEST:      param_tst_apply(); break;
+#endif
     case P_AGV_TYPE:
         param_dv.agv_type_mode = (int16_t)(10 * param_digit(s_set[P_AGV_TYPE], 100) + param_digit(s_set[P_AGV_TYPE], 10));
         break;
@@ -320,6 +357,9 @@ static void after_load(void)
     recalc_all();
     D.p_kp = (float)s_set[P_STEER_KP];
     D.p_ki = (float)s_set[P_STEER_KI] * 0.1f;
+#if AGV_DEV_TESTS
+    param_tst_apply();
+#endif
     /* 특정 차종군은 자동 주행 모드를 강제하고 저장한다 (AGV_Type_Mode == 60) */
     if (param_dv.agv_type_mode == 60) {
         (void)param_set(P_AUTO_DRIVE_MODE, 3);
