@@ -4,7 +4,7 @@
 MEMORY
 {
 PAGE 0:
-   RAML0       : origin = 0x008000, length = 0x001000
+   RAML0       : origin = 0x008000, length = 0x000080     /* ramfuncs. 나머지는 PAGE 1 RAML0D */
    FLASH       : origin = 0x3E8000, length = 0x00FF80     /* 섹터 D, C, B, A 중 CSM_RSVD 앞까지 */
    BEGIN       : origin = 0x3F7FF6, length = 0x000002     /* 부트 ROM 이 점프하는 자리 */
    RESET       : origin = 0x3FFFC0, length = 0x000002
@@ -14,6 +14,7 @@ PAGE 1:
    RAMM1       : origin = 0x000480, length = 0x000380     /* 0x400~0x47F 부트 ROM 예약 */
    RAML1       : origin = 0x009000, length = 0x001000
    RAMH0       : origin = 0x3FA000, length = 0x002000
+   RAML0D      : origin = 0x008080, length = 0x000F80     /* L0 데이터 구역: steerlog_ram(조향 기록기, AGV_DEV_TESTS 이미지만) */
 }
 
 SECTIONS
@@ -39,4 +40,5 @@ SECTIONS
                                                                        curvelog_ram(곡선 기록기)은 .ebss 에 안 들어가 맨 뒤에 둔다. 부팅 때 curvelog_reset 이 지운다.
                                                                        gscan_ram(t3.8 스캔 주기 시험 결과·시각 버퍼)은 그 뒤. 보존하지 않고 부팅 때 gresp_reset 이 지운다.
                                                                        . = 0xA40: agv_stopt 를 앞 이미지와 같은 0x3FAA40 에 둔다. 앞이 넘치면 링크가 실패한다 */
+   steerlog_ram : > RAML0D,    PAGE = 1   /* 조향 기록기 agv_steerlog. 보존하지 않고 부팅 때 steerlog_reset 이 지운다. 현장 이미지(AGV_DEV_TESTS 0)는 비어 있다 */
 }

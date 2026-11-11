@@ -11,6 +11,7 @@
 #include "agv/motor.h"
 #include "agv/param.h"
 #include "agv/seq.h"
+#include "agv/steerlog.h"
 #include "agv/stop.h"
 #include "agv/storage.h"
 #include "agv/tagact.h"
@@ -764,6 +765,9 @@ static void auto_speed_change(void)
     if (D.flag_stopping) { return; }
     if (P.auto_drive_mode && (P.low_speed >= D.speed_cmd) && guide_within(AUTO_SPEED_RANGE)) {
         if (P.straight_len <= D.straight_cnt) {
+#if AGV_DEV_TESTS
+            if (D.speed_cmd != P.target_speed) { steerlog_event(STEERLOG_EV_DRS); }
+#endif
             D.speed_cmd = P.target_speed;
             D.step = DRIVE_CHANGE_SPEED;
         }
@@ -775,6 +779,9 @@ static void auto_speed_change(void)
         && (P.low_speed < D.speed_cmd)) {
         if (!guide_within(AUTO_CURVE_RANGE)) {
             if ((int32_t)P.tag_pulse[2] <= s_curve_cnt) {
+#if AGV_DEV_TESTS
+                steerlog_event(STEERLOG_EV_LOS);   /* 조건이 low_speed < speed_cmd 라 늘 낮춘다 */
+#endif
                 D.speed_cmd = P.low_speed;
                 D.step = DRIVE_CHANGE_SPEED;
             }

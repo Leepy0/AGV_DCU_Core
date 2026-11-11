@@ -3,6 +3,7 @@
 #include "agv/drive.h"
 #include "agv/guide.h"
 #include "agv/param.h"
+#include "agv/steerlog.h"
 #include "agv/stop.h"
 
 #define D agv_drive
@@ -57,6 +58,10 @@ static struct {
     int16_t previous_speed;
     int16_t i_exit;         /* 곡선 편차를 지났다: 4단위 아래로 들어오면 적분을 뺀다 */
 } s_steer;
+
+#if AGV_DEV_TESTS
+float steer_i_out(void) { return s_steer.i_out; }   /* 조향 기록기(steerlog.c)가 읽는다 */
+#endif
 
 void steer_reset(void)
 {

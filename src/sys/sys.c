@@ -19,6 +19,7 @@
 #include "agv/run.h"
 #include "agv/seq.h"
 #include "agv/site.h"
+#include "agv/steerlog.h"
 #include "agv/steer.h"
 #include "agv/stop.h"
 #include "agv/storage.h"
@@ -84,6 +85,9 @@ void sys_boot(void)
     acs_out_boot(&storage_queued);
     tune_load();
     curvelog_reset();              /* 곡선 기록기는 전원 투입마다 비운다 */
+#if AGV_DEV_TESTS
+    steerlog_reset();
+#endif
     seq_pick_profile();
     run_reset();
     run_boot_restore();
@@ -113,6 +117,9 @@ static void scan_10ms(void)
         site_manual();
         run_after_motor();
         curvelog_tick();
+#if AGV_DEV_TESTS
+        steerlog_tick();           /* 조향 기록기. 주행 상태를 읽기만 한다 */
+#endif
         ui_run();
     }
     else if (s_io_test == IO_TEST_WAIT) {
