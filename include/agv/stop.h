@@ -30,9 +30,15 @@
 #define STOP_NO_PROGRESS_TICKS   300
 #define STOP_MOVE_CONFIRM        2
 #define STOP_FEEDBACK_DELAY      5
+/* 저크(가속도 변화) 고정 STOP_JERK_NUM / STOP_JERK_DEN = 2.4 rpm/틱²: DCC 60 에 25틱(0.25 s). 가감속 한계는 상한일 뿐이라
+ * 속도 변화 Δv 가 작으면 최고 가감속도가 √(2.4 × Δv) 쯤에서 풀린다. 예전(QUIRK_JERK_OLD)은 한계/STOP_JERK_DIV */
+#define STOP_JERK_NUM            12
+#define STOP_JERK_DEN            5
 #define STOP_JERK_DIV            8
 #define STOP_TURN_DCC_DIV        4
 #define STOP_ENTRY_BLEND_PCT     10     /* 위치 제동 초반의 진입 혼합 구간. 0 이면 등감속 */
+#define STOP_TAIL_MARGIN         2      /* 위치 정지: 끝 꼬리 앞 바닥 속도로 가는 펄스(거리 제동이 꼬리 전에 바닥에 들게) */
+#define STOP_TAIL_RPM_TICKS      1122   /* 위치 정지 끝 꼬리: 바닥 150 에서 0 까지 저크 S커브로 가는 거리(rpm·틱, 19틱, 2.2 펄스). test_stop 이 확인 */
 #define STOP_TURN_DCC_MAX        10
 #define STOP_RAPID_DCC_DIV       1
 #define STOP_RAPID_DCC_MAX       60

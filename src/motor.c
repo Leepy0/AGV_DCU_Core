@@ -16,7 +16,6 @@ float atanf(float x);
 #define RPM_CONST            500000000L    /* SYSCLK 100 MHz, 12 PPR */
 #define TCNT_SYSCLK_PER_TICK 1000000L
 #define IDLE_TICKS_MAX       1000
-#define SCV_JERK_DIV         8
 /* 저속(LOS/2 아래)은 엔코더 펄스가 드물어(1회전 12펄스) 속도 제어가 계단처럼 거칠다. 가속 때 그 구간 체류를 줄인다 */
 #define SCV_LOW_ACC_DIV      2
 #define SCV_LOW_ACC_MIN      5
@@ -247,9 +246,12 @@ void motor_velocity(int16_t input)
         D.offset_kp = 0;
         D.p_pi_out = 0.0f;
     }
-    /* 평균 지령은 두고 두 바퀴 지령을 검증된 바닥 위에 둔다. 조향 권한은 바닥에서 0 이 된다 */
-    if (stop_is_braking() && (input >= stop_floor_rpm())) {
-        int16_t limit = (int16_t)(input - stop_floor_rpm());
+    /* 평균 지령은 두고 두 바퀴 지령을 검증된 바닥 위에 둔다. 조향 권한은 바닥에서 0 이 된다.
+     * 바닥이 150 이하(새 저크)면 바닥 아래 정지 꼬리도 0. 예전(QUIRK_JERK_OLD, 바닥 350)·배운 바닥은 바닥 아래를 묶지 않는다 */
+    int16_t fl = stop_floor_rpm();
+    if (stop_is_braking() && ((input >= fl) || (fl <= STOP_FLOOR_RPM))) {
+        int16_t limit = (int16_t)(input - fl);
+        if (limit < 0) { limit = 0; }
         if (limit > STOP_COMMAND_MAX_RPM - input) { limit = (int16_t)(STOP_COMMAND_MAX_RPM - input); }
         D.add_speed_l = stop_clamp(D.add_speed_l, (int16_t)(-limit), limit);
         D.add_speed_r = stop_clamp(D.add_speed_r, (int16_t)(-limit), limit);
@@ -259,59 +261,68 @@ void motor_velocity(int16_t input)
 
 /* ---- S커브 ---- */
 
+/* S커브 한 틱. 가속도 *accel 은 저크로만 바뀌고 한계(acc·dcc, 가감속도 상한)를 넘지 않는다.
+ * 저크 고정 STOP_JERK_NUM/STOP_JERK_DEN = 2.4 rpm/틱²: 속도 변화가 작으면 한계 전에 풀려 최고 가감속도가 √(2.4 × 변화)쯤이 된다.
+ * 예전(SCV_JERK_OLD, QUIRK_JERK_OLD)은 한계/8(어느 속도든 8틱에 한계). 가속도·한계는 많아야 60 남짓이라 16비트로 계산한다.
+ * 저속 구간 가속 상한(max(5, ACC/2))은 둔다: 저크는 오르는 빠르기만 정하고 엔코더가 드문 구간의 가속도 크기는 그대로 묶어야 한다.
+ * 예전 저속 DCC 하한 20(flags b0, min_speed 2배 아래)은 뺐다: P_DCC 한계가 20~60 이라 늘 DCC 그대로였다(공차 값도 그 하한 아래면
+ * 적재 값). 인자는 호출자(ident.c 등)를 위해 남긴다.
+ * stop.c 의 정지 램프도 이 함수를 쓴다(llow -1, flags 0) */
 int16_t motor_scv_core(int16_t vin, int16_t *vout, int16_t acc, int16_t dcc, int16_t llow,
-                       int16_t min_speed, int16_t stop_floor, int16_t use_dcc_floor, int16_t *accel)
+                       int16_t min_speed, int16_t stop_floor, int16_t flags, int16_t *accel)
 {
-    int16_t diff, a_lim, jerk, a_tgt, a_abs, n;
-    int16_t v_abs = (*vout >= 0) ? *vout : (int16_t)(-*vout);
     int16_t low_acc = param_quirk(QUIRK_LOW_ACC) ? SCV_LOW_ACC_MIN : (int16_t)(acc / SCV_LOW_ACC_DIV);
-    int16_t n_acc = ((*vout > llow) || (acc < SCV_LOW_ACC_MIN)) ? acc
-                  : ((low_acc > SCV_LOW_ACC_MIN) ? low_acc : SCV_LOW_ACC_MIN);
-    int16_t n_dcc = (!use_dcc_floor || (v_abs > min_speed * 2) || (dcc > 20)) ? dcc : 20;
-    int32_t brake;
+    int16_t v = *vout, a, m, s = (vin >= v) ? 1 : -1, n, j = 1;
+    int16_t old_jerk = (int16_t)((flags & SCV_JERK_OLD) || param_quirk(QUIRK_JERK_OLD));
+    int16_t lim = ((v >= 0) == (s > 0)) ? (((v > llow) || (acc < SCV_LOW_ACC_MIN)) ? acc
+                : ((low_acc > SCV_LOW_ACC_MIN) ? low_acc : SCV_LOW_ACC_MIN)) : dcc;
 
-    if (*vout == 0) { *accel = 0; }
-    diff = (int16_t)(vin - *vout);
-    a_lim = ((*vout >= 0) == (diff >= 0)) ? n_acc : n_dcc;
-    jerk = (int16_t)(a_lim / SCV_JERK_DIV);
-    if (jerk < 1) { jerk = 1; }
+    (void)min_speed;
 
-    /* 지금 가속도를 0 으로 내려도 남은 차이 안에서 목표를 넘지 않는지 본다 */
-    a_abs = (*accel >= 0) ? *accel : (int16_t)(-*accel);
-    n = (int16_t)((a_abs + jerk - 1) / jerk);
-    brake = ((int32_t)a_abs * (n + 1)) / 2;
-    if (((diff >= 0) && ((int32_t)diff <= brake)) || ((diff < 0) && ((int32_t)(-diff) <= brake))) {
-        a_tgt = 0;
+    if (v == 0) { *accel = 0; }
+    a = *accel;
+    m = (a >= 0) ? a : (int16_t)(-a);
+    if (old_jerk) {     /* 예전: 지금 가속도를 0 까지 푸는 동안 바뀌는 속도(넉넉히) */
+        j = (int16_t)(lim / STOP_JERK_DIV);
+        if (j < 1) { j = 1; }
+        n = (int16_t)((m + j - 1) / j);
+        n = (int16_t)(m * (n + 1) / 2);
     }
-    else {
-        a_tgt = (diff >= 0) ? a_lim : (int16_t)(-a_lim);
+    else {              /* 한 칸 더 올린 뒤 0 까지 푸는 동안 바뀌는 속도 ≈ (m + J)(m + 2J) / 2J. m(m + 10) / 2J 로 둔다:
+                         * m 이 4 넘으면 넉넉하고(일찍 푼다), 0 이면 0 이라 남은 차가 있으면 다시 민다 */
+        n = (int16_t)(m * (m + 10) * STOP_JERK_DEN / (2 * STOP_JERK_NUM));
     }
-
-    if (*accel < a_tgt) {
-        *accel = (int16_t)(*accel + jerk);
-        if (*accel > a_tgt) { *accel = a_tgt; }
+    /* 목표 가속도 n: 남은 차가 그 안이면 0 으로 푼다 */
+    n = ((int16_t)((vin - v) * s) <= n) ? 0 : (int16_t)(lim * s);
+    if (a != n) {
+        int16_t up = (a < n) ? 1 : -1;
+        if (old_jerk) { a = (int16_t)(a + up * j); }
+        else {      /* 가속도 칸 k = 가속도 ÷ 2.4 반올림. 한 칸씩 옮겨(2 또는 3) 평균 2.4 */
+            j = (int16_t)((m * STOP_JERK_DEN + STOP_JERK_NUM / 2) / STOP_JERK_NUM);
+            a = (int16_t)((((a < 0) ? -j : j) + up) * STOP_JERK_NUM / STOP_JERK_DEN);
+        }
+        if ((a - n) * up > 0) { a = n; }
     }
-    else if (*accel > a_tgt) {
-        *accel = (int16_t)(*accel - jerk);
-        if (*accel < a_tgt) { *accel = a_tgt; }
+    v = (int16_t)(v + a);
+    if ((v - vin) * s >= 0) {                             /* 목표에 닿거나 넘었다 */
+        v = vin;
+        a = 0;
     }
-    *vout = (int16_t)(*vout + *accel);
-
-    if (((diff >= 0) && (*vout >= vin)) || ((diff < 0) && (*vout <= vin))) {
-        *vout = vin;
-        *accel = 0;
+    /* 예전: 목표 0 이고 바닥 아래면 0 으로 한 번에. 지금은 감속도를 풀며 0 에 닿는다 */
+    if (old_jerk && (vin == 0) && (((v >= 0) ? v : -v) < stop_floor)) {
+        v = 0;
+        a = 0;
     }
-    v_abs = (*vout >= 0) ? *vout : (int16_t)(-*vout);
-    if ((vin == 0) && (v_abs < stop_floor)) {
-        *vout = 0;
-        *accel = 0;
-    }
-    return *vout;
+    *accel = a;
+    *vout = v;
+    return v;
 }
 
 int16_t motor_scv_speed(int16_t target, int16_t acc, int16_t dcc)
 {
-    return motor_scv_core(target, &D.vin_out, acc, dcc, P.llow_speed, P.min_speed, P.min_speed, 1, &D.scv_accel);
+    /* 위험 감속은 늦어지면 안 된다: 예전 저크(DCC 60 이면 8틱에 한계)를 쓴다 */
+    return motor_scv_core(target, &D.vin_out, acc, dcc, P.llow_speed, P.min_speed, P.min_speed,
+                          (int16_t)((D.step == DRIVE_RISK_STOP) ? SCV_JERK_OLD : 0), &D.scv_accel);
 }
 
 /* ---- 주행 단계 ---- */
