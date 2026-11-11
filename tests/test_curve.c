@@ -556,14 +556,14 @@ static void tape_sim(int kind, float gd, int dcc, float tau, float w, tape_res_t
 /* 정렬 회전 모의: 교차 테이프(90도 선)를 찾아 회전 중심을 그 위에 세우고 CW 90도 정렬 회전.
  * 슬립 = 실제 회전 / 엔코더 회전의 역수(s_m.wbx). 결과: 각-속도 곡선 v² 직선 적합도(R²), 중앙 도달 지령 rpm, 최종 각 오차,
  * 보정 횟수, 회전 시간, 감속 중 재가속 횟수 */
-typedef struct { float r2, v_center, err_deg, t_turn, a_fit, line_deg, ctr_mm; int fix, reacc, err, done; } turn_res_t;
+typedef struct { float r2, v_center, err_deg, t_turn, a_fit, line_deg, ctr_mm, dec_max; int fix, reacc, err, done; } turn_res_t;
 
-static void turn_sim(float gd, int leds, float tau, float slip, turn_res_t *r)
+static void turn_sim(float gd, int leds, float tau, float slip, int tns, int dcc, turn_res_t *r)
 {
     static const case_t c0 = { 32, 0.0f, 0.0f, 1, 20, 20, 30, 0.1f, 0, 0 };
     case_t c = c0;
     int t, armed = 0, phase = 0, t0 = 0;
-    float sx = 0, sy = 0, sxx = 0, sxy = 0, syy = 0, n = 0, prev_v = 1e9f, vpeak_dec = 0.0f;
+    float sx = 0, sy = 0, sxx = 0, sxy = 0, syy = 0, n = 0, prev_v = 1e9f, vpeak_dec = 0.0f, v_peak = 0.0f;
 
     c.tau = tau;
     c.leds = leds;
@@ -588,12 +588,16 @@ static void turn_sim(float gd, int leds, float tau, float slip, turn_res_t *r)
     assert(param_set_ram(P_SPEED_LOW, 25) == 0);
     assert(param_set_ram(P_TURN_FORBACK, 10) == 0);
     assert(param_set_ram(P_STOP_LEN_MM, 50) == 0);
+    assert(param_set_ram(P_SPEED_TURN, (int16_t)tns) == 0);
+    assert(param_set_ram(P_DCC, (int16_t)dcc) == 0);
+    assert(param_set_ram(P_WHEEL_BASE_MM, (int16_t)(WB_MM / 10.0f)) == 0);   /* 다시 계산(회전 속도) */
     tune_turn_scale_set((int16_t)(TURN_SCALE * 1000.0f + 0.5f));
     host.bus_in[BUS_IN_A] &= (uint16_t)~RAW_START;
     scan();
     host.bus_in[BUS_IN_A] |= RAW_START;
     scan();
     for (t = 0; t < 8000; t++) {
+        float r0 = s_v.rpm[0], r1 = s_v.rpm[1];
         float u = 0.0f, slant = 1.0f;
         int seen = cross(&u, &slant);
         s_m.wbx = (D.control == RUN_TURN) ? slip : 1.0f;
@@ -606,12 +610,18 @@ static void turn_sim(float gd, int leds, float tau, float slip, turn_res_t *r)
             D.tape_turn_dir = TURN_CW; D.tape_turn_deg = 90; D.tape_turn_next = 0;
         }
         if ((phase == 0) && D.flag_turn && D.tape_align) { phase = 1; t0 = t; }
+        if (phase == 1) {   /* 바퀴 감속 최댓값 rpm/s(모터축) */
+            float d0 = (r0 - s_v.rpm[0]) * 100.0f, d1 = (r1 - s_v.rpm[1]) * 100.0f;
+            if (d0 > r->dec_max) { r->dec_max = d0; }
+            if (d1 > r->dec_max) { r->dec_max = d1; }
+        }
         if (phase == 1) {
             float rem = (90.0f + s_v.th * 180.0f / PI_F);       /* 남은 실제 각(도), CW 라 th 가 -90 으로 간다 */
             float v = (float)D.vin_out;
             if ((D.tape_step <= 2) && (rem < 25.0f) && (rem > 0.3f) && (v > 0.0f)) {
                 sx += rem; sy += v * v; sxx += rem * rem; sxy += rem * v * v; syy += v * v * v * v; n += 1.0f;
-                if (v > prev_v + 1.0f) { r->reacc++; }
+                if ((prev_v < 1e8f) && (v > prev_v + 1.0f) && (v_peak - prev_v > 20.0f)) { r->reacc++; }   /* 감속을 시작한 뒤 올림 */
+                if (v > v_peak) { v_peak = v; }
                 prev_v = v;
             }
             if ((D.tape_step == TAPE_STEP_SETTLE) && (r->v_center == 0.0f)) { r->v_center = (vpeak_dec > 0.0f) ? vpeak_dec : 0.01f; }
@@ -638,18 +648,20 @@ static void turn_sim(float gd, int leds, float tau, float slip, turn_res_t *r)
     s_x30w = 0.0f; s_xa = 30.0f; s_gd = 250.0f; s_m.wbx = 1.0f;
 }
 
-static void turn_table(void)
+static void turn_table(int full)
 {
     static const float sl[3] = { 0.8f, 1.0f, 1.25f };
-    int g, l, t, k;
-    for (g = 0; g < 2; g++) {
+    static const int tn[3] = { 7, 15, 25 }, dc[3] = { 20, 40, 50 };
+    int g, l, t, k, a, b;
+    for (g = 0; g < (full ? 1 : 2); g++) {
         for (l = 0; l < 2; l++) {
             for (t = 0; t < 2; t++) {
-                for (k = 0; k < 3; k++) {
+                for (k = 0; k < 3; k++) for (a = 0; a < (full ? 3 : 1); a++) for (b = 0; b < (full ? 3 : 1); b++) {
                     turn_res_t r;
-                    turn_sim(g ? 500.0f : 250.0f, l ? 16 : 32, t ? 0.15f : 0.1f, sl[k], &r);
-                    printf("TURN GD%d/L%d/t%d/s%.2f | done %d err %d r2 %.3f vcenter %.0f errdeg %.2f fix %d time %.2f reacc %d linedeg %.2f ctr %.1f\n",
-                           g ? 500 : 250, l ? 16 : 32, t ? 150 : 100, sl[k], r.done, r.err, r.r2, r.v_center, r.err_deg, r.fix, r.t_turn, r.reacc, r.line_deg, r.ctr_mm);
+                    int tns = full ? tn[a] : 13, dcc = full ? dc[b] : 40;
+                    turn_sim(g ? 500.0f : 250.0f, l ? 16 : 32, t ? 0.15f : 0.1f, sl[k], tns, dcc, &r);
+                    printf("TURN GD%d/L%d/t%d/s%.2f/T%d/D%d | done %d err %d r2 %.3f vcenter %.0f errdeg %.2f fix %d time %.2f reacc %d linedeg %.2f ctr %.1f decmax %.0f\n",
+                           g ? 500 : 250, l ? 16 : 32, t ? 150 : 100, sl[k], tns, dcc, r.done, r.err, r.r2, r.v_center, r.err_deg, r.fix, r.t_turn, r.reacc, r.line_deg, r.ctr_mm, r.dec_max);
                 }
             }
         }
@@ -1006,7 +1018,7 @@ int main(int argc, char **argv)
     if ((argc > 1) && (strcmp(argv[1], "acc") == 0))   { acceptance(); return 0; }
     if ((argc > 1) && (strcmp(argv[1], "acc2") == 0))  { acceptance2(); return 0; }
     if ((argc > 1) && (strcmp(argv[1], "tape") == 0))  { tape_table(); return 0; }
-    if ((argc > 1) && (strcmp(argv[1], "turn") == 0))  { turn_table(); return 0; }
+    if ((argc > 1) && (strcmp(argv[1], "turn") == 0))  { turn_table(argc > 2); return 0; }
     if ((argc > 1) && (strcmp(argv[1], "cmp") == 0))   { if (argc > 2) { s_gmask = atoi(argv[2]); } compare(argc > 3); return 0; }
     if ((argc > 6) && (strcmp(argv[1], "one") == 0)) {  /* one LG 곡선(0~5, 직선은 6 + 모드) v tau_ms leds */
         int i = atoi(argv[3]);
@@ -1096,7 +1108,7 @@ int main(int argc, char **argv)
          * v0.34.0(최저 회전 속도 기어가기)은 가운데 도달 615~784 rpm, 보정 24조건 합 26 */
         turn_res_t tr;
         for (i = 0; i < 4; i++) {
-            turn_sim((i & 1) ? 500.0f : 250.0f, (i & 2) ? 16 : 32, 0.15f, (i & 1) ? 0.8f : 1.25f, &tr);
+            turn_sim((i & 1) ? 500.0f : 250.0f, (i & 2) ? 16 : 32, 0.15f, (i & 1) ? 0.8f : 1.25f, 13, 40, &tr);
             printf("  정렬 회전 GD %d L%d: 가운데 %.0f rpm, 선 기준 각 %.2f도, 보정 %d, %.2f s\n", (i & 1) ? 500 : 250, (i & 2) ? 16 : 32,
                    tr.v_center, tr.line_deg, tr.fix, tr.t_turn);
             assert(tr.done && (tr.err == 0) && (tr.v_center <= (float)stop_min_rpm()) && (tr.reacc == 0) && (fabsf(tr.line_deg) < 1.0f) && (tr.fix <= 1));

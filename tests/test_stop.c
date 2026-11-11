@@ -458,9 +458,13 @@ int main(void)
     assert(c.phase == STOP_PHASE_FAILED);
     stop_ctrl_begin(&c, STOP_REASON_TAG_DOCKING, 2000, 2000, 10, 20, 100, 0.0f);
     assert(c.phase == STOP_PHASE_FAILED);
-    /* 회전은 감속 제한 dcc/4, 상한 10, 가속도 그 아래 */
+    /* 회전은 감속 제한 dcc 그대로(v0.36.0, 예전 dcc/4 상한 10 은 LG 2048), 가속도 그 아래 */
     stop_ctrl_begin(&c, STOP_REASON_TURN_ANGLE, 0, 1000, 60, 60, 500, 0.004f);
-    assert(c.phase == STOP_PHASE_CRUISE && c.decel_limit == 10 && c.accel_limit == 10);
+    assert(c.phase == STOP_PHASE_CRUISE && c.decel_limit == 60 && c.accel_limit == 60);
+    (void)param_set_ram(P_LEGACY_QUIRKS, QUIRK_FLOOR_350);
+    stop_ctrl_begin(&c, STOP_REASON_TURN_ANGLE, 0, 1000, 60, 60, 500, 0.004f);
+    assert(c.decel_limit == 10 && c.accel_limit == 10);
+    (void)param_set_ram(P_LEGACY_QUIRKS, 0);
     /* 일반 정지: 바닥 이하면 바로 0 */
     stop_ctrl_begin(&c, STOP_REASON_COMMAND, 100, 1000, 10, 20, 0, 0.002f);
     assert(c.phase == STOP_PHASE_WAIT_QUIET);

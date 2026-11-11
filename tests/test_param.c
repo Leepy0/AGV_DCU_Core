@@ -36,10 +36,10 @@ int main(void)
     assert(param_get(P_ACC) == 8 && param_get(P_DCC) == 40);
     /* 옛 턴 속도 30 은 15 로 줄이고 나머지 값을 지우지 않는다 */
     { int16_t id = param_get(P_WHEEL_BASE_MM);
-      fake_ee[P_SPEED_TURN] = 30;
+      fake_ee[P_SPEED_TURN] = 30;     /* 상한 25 넘음 */
       fake_ee[0] = ee_sum();
       assert(param_boot(&fake_store, 2611) == 0);
-      assert(param_get(P_SPEED_TURN) == 15 && fake_ee[P_SPEED_TURN] == 15 && fake_ee[0] == ee_sum());
+      assert(param_get(P_SPEED_TURN) == 25 && fake_ee[P_SPEED_TURN] == 25 && fake_ee[0] == ee_sum());
       assert(param_get(P_WHEEL_BASE_MM) == id); }
     assert(param_set(P_SPEED_TURN, 13) == 0);
     /* 가이드센서 거리: 빈 EEPROM 이면 250, 체크섬 밖 115 에 저장, 범위 100~999 */
@@ -124,7 +124,7 @@ int main(void)
     fake_ee_writes = 0;
     assert(param_set(P_SPEED_TURN, 12) == 0);
     assert(fake_ee_writes == 2 && fake_ee[P_SPEED_TURN] == 12 && fake_ee[0] == ee_sum());
-    assert(param_set(P_SPEED_TURN, 16) == -1);
+    assert(param_set(P_SPEED_TURN, 26) == -1);     /* TNS 상한 25(v0.36.0, 예전 15) */
     fake_ee_writes = 0;
     assert(param_set(P_BAT_DV, 240) == 0);
     assert(fake_ee_writes == 0 && param_get(P_BAT_DV) == 240);

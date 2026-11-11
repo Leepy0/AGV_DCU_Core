@@ -17,7 +17,7 @@ typedef struct { int16_t low, up; } limit_t;
  * 31·38·39·44 는 새 파라미터이고 36 하한은 0 이다 */
 static const limit_t s_limit[P_PARA_INIT + 1] = {
     {0, 0},
-    {7, 60}, {3, 60}, {3, 15}, {0, 3}, {0, 99}, {0, 1},
+    {7, 60}, {3, 60}, {3, 25}, {0, 3}, {0, 99}, {0, 1},
     {10000, 10055}, {10000, 10022}, {1, 10}, {-9, 9}, {7, 60}, {5, 60},
     {20, 60}, {0, 999}, {0, 99}, {0, 9}, {10000, 10022}, {5, 9},
     {0, 300}, {0, 99}, {0, 20}, {10, 500}, {1, 250}, {30, 300},
@@ -61,7 +61,7 @@ static const extra_t s_extra[] = {
     { P_ENC_STALL_TICKS, 118, 0, 99,  0 },
     /* 공차 프로필. 한계 위는 적재 칸(1·3·12·13번)과 같고 0 = 적재 값. 77~81 은 KEEP 의 빈 칸이다 */
     { P_EMPTY_SPEED, PARAM_EMPTY_ADDR0,      0, 60, 0 },
-    { P_EMPTY_TURN,  PARAM_EMPTY_ADDR0 + 1u, 0, 15, 0 },
+    { P_EMPTY_TURN,  PARAM_EMPTY_ADDR0 + 1u, 0, 25, 0 },
     { P_EMPTY_ACC,   PARAM_EMPTY_ADDR0 + 2u, 0, 60, 0 },
     { P_EMPTY_DCC,   PARAM_EMPTY_ADDR0 + 3u, 0, 60, 0 },
     { P_LOAD_DETECT, PARAM_EMPTY_ADDR0 + 4u, 0, 1,  0 }

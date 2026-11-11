@@ -21,6 +21,7 @@ static void setup(void)
     motor_reset();
     stop_reset();
     steer_reset();
+    { guide_cfg_t gc; guide_cfg_default(&gc); guide_configure(&gc); }   /* h 배율 1(부팅과 같게) */
     D.ui_mode = UI_AUTO;
     D.control = RUN_DRIVE;
     D.step = DRIVE_CHANGE_SPEED;
@@ -380,9 +381,9 @@ int main(void)
         }
         assert(D.tape_align == 0 && D.tape_fix_cnt == 0 && D.tape_fix_end == (c ? 3 : 4) && D.system_err == 0);
     }
-    /* 정렬 회전 감속은 일반 회전과 같다(DCC/4). 라인을 보기 전에 미리 줄인다 */
+    /* 정렬 회전 감속은 일반 회전과 같다(v0.36.0 부터 DCC). 감속 시작 각이 잡음 각보다 크면(DCC 20, 일반 센서) 라인을 보기 전에 엔코더로 미리 줄인다 */
     setup();
-    (void)param_set(P_DCC, 40);
+    (void)param_set(P_DCC, 20);
     D.control = RUN_TURN;
     D.tape_step = 1;
     D.tape_align = 1;
@@ -405,7 +406,7 @@ int main(void)
           v0 = v1;
       }
       assert(D.vin_out < P.turn_speed); }
-    assert(stop_turn_dcc() == 10);
+    assert(stop_turn_dcc() == 20);
     /* 거리 감속: 회전 속도로 오다가 중앙 앞 2도 근처에서 최저 속도가 된다. 최저 속도 구간은 몇 도뿐이다 */
     {
         float rate, acc = 0.0f, at_min = -1.0f;
@@ -428,11 +429,9 @@ int main(void)
             while (acc >= 1.0f) { acc -= 1.0f; D.tape_turned++; }
             if ((at_min < 0.0f) && (D.vin_out <= P.turn_min)) { at_min = (float)D.tape_turned; }
         }
-        assert(at_min > 0.0f);
-        printf("  정렬 회전 최저 속도 구간 %.1f 도\n", (4870.0f - at_min) / rate);
-        /* v0.35.0: 끝점(엔코더 추정)에서 0 이 되는 등감속이라 최저 회전 속도 기어가기가 없다. 끝은 정지 바닥 */
-        assert((4870.0f - at_min) / rate <= 5.0f);   /* 감속도 0.5 몫·지연 20틱이라 약 4도 */
-        assert(D.vin_out == stop_min_rpm());
+        /* v0.36.0: 라인을 못 본 채 끝점에 오면 v_잡음(감속 시작 각이 잡음 각 안이면 회전 속도)으로 찾는다. 바닥 속도 찾기는 없다 */
+        printf("  정렬 회전 라인 못 봄: 끝 속도 %d rpm(회전 속도 %d)\n", D.vin_out, P.turn_speed);
+        assert((at_min < 0.0f) && (D.vin_out == P.turn_speed));
     }
     /* 편차 → 각 환산: atan(편차 mm / GD). 1단위 = 6.89 / 2 mm. GD 250, 1도 10 펄스 */
     { static const struct { int16_t pos; float lo, hi; } cv[2] = { { 15, 115.0f, 118.0f }, { 31, 229.0f, 233.0f } };

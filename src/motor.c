@@ -36,8 +36,15 @@ float atanf(float x);
 #define TAPE_CREEP_DEG       2.0f    /* 예전(QUIRK_FLOOR_350): 최저 속도로 도는 마지막 각 */
 /* 회전 끝 등감속(v0.35.0). 모의(test_curve turn: GD 250·500, wide·일반, 바퀴 지연 100·150 ms, 슬립 0.8~1.25)에서
  * 0.75·10틱은 가운데 도달 지령이 바닥(150) 위 최대 346 rpm, 0.5·20틱은 모두 150 */
-#define TAPE_DECEL_SHARE     0.5f    /* 감속도 = 회전 감속(DCC/4, 많아야 10) × 이 값 */
-#define TAPE_DELAY_TICKS     20      /* 응답 지연(센서 + 바퀴 + 회전 램프) 틱 */
+#ifndef TAPE_DECEL_SHARE
+#define TAPE_DECEL_SHARE     0.35f   /* 감속도 = 회전 감속(v0.36.0 부터 DCC) × 이 값 */
+#endif
+#ifndef TAPE_NOISE_MARGIN
+#define TAPE_NOISE_MARGIN    4       /* 잡음 각: 센서 끝 이만큼 단위 안쪽(가장자리 포화·덩어리 판정 여유) */
+#endif
+#ifndef TAPE_DELAY_TICKS
+#define TAPE_DELAY_TICKS     40      /* 응답 지연(센서 + 바퀴 + 회전 램프) 틱 */
+#endif
 #define TAPE_PLAN_DCC        0.75f   /* 예전(QUIRK_FLOOR_350) 감속 계획 = 회전 감속(DCC/4, 많아야 10) × 이 값. S커브 지연 여유 */
 #define TAPE_SETTLE_TICKS    20      /* 중앙에서 선 뒤 0.2 s 기다리고 바퀴가 서면 편차를 본다 */
 #define TAPE_SETTLE_MAX      100     /* 바퀴가 안 서도 1 s 면 본다 */
@@ -64,6 +71,8 @@ static struct {
 
 /* 정렬 회전 끝: 라인을 잡은 뒤 남은 각(tape_left_guide) */
 static struct { int16_t have, prev; int32_t at; float left; } s_tr;
+/* 정렬 회전 감속 시작 각(tape_start_plan). 펄스 */
+static struct { float th_start, th_noise; int16_t v_noise; } s_ta;
 
 void motor_reset(void)
 {
@@ -82,6 +91,7 @@ void motor_reset(void)
     s_motor.forcing = 0;
     s_motor.spike = 0;
     s_tr.have = 0;
+    s_ta.th_noise = 0.0f;
 }
 
 static int16_t dac_clamp(int16_t v) { return (v < 0) ? 0 : ((v > MOTOR_DAC_MAX) ? MOTOR_DAC_MAX : v); }
@@ -492,6 +502,35 @@ static int16_t tape_centered(int32_t pos)
     }
 }
 
+/* 감속 시작 각(정렬 회전 시작 때 한 번). 회전 속도 v 에서 0 까지 θ_시작 = v·T + v²/(2a).
+ * θ_잡음 = atan((센서 반폭 - 여유) / GD) 은 새 라인이 센서에 보이기 시작하는 각. θ_시작 ≤ θ_잡음 이면 라인을 볼 때까지 회전 속도 그대로.
+ * 넘으면 엔코더 끝점(슬립 최악 TAPE_SLIP_HIGH 로 앞당김)에서 θ_잡음 앞에 v_잡음(θ_잡음 = v·T + v²/2a 의 해)이 되게 미리 줄인다.
+ * 라인을 못 본 채 끝점을 지나면 v_잡음으로 찾는다. 펄스 단위. CCS 로 본다 */
+
+static void tape_start_plan(void)
+{
+    float k = ((float)STOP_ENCODER_PPR / 6000.0f) * 2.0f;
+    float a = TAPE_DECEL_SHARE * (float)stop_turn_dcc(), v = (float)P.turn_speed, at = a * (float)TAPE_DELAY_TICKS;
+    s_ta.th_start = (v * k * (float)TAPE_DELAY_TICKS) + (v * v * k / (2.0f * a));
+    s_ta.th_noise = guide_offset_to_pulse_f((float)((D.guide_wide ? 32 : 16) - TAPE_NOISE_MARGIN));
+    v = sqrtf((at * at) + (2.0f * a * s_ta.th_noise / k)) - at;
+    s_ta.v_noise = (s_ta.th_start <= s_ta.th_noise) ? P.turn_speed : (int16_t)v;
+    if (s_ta.v_noise < stop_min_rpm()) { s_ta.v_noise = stop_min_rpm(); }
+}
+
+/* 라인을 잡기 전 속도 상한. left = 엔코더 끝점까지 남은 펄스(슬립 최악으로 앞당김) */
+static int16_t tape_pre_speed(float left)
+{
+    float k = ((float)STOP_ENCODER_PPR / 6000.0f) * 2.0f, a = TAPE_DECEL_SHARE * (float)stop_turn_dcc();
+    float d, vn, v;
+    if (s_ta.th_noise <= 0.0f) { tape_start_plan(); }      /* 단계 0 을 거치지 않은 회전 */
+    d = left - s_ta.th_noise;
+    vn = (float)s_ta.v_noise;
+    if (s_ta.v_noise >= P.turn_speed) { return P.turn_speed; }
+    v = (d > 0.0f) ? sqrtf((vn * vn) + (2.0f * a * d / k)) : vn;
+    return (v >= (float)P.turn_speed) ? P.turn_speed : (int16_t)v;
+}
+
 /* 라인을 잡은 뒤 남은 각: 위치가 바뀐 순간 두 칸 경계로 잡고, 그 사이는 엔코더로 뺀다(계단 없이). 지금 칸 ±0.5 안으로 묶는다 */
 
 static float tape_left_guide(int32_t turned, int32_t pos)
@@ -599,6 +638,7 @@ static int16_t tape_adjust(void)
 
     switch (D.tape_step) {
     case 0:     /* 출발 라인에서 멀어지는 동안 슬립비를 잰다 */
+        tape_start_plan();
         s_tr.have = 0;
         if (!D.guide_all_off) {
             D.tape_lost_cnt = 0;
@@ -652,7 +692,8 @@ static int16_t tape_adjust(void)
     }
     if (D.tape_align) {
         int16_t plan = param_quirk(QUIRK_FLOOR_350) ? tape_plan(D.tape_end_cnt - (float)turned)
-                                                    : tape_decel(D.tape_end_cnt - (float)turned);
+                     : (s_tr.have ? tape_decel(D.tape_end_cnt - (float)turned)
+                                  : tape_pre_speed((D.tape_end_cnt / TAPE_SLIP_HIGH) - (float)turned));
         /* 감속을 시작하면 다시 올리지 않는다. 새 라인으로 끝점이 멀어져도 지금 속도로 가다가 마지막만 최저 속도 */
         if ((D.tape_plan_min > 0) && (plan > D.tape_plan_min)) { plan = D.tape_plan_min; }
         D.tape_plan_min = plan;

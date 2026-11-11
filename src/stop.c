@@ -47,9 +47,11 @@ int16_t stop_clamp(int16_t value, int16_t lower, int16_t upper)
     return value;
 }
 
+/* 회전 감속도(rpm/틱). v0.36.0 부터 DCC 그대로(많아야 60). 예전(QUIRK_FLOOR_350)은 DCC/4, 많아야 10 */
 static int16_t turn_dcc(int16_t dcc)
 {
-    return stop_clamp((int16_t)(dcc / STOP_TURN_DCC_DIV), 1, STOP_TURN_DCC_MAX);
+    if (param_quirk(QUIRK_FLOOR_350)) { return stop_clamp((int16_t)(dcc / STOP_TURN_DCC_DIV), 1, STOP_TURN_DCC_MAX); }
+    return stop_clamp(dcc, 1, STOP_RAPID_DCC_MAX);
 }
 
 void stop_ctrl_reset(stop_ctrl_t *c)
