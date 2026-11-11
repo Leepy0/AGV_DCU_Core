@@ -25,7 +25,7 @@
 
 #if AGV_DEV_TESTS
 
-#define STEERLOG_N   616     /* 6.16 s. cmd RAML0D(0xF80 워드)에 상태와 같이 들어가는 최대에서 여유 몇 워드 */
+#define STEERLOG_N   600     /* 6.00 s. 표본 6워드. 상태(s_sl)·헤더와 같이 cmd RAML0D(0xF80 워드)에 들어가야 한다. 616 은 실기 링크에서 34워드 넘쳤다 */
 #define STEERLOG_EV  16
 
 enum {                       /* 사건 종류. 모두 '진입' 순간 한 건 */
