@@ -37,7 +37,7 @@
 #define TAPE_MM     10.0f
 #define WB_MM       600.0f
 #define TURN_SCALE  1.023f      /* 회전 보정비 */
-#define GD_MM       250.0f
+#define GD_MM       s_gd
 #define RPM_MAX     3540.0f
 #define ACC_LIM     6000.0f     /* 바퀴 가감속 한계 rpm/s */
 #define LEAD_MM     6000.0f     /* 곡선 앞 직선. 가속 구간 + 정속 2 m */
@@ -82,6 +82,8 @@ typedef struct {
 } res_t;
 
 static struct { float x, y, th, rpm[2], acc[2], s; } s_v;
+static float s_gd = 250.0f;     /* 센서 거리(모형과 GD 같음) */
+static float s_cross_x, s_cross_w;   /* 교차 테이프 x mm·폭 mm. 폭 0 = 없음 */
 static const case_t *s_c;
 static float s_st[6000], s_wd[6000], s_j[6000];
 
@@ -162,6 +164,10 @@ static void sensor_reply(float u, float slant, int seen)
 {
     uint32_t bits = 0;
     int i, leds = s_c->leds;
+    if ((s_cross_w > 0.0f) && (fabsf(s_v.x + GD_MM * cosf(s_v.th) - s_cross_x) < s_cross_w * 0.5f)) {
+        send_h((leds == 32) ? 0xFFFFFFFFUL : 0xFFFFUL, leds);    /* 센서 줄이 교차 테이프 위: 전부 켜짐 */
+        return;
+    }
     if (seen) {
         float c = (float)(leds + 1) / 2.0f + u / PITCH_MM;
         for (i = 1; i <= leds; i++) {
@@ -381,6 +387,104 @@ static void sweep(void)
     }
 }
 
+/* 교차 테이프 찾기: 순항(20 m/min) 중 교차 테이프 0.6 m 앞(센서 기준, 찾기 한계 2 × SL = 1 m)에서 찾기를 건다(kind 0 정렬 회전, 1 테이프 정지).
+ * 결과: 회전 중심의 정지 위치(교차 테이프 기준, + 지나침), 정지까지 중심 최대 위치, 찾기 시간, 찾은 때 속도, 회전 시작 방향 */
+typedef struct { float stop_x, peak_x, t_seek, v_find, v_cmd, head_mrad, lat; int err, found; } tape_res_t;
+
+static void tape_sim(int kind, float gd, int dcc, float tau, float w, tape_res_t *r)
+{
+    static const case_t c0 = { 32, 0.0f, 0.0f, 1, 25, 25, 30, 0.1f, 0, 0 };
+    case_t c = c0;
+    int t, armed = 0, found = 0, still = 0;
+    float t0 = 0.0f;
+
+    c.tau = tau;
+    memset(r, 0, sizeof(*r));
+    memset(&s_v, 0, sizeof(s_v));
+    s_c = &c;
+    s_gd = gd;
+    s_cross_x = 4000.0f;
+    s_cross_w = w;
+    s_v.s = GD_MM;
+    host_reset();
+    memset(&D, 0, sizeof(D));
+    memset(seq_request_flag, 0, sizeof(seq_request_flag));   /* 앞 판의 테이프 정지 시퀀스 요청이 남지 않게 */
+    sys_boot();
+    host.adc = 300u << 4;
+    for (t = 0; t < 60; t++) { scan(); }
+    assert(sys_power_on());
+    assert(param_set_ram(P_SPEED_MIN, 4) == 0);               /* SPN 은 다시 계산할 때 들어간다(WW 가 부른다) */
+    assert(param_set_ram(P_GEAR_RATIO, 60) == 0);            /* 곡선 모의와 같은 94.5 rpm 당 1 m/min. SPN 4 = 378 rpm(정지 바닥 350 위) */
+    assert(param_set_ram(P_WHEEL_BASE_MM, (int16_t)(WB_MM / 10.0f)) == 0);
+    assert(param_set_ram(P_GUIDE_DIST_MM, (int16_t)gd) == 0);
+    assert(param_set_ram(P_SPEED_HIGH, 30) == 0);
+    assert(param_set_ram(P_SPEED_LOW, 25) == 0);
+    assert(param_set_ram(P_SPEED_MIN, 4) == 0);
+    assert(param_set_ram(P_DCC, (int16_t)dcc) == 0);
+    assert(param_set_ram(P_TURN_FORBACK, 10) == 0);
+    tune_turn_scale_set((int16_t)(TURN_SCALE * 1000.0f + 0.5f));
+    host.bus_in[BUS_IN_A] &= (uint16_t)~RAW_START;
+    scan();
+    host.bus_in[BUS_IN_A] |= RAW_START;
+    scan();
+    for (t = 0; t < 4000; t++) {
+        float u = 0.0f, slant = 1.0f;
+        int seen = cross(&u, &slant);
+        sensor_reply(u, slant, seen);
+        plant();
+        scan();
+        if ((t == 50) && D.flag_run) { tagact_speed(20); }
+        if (!armed && (s_v.x + GD_MM >= s_cross_x - 600.0f)) {
+            armed = 1;
+            t0 = (float)t;
+            if (kind == 0) { D.tape_turn_dir = TURN_CW; D.tape_turn_deg = 90; D.tape_turn_next = 0; }
+            else           { D.tape_stop_id = 1; }
+        }
+        if (armed && !found && !D.system_err && ((kind == 0) ? (D.tape_align != 0) : (D.tape_stop_id == 0))) {
+            found = 1;
+            r->t_seek = ((float)t - t0) * 0.01f;
+            r->v_find = (s_v.rpm[0] + s_v.rpm[1]) * 0.5f / P.one_meter_rpm;
+            r->v_cmd = (float)D.speed_cmd / P.one_meter_rpm;
+        }
+        if (found) {
+            if (s_v.x - s_cross_x > r->peak_x - 0.0f || r->peak_x == 0.0f) { if (s_v.x - s_cross_x > r->peak_x) r->peak_x = s_v.x - s_cross_x; }
+            if (D.flag_turn || ((s_v.rpm[0] < 1.0f) && (s_v.rpm[1] < 1.0f) && (++still > 50))) { break; }
+            r->stop_x = s_v.x - s_cross_x;
+            r->head_mrad = s_v.th * 1000.0f;
+            r->lat = s_v.y;
+        }
+        if (armed && !found && (D.system_err || D.stop_err)) { break; }
+    }
+    if (r->peak_x < r->stop_x) { r->peak_x = r->stop_x; }
+    r->found = found;
+    r->err = D.system_err ? D.system_err : D.stop_err;
+    s_cross_w = 0.0f;
+    s_gd = 250.0f;
+}
+
+static void tape_table(void)
+{
+    static const int   dcc[2] = { 20, 50 };
+    static const float gd[2] = { 250.0f, 400.0f };
+    static const float tau[2] = { 0.05f, 0.15f };
+    int k, i, j, l, w;
+    tape_res_t r;
+    for (k = 0; k < 2; k++) {
+        for (j = 0; j < 2; j++) {
+            for (i = 0; i < 2; i++) {
+                for (l = 0; l < 2; l++) {
+                    for (w = 0; w < 2; w++) {
+                        tape_sim(k, gd[j], dcc[i], tau[l], w ? 50.0f : 10.0f, &r);
+                        printf("  %s GD %3.0f DCC %2d 지연 %3.0f 폭 %2d | 찾음 %d 찾은 속도 %5.1f(지령 %4.1f) m/min 찾기 %5.2f s | 정지 위치 %7.1f mm 최대 %7.1f 옆 %5.1f 방향 %5.1f mrad | err %d\n",
+                               k ? "정지" : "회전", gd[j], dcc[i], tau[l] * 1000.0f, w ? 50 : 10, r.found, r.v_find, r.v_cmd, r.t_seek,
+                               r.stop_x, r.peak_x, r.lat, r.head_mrad, r.err);
+                    }
+                }
+            }
+        }
+    }
+}
+
 static void on_abort(int sig) { (void)sig; _exit(3); }
 
 int main(int argc, char **argv)
@@ -391,6 +495,7 @@ int main(int argc, char **argv)
     signal(SIGABRT, on_abort);
     setvbuf(stdout, 0, _IONBF, 0);
     if ((argc > 1) && (strcmp(argv[1], "sweep") == 0)) { sweep(); return 0; }
+    if ((argc > 1) && (strcmp(argv[1], "tape") == 0))  { tape_table(); return 0; }
 
     for (g = 0; g < 2; g++) {
         for (l = 32; l >= 16; l -= 16) {
@@ -451,6 +556,18 @@ int main(int argc, char **argv)
         assert((r.err == 0) && (r.lost >= 15) && (r.exit_max < 20.0f));
         if (i == 10) { assert((r.jump <= 1) && (r.exit_max < 1.0f)); }   /* GUIDE_REACQ_N 응답보다 짧은 점은 받지 않는다 */
         if (i == 40) { assert(r.jump >= 8); }                            /* 긴 것은 받는다(지속 확인이 없으면 10 mm 도 이렇다) */
+    }
+    {   /* 교차 테이프 찾기. 정렬 회전 앞은 계산 속도(SPN 4 대신 8.7~12 m/min)로 찾아 회전 중심이 테이프 ±12 mm 안에 선다
+         * (SPN 4: -1~+6 mm, 찾기 6.6~8.0 s → 2.7~3.7 s). 테이프 정지는 SPN 그대로 */
+        tape_res_t tr;
+        for (i = 0; i < 4; i++) {
+            tape_sim(0, (i & 1) ? 400.0f : 250.0f, (i & 2) ? 50 : 20, 0.15f, 10.0f, &tr);
+            printf("  교차 테이프 회전 GD %d DCC %d: 찾기 %.1f m/min %.2f s, 정지 위치 %.1f mm\n", (i & 1) ? 400 : 250, (i & 2) ? 50 : 20,
+                   tr.v_cmd, tr.t_seek, tr.stop_x);
+            assert(tr.found && (tr.err == 0) && (tr.v_cmd > 8.0f) && (tr.v_cmd < 12.1f) && (fabsf(tr.stop_x) < 12.0f) && (tr.t_seek < 4.0f));
+        }
+        tape_sim(1, 250.0f, 50, 0.15f, 10.0f, &tr);
+        assert(tr.found && (tr.err == 0) && (fabsf(tr.v_cmd - 4.0f) < 0.1f) && (tr.stop_x < -240.0f) && (tr.stop_x > -255.0f));
     }
     printf("test_curve ok\n");
     return 0;

@@ -2343,7 +2343,7 @@ static void test_tape_turn(void)
     guide_led_reply(0x03FFu);
     tick();
     assert(guide_tx_has('H'));
-    assert(D.speed_cmd == P.min_speed);
+    assert((D.speed_cmd == run_seek_rpm()) && (D.speed_cmd >= P.min_speed));   /* 정렬 회전 앞 찾기 속도 */
     assert(D.tape_align == 0);
     guide_led_reply(0x03FFu);
     tick();

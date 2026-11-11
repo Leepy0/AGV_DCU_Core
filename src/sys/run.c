@@ -810,14 +810,38 @@ static uint16_t led_total(void)
 
 static struct { int16_t prev_id; uint32_t start_len; int16_t hits; } s_tape;
 
-/* 최저 속도로 달리며 교차 테이프를 찾는다. 1 찾음, -1 정지 거리 2배를 넘김, 0 계속 */
+/* 정렬 회전 앞 교차 테이프 찾기 속도. 센서가 회전 중심보다 GD 앞이라 테이프를 본 뒤 GD 안에 서면 된다.
+ * 인정(LED 6개 이상 2응답) 지연 t 동안 v·t 를 가고, 감속도 k·DCC(1 = 100 rpm/s)로 GD - 여유 - v·t 안에 선다:
+ * v² = 2·k·a·(d0 - v·t) → v = √((k·a·t)² + 2·k·a·d0) - k·a·t. SPN 과 min(LOS, 12 m/min) 사이로 묶는다.
+ * 모의(test_curve tape, DCC 20·50, GD 250·400, 바퀴 지연 50·150 ms): k 0.5 는 회전 중심 정지 위치가 SPN 4 보다
+ * 최대 17 mm 더 나갔다. k 0.15 + 12 m/min 상한에서 +5 mm 안. 테이프 정지(바로 섬)는 속도만큼 더 가서 SPN 그대로 */
+#ifndef SEEK_DCC_SHARE
+#define SEEK_DCC_SHARE 0.15f    /* S커브 저크 풀림·앰프 응답·정지 제어 여유 */
+#endif
+#ifndef SEEK_MAX_MPM
+#define SEEK_MAX_MPM   12
+#endif
+#define SEEK_MARGIN_MM 50.0f
+float sqrtf(float x);
+#define SEEK_ACK_S     0.02f
+int16_t run_seek_rpm(void)
+{
+    float a = SEEK_DCC_SHARE * (float)P.dcc * 100.0f / P.one_meter_rpm * (1000.0f / 60.0f);   /* mm/s² */
+    float d0 = P.guide_dist_mm - SEEK_MARGIN_MM, at = a * SEEK_ACK_S;
+    float r = (d0 > 0.0f) ? (sqrtf((at * at) + (2.0f * a * d0)) - at) * (0.06f * P.one_meter_rpm) : 0.0f;   /* mm/s → rpm */
+    if (r > (float)P.low_speed) { r = (float)P.low_speed; }
+    if (r > (float)SEEK_MAX_MPM * P.one_meter_rpm) { r = (float)SEEK_MAX_MPM * P.one_meter_rpm; }
+    return (r > (float)P.min_speed) ? (int16_t)r : P.min_speed;
+}
+
+/* 교차 테이프를 찾는다. 정렬 회전 앞은 찾기 속도(run_seek_rpm), 테이프 정지는 최저 속도(SPN). 1 찾음, -1 정지 거리 2배를 넘김, 0 계속 */
 static int16_t tape_seek(int16_t id)
 {
     if (id != s_tape.prev_id) {
         s_tape.prev_id = id;
         s_tape.start_len = s_pulses[0];
     }
-    D.speed_cmd = P.min_speed;
+    D.speed_cmd = (id == TAPE_ID_TURN) ? run_seek_rpm() : P.min_speed;
     D.step = DRIVE_CHANGE_SPEED;
     if (led_total() >= TAPE_LED_MIN) {
         if (++s_tape.hits > 1) {

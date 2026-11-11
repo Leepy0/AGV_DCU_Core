@@ -15,6 +15,7 @@ void     run_seq(void);             /* 10 ms, motor_run 뒤. 시퀀스 스텝과
 void     run_after_motor(void);     /* 10 ms, site_manual 뒤. error_check 후반 */
 void     run_encoder(uint16_t wheel, uint32_t period);   /* eCAP ISR */
 
+int16_t  run_seek_rpm(void);              /* 정렬 회전 앞 교차 테이프 찾기 속도 rpm. SPN~min(LOS, 12 m/min) */
 uint32_t run_pulses(uint16_t wheel);       /* 좌 Total_length, 우 누적 펄스 */
 int      run_is_idle(void);                /* gFlag_AGV_None_Action */
 int      run_auto_started(void);           /* Flag_Auto_Start */
