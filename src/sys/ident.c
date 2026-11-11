@@ -1593,11 +1593,12 @@ static void stage_end(uint16_t st)
         break;
     case 2:
         b->amp = agv_rpmt.amp;
-        if (agv_rpmt.low_rpm > 0) {   /* 안정 최저 rpm × 1.2. 정지 바닥(350 rpm) 아래면 선 앞 정지가 실패하니 바닥 이상.
-                                         4 m/min 미만은 파생값 계산이 6 으로 바꾸므로 4 이상 */
-            float r = (float)agv_rpmt.low_rpm * 1.2f;
-            int16_t v = (int16_t)ceilf(((r < (float)STOP_MIN_RPM) ? (float)STOP_MIN_RPM : r) / P.one_meter_rpm);
-            b->min_rec = clamp_p(P_SPEED_MIN, (v < 4) ? 4 : v);
+        if (agv_rpmt.low_rpm > 0) {   /* 안정 최저 rpm × 1.2. 정지 바닥(stop_min_rpm) 아래면 선 앞 정지가 실패하니 바닥 이상.
+                                         3 m/min 미만은 파생값 계산이 3 으로 묶으므로 3 이상(예전 바닥 350·4 이상) */
+            float r = (float)agv_rpmt.low_rpm * 1.2f, f = (float)stop_min_rpm();
+            int16_t lo = param_quirk(QUIRK_FLOOR_350) ? 4 : 3;
+            int16_t v = (int16_t)ceilf(((r < f) ? f : r) / P.one_meter_rpm);
+            b->min_rec = clamp_p(P_SPEED_MIN, (v < lo) ? lo : v);
             if (s_build & BLD_MIN) { (void)param_set(P_SPEED_MIN, b->min_rec); }
         }
         break;

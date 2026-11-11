@@ -59,8 +59,9 @@ void stop_ctrl_reset(stop_ctrl_t *c)
     c->command_rpm = 0;
     c->acceleration = 0;
     c->maximum_rpm = 0;
-    c->floor_rpm = STOP_MIN_RPM;
-    c->candidate_floor_rpm = STOP_MIN_RPM;
+    c->floor_rpm = stop_min_rpm();
+    c->candidate_floor_rpm = c->floor_rpm;
+    c->pred_rpm = 0.0f;
     c->accel_limit = 1;
     c->decel_limit = 1;
     c->elapsed_ticks = 0;
@@ -235,9 +236,24 @@ static int16_t cruise_left(const stop_ctrl_t *c, const stop_feedback_t *fb)
            (float)c->maximum_rpm * fb->pulses_per_rpm_tick * 2.0f;
 }
 
+int16_t stop_min_rpm(void) { return param_quirk(QUIRK_FLOOR_350) ? STOP_MIN_RPM : STOP_FLOOR_RPM; }
+
+/* 바퀴 하나가 멈췄는가. 펄스 사이 바퀴 속도는 지령을 1차 지연으로 따른다고 예측하고(pred_rpm), 그 펄스 간격
+ * (RPM_CONST / rpm = 500 / rpm 틱)의 STALL_INTERVAL_FACTOR 배 넘게 펄스가 없으면 멈춤이다. 예전은 고정 STOP_STALL_TICKS */
+static int16_t stalled(const stop_ctrl_t *c, int16_t idle)
+{
+    float lim;
+    if (param_quirk(QUIRK_FLOOR_350)) { return idle >= STOP_STALL_TICKS; }
+    if (c->pred_rpm < 1.0f)           { return idle >= STOP_QUIET_TICKS; }
+    lim = (float)STALL_INTERVAL_FACTOR * 500.0f / c->pred_rpm;
+    return (idle >= STOP_STALL_MIN_TICKS) && ((float)idle > lim);
+}
+
 int16_t stop_ctrl_update(stop_ctrl_t *c, const stop_feedback_t *fb)
 {
     int16_t both_idle, one_stalled, ceiling;
+
+    c->pred_rpm += ((float)c->command_rpm - c->pred_rpm) * STOP_PRED_LAG;
 
     both_idle = (fb->idle_left >= STOP_QUIET_TICKS) && (fb->idle_right >= STOP_QUIET_TICKS);
     if ((c->phase == STOP_PHASE_COMPLETE) || (c->phase == STOP_PHASE_FAILED) || (c->phase == STOP_PHASE_IDLE)) {
@@ -276,7 +292,14 @@ int16_t stop_ctrl_update(stop_ctrl_t *c, const stop_feedback_t *fb)
         c->phase = STOP_PHASE_DECELERATE;
         start_distance_brake(c, fb->remaining_pulses, fb->pulses_per_rpm_tick);
     }
-    one_stalled = (fb->idle_left >= STOP_STALL_TICKS) || (fb->idle_right >= STOP_STALL_TICKS);
+    one_stalled = stalled(c, fb->idle_left) || stalled(c, fb->idle_right);
+    /* 바닥이 낮아 제동 곡선 위에서 바퀴가 멈출 수 있다(짐·마찰). 그 지령부터 바닥을 배운다. 예전(바닥 350)은 300 틱 뒤 실패 */
+    if ((c->phase == STOP_PHASE_DECELERATE) && one_stalled && !param_quirk(QUIRK_FLOOR_350)
+        && (c->command_rpm < STOP_LEARN_MAX_RPM)) {
+        if (c->command_rpm > c->floor_rpm) { c->floor_rpm = c->command_rpm; }
+        c->phase = STOP_PHASE_APPROACH;
+        c->floor_hold_ticks = STOP_GRACE_TICKS;
+    }
     if ((c->phase == STOP_PHASE_APPROACH) && (c->command_rpm >= c->floor_rpm)) {
         if (c->floor_hold_ticks < STOP_GRACE_TICKS) { c->floor_hold_ticks++; }
     }
@@ -475,8 +498,8 @@ void stop_begin_runtime(int16_t reason)
 
     if ((reason != STOP_REASON_TURN_ANGLE) && (maximum < entry)) { maximum = entry; }
     /* 바닥 속도 아래는 바퀴가 안 돈다. 그 구간을 건너뛰어 회전 시작 지연을 줄인다 */
-    if ((reason == STOP_REASON_TURN_ANGLE) && (entry < STOP_MIN_RPM) && !param_quirk(QUIRK_TURN_START)) {
-        entry = STOP_MIN_RPM;
+    if ((reason == STOP_REASON_TURN_ANGLE) && (entry < stop_min_rpm()) && !param_quirk(QUIRK_TURN_START)) {
+        entry = stop_min_rpm();
     }
     s_command_sign = (D.last_input < 0) ? -1 : 1;
     get_feedback(&fb, reason);
@@ -738,7 +761,7 @@ int16_t stop_run(void)
 int16_t stop_alignment_speed(int16_t target_rpm)
 {
     if (target_rpm <= 0) { return 0; }
-    if (target_rpm < STOP_MIN_RPM) { target_rpm = STOP_MIN_RPM; }
+    if (target_rpm < stop_min_rpm()) { target_rpm = stop_min_rpm(); }
     return motor_scv_speed(target_rpm, P.acc, P.dcc);
 }
 
@@ -750,7 +773,7 @@ int16_t stop_turn_speed(int16_t target_rpm)
     int16_t acc = (P.acc < dcc) ? P.acc : dcc;
 
     if (target_rpm <= 0) { return 0; }
-    if (target_rpm < STOP_MIN_RPM) { target_rpm = STOP_MIN_RPM; }
+    if (target_rpm < stop_min_rpm()) { target_rpm = stop_min_rpm(); }
     return motor_scv_core(target_rpm, &D.vin_out, acc, dcc, P.llow_speed, P.min_speed, P.min_speed, 0, &D.scv_accel);
 }
 

@@ -89,7 +89,7 @@ int main(void)
       assert(P.one_meter_rpm == scale);
       assert(P.target_speed == (int16_t)(30.0f * scale));
       assert(P.low_speed == (int16_t)(25.0f * scale));
-      assert(P.min_speed == (int16_t)(6.0f * scale));              /* set28 < 4 → 6 */
+      assert(P.min_speed == (int16_t)(3.0f * scale));              /* set28 < 3 → 3 (예전 < 4 → 6) */
       assert(P.llow_min == (int16_t)(7.0f * scale));
       assert(P.llow_speed == P.low_speed / 2);
       assert(P.one_pulse_length == (dia / 40.0f) / 12.0f);
@@ -175,8 +175,9 @@ int main(void)
     assert(param_boot(&fake_store, 1) == 0);
     assert(param_get(P_LEGACY_QUIRKS) == 5);
     assert(param_quirk(QUIRK_RISK_FLAG) == 1 && param_quirk(QUIRK_H_POSITION) == 0);
-    /* 레거시 비트 b0~b10 까지 2047. 2048 은 넘는다 */
-    assert(param_set(P_LEGACY_QUIRKS, 2048) == -1 && param_set(P_LEGACY_QUIRKS, 2047) == 0 && param_quirk(QUIRK_SRC_A) && param_quirk(QUIRK_LOW_ACC));
+    /* 레거시 비트 b0~b11 까지 4095. 4096 은 넘는다 */
+    assert(param_set(P_LEGACY_QUIRKS, 4096) == -1 && param_set(P_LEGACY_QUIRKS, 4095) == 0 && param_quirk(QUIRK_SRC_A) && param_quirk(QUIRK_LOW_ACC)
+           && param_quirk(QUIRK_FLOOR_350));
     assert(param_set(P_LEGACY_QUIRKS, QUIRK_STEER_LEGACY | 0x0F) == 0);
     assert(param_get(P_LEGACY_QUIRKS) == 383 && param_quirk(QUIRK_STEER_20MS) && param_quirk(QUIRK_NO_WB_GAIN));
     assert(param_set(P_LEGACY_QUIRKS, 5) == 0);

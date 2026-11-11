@@ -150,7 +150,7 @@ void motor_stall_check(void)
         return;
     }
     for (i = 0; i < 2; i++) {
-        if (D.w_cmd[i] >= STOP_MIN_RPM) { if (s_motor.stall_cnt[i] < IDLE_TICKS_MAX) { s_motor.stall_cnt[i]++; } }
+        if (D.w_cmd[i] >= stop_min_rpm()) { if (s_motor.stall_cnt[i] < IDLE_TICKS_MAX) { s_motor.stall_cnt[i]++; } }
         else                            { s_motor.stall_cnt[i] = 0; }
     }
     for (i = 0; i < 2; i++) {
@@ -430,7 +430,17 @@ static void tape_end(void)
 
 static int32_t abs32(int32_t v) { return (v < 0) ? -v : v; }
 
-/* 라인 중앙까지 left 펄스. 마지막 TAPE_CREEP_DEG 만 최저 속도로 가게 거리로 감속한다: v² = 최저² + 2·a·거리 */
+/* 회전 끝 속도: 남은 각(가이드 위치로 고친 펄스)에 비례해 TAPE_CREEP_DEG 에서 최저 회전 속도, 중앙 쪽으로 정지 바닥까지 낮춘다.
+ * 중앙에서는 tape_stop 이 0 으로 선다. 예전(QUIRK_FLOOR_350)은 최저 회전 속도 그대로 */
+static int16_t tape_end_speed(float left)
+{
+    float v = (float)P.turn_min * left / (TAPE_CREEP_DEG * tape_deg_pulse());
+    if (param_quirk(QUIRK_FLOOR_350) || (v >= (float)P.turn_min)) { return P.turn_min; }
+    return (v > (float)stop_min_rpm()) ? (int16_t)v : stop_min_rpm();
+}
+
+/* 라인 중앙까지 left 펄스. 마지막 TAPE_CREEP_DEG 만 최저 속도로 가게 거리로 감속한다: v² = 최저² + 2·a·거리.
+ * 새 라인을 잡았으면(단계 2) 그 위치로 tape_end_speed 가 더 낮춘다 */
 static int16_t tape_plan(float left)
 {
     float d = left - TAPE_CREEP_DEG * tape_deg_pulse();
@@ -471,7 +481,7 @@ static int16_t tape_after(int16_t seen, int32_t pos)
         else if (++D.tape_lost_cnt >= TAPE_FIX_LOST_TICKS) { D.tape_fix_end = 3; return tape_stop(); }
         if (seen && (pos <= TAPE_CENTER_POS)) { return tape_stop(); }
         if ((float)D.tape_fix_turned > TAPE_FIX_DEG * tape_deg_pulse()) { D.tape_fix_end = 2; return tape_stop(); }
-        return P.turn_min;
+        return seen ? tape_end_speed((float)abs32(guide_offset_to_pulse((int16_t)pos))) : P.turn_min;
     }
     D.vin_out = 0;
     D.scv_accel = 0;
@@ -494,8 +504,8 @@ static int16_t tape_after(int16_t seen, int32_t pos)
             D.tape_fix_turned = 0;
             D.tape_lost_cnt = 0;
             D.tape_step = TAPE_STEP_FIX;
-            if (!param_quirk(QUIRK_TURN_START)) { D.vin_out = STOP_MIN_RPM; }   /* 바닥 아래 구간을 건너뛴다(회전 시작과 같다) */
-            return P.turn_min;
+            if (!param_quirk(QUIRK_TURN_START)) { D.vin_out = stop_min_rpm(); }   /* 바닥 아래 구간을 건너뛴다(회전 시작과 같다) */
+            return tape_end_speed((float)abs32(guide_offset_to_pulse(D.guide_pos)));
         }
     }
     tape_end();
@@ -574,6 +584,10 @@ static int16_t tape_adjust(void)
         if ((D.tape_plan_min > 0) && (plan > D.tape_plan_min)) { plan = D.tape_plan_min; }
         D.tape_plan_min = plan;
         if (plan < speed) { speed = plan; }
+        if ((D.tape_step == 2) && seen) {      /* 라인 위 마지막 TAPE_CREEP_DEG: 가이드 위치로 남은 각에 비례 */
+            float g = (float)abs32(guide_offset_to_pulse(D.guide_pos));
+            if ((g < TAPE_CREEP_DEG * tape_deg_pulse()) && (tape_end_speed(g) < speed)) { speed = tape_end_speed(g); }
+        }
     }
     return speed;
 }

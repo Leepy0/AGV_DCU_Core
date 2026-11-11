@@ -180,7 +180,9 @@ static void test_traffic(void)
         traffic_begin(speeds[k], 60);
         for (t = 0; (t < 3000) && (stop_reason() != STOP_REASON_TRAFFIC_POSITION); t++) { tick(0); }
         while (D.last_input > (speeds[k] * 2) / 3) { tick(0); }
-        if (k == 2) { while (stop_phase() != STOP_PHASE_APPROACH) { tick(0); } }   /* 바닥 속도에서 허가 */
+        if (k == 2) {   /* 바닥 근처에서 허가. 바닥 150 은 접근 구간 없이 목표에 닿기도 해 지령으로 본다 */
+            for (t = 0; (t < 3000) && (stop_phase() != STOP_PHASE_APPROACH) && (D.last_input > stop_floor_rpm() + 30); t++) { tick(0); }
+        }
         watch_reset();
         low = D.last_input;
         acs_cross_release(ACS_CROSS_IN);
@@ -452,7 +454,7 @@ int main(void)
     assert(c.phase == STOP_PHASE_WAIT_QUIET && c.command_rpm == 0);
     stop_ctrl_begin(&c, STOP_REASON_TAG_DOCKING, 2000, 2000, 10, 20, 0, 0.002f);
     assert(c.phase == STOP_PHASE_WAIT_QUIET);
-    stop_ctrl_begin(&c, STOP_REASON_TAG_DOCKING, 200, 200, 10, 20, 100, 0.002f);
+    stop_ctrl_begin(&c, STOP_REASON_TAG_DOCKING, 100, 100, 10, 20, 100, 0.002f);    /* 바닥 150 미만 */
     assert(c.phase == STOP_PHASE_FAILED);
     stop_ctrl_begin(&c, STOP_REASON_TAG_DOCKING, 2000, 2000, 10, 20, 100, 0.0f);
     assert(c.phase == STOP_PHASE_FAILED);
@@ -460,7 +462,7 @@ int main(void)
     stop_ctrl_begin(&c, STOP_REASON_TURN_ANGLE, 0, 1000, 60, 60, 500, 0.004f);
     assert(c.phase == STOP_PHASE_CRUISE && c.decel_limit == 10 && c.accel_limit == 10);
     /* 일반 정지: 바닥 이하면 바로 0 */
-    stop_ctrl_begin(&c, STOP_REASON_COMMAND, 300, 1000, 10, 20, 0, 0.002f);
+    stop_ctrl_begin(&c, STOP_REASON_COMMAND, 100, 1000, 10, 20, 0, 0.002f);
     assert(c.phase == STOP_PHASE_WAIT_QUIET);
     /* 제동 계획 값 */
     stop_ctrl_begin(&c, STOP_REASON_TAG_DOCKING, 2000, 2000, 10, 20, 1000, 0.002f);
@@ -487,15 +489,15 @@ int main(void)
     assert(run_until_idle(0, 5000) < 5000);
     assert(D.stop_pulses == 0 && D.flag_run == 0 && D.amp_run == 0);
 
-    /* 바닥 학습: 접근 구간에 들어서 바퀴가 350 으로 안 돌면 후보를 올려 찾는다.
-     * 제동 곡선 위에서 멈추면 원본도 학습 없이 300 틱 뒤 실패한다 */
+    /* 바닥 학습(짐·마찰): 바퀴가 420 rpm 아래로 안 돈다. 바닥 150 이라 제동 곡선 위(약 410)에서 멈춘다.
+     * 예측 펄스 간격 × 2 넘게 펄스가 없으면 그 지령부터 후보를 올려 찾는다. 예전(바닥 350)은 300 틱 뒤 실패 */
     setup(2000);
     D.stop_pulses = 400;
     D.flag_stopping = 1;
     stop_request_tag();
     { int learned = 0;
       for (int t = 0; t < 6000 && D.flag_run; t++) {
-          tick((stop_phase() >= STOP_PHASE_APPROACH) ? 420 : 0);
+          tick(420);
           if (stop_phase() == STOP_PHASE_LEARN_FLOOR) { learned = 1; }
           if (stop_floor_rpm() > STOP_MIN_RPM) { learned = 2; }
           assert(stop_phase() != STOP_PHASE_FAILED);
@@ -683,11 +685,15 @@ int main(void)
     motor_velocity(1000);
     assert(D.add_speed_l == 1000 - stop_floor_rpm() && D.add_speed_r == -(1000 - stop_floor_rpm()));
 
-    /* 정렬 속도: 바닥 아래 목표는 350 으로 */
+    /* 정렬 속도: 바닥 아래 목표는 정지 바닥(150, 예전 350)으로 */
     setup(0);
     assert(stop_alignment_speed(0) == 0);
+    D.vin_out = 140;
+    assert(stop_alignment_speed(100) > 140);
+    (void)param_set(P_LEGACY_QUIRKS, QUIRK_FLOOR_350);
     D.vin_out = 340;
     assert(stop_alignment_speed(100) > 340);
+    (void)param_set(P_LEGACY_QUIRKS, 0);
 
     test_ramp_continuity();
     test_traffic();

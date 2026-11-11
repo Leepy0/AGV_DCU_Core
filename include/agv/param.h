@@ -57,6 +57,7 @@ enum {
 #define QUIRK_STEER_STEP     0x100u /* b8 예전 조향을 되살린다: 속도 연동 불감대(안쪽 0, 선형 구간 안에서만 폭을 뺀다), 편차 문턱에서 Kp 가 한 번에 최대가 된다 */
 #define QUIRK_SRC_A         0x200u /* b9 위치 소스를 예전 'a' 로 되살린다(기본 'h' 전용). 조향 비트와 별개 */
 #define QUIRK_LOW_ACC       0x400u /* b10 저속 구간(llow 아래) 가속 한계를 예전 5 로 둔다(기본 max(5, ACC/2)) */
+#define QUIRK_FLOOR_350     0x800u /* b11 예전 저속: 정지 바닥 350 rpm, 멈춤 판단 고정 10틱, SPN 4 미만은 6, 정렬 회전 끝 최저 회전 속도 */
 #define QUIRK_STEER_LEGACY  (QUIRK_STEER_20MS | QUIRK_DAMP_SIGN_OLD | QUIRK_NO_WB_GAIN | QUIRK_STEER_STEP)
 #define QUIRK_PAUSE_FULL_STOP 0x80u /* b7 일시정지(장애물·PAUSE) 감속 중 원인이 풀려도 0 까지 서고 다시 출발한다(예전 동작) */
 

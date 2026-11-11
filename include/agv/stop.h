@@ -10,10 +10,16 @@
 
 #include "agv/types.h"
 
-#define STOP_MIN_RPM             350
+#define STOP_MIN_RPM             350    /* 예전 정지 바닥(QUIRK_FLOOR_350). 바닥 rpm 시험 기준 속도 */
+/* 정지 바닥. 엔코더는 펄스 간격 캡처라 펄스가 오면 속도가 정확하다. 150 rpm 은 바퀴당 펄스 간격 33 ms(3틱)라
+ * 멈춤 판단(예측 간격 × 2 = 67 ms)과 정착(0.15 s)이 10 ms 주기로 가린다. 약 1.6 m/min(94.5 rpm 당 1 m/min). 실제 멈춤은 학습이 올린다 */
+#define STOP_FLOOR_RPM           150
+#define STALL_INTERVAL_FACTOR    2      /* 예측 펄스 간격의 이 배 넘게 펄스가 없으면 멈춤 */
+#define STOP_STALL_MIN_TICKS     2      /* 멈춤 판단 최소 틱. 틱 경계 떨림 */
+#define STOP_PRED_LAG            0.2f   /* 바퀴 예측 1차 지연(10 ms 마다 지령 쪽으로 이 몫, 시정수 약 50 ms) */
 #define STOP_COMMAND_MAX_RPM     3500
 #define STOP_LEARN_STEP_RPM      25
-#define STOP_LEARN_MAX_RPM       900
+#define STOP_LEARN_MAX_RPM       900    /* 학습 상한. 하한은 정지 바닥 */
 #define STOP_DISTANCE_TOL_MM     3.0f
 #define STOP_ANGLE_TOL_DEG       0.3f
 #define STOP_STALL_TICKS         10
@@ -56,6 +62,7 @@ typedef enum {
 typedef struct {
     int16_t reason, phase;
     int16_t command_rpm, acceleration, maximum_rpm, floor_rpm, candidate_floor_rpm;
+    float   pred_rpm;           /* 예측 바퀴 rpm: 지령의 1차 지연. 멈춤 판단의 펄스 간격 */
     int16_t accel_limit, decel_limit;
     int16_t elapsed_ticks, floor_hold_ticks, learn_ticks, candidate_hold_ticks;
     int16_t evidence_left, evidence_right;
@@ -121,6 +128,7 @@ int16_t stop_is_braking(void);
 int16_t stop_phase(void);
 int16_t stop_reason(void);
 int16_t stop_floor_rpm(void);
+int16_t stop_min_rpm(void);        /* 정지 바닥 하한: STOP_FLOOR_RPM, 예전(QUIRK_FLOOR_350) STOP_MIN_RPM */
 const stop_ctrl_t *stop_ctrl(void);
 
 #endif /* AGV_STOP_H */

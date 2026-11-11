@@ -431,7 +431,7 @@ int main(void)
         assert(at_min > 0.0f);
         printf("  정렬 회전 최저 속도 구간 %.1f 도\n", (4870.0f - at_min) / rate);
         assert((4870.0f - at_min) / rate <= 3.0f && (4870.0f - at_min) / rate >= 1.0f);
-        assert(D.vin_out == P.turn_min);
+        assert(D.vin_out == P.turn_min);      /* 라인이 안 보이면 마지막 2도는 최저 회전 속도 */
     }
     /* 편차 → 각 환산: atan(편차 mm / GD). 1단위 = 6.89 / 2 mm. GD 250, 1도 10 펄스 */
     { static const struct { int16_t pos; float lo, hi; } cv[2] = { { 15, 115.0f, 118.0f }, { 31, 229.0f, 233.0f } };
@@ -564,7 +564,16 @@ int main(void)
     D.guide_all_off = 1;                      /* 라인이 잠깐 안 보이면 마지막 예상을 쓴다 */
     D.tape_end_cnt = (float)D.tape_turned + (float)P.turn_90 / 90.0f;
     for (int i = 0; i < 2000; i++) { (void)motor_turn_adjust(); }
-    assert(D.vin_out == ((P.turn_min > STOP_MIN_RPM) ? P.turn_min : STOP_MIN_RPM));
+    assert(D.vin_out == P.turn_min);
+    /* 라인 위(단계 2)에서 2도 안: 가이드 위치로 남은 각에 비례해 정지 바닥까지 낮춘다. 예전(QUIRK_FLOOR_350)은 최저 회전 속도 */
+    D.guide_all_off = 0;
+    D.guide_pos = 2;                          /* 2단위 = 6.9 mm = 1.6도 */
+    for (int i = 0; i < 300; i++) { (void)motor_turn_adjust(); }
+    assert((D.tape_step == 2) && (D.vin_out < P.turn_min) && (D.vin_out >= stop_min_rpm()));
+    (void)param_set(P_LEGACY_QUIRKS, QUIRK_FLOOR_350);
+    for (int i = 0; i < 300; i++) { (void)motor_turn_adjust(); }
+    assert(D.vin_out == P.turn_min);
+    (void)param_set(P_LEGACY_QUIRKS, 0);
 
     /* motor_run: 플래그가 없으면 리셋 분기. 위험 표시 해제, 비트를 켜면 남는다 */
     setup();

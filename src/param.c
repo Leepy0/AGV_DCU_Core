@@ -23,7 +23,7 @@ static const limit_t s_limit[P_PARA_INIT + 1] = {
     {0, 300}, {0, 99}, {0, 20}, {10, 500}, {1, 250}, {30, 300},
     {0, 99}, {0, 999}, {0, 1}, {0, 999}, {1, 99}, {0, 99},
     {0, 1}, {0, 900}, {10000, 10066}, {1, 99}, {0, 999}, {0, 99},
-    {0, 989}, {0, 2}, {0, 2047}, {0, 99}, {0, 99}, {0, 10011},
+    {0, 989}, {0, 2}, {0, 4095}, {0, 99}, {0, 99}, {0, 10011},
     {-999, 999}, {0, 99}, {0, 99}, {0, 99}
 };
 
@@ -164,7 +164,10 @@ static void recalc_all(void)
     param_dv.jog_speed = param_rpm(s_set[P_SPEED_JOG]);
     param_dv.target_speed = param_rpm(param_active(P_SPEED_HIGH));
     recalc_low();
-    param_dv.min_speed = param_rpm((s_set[P_SPEED_MIN] >= 4) ? s_set[P_SPEED_MIN] : 6);
+    /* SPN 은 3 m/min 이상(LOS 하한과 같다). 범위 표 하한(0)은 두고 파생값만 묶는다: 표를 올리면 저장된 0~2(기본 0)가 부팅 때
+     * 한계 위반으로 모든 파라미터를 기본값으로 되돌린다. 예전(QUIRK_FLOOR_350)은 4 미만이면 6 */
+    if (param_quirk(QUIRK_FLOOR_350)) { param_dv.min_speed = param_rpm((s_set[P_SPEED_MIN] >= 4) ? s_set[P_SPEED_MIN] : 6); }
+    else                              { param_dv.min_speed = param_rpm((s_set[P_SPEED_MIN] >= 3) ? s_set[P_SPEED_MIN] : 3); }
     recalc_llow();
 
     param_dv.tag_pulse[0] = 0;
