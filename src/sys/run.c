@@ -63,6 +63,7 @@ static struct {
     int16_t bat_low_cnt;
     uint16_t bat_filtered;
     int16_t init_step, init_cnt;      /* Inital_start, Inital_cnt */
+    uint32_t align_from;              /* 출발 때 두 바퀴 펄스 합(출발 정렬 거리 끝) */
     int16_t drive_started;            /* Flag_Driving_start */
     int16_t was_stopping, prev_len;   /* 이번 틱 정지 요청 판단 */
     int16_t empty_cnt;                /* 공차 판정 */
@@ -240,6 +241,7 @@ static void start_run(void)
     D.flag_ready = 1;
 #if AGV_START_ALIGN
     D.start_align = (int16_t)(DRIVE_ALIGN_HOLD + (tune_active() ? 1 : 0));   /* 튜닝은 속도를 스스로 정한다: 조향 상한만 */
+    s_run.align_from = s_pulses[0] + s_pulses[1];
 #endif
     s_run.init_step = 0;
     s_run.init_cnt = 0;
@@ -737,8 +739,13 @@ static int16_t guide_within(int16_t range)
 
 #if AGV_START_ALIGN
 #define ALIGN_SEEN() (!D.guide_all_off)    /* 출발 정렬은 선이 보여야 끝난다 */
+/* 선을 본 채 출발 뒤 DRIVE_ALIGN_MAX_MM 을 갔다. 곡선 위 출발은 편차가 ±3 안에 안 들어와 정렬 확인이 곡선 끝까지 안 된다.
+ * 거리는 두 바퀴 평균: 한 바퀴(travel_pulses)는 왼쪽 곡선 안쪽 바퀴라 거의 서 있을 수 있다 */
+#define ALIGN_FAR()  (!D.guide_all_off && ((float)(int32_t)(s_pulses[0] + s_pulses[1] - s_run.align_from) \
+                                           >= (2.0f * (float)DRIVE_ALIGN_MAX_MM) * P.one_length_pulse))
 #else
 #define ALIGN_SEEN() 1
+#define ALIGN_FAR()  0
 #endif
 
 static void start_low_speed(void)
@@ -751,18 +758,15 @@ static void start_low_speed(void)
     if (s_run.init_step >= START_LOW_DONE) { return; }
     if (tag_clear) { s_run.init_step = 1; }
     if (s_run.init_step == 1) {
-        if (guide_within(START_ALIGN_RANGE) && ALIGN_SEEN()) {
-            if (++s_run.init_cnt > START_ALIGN_TICKS) {
+        if (guide_within(START_ALIGN_RANGE) && ALIGN_SEEN()) { s_run.init_cnt++; }
+        else                                                 { s_run.init_cnt = 0; }
+        if ((s_run.init_cnt > START_ALIGN_TICKS) || ALIGN_FAR()) {
 #if AGV_START_ALIGN
-                D.start_align = DRIVE_ALIGN_RAMP;
+            D.start_align = DRIVE_ALIGN_RAMP;
 #endif
-                D.speed_cmd = P.low_speed;
-                D.step = DRIVE_CHANGE_SPEED;
-                s_run.init_step = START_LOW_DONE;
-            }
-        }
-        else {
-            s_run.init_cnt = 0;
+            /* 지령(speed_cmd)은 덮지 않는다: 출발 때 이미 LOS 이고, 정렬 전에 읽은 속도 태그를 지우지 않는다 */
+            D.step = DRIVE_CHANGE_SPEED;
+            s_run.init_step = START_LOW_DONE;
         }
     }
 }

@@ -42,8 +42,20 @@ enum { TAPE_STEP_SETTLE = 3, TAPE_STEP_FIX = 4 };   /* 정렬 회전: 중앙에�
 #define ERR_CROSS_NO_ACK    286
 #define ERR_PAUSE           290
 
-#define DRIVE_ALIGN_RAMP 30   /* 정렬 뒤 조향 상한을 0.3 s 에 걸쳐 푼다(steer.c: (40 - k)/40, 30 에서 × 0.5) */
+#define DRIVE_ALIGN_RAMP 30   /* 정렬 뒤 조향 상한을 0.3 s 에 걸쳐 푼다(steer.c: (60 - k)/60, 30 에서 평소의 절반 = |v| × 1) */
 #define DRIVE_ALIGN_HOLD 31   /* start_align 정렬 전 값 */
+#ifndef DRIVE_ALIGN_DEV_LO
+#define DRIVE_ALIGN_DEV_LO 3  /* 출발 정렬 속도 상한: |위치| 이 단위 이하면 LLOW */
+#endif
+#ifndef DRIVE_ALIGN_DEV_HI
+#define DRIVE_ALIGN_DEV_HI 10 /* 이 단위 이상이면 SPN(위험 감속 문턱과 같다). 사이는 곧게 잇는다 */
+#endif
+#ifndef DRIVE_ALIGN_DEV_HYS
+#define DRIVE_ALIGN_DEV_HYS 2 /* 속도 상한을 내릴 때 편차 히스테리시스(단위) */
+#endif
+#ifndef DRIVE_ALIGN_MAX_MM
+#define DRIVE_ALIGN_MAX_MM 500   /* 출발 뒤 선을 본 채 이만큼(두 바퀴 평균) 가면 정렬 확인이 없어도 출발 정렬을 끝낸다 */
+#endif
 #ifndef AGV_START_ALIGN
 #define AGV_START_ALIGN 1     /* 출발 정렬 단계(모든 빌드). 0 = 예전 출발 */
 #endif
@@ -84,9 +96,10 @@ typedef struct {
     int16_t last_input;              /* da_last_velocity_input */
     int16_t restart_cnt;             /* gReStart_Cnt */
     int16_t drive_start_cnt;         /* Cnt_Driving_strat */
-    /* 출발 정렬 단계(START·자동 출발·태그 정지 뒤 출발, run.c start_run). DRIVE_ALIGN_HOLD 이상 = 정렬 전: 조향 상한 |v_cmd| × 0.5,
-     * DRIVE_ALIGN_HOLD 면 속도 상한 LLOW(선 없음 SPN). +1 은 튜닝(조향 상한만). 1~DRIVE_ALIGN_RAMP = 정렬 뒤 조향 상한을 ×2 로 푸는 틱. 0 = 평소.
-     * AGV_START_ALIGN 0 이면 쓰지 않는다(늘 0, run.c·steer.c·motor.c 코드 없음) */
+    /* 출발 정렬 단계(START·자동 출발·태그 정지 뒤 출발, run.c start_run). DRIVE_ALIGN_HOLD 이상 = 정렬 전: 조향 상한 |v_cmd| × 1,
+     * DRIVE_ALIGN_HOLD 면 속도 상한 = 편차에 따라 LLOW~SPN(선 없음 SPN, motor.c), 위험 감속에 새로 들어가지 않는다.
+     * +1 은 튜닝(조향 상한만). 끝 = 정렬 확인 또는 선을 본 채 DRIVE_ALIGN_MAX_MM. 1~DRIVE_ALIGN_RAMP = 끝난 뒤 조향 상한을 ×2 로 푸는 틱.
+     * 0 = 평소. AGV_START_ALIGN 0 이면 쓰지 않는다(늘 0, run.c·steer.c·motor.c 코드 없음) */
     int16_t start_align;
     /* 시퀀스 거리 이동(MOVE_MM, tagact_move_mm). 0 없음, 1 요청(run.c 가 출발), 2 출발함(주행 첫 틱에 정지 거리를 건다),
      * 3 이동 중(STOP_REASON_MOVE). 서면(stop.c finish)·시퀀스 중단(run_seq_init) 때 0 */
