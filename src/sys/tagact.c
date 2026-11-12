@@ -286,9 +286,17 @@ static void autostart(uint16_t sec)
     if (wait != 0u) { run_request_restart(wait); }
 }
 
+#ifdef AGV_HOST_BUILD
+void (*tagact_trace)(uint16_t code, uint16_t next);   /* 시험용: 실행하는 동작마다 알린다 */
+#endif
+
 static void act_exec(uint16_t code, uint16_t next)
 {
     uint16_t arg = TA_ARG(code);
+
+#ifdef AGV_HOST_BUILD
+    if (tagact_trace != 0) { tagact_trace(code, next); }
+#endif
 
     switch ((uint16_t)(TA_KIND(code) << 8)) {
     case TA_STOP:           tagact_stop(); break;
