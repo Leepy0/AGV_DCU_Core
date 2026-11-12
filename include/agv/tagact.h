@@ -66,7 +66,7 @@ extern void (*tagact_trace)(uint16_t code, uint16_t next);   /* 호스트 시험
 #define TA_BRANCH         0x0600   /* 인자: branch_dir_t */
 #define TA_SEQ            0x0700   /* 인자: seq_id_t (정지 + 시퀀스 요청) */
 #define TA_TAPE_STOP      0x0800   /* 인자: seq_id_t (테이프 탐색 정지 뒤 시퀀스) */
-#define TA_ACS            0x0900   /* 인자: ACS_INFO_* ; 번호는 스테이션 큐[0] */
+#define TA_ACS            0x0900   /* 인자: DSL_INFO_* ; 번호는 스테이션 큐[0] */
 #define TA_ACS_NUM        0x0A00   /* 인자: 번호 상수 (다음 칸에 Info) */
 #define TA_OBS            0x0B00   /* 인자: on/off */
 #define TA_STATE          0x0C00   /* 인자: 사이트 상태 id (다음 칸: 값) */
@@ -85,7 +85,7 @@ int      tagact_run(uint16_t tag);     /* DA_Tag_Selection 대체. 반환 1 = �
 uint16_t tagact_dry_run(uint16_t tag, uint16_t *acts, uint16_t cap);  /* 실행하지 않고 액션 열거 (관리 TT/TR) */
 
 /* 개별 액션 (사용자 정의 코드용) */
-void tagact_stop(void);          /* 정지 거리 없이 멈춘다. A_STOP */
+void tagact_stop(void);          /* 정지 거리 없이 멈춘다. AGV_STOP */
 void tagact_stop_length(void);   /* 방향별 정지 거리 뒤 멈춘다 */
 void tagact_stop_after_mm(int32_t mm);   /* 지금 자리에서 mm 만큼 더 가서 멈춘다. 현장 센서 정지용(레거시 FL_check: 센서가 켜지면 FL 만큼 가서 정지) */
 void tagact_speed(uint16_t level);

@@ -11,6 +11,7 @@
 #define AGV_SEQ_DSL_H
 
 #include "agv/seq.h"
+#include "agv/acs.h"
 #include "agv/tagact.h"
 #include "agv/io.h"
 #include "agv/param.h"
@@ -27,23 +28,36 @@
 #define DSL_ID_OK(x)     (0 * sizeof(char[(((x) < 32) || ((x) == IO_NONE)) ? 1 : -1]))
 #define DSL_BIT(x)       ((((x) == IO_NONE) ? 0UL : (1UL << ((x) & 31))) + DSL_ID_OK(x))
 
-#define DSL_MASK1(a)                 DSL_BIT(a)
-#define DSL_MASK2(a, b)              (DSL_BIT(a) | DSL_BIT(b))
-#define DSL_MASK3(a, b, c)           (DSL_MASK2(a, b) | DSL_BIT(c))
-#define DSL_MASK4(a, b, c, d)        (DSL_MASK3(a, b, c) | DSL_BIT(d))
-#define DSL_MASK5(a, b, c, d, e)     (DSL_MASK4(a, b, c, d) | DSL_BIT(e))
-#define DSL_MASK6(a, b, c, d, e, f)  (DSL_MASK5(a, b, c, d, e) | DSL_BIT(f))
-#define DSL_MASK7(a, b, c, d, e, f, g)     (DSL_MASK6(a, b, c, d, e, f) | DSL_BIT(g))
-#define DSL_MASK8(a, b, c, d, e, f, g, h)  (DSL_MASK7(a, b, c, d, e, f, g) | DSL_BIT(h))
-#define DSL_MASK9(a, b, c, d, e, f, g, h, i)                    (DSL_MASK8(a, b, c, d, e, f, g, h) | DSL_BIT(i))
-#define DSL_MASK10(a, b, c, d, e, f, g, h, i, j)                (DSL_MASK9(a, b, c, d, e, f, g, h, i) | DSL_BIT(j))
-#define DSL_MASK11(a, b, c, d, e, f, g, h, i, j, k)             (DSL_MASK10(a, b, c, d, e, f, g, h, i, j) | DSL_BIT(k))
-#define DSL_MASK12(a, b, c, d, e, f, g, h, i, j, k, l)          (DSL_MASK11(a, b, c, d, e, f, g, h, i, j, k) | DSL_BIT(l))
-#define DSL_MASK13(a, b, c, d, e, f, g, h, i, j, k, l, m)       (DSL_MASK12(a, b, c, d, e, f, g, h, i, j, k, l) | DSL_BIT(m))
-#define DSL_MASK14(a, b, c, d, e, f, g, h, i, j, k, l, m, n)    (DSL_MASK13(a, b, c, d, e, f, g, h, i, j, k, l, m) | DSL_BIT(n))
-#define DSL_MASK15(a, b, c, d, e, f, g, h, i, j, k, l, m, n, o) (DSL_MASK14(a, b, c, d, e, f, g, h, i, j, k, l, m, n) | DSL_BIT(o))
-#define DSL_MASK16(a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p) (DSL_MASK15(a, b, c, d, e, f, g, h, i, j, k, l, m, n, o) | DSL_BIT(p))
-#define DSL_MASK(...)    DSL_CAT(DSL_MASK, DSL_NARG(__VA_ARGS__))(__VA_ARGS__)
+/* 논리 0 이 활성인 입력(기본 active-low 배선에서 핀 1 = 활성). 같은 핀을 차종마다 반대 극성으로 쓸 때
+ * 사이트 io_map.h 가 이름 정의에 표시한다: #define SENH_1 IN_ACTIVE_HIGH( IN_EXT_1 ).
+ * ON()·OFF() 만 받고 반대쪽 절반으로 보낸다. ANY_ON·ANY2_ON·출력·LOAD_SENSORS 에 쓰면 컴파일 오류다.
+ * C 코드의 io_in( ) 에는 쓰지 않는다(논리 ID 를 쓴다) */
+#define DSL_ACTIVE_HIGH  0x100
+#define IN_ACTIVE_HIGH(x)  ((x) + DSL_ACTIVE_HIGH + DSL_ID_OK(x))
+#define DSL_HI(x)        (((x) & DSL_ACTIVE_HIGH) != 0)
+#define DSL_RAW(x)       ((x) & ~DSL_ACTIVE_HIGH)
+#define DSL_LBIT(x)      (DSL_HI(x) ? 0UL : DSL_BIT(DSL_RAW(x)))   /* 논리 1 활성(보통) */
+#define DSL_HBIT(x)      (DSL_HI(x) ? DSL_BIT(DSL_RAW(x)) : 0UL)   /* 논리 0 활성(IN_ACTIVE_HIGH) */
+
+/* F 는 신호 하나를 비트로 바꾸는 매크로(DSL_BIT, DSL_LBIT, DSL_HBIT) */
+#define DSL_MASK1(F, a)                 F(a)
+#define DSL_MASK2(F, a, b)              (F(a) | F(b))
+#define DSL_MASK3(F, a, b, c)           (DSL_MASK2(F, a, b) | F(c))
+#define DSL_MASK4(F, a, b, c, d)        (DSL_MASK3(F, a, b, c) | F(d))
+#define DSL_MASK5(F, a, b, c, d, e)     (DSL_MASK4(F, a, b, c, d) | F(e))
+#define DSL_MASK6(F, a, b, c, d, e, f)  (DSL_MASK5(F, a, b, c, d, e) | F(f))
+#define DSL_MASK7(F, a, b, c, d, e, f, g)     (DSL_MASK6(F, a, b, c, d, e, f) | F(g))
+#define DSL_MASK8(F, a, b, c, d, e, f, g, h)  (DSL_MASK7(F, a, b, c, d, e, f, g) | F(h))
+#define DSL_MASK9(F, a, b, c, d, e, f, g, h, i)                    (DSL_MASK8(F, a, b, c, d, e, f, g, h) | F(i))
+#define DSL_MASK10(F, a, b, c, d, e, f, g, h, i, j)                (DSL_MASK9(F, a, b, c, d, e, f, g, h, i) | F(j))
+#define DSL_MASK11(F, a, b, c, d, e, f, g, h, i, j, k)             (DSL_MASK10(F, a, b, c, d, e, f, g, h, i, j) | F(k))
+#define DSL_MASK12(F, a, b, c, d, e, f, g, h, i, j, k, l)          (DSL_MASK11(F, a, b, c, d, e, f, g, h, i, j, k) | F(l))
+#define DSL_MASK13(F, a, b, c, d, e, f, g, h, i, j, k, l, m)       (DSL_MASK12(F, a, b, c, d, e, f, g, h, i, j, k, l) | F(m))
+#define DSL_MASK14(F, a, b, c, d, e, f, g, h, i, j, k, l, m, n)    (DSL_MASK13(F, a, b, c, d, e, f, g, h, i, j, k, l, m) | F(n))
+#define DSL_MASK15(F, a, b, c, d, e, f, g, h, i, j, k, l, m, n, o) (DSL_MASK14(F, a, b, c, d, e, f, g, h, i, j, k, l, m, n) | F(o))
+#define DSL_MASK16(F, a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p) (DSL_MASK15(F, a, b, c, d, e, f, g, h, i, j, k, l, m, n, o) | F(p))
+#define DSL_FMASK(F, ...)  DSL_CAT(DSL_MASK, DSL_NARG(__VA_ARGS__))(F, __VA_ARGS__)
+#define DSL_MASK(...)    DSL_FMASK(DSL_BIT, __VA_ARGS__)
 
 /* 조건은 64비트 상수 하나: 하위 32비트 must_on, 상위 32비트 must_off */
 typedef unsigned long long dsl_cond_t;
@@ -61,9 +75,10 @@ typedef unsigned long long dsl_cond_t;
     { (uint16_t)(kind), (uint16_t)(target), (uint16_t)(xa), (uint16_t)(xb), (uint16_t)(to), (uint16_t)(xk), \
       DSL_COND_ON(c), DSL_COND_OFF(c), (uint32_t)(any2) },
 
-/* ---- 조건 ---- */
-#define ON(...)          ((dsl_cond_t)DSL_MASK(__VA_ARGS__))
-#define OFF(...)         (((dsl_cond_t)DSL_MASK(__VA_ARGS__)) << 32)
+/* ---- 조건 ----
+ * ON( a ) = a 가 활성(자재 감지, 신호 들어옴), OFF( a ) = 비활성. 핀 레벨은 io_map.h 의 이름이 정한다 */
+#define ON(...)          (((dsl_cond_t)DSL_FMASK(DSL_LBIT, __VA_ARGS__)) | (((dsl_cond_t)DSL_FMASK(DSL_HBIT, __VA_ARGS__)) << 32))
+#define OFF(...)         ((((dsl_cond_t)DSL_FMASK(DSL_LBIT, __VA_ARGS__)) << 32) | ((dsl_cond_t)DSL_FMASK(DSL_HBIT, __VA_ARGS__)))
 /* 나열한 신호 중 하나라도 켜짐. 같은 마스크를 양쪽 절반에 넣는다. 예: IN( ANY_ON(S1, S2), OFF(S5) ) */
 #define ANY_ON(...)      (((dsl_cond_t)DSL_MASK(__VA_ARGS__)) | (((dsl_cond_t)DSL_MASK(__VA_ARGS__)) << 32))
 #define DSL_IN1(a)       (a)
@@ -198,16 +213,26 @@ typedef unsigned long long dsl_cond_t;
     DSL_STEP_C(SK_WAIT_PARAM, label, (p) + DSL_PARAM_OK(p), DSL_UNIT_##unit, 0, c, 0)
 
 /* ---- ACS ---- */
-#define DSL_INFO_L 'L'
-#define DSL_INFO_U 'U'
-#define DSL_INFO_N 'N'
-#define DSL_INFO_A 'A'
-#define DSL_INFO_F 'F'
-#define DSL_INFO_P 'P'
-#define DSL_INFO_B 'B'
-#define DSL_INFO_C 'C'
+/* 보고 종류: 레거시 DA_ACS_<이름> 과 같은 이름. 값은 프레임 Info 글자 */
+#define DSL_INFO_LOADING    'L'
+#define DSL_INFO_UNLOADING  'U'
+#define DSL_INFO_NEXT       'N'
+#define DSL_INFO_ARRIVE     'A'
+#define DSL_INFO_FINISH     'F'
+#define DSL_INFO_PROCESSING 'P'
+#define DSL_INFO_STANDBY    'B'
+#define DSL_INFO_CALL       'C'
+/* 번호 자리의 스테이션 큐 번호: ACS_SEND( NEXT, STATION(1) ) = 레거시 DA_ACS_Next( ACS_Station_Call_Num[1] ). k 0~23.
+ * 상수식이라 정적 표에 쓴다(ACS( 종류, STATION(k) ) 의 출처 자리에서는 이름으로 붙는다) */
+#define DSL_STATION_MARK       0x20000L
+#define STATION(k)             (DSL_STATION_MARK + (k) + (0 * sizeof(char[(((k) >= 0) && ((k) < ACS_STATION_MAX)) ? 1 : -1])))
+#define DSL_IS_STATION(n)      ((n) >= DSL_STATION_MARK)
+#define DSL_SEND_OK(n)         (0 * sizeof(char[(((n) >= 0) && (((n) < 0x10000L) || DSL_IS_STATION(n))) ? 1 : -1]))
+#define DSL_SEND_SRC(n)        (DSL_IS_STATION(n) ? ((((n) & 0xFF) == 0) ? SEQ_NUM_STATION0 : SEQ_NUM_STATION((n) & 0xFF)) : SEQ_NUM_CONST)
 #define ACS(info, src)         DSL_STEP(SK_ACS, SEQ_NO_LABEL, DSL_INFO_##info, SEQ_NUM_##src, 0, 0, 0, 0)
-#define ACS_N(info, num)       DSL_STEP(SK_ACS, SEQ_NO_LABEL, DSL_INFO_##info, SEQ_NUM_CONST, num, 0, 0, 0)
+/* 번호 상수 0~65535 또는 STATION(k). STATION(k) 는 ACS( 종류, STATION(k) ) 와 같은 스텝(k 0 은 STATION0) */
+#define ACS_SEND(info, num)    DSL_STEP(SK_ACS, SEQ_NO_LABEL, DSL_INFO_##info, DSL_SEND_SRC(num) + DSL_SEND_OK(num), \
+                                        DSL_IS_STATION(num) ? 0 : (num), 0, 0, 0)
 #define ACS_WAIT_ACK(t, label) DSL_STEP(SK_ACS_WAIT_ACK, label, 0, 0, t, 0, 0, 0)
 #define ACS_STATION(idx, val, cnt)  DSL_STEP(SK_ACS_STATION, SEQ_NO_LABEL, idx, val, cnt, 0, 0, 0)
 #define STATION_RESET          DSL_STEP(SK_STATION_RESET, SEQ_NO_LABEL, 0, 0, 0, 0, 0, 0)
@@ -282,27 +307,6 @@ typedef unsigned long long dsl_cond_t;
 #define IF_TAG_MINUS_EQ_STATION(k, n)    IF_X(X_TAG_MINUS_EQ_STATION(k, n))
 #define IF_TAG_EQ_STATION(k)             IF_X(X_TAG_EQ_STATION(k))
 
-#define A_STOP                 TA_STOP
-#define A_AUTOSTART(sec)       (TA_STOP_AUTOSTART | (sec))
-#define A_AUTOSTART_PARAM      TA_STOP_AUTOSTART
-#define A_SPEED_HIGH           (TA_SPEED | 0)
-#define A_SPEED_LOW            (TA_SPEED | 1)
-#define A_SPEED_LLOW           (TA_SPEED | 2)
-#define A_SPEED_MIN            (TA_SPEED | 3)
-#define A_FORBACK(dir)         (TA_FORBACK | DIR_##dir)
-#define A_TURN(dir, deg, fb, autostart, obs) \
-    (TA_TURN | TURN_##dir | (((deg) / 90) << 2)), ((fb) | ((autostart) << 4) | ((obs) << 8))
-#define A_TURN_ALIGN(dir, deg, fb, autostart, obs) \
-    (TA_TURN_ALIGN | TURN_##dir | (((deg) / 90) << 2)), ((fb) | ((autostart) << 4) | ((obs) << 8))
-#define A_TURN_TAPE(dir, deg, fb, autostart, obs) \
-    (TA_TURN_TAPE | TURN_##dir | (((deg) / 90) << 2)), ((fb) | ((autostart) << 4) | ((obs) << 8))
-#define A_BRANCH(dir)          (TA_BRANCH | BRANCH_##dir)
-#define A_SEQ(id)              (TA_SEQ | (id))
-#define A_TAPE_STOP(id)        (TA_TAPE_STOP | (id))
-#define A_ACT(id)              (TA_ACT | (id))
-#define A_OBS_ON               (TA_OBS | 1)
-#define A_OBS_OFF              (TA_OBS | 0)
-#define A_STATION_RESET        TA_STATION_RESET
-#define A_CALL(idx)            (TA_CALL | (idx))
+/* 태그 동작 이름(AGV_STOP, AGV_TURN, SEQ_START, ACS_SEND …)은 agv/tag_dsl.h. 태그 표 파일은 그 헤더를 포함한다 */
 
 #endif /* AGV_SEQ_DSL_H */

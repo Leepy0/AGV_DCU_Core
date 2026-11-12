@@ -53,7 +53,7 @@
 | 분기 | `SELECT_BEGIN … WHEN … SELECT_END` | 3.4절 | `if … else if` |
 | | `GOTO( 라벨 )` | 이동 | `step = n;` |
 | | `ERROR_HOLD( 코드, 조건, 라벨 )` | 오류 표시 유지, 조건 참이면 라벨로 | `case 290` |
-| ACS | `ACS( L, STATION0 )` / `ACS_N( L, 87 )` | 보고. 번호 출처 `STATION0`, `STATION0_PLUS1`, `STATION(k)`(큐[k]), `AGV_ID` 또는 상수 | `DA_ACS_Loading(…)` |
+| ACS | `ACS_SEND( LOADING, 87 )` / `ACS_SEND( NEXT, STATION(1) )` / `ACS( LOADING, AGV_ID )` | 보고. `ACS_SEND` 번호는 상수 0\~65535 또는 `STATION(k)`(스테이션 큐[k], `ACS( 종류, STATION(k) )` 와 같은 스텝). 종류는 레거시 함수 이름 그대로 `LOADING` `UNLOADING` `NEXT` `ARRIVE` `FINISH` `PROCESSING` `STANDBY` `CALL`(태그 표는 `DSL_INFO_<이름>`). 번호 출처 `STATION0`, `STATION0_PLUS1`, `STATION(k)`(큐[k]), `AGV_ID` 또는 상수 | `DA_ACS_Loading(…)` |
 | | `ACS_WAIT_ACK( 제한, 라벨 )` | ACK 대기 | `Scia_Send_AGV2PC_Message == ACK_NONE_MSG` |
 | | `ACS_STATION( 칸, 값, 길이 )` / `STATION_RESET` | 스테이션 큐 | `ACS_Station_Call_Num[1] = 0;` |
 | 주행 | `SPEED( HIGH·LOW·LLOW·MIN )` / `SPEED_MMIN( v )` | 재출발 속도 | `gDriving_speed = …` |
@@ -108,6 +108,7 @@ IN( ANY_ON( SEN_1, SEN_2 ), OFF( SEN_5 ) )                 /* 1·2 중 하나라
 ```
 
 - `ANY_ON`은 나열한 신호 중 하나라도 켜지면 참이다. `IN`으로 `ON`·`OFF`와 묶는다. `ON(x)`와 `OFF(x)`를 같이 쓰면 컴파일 오류 없이 `ANY_ON(x)`로 읽히니 주의한다.
+- `ON(x)`는 x 가 활성(자재 감지, 설비 신호 들어옴), `OFF(x)`는 비활성이다. 핀 레벨은 사이트 `io_map.h`의 이름이 정한다. 레거시가 `== nON`으로 견준 신호는 그대로 논리 ID, `== ON`으로 견준 신호(같은 핀을 차종마다 반대 극성으로 쓰는 경우)는 `#define SENH_1 IN_ACTIVE_HIGH( IN_EXT_1 )`처럼 이름에 표시한다. `ON()`·`OFF()`가 컴파일 때 반대쪽 마스크로 보내므로 표 데이터·해석기는 같다. 표시한 이름은 `ON`·`OFF`에만 쓴다(`ANY_ON`·`ANY2_ON`·출력·`LOAD_SENSORS`는 컴파일 오류, C 코드의 `io_in`에는 논리 ID 를 쓴다).
 - 조건에 쓸 수 있는 신호는 논리 ID 0\~31이다. 앰프 과부하 입력처럼 그 밖의 ID는 컴파일 오류다.
 - 조건은 그룹끼리 AND다. 같은 신호들의 OR은 `ANY_ON`. 서로 다른 조건의 OR은 `WHEN`을 나눈다.
 - `ANY_ON` 묶음은 조건 하나에 하나다. 묶음이 둘이면 `WHEN_ANY2`·`WAIT_ANY2`·`WAIT_ANY2_TO`의 둘째 인자 `ANY2_ON(...)`. 스텝의 `out` 칸을 쓴다. 이 셋에서만 된다. 확장 조건과 같이 쓸 수 없다.
@@ -312,11 +313,11 @@ ACT_END
 ```
 
 ```c
-/* 태그 표: A_STOP 이 없으므로 주행을 계속한다 */
-TAG( 41, PF_LIFT, A_ACT( ACT_BELT_5S ) )
+/* 태그 표: AGV_STOP 이 없으므로 주행을 계속한다 */
+TAG( 41, PF_LIFT, ACT_START( ACT_BELT_5S ) )
 
 /* 상태 조건: 스테이션 큐[1] 이 101~116 일 때만 */
-TAG_IF( 36, PF_LIFT, IF_STATION( 1, 101, 116 ), A_ACT( ACT_LIFT_SIGNAL ) )
+TAG_IF( 36, PF_LIFT, IF_STATION( 1, 101, 116 ), ACT_START( ACT_LIFT_SIGNAL ) )
 ```
 
 마지막 스텝이 끝나면 ACT는 자동으로 끝난다. 다음에 스텝이 더 있는 지점에서 끝내려면 `END_STOP`을 쓴다.
@@ -325,7 +326,7 @@ TAG_IF( 36, PF_LIFT, IF_STATION( 1, 101, 116 ), A_ACT( ACT_LIFT_SIGNAL ) )
 
 | 항목 | 동작 |
 |---|---|
-| 시작 | 태그 `A_ACT(id)`, 시퀀스 `ACT_START(id)`, 관리 명령 |
+| 시작 | 태그 `ACT_START(id)`, 시퀀스 `ACT_START(id)`, 관리 명령 |
 | 실행 | 매 10 ms, 주행·정지와 무관. 슬롯 4개, 슬롯별 타이머 |
 | 같은 ACT 재요청 | 무시. 레거시 `Gate1_Out = ON` 재대입과 같다 |
 | 슬롯 부족 | 시작하지 않고 로그에 남긴다 |
@@ -334,7 +335,7 @@ TAG_IF( 36, PF_LIFT, IF_STATION( 1, 101, 116 ), A_ACT( ACT_LIFT_SIGNAL ) )
 | 실패 | `END_ERROR(code)`는 `stop_err = code`로 주행을 멈춘다. 시퀀스의 `END_ERROR`는 `action_err`다 |
 | 금지 스텝 | `SPEED`, `SPEED_MMIN`, `FORBACK`, `TURN`, `TURN_NOWAIT`, `MOVE_MM`, `ERROR_HOLD`, `END_RESTART`. 주행 상태를 건드리므로 `seq_bind()`가 부팅 때 거부한다 |
 | 시퀀스와 같은 출력 | 금지. 겹치면 같은 스캔에서 나중에 실행되는 ACT가 이긴다. 정지 태그로 시퀀스에 들어갈 때 ACT가 남아 있을 수 있으면 첫 스텝에 `WAIT_ACT( id )` |
-| 정지 태그와 같이 사용 | `TAG( n, PF, A_STOP, A_ACT(id) )`. 정지와 동시에 시작하며 서로 기다리지 않는다 |
+| 정지 태그와 같이 사용 | `TAG( n, PF, AGV_STOP, ACT_START(id) )`. 정지와 동시에 시작하며 서로 기다리지 않는다 |
 
 레거시와 달라지는 점: 레거시는 `stop_err`가 나도 `Gate` 펄스가 계속되고 STOP에서만 지운다. ACT는 오류에서도 멈춘다. 안전 쪽 변경이다.
 
@@ -345,26 +346,29 @@ TAG_IF( 36, PF_LIFT, IF_STATION( 1, 101, 116 ), A_ACT( ACT_LIFT_SIGNAL ) )
 ## 5. 태그 규칙 표
 
 ```c
+#include "agv/tag_dsl.h"   /* 태그 표 동작 이름 */
+
 TAG_TABLE_BEGIN( site_tags )
 
     /* 공통 */
-    TAG( 1,  ANY_PROFILE,  A_STOP, A_AUTOSTART_PARAM )
-    TAG( 2,  ANY_PROFILE,  A_SPEED_LLOW )
-    TAG( 3,  ANY_PROFILE,  A_SPEED_LOW )
-    TAG( 5,  ANY_PROFILE,  A_SPEED_HIGH )
-    TAG( 21, ANY_PROFILE,  A_TURN( CW, 90, 0, 1, 0 ) )
+    TAG( 1,  ANY_PROFILE,  AGV_STOP, AGV_AUTOSTART_PARAM )
+    TAG( 2,  ANY_PROFILE,  AGV_SPEED( LLOW ) )
+    TAG( 3,  ANY_PROFILE,  AGV_SPEED( LOW ) )
+    TAG( 5,  ANY_PROFILE,  AGV_SPEED( HIGH ) )
+    TAG( 21, ANY_PROFILE,  AGV_TURN( CW, 90, 0, 1, 0 ) )
 
     /* 적재 태그 4: 프로파일별. 위에서 아래로 첫 번째로 맞는 규칙 하나만 실행 */
-    TAG   ( 4, PF_MATERIAL,  A_STOP, A_SEQ( SEQ_LOAD ) )
-    TAG   ( 4, PF_FRAME,     A_STOP, A_SEQ( SEQ_LOAD_FINISH ) )
-    TAG_IF( 4, PF_TUB,       IF_FORBACK_MODE,  A_STOP, A_SEQ( SEQ_LOAD ) )
-    TAG   ( 4, ANY_PROFILE,  A_STOP )
+    TAG   ( 4, PF_MATERIAL,  AGV_STOP, SEQ_START( LOAD ) )
+    TAG   ( 4, PF_FRAME,     AGV_STOP, SEQ_START( LOAD_FINISH ) )
+    TAG_IF( 4, PF_TUB,       IF_FORBACK_MODE,  AGV_STOP, SEQ_START( LOAD ) )
+    TAG   ( 4, ANY_PROFILE,  AGV_STOP )
 
 TAG_TABLE_END
 ```
 
 - `tagact_run(tag)`는 활성 프로파일과 번호가 맞는 첫 규칙을 찾아 액션을 순서대로 실행한다. 규칙이 없으면 아무것도 하지 않는다.
-- 액션은 규칙당 4칸이다. `A_TURN`은 2칸을 쓴다. 넘치면 `A_CALL( 인덱스 )`.
+- 액션은 규칙당 4칸이다. `AGV_TURN`은 2칸을 쓴다. 넘치면 `CALL( 인덱스 )`.
+- 보고·스테이션은 태그 표 파일에서 `agv/tag_dsl.h`를 포함하고 시퀀스 표와 같은 이름으로 쓴다. `ACS_SEND( 종류, 번호 )`(0\~255, 2칸), `ACS( 종류, STATION0 )`(1칸), `STATION_RESET`. 숫자 칸 `( TA_ACS | DSL_INFO_… )`, `( TA_ACS_NUM | n ), DSL_INFO_…`도 쓸 수 있다. 예전 `A_` 이름(`A_STOP` 등)은 v0.47.0 에서 뺐다(대응표는 CHANGELOG v0.47.0).
 - 조건은 `TAG_IF`의 셋째 인자 하나. 확장 조건 둘과 입력 조건 하나를 AND 한다.
 
 | 매크로 | 뜻 |
@@ -379,16 +383,16 @@ TAG_TABLE_END
 | `IF_TAG_MINUS_EQ_STATION( k, n )`, `IF_TAG_EQ_STATION( k )` | 태그 - n == 큐[k], 태그 == 큐[k] |
 
 ```c
-TAG_IF( 6,  PF_TUB,  IF_IN( ON(IN_EXT_4) ),   A_SEQ( SEQ_UNLOAD ), A_FORBACK( TOGGLE ) )   /* 입력 켜짐일 때만 */
-TAG   ( 6,  PF_TUB,  A_STOP )                                                   /* 이 줄이 없으면 뒤 공통 규칙 */
-TAG_IF( 51, PF_LIFT, IF_X2( X_ID(85, 85), X_STATION(1, 42, 42) ),  A_TURN( CCW, 90, 0, 1, 0 ) )
-TAG_IF( 52, PF_LIFT, IF_X_IN( X_ID(81, 84), IN( OFF(SEN_1) ) ),    A_STOP )
-TAG_IF( 45, PF_LIFT, IF_TAG_MINUS_EQ_STATION( 1, 40 ),             A_STOP )       /* 큐[1] == 5 */
+TAG_IF( 6,  PF_TUB,  IF_IN( ON(IN_EXT_4) ),   SEQ_START( UNLOAD ), AGV_FORBACK( TOGGLE ) )   /* 입력 켜짐일 때만 */
+TAG   ( 6,  PF_TUB,  AGV_STOP )                                                   /* 이 줄이 없으면 뒤 공통 규칙 */
+TAG_IF( 51, PF_LIFT, IF_X2( X_ID(85, 85), X_STATION(1, 42, 42) ),  AGV_TURN( CCW, 90, 0, 1, 0 ) )
+TAG_IF( 52, PF_LIFT, IF_X_IN( X_ID(81, 84), IN( OFF(SEN_1) ) ),    AGV_STOP )
+TAG_IF( 45, PF_LIFT, IF_TAG_MINUS_EQ_STATION( 1, 40 ),             AGV_STOP )       /* 큐[1] == 5 */
 ```
 
 - 조건이 거짓이면 다음 규칙을 본다. "조건이 아니면 아무것도 안 함"이면 뒤에 액션 없는 규칙 `TAG( n, PF, 0 )`을 둔다.
 - 태그 번호 조건은 규칙의 `tag`를 쓴다. 맞은 규칙의 `tag`가 곧 지금 태그다. 1xx·2xx 별칭을 `tagact_run( 번호 % 100 )`으로 다시 찾는 사이트는 변환된 번호로 평가된다(레거시 `Tag_Num = j`와 같음). 별칭 규칙 자체에 쓰면 1xx·2xx 번호다.
-- `X_KEY`·`X_CROSS_*`도 쓸 수 있다. 표로 안 되는 동작은 `A_CALL`.
+- `X_KEY`·`X_CROSS_*`도 쓸 수 있다. 표로 안 되는 동작은 `CALL`.
 - 규칙 1개는 16워드다(예전 9워드). 새 칸은 `act` 뒤에 있어 `{ tag, profile, cond, a, b, { act } }` 직접 초기화와 `TAG(...)`는 그대로 된다.
 - 압축 표(생성기용, v0.33.0): 규칙이 많아 플래시가 모자라면 확장 조건·입력 조건·동작을 중복 없는 표(`TAG_X`·`TAG_IN`·`TAG_ACTS`)로 빼고 규칙은 표 번호 3워드(`TAGP(태그, 프로파일, 확장 조건 1, 확장 조건 2, 입력, 동작)`)로 둔다. 번호 0 = 없음, 표 번호 0\~255, 태그 0\~1023, 프로파일 0\~63. `TAG_PACKED`로 묶어 `tagact_bind_packed`로 넘긴다. 맞춰 보는 규칙은 16워드 규칙으로 펼쳐 같은 길로 돈다. 손으로 쓰는 표는 16워드 그대로 쓴다.
 

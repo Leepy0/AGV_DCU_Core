@@ -80,10 +80,10 @@ SEQ_BEGIN( s_timing )
 SEQ_END
 
 SEQ_BEGIN( s_acs )
-    ACS( L, STATION0 )
-    ACS( U, STATION0_PLUS1 )
-    ACS( A, AGV_ID )
-    ACS_N( F, 87 )
+    ACS( LOADING, STATION0 )
+    ACS( UNLOADING, STATION0_PLUS1 )
+    ACS( ARRIVE, AGV_ID )
+    ACS_SEND( FINISH, 87 )
     ACS_WAIT_ACK( 5, L_ERR )
     OUT_ON( O_A )
     STATION_RESET
@@ -209,7 +209,7 @@ SEQ_END
 SEQ_BEGIN( s_nowait )
     TURN_NOWAIT( CCW, 90, 0, 1, 0 )
     OUT_ON( O_A )
-    ACS( L, STATION(2) )
+    ACS( LOADING, STATION(2) )
     END_STOP
 SEQ_END
 

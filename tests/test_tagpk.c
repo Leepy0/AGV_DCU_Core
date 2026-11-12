@@ -5,7 +5,7 @@
 #include <string.h>
 #include "agv/drive.h"
 #include "agv/param.h"
-#include "agv/seq_dsl.h"
+#include "agv/tag_dsl.h"
 #include "agv/site.h"
 #include "agv/sys.h"
 #include "agv/tagact.h"
@@ -36,9 +36,9 @@ TAG_POOL_END
 TAG_IN_BEGIN( s_in )
 TAG_POOL_END
 TAG_ACT_BEGIN( s_act )
-    TAG_ACTS( A_CALL(0), A_CALL(1), A_CALL(1), A_CALL(1) )   /* 1 */
-    TAG_ACTS( A_CALL(2) )                                    /* 2 */
-    TAG_ACTS( A_CALL(3), A_CALL(3), A_CALL(3), A_CALL(3) )   /* 3 */
+    TAG_ACTS( CALL(0), CALL(1), CALL(1), CALL(1) )   /* 1 */
+    TAG_ACTS( CALL(2) )                                    /* 2 */
+    TAG_ACTS( CALL(3), CALL(3), CALL(3), CALL(3) )   /* 3 */
 TAG_POOL_END
 TAGP_BEGIN( s_prules )
     TAGP( 50, 0, 0, 0, 0, 1 )

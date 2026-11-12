@@ -22,7 +22,7 @@
 #include "agv/param.h"
 #include "agv/rpmtest.h"
 #include "agv/run.h"
-#include "agv/seq_dsl.h"
+#include "agv/tag_dsl.h"
 #include "agv/site.h"
 #include "agv/stop.h"
 #include "agv/storage.h"
@@ -84,15 +84,15 @@ static const tag_rule_t s_rules[] = {
     { 8, 0, 0, 0, 0, { TA_CALL | 0, 0, 0, 0 } },
     { 9, 0, TAG_COND_BACKWARD, 0, 0, { TA_STOP, 0, 0, 0 } },
     /* 확장 조건 둘 + 입력. 시험은 tagact_dry_run 으로 맞은 규칙만 본다 */
-    TAG_IF( 20, 0, IF_X2_IN( X_ID(AGV_ID, AGV_ID), X_STATION(1, 42, 42), IN( ON(IN_START_SW) ) ), A_SPEED_LOW )
-    TAG_IF( 20, 0, IF_X2( X_ID(AGV_ID, AGV_ID), X_STATION(1, 42, 42) ), A_SPEED_MIN )
-    TAG_IF( 20, 0, IF_ID( 8, 9 ), A_SPEED_HIGH )
-    TAG_IF( 21, 0, IF_TAG_MINUS_EQ_STATION( 0, 10 ), A_OBS_ON )
-    TAG_IF( 21, 0, IF_TAG_EQ_STATION( 0 ), A_OBS_OFF )
-    TAG_IF( 22, 0, IF_STATION_MOD( 0, 10, 3 ), A_OBS_ON )
-    TAG_IF( 22, 0, IF_STATION_DIV( 0, 10, 4 ), A_OBS_OFF )
-    TAG_IF( 23, 0, IF_IN( ANY_ON(IN_EXT_16, IN_START_SW) ), A_OBS_ON )
-    TAG_IF( 23, 0, IF_X( X_NOT(X_CROSS_IN) ), A_OBS_OFF )
+    TAG_IF( 20, 0, IF_X2_IN( X_ID(AGV_ID, AGV_ID), X_STATION(1, 42, 42), IN( ON(IN_START_SW) ) ), AGV_SPEED( LOW ) )
+    TAG_IF( 20, 0, IF_X2( X_ID(AGV_ID, AGV_ID), X_STATION(1, 42, 42) ), AGV_SPEED( MIN ) )
+    TAG_IF( 20, 0, IF_ID( 8, 9 ), AGV_SPEED( HIGH ) )
+    TAG_IF( 21, 0, IF_TAG_MINUS_EQ_STATION( 0, 10 ), OBS_ON )
+    TAG_IF( 21, 0, IF_TAG_EQ_STATION( 0 ), OBS_OFF )
+    TAG_IF( 22, 0, IF_STATION_MOD( 0, 10, 3 ), OBS_ON )
+    TAG_IF( 22, 0, IF_STATION_DIV( 0, 10, 4 ), OBS_OFF )
+    TAG_IF( 23, 0, IF_IN( ANY_ON(IN_EXT_16, IN_START_SW) ), OBS_ON )
+    TAG_IF( 23, 0, IF_X( X_NOT(X_CROSS_IN) ), OBS_OFF )
 };
 
 /* 위 20~23 과 같은 규칙의 압축 표. 앞 줄은 다른 프로파일이라 건너뛴다 */
@@ -111,11 +111,11 @@ TAG_IN_BEGIN( s_pin )
     TAG_IN( IN( ANY_ON(IN_EXT_16, IN_START_SW) ) )   /* 2 */
 TAG_POOL_END
 TAG_ACT_BEGIN( s_pact )
-    TAG_ACTS( A_SPEED_LOW )    /* 1 */
-    TAG_ACTS( A_SPEED_MIN )    /* 2 */
-    TAG_ACTS( A_SPEED_HIGH )   /* 3 */
-    TAG_ACTS( A_OBS_ON )       /* 4 */
-    TAG_ACTS( A_OBS_OFF )      /* 5 */
+    TAG_ACTS( AGV_SPEED( LOW ) )    /* 1 */
+    TAG_ACTS( AGV_SPEED( MIN ) )    /* 2 */
+    TAG_ACTS( AGV_SPEED( HIGH ) )   /* 3 */
+    TAG_ACTS( OBS_ON )       /* 4 */
+    TAG_ACTS( OBS_OFF )      /* 5 */
 TAG_POOL_END
 TAGP_BEGIN( s_prules )
     TAGP( 20, 63, 0, 0, 0, 3 )
@@ -602,15 +602,15 @@ static void tag_cond_checks(void)
     uint16_t a[4];
 
     acs_station_set(1, 42, 2);
-    assert((tagact_dry_run(20, a, 4) == 1) && (a[0] == A_SPEED_MIN));
+    assert((tagact_dry_run(20, a, 4) == 1) && (a[0] == AGV_SPEED( MIN )));
     raw_a(RAW_START, 0);                        /* START 누름 */
     tick();
     assert(io_in(IN_START_SW));
-    assert((tagact_dry_run(20, a, 4) == 1) && (a[0] == A_SPEED_LOW));
-    assert((tagact_dry_run(23, a, 4) == 1) && (a[0] == A_OBS_ON));
+    assert((tagact_dry_run(20, a, 4) == 1) && (a[0] == AGV_SPEED( LOW )));
+    assert((tagact_dry_run(23, a, 4) == 1) && (a[0] == OBS_ON));
     raw_a(0, RAW_START);
     tick();
-    assert((tagact_dry_run(23, a, 4) == 1) && (a[0] == A_OBS_OFF));
+    assert((tagact_dry_run(23, a, 4) == 1) && (a[0] == OBS_OFF));
     D.cross_in_flag = 1;
     assert(tagact_dry_run(23, a, 4) == 0);
     D.cross_in_flag = 0;
@@ -618,17 +618,17 @@ static void tag_cond_checks(void)
     assert(tagact_dry_run(20, a, 4) == 0);
     acs_station_set(1, 42, 2);
     (void)param_set(P_AGV_ID, 8);
-    assert((tagact_dry_run(20, a, 4) == 1) && (a[0] == A_SPEED_HIGH));
+    assert((tagact_dry_run(20, a, 4) == 1) && (a[0] == AGV_SPEED( HIGH )));
     (void)param_set(P_AGV_ID, AGV_ID);
 
     acs_station_set(0, 11, 2);                  /* 21 - 10 == 11 */
-    assert((tagact_dry_run(21, a, 4) == 1) && (a[0] == A_OBS_ON));
+    assert((tagact_dry_run(21, a, 4) == 1) && (a[0] == OBS_ON));
     acs_station_set(0, 21, 2);
-    assert((tagact_dry_run(21, a, 4) == 1) && (a[0] == A_OBS_OFF));
+    assert((tagact_dry_run(21, a, 4) == 1) && (a[0] == OBS_OFF));
     acs_station_set(0, 43, 2);
-    assert((tagact_dry_run(22, a, 4) == 1) && (a[0] == A_OBS_ON));
+    assert((tagact_dry_run(22, a, 4) == 1) && (a[0] == OBS_ON));
     acs_station_set(0, 45, 2);
-    assert((tagact_dry_run(22, a, 4) == 1) && (a[0] == A_OBS_OFF));
+    assert((tagact_dry_run(22, a, 4) == 1) && (a[0] == OBS_OFF));
     acs_station_set(0, 55, 2);
     assert(tagact_dry_run(22, a, 4) == 0);
     acs_station_reset();

@@ -3,13 +3,14 @@
  *
  * 호스트: gcc -std=c99 -DAGV_HOST_BUILD -Iinclude tests/test_dsl.c -o build/test_dsl && build/test_dsl
  * 타깃:   cl2000 -v28 -ml -mt --c99 -Iinclude --compile_only tests/test_dsl.c
- * 컴파일 오류 시험: -DNEG_AMP_INPUT, -DNEG_NO_DIRECTION, -DNEG_PARAM_ZERO, -DNEG_MOD_ZERO 각각 컴파일이 실패해야 한다.
+ * 컴파일 오류 시험: -DNEG_AMP_INPUT, -DNEG_NO_DIRECTION, -DNEG_PARAM_ZERO, -DNEG_MOD_ZERO, -DNEG_HIGH_ANY 각각 컴파일이 실패해야 한다.
  */
 #include "agv/seq_dsl.h"
 
 #define SEN_A     IN_EXT_1
 #define SEN_B     IN_EXT_2
 #define SEN_C     IN_EXT_3
+#define SEN_H     IN_ACTIVE_HIGH(IN_EXT_4)
 #define CV1_RUN   OUT_EXT_1
 #define CV1_DIR   OUT_EXT_2
 #define CV2_CW    OUT_EXT_3
@@ -77,12 +78,19 @@ SEQ_BEGIN( ext )
     DELAY_PARAM( P_AUTO_START_SEC, MIN )                                     /* 8 */
     WAIT_TO_PARAM( IN( ON(SEN_B) ), P_STATION_NO, DSEC, ERR )                /* 9 */
     TURN_NOWAIT( CCW, 90, 0, 1, 0 )                                          /* 10 */
-    ACS( L, STATION(3) )                                                     /* 11 */
-    ACS( N, STATION0 )                                                       /* 12 */
+    ACS( LOADING, STATION(3) )                                               /* 11 */
+    ACS( NEXT, STATION0 )                                                    /* 12 */
     WAIT( IN( ON(IN_EXT_1), ON(IN_EXT_2), ON(IN_EXT_3), OFF(IN_EXT_4), OFF(IN_EXT_5), ANY_ON(IN_EXT_6, IN_EXT_7) ) )  /* 13 */
     OUT_ON( OUT_EXT_1, OUT_EXT_2, OUT_EXT_3, OUT_EXT_4, OUT_EXT_5, OUT_EXT_6, OUT_EXT_7, OUT_EXT_8,
             OUT_EXT_9, OUT_EXT_10, OUT_EXT_11, OUT_EXT_12, OUT_EXT_13, OUT_EXT_14, OUT_EXT_15, OUT_EXT_16 )  /* 14 */
     WAIT_IF( X_ERR_EQ(281) )                                                 /* 15 */
+    WAIT( IN( ON(SEN_H, SEN_A), OFF(IN_ACTIVE_HIGH(IN_EXT_3), SEN_B) ) )     /* 16 논리 0 활성 */
+    ACS_SEND( NEXT, STATION(0) )                                             /* 17 = ACS( NEXT, STATION0 ) */
+    ACS_SEND( NEXT, STATION(2) )                                             /* 18 = ACS( NEXT, STATION(2) ) */
+    ACS_SEND( LOADING, 599 )                                                 /* 19 */
+#ifdef NEG_HIGH_ANY
+    WAIT( ANY_ON(SEN_H) )
+#endif
 SEQ_END
 
 ACT_BEGIN( signal_3x )
@@ -98,22 +106,25 @@ ACT_MAP_BEGIN( site_acts )
     ACT_MAP( 1, ACT_DEMO, signal_3x )
 ACT_MAP_END
 
+#include "agv/tag_dsl.h"   /* 아래부터 ACS·ACS_SEND·STATION_RESET 은 태그 동작 */
+
 TAG_TABLE_BEGIN( site_tags )
-    TAG( 4, 1, A_STOP, A_SEQ(SEQ_LOAD) )
-    TAG( 21, ANY_PROFILE, A_TURN(CW, 90, 0, 1, 0) )
-    TAG_IF( 36, 1, IF_STATION(1, 101, 116), A_ACT(ACT_DEMO) )
-    TAG_IF( 6,  1, IF_IN( ON(SEN_C) ), A_SEQ(SEQ_UNLOAD), A_FORBACK(TOGGLE) )                     /* 3 */
-    TAG_IF( 10, 1, IF_IN( ANY_ON(SEN_A, SEN_B) ), A_SEQ(SEQ_LOAD) )                               /* 4 */
-    TAG_IF( 61, 1, IF_X2( X_ID(5, 5), X_STATION(1, 42, 42) ), A_TURN(CCW, 90, 0, 1, 0) )        /* 5 */
-    TAG_IF( 62, 1, IF_X_IN( X_ID(1, 9), IN( OFF(SEN_A) ) ), A_STOP )                              /* 6 */
-    TAG_IF( 30, 1, IF_TAG_MINUS_EQ_STATION(1, 20), A_STOP )                                       /* 7 */
-    TAG_IF( 31, 1, IF_STATION_MOD(0, 10, 3), A_STOP )                                             /* 8 */
-    TAG_IF( 32, 1, IF_STATION_DIV(2, 100, 1), A_STOP )                                            /* 9 */
-    TAG_IF( 33, 1, IF_TAG_EQ_STATION(0), A_STOP )                                                 /* 10 */
-    TAG_IF( 34, 1, IF_X2_IN( X_FORWARD, X_NOT(X_CROSS_OUT), IN( ON(SEN_A) ) ), A_STOP )           /* 11 */
-    TAG_IF( 35, 1, IF_BACKWARD, A_STOP )                                                          /* 12 */
+    TAG( 4, 1, AGV_STOP, SEQ_START( LOAD ) )
+    TAG( 21, ANY_PROFILE, AGV_TURN(CW, 90, 0, 1, 0) )
+    TAG_IF( 36, 1, IF_STATION(1, 101, 116), ACT_START(ACT_DEMO) )
+    TAG_IF( 6,  1, IF_IN( ON(SEN_C) ), SEQ_START( UNLOAD ), AGV_FORBACK(TOGGLE) )                     /* 3 */
+    TAG_IF( 10, 1, IF_IN( ANY_ON(SEN_A, SEN_B) ), SEQ_START( LOAD ) )                               /* 4 */
+    TAG_IF( 61, 1, IF_X2( X_ID(5, 5), X_STATION(1, 42, 42) ), AGV_TURN(CCW, 90, 0, 1, 0) )        /* 5 */
+    TAG_IF( 62, 1, IF_X_IN( X_ID(1, 9), IN( OFF(SEN_A) ) ), AGV_STOP )                              /* 6 */
+    TAG_IF( 30, 1, IF_TAG_MINUS_EQ_STATION(1, 20), AGV_STOP )                                       /* 7 */
+    TAG_IF( 31, 1, IF_STATION_MOD(0, 10, 3), AGV_STOP )                                             /* 8 */
+    TAG_IF( 32, 1, IF_STATION_DIV(2, 100, 1), AGV_STOP )                                            /* 9 */
+    TAG_IF( 33, 1, IF_TAG_EQ_STATION(0), AGV_STOP )                                                 /* 10 */
+    TAG_IF( 34, 1, IF_X2_IN( X_FORWARD, X_NOT(X_CROSS_OUT), IN( ON(SEN_A) ) ), AGV_STOP )           /* 11 */
+    TAG_IF( 35, 1, IF_BACKWARD, AGV_STOP )                                                          /* 12 */
+    TAG( 43, 1, ACS_SEND( ARRIVE, 115 ), ACS( ARRIVE, STATION0 ), STATION_RESET )                 /* 13 */
 #ifdef NEG_MOD_ZERO
-    TAG_IF( 37, 1, IF_STATION_MOD(0, 0, 3), A_STOP )
+    TAG_IF( 37, 1, IF_STATION_MOD(0, 0, 3), AGV_STOP )
 #endif
 TAG_TABLE_END
 
@@ -177,6 +188,10 @@ int main(void)
         assert(e[13].on == 0x67UL && e[13].off == 0x78UL);                  /* IN 6개 */
         assert(e[14].kind == SK_OUT && e[14].on == 0xFFFFUL);               /* 신호 16개 */
         assert(e[15].xc == XC_ERR_EQ && e[15].arg0 == 281);
+        assert(e[17].arg0 == 'N' && e[17].arg1 == SEQ_NUM_STATION0 && e[17].timeout == 0);
+        assert(e[18].arg1 == SEQ_NUM_STATION(2) && e[18].timeout == 0);
+        assert(e[19].arg0 == 'L' && e[19].arg1 == SEQ_NUM_CONST && e[19].timeout == 599);
+        assert(e[16].on == 0x5UL && e[16].off == 0xAUL);                    /* ON(H) 는 off 쪽, OFF(H) 는 on 쪽 */
         assert(demo_steps[1].xc == 0);                                       /* 예전 스텝은 0 */
     }
     /* 태그: 확장 조건 둘 + 입력 조건. 새 칸은 act 뒤 */
@@ -195,6 +210,9 @@ int main(void)
     assert(site_tags[10].cond == XC_TAG_EQ_ST);
     assert(site_tags[11].cond == XC_FORWARD && site_tags[11].cond2 == (XC_CROSS | (1 << 8) | XC_NOT) && site_tags[11].in_on == 0x1UL);
     assert(site_tags[12].cond == TAG_COND_BACKWARD && site_tags[12].act[0] == TA_STOP);
+    /* 태그 보고·스테이션 (tag_dsl.h) */
+    assert(site_tags[13].act[0] == (TA_ACS_NUM | 115) && site_tags[13].act[1] == 'A'
+           && site_tags[13].act[2] == (TA_ACS | 'A') && site_tags[13].act[3] == TA_STATION_RESET);
 
     puts("test_dsl ok");
     return 0;
