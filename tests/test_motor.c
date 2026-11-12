@@ -73,6 +73,22 @@ int main(void)
     /* 유휴 카운터 상한 */
     for (int i = 0; i < 1100; i++) { motor_feedback_update(); }
     assert(motor_idle_ticks(0) == 1000);
+    /* 스파이크 컷 = max(3500, 지령 × 5/4 + 600): 곡선 바깥 바퀴 지령 3562 에서 3600 은 쓰고 9000 은 버린다 */
+    setup();
+    D.w_cmd[0] = 3562;
+    motor_encoder_pulse(0); D.period[0] = 138888; motor_feedback_update();     /* 3600 */
+    assert(D.rpm[0] == 3600);
+    motor_encoder_pulse(0); D.period[0] = 55555;  motor_feedback_update();     /* 9000 */
+    assert(D.rpm[0] == 3600 && motor_raw_rpm(0) == 9000);
+    motor_spike_set(3550);                                                     /* 시험이 준 컷은 지령과 무관 */
+    motor_encoder_pulse(0); D.period[0] = 135135; motor_feedback_update();     /* 3700 */
+    assert(D.rpm[0] == 3600);
+    motor_spike_set(0);
+    D.w_cmd[0] = 0;                                                            /* 지령 0 이면 바닥 3500 */
+    motor_encoder_pulse(0); D.period[0] = 166666; motor_feedback_update();     /* 3000 */
+    assert(D.rpm[0] == 3000);
+    motor_encoder_pulse(0); D.period[0] = 138888; motor_feedback_update();     /* 3600 */
+    assert(D.rpm[0] == 3000);
 
     /* 속도 PI: 게인, 토크 상한 4000, 음수 없음 */
     setup();

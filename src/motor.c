@@ -145,8 +145,11 @@ void motor_feedback_update(void)
         }
 
         s_motor.raw[i] = (int16_t)((cur > 32767L) ? 32767L : cur);
-        if (cur > motor_spike()) { D.rpm[i] = s_motor.pre_rpm[i]; }
-        else                       { s_motor.pre_rpm[i] = D.rpm[i] = (int16_t)cur; }
+        /* 컷 = max(MOTOR_RPM_SPIKE, 지령 × 5/4 + 600): 곡선 바깥 바퀴 지령이 3500 을 넘어도 실측을 쓴다. 시험이 준 컷은 그대로 */
+        int32_t cut = (int32_t)D.w_cmd[i] * 5 / 4 + 600;
+        if ((s_motor.spike > 0) || (cut < MOTOR_RPM_SPIKE)) { cut = motor_spike(); }
+        if (cur > cut) { D.rpm[i] = s_motor.pre_rpm[i]; }
+        else           { s_motor.pre_rpm[i] = D.rpm[i] = (int16_t)cur; }
 
         D.rpm_avg[i] = (int16_t)((D.rpm[i] + s_motor.hist[i][0] + s_motor.hist[i][1] + s_motor.hist[i][2]
                                   + s_motor.hist[i][3] + s_motor.hist[i][4]) / 6);
