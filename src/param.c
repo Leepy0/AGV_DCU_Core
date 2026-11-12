@@ -3,7 +3,7 @@
 #include "agv/drive.h"
 #include "agv/guide.h"      /* guide_hold_test (TST) */
 #include "agv/motor.h"      /* speed_pi_test (TST) */
-#include "agv/steer.h"      /* steer_exit_test·steer_iv_test (TST) */
+#include "agv/steer.h"      /* steer_exit_test 등 (TST) */
 
 #define D    agv_drive
 #define PI_F 3.14159265f
@@ -44,48 +44,43 @@ int16_t param_digit(int16_t value, int16_t place)
     return tmp ? (int16_t)(tmp / place) : 0;
 }
 
-#if AGV_DEV_TESTS
-/* TST 조합 표(param.h). 번호 배열은 이 표만 고친다. v0.44.0 에서 번호 뜻이 다시 바뀌었다(53차).
- * spd 속도 루프 0 지금·1 새1·2 새2(speed_pi_test, motor.c s_spi), hold 교차선 덩어리 유지(guide_hold_test),
- * kp·ki K_P·K_I 강제값(0 = 파라미터. 원래 값은 두고 param_get 만 덮는다. 파라미터 화면에도 강제값이 보인다),
- * ex 곡선 끝 적분 처리 0 예전·1 부호 기준·2 부호 기준 + 빠른 접근·3 없음(steer_exit_test), iv 속도 비례 적분(steer_iv_test),
- * en 진입 적분 가속 배수(steer_entry_test), px 큰 편차 보조 비례(steer_px_test).
- * 추정 조향·반응형 속도(steer_alg_test·speed_curve_test)와 칼만 위치는 표에 없다(코드는 남는다. 칼만 위치는 OPT b3) */
-static const struct { int16_t spd, hold, kp, ki, ex, iv, en, px; } s_tst[9] = {
-    /* spd hold kp  ki ex iv en px */
-    { 0, 0,  0,  0, 0, 0, 0, 0 },   /* 0 평소 */
-    { 1, 0, 60,  5, 2, 1, 0, 0 },   /* 1 52차 TST 2 그대로(기준) */
-    { 1, 0, 60, 10, 2, 1, 0, 0 },   /* 2 적분 2배 */
-    { 1, 0, 60,  5, 2, 1, 4, 0 },   /* 3 진입 적분 가속 ×4 */
-    { 1, 0, 60,  5, 2, 1, 8, 0 },   /* 4 진입 적분 가속 ×8 */
-    { 1, 0, 60,  5, 2, 1, 0, 1 },   /* 5 큰 편차 보조 비례 */
-    { 1, 0, 60,  5, 2, 1, 4, 1 },   /* 6 3 + 5 */
-    { 1, 1, 60,  5, 2, 1, 0, 0 },   /* 7 1 + 교차선 유지 */
-    { 1, 0,  0,  0, 2, 1, 0, 0 }    /* 8 값 조정용(K_P·K_I 는 파라미터) */
-};
+int16_t param_get(uint16_t idx)        { return (idx < P_COUNT) ? s_set[idx] : 0; }
 
-int16_t param_get(uint16_t idx)
-{
-    if ((idx == P_STEER_KP) && s_tst[s_set[P_DEV_TEST]].kp) { return s_tst[s_set[P_DEV_TEST]].kp; }
-    if ((idx == P_STEER_KI) && s_tst[s_set[P_DEV_TEST]].ki) { return s_tst[s_set[P_DEV_TEST]].ki; }
-    return (idx < P_COUNT) ? s_set[idx] : 0;
-}
+#if AGV_DEV_TESTS
+/* TST 조합 표(param.h). 번호 배열은 이 표만 고친다. v0.45.0 에서 번호 뜻이 다시 바뀌었다(54차).
+ * spd 속도 루프 0 예전·1 기본·2 새2(speed_pi_test, motor.c s_spi), ex 곡선 끝 적분 처리 0 예전·2 부호 기준 + 빠른 접근(steer_exit_test),
+ * iv 속도 비례 적분(steer_iv_test), ag 1 = K_P·K_I 0 이 37차 자동 이득(아니면 권장값, param_gain).
+ * 교차선 유지·진입 적분 가속·큰 편차 보조 비례·추정 조향·반응형 속도·칼만 위치는 표에 없다(코드는 남는다. CCS 로만, 칼만 위치는 OPT b3).
+ * 1 은 비었다(limit_ok 가 받지 않는다) */
+static const struct { int16_t spd, ex, iv, ag; } s_tst[3] = {
+    /* spd ex iv ag */
+    { 1, 2, 1, 0 },   /* 0 기본(53차 TST 1, 현장 이미지와 같다) */
+    { 1, 2, 1, 0 },   /* 1 비었다 */
+    { 0, 0, 0, 1 }    /* 2 예전(53차 TST 0): 37차 자동 이득·예전 끝 처리·예전 속도 루프. 비교용 */
+};
 
 void param_tst_apply(void)
 {
     int16_t t = s_set[P_DEV_TEST];
-    D.p_kp = (float)param_get(P_STEER_KP);       /* 0 이면 steer.c 가 경사로 다시 잡는다 */
-    D.p_ki = (float)param_get(P_STEER_KI) * 0.1f;
-    guide_hold_test = s_tst[t].hold;
+    D.p_kp = (float)param_gain(P_STEER_KP);      /* 0 이면 steer.c 가 경사로 다시 잡는다 */
+    D.p_ki = (float)param_gain(P_STEER_KI) * 0.1f;
+    guide_hold_test = 0;
     speed_pi_test = s_tst[t].spd;
     steer_exit_test = s_tst[t].ex;
     steer_iv_test = s_tst[t].iv;
-    steer_entry_test = s_tst[t].en;
-    steer_px_test = s_tst[t].px;
+    steer_entry_test = 0;
+    steer_px_test = 0;
 }
-#else
-int16_t param_get(uint16_t idx)        { return (idx < P_COUNT) ? s_set[idx] : 0; }
 #endif
+
+int16_t param_gain(uint16_t idx)
+{
+    int16_t v = param_get(idx);
+#if AGV_DEV_TESTS
+    if (s_tst[s_set[P_DEV_TEST]].ag) { return v; }
+#endif
+    return v ? v : ((idx == P_STEER_KP) ? PARAM_KP_DEFAULT : PARAM_KI_DEFAULT);
+}
 int16_t param_opt(uint16_t bit)        { return (((uint16_t)s_set[P_OPT_FLAGS] & bit) != 0) ? 1 : 0; }
 int16_t param_quirk(uint16_t bit)      { return (((uint16_t)s_set[P_LEGACY_QUIRKS] & bit) != 0) ? 1 : 0; }
 
@@ -110,7 +105,7 @@ static const extra_t s_extra[] = {
     { P_EMPTY_DCC,   PARAM_EMPTY_ADDR0 + 3u, 0, 60, 0 },
     { P_LOAD_DETECT, PARAM_EMPTY_ADDR0 + 4u, 0, 1,  0 }
 #if AGV_DEV_TESTS
-    , { P_DEV_TEST,  PARAM_EMPTY_ADDR0 + 5u, 0, 8,  0 }   /* 82: 레거시 KEEP 빈 칸(77~88) */
+    , { P_DEV_TEST,  PARAM_EMPTY_ADDR0 + 5u, 0, 2,  0 }   /* 82: 레거시 KEEP 빈 칸(77~88). 53차까지의 3~8 은 부팅 때 0 */
 #endif
 };
 static int16_t s_empty;
@@ -127,6 +122,9 @@ static int16_t limit_ok(uint16_t i, int16_t v)
 {
     int16_t p;
     const extra_t *e = extra_find(i);
+#if AGV_DEV_TESTS
+    if ((i == P_DEV_TEST) && (v == 1)) { return 0; }     /* TST 1 은 비었다(54차). 53차의 1 도 부팅 때 0 */
+#endif
     if (e != 0) { return (v >= e->low) && (v <= e->up); }
     if (i > P_PARA_INIT) { return 1; }
     if ((s_limit[i].low > 10000) || (s_limit[i].up > 10000)) {
@@ -295,8 +293,8 @@ static void recalc_one(uint16_t i)
         param_dv.forback_mode = param_digit(s_set[P_TURN_FORBACK], 1);
         break;
     case P_STOP_LEN_MM:   recalc_stop_len(); break;
-    case P_STEER_KP:      D.p_kp = (float)param_get(P_STEER_KP); break;          /* TST 강제값이 있으면 그것 */
-    case P_STEER_KI:      D.p_ki = (float)param_get(P_STEER_KI) * 0.1f; break;
+    case P_STEER_KP:      D.p_kp = (float)param_gain(P_STEER_KP); break;         /* 0 = 권장값(TST 2 는 자동 이득) */
+    case P_STEER_KI:      D.p_ki = (float)param_gain(P_STEER_KI) * 0.1f; break;
     case P_WHEEL_DIA_MM:
     case P_GEAR_RATIO:
     case P_WHEEL_BASE_MM: recalc_all(); break;
@@ -368,8 +366,8 @@ int16_t param_set(uint16_t idx, int16_t value)
 static void after_load(void)
 {
     recalc_all();
-    D.p_kp = (float)s_set[P_STEER_KP];
-    D.p_ki = (float)s_set[P_STEER_KI] * 0.1f;
+    D.p_kp = (float)param_gain(P_STEER_KP);
+    D.p_ki = (float)param_gain(P_STEER_KI) * 0.1f;
 #if AGV_DEV_TESTS
     param_tst_apply();
 #endif

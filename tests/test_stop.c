@@ -469,10 +469,129 @@ static void test_smooth_resume(void)
     (void)param_set(P_OPT_FLAGS, 0);
 }
 
-int main(void)
+/* ---- 정지 지나침 표(인자 plan, 54차 조사). 바퀴 모형: 1 지령 1차 지연 τ 0.1 s(가감속 6000 rpm/s, 예전 모의와 같다),
+ * 2 지령 → 바퀴 순수 지연 20 ms + 2차 22 Hz 감쇠비 0.45(실측 새 속도 루프), 3 토크 지령(DAC) → 바퀴 0.64 rpm/DAC, τ 10.7 ms,
+ * 순수 지연 6.2 ms(앱 analysis/speedloop 맞춤 (가), 속도 PI 가 고리 안이라 TST 0·2 가 다르다). 1·2 는 TST 와 무관하다 */
+static struct { float x[2], xd[2], acc[2], tq[2]; int16_t cmd[2][3]; int pm; } s_pm;
+
+static void pm_plant(void)
+{
+    const float wn = 2.0f * 3.14159265f * 22.0f;
+    for (uint16_t i = 0; i < 2; i++) {
+        float u = D.amp_run ? (float)D.w_cmd[i] : 0.0f, tq = D.amp_run ? (float)D.tq_cmd[i] : 0.0f;
+        s_pm.cmd[i][2] = s_pm.cmd[i][1];
+        s_pm.cmd[i][1] = s_pm.cmd[i][0];
+        s_pm.cmd[i][0] = (int16_t)u;
+        for (int m = 0; m < 10; m++) {              /* 1 ms */
+            if (s_pm.pm == 1) {
+                float d = (u - s_pm.x[i]) * 0.01f;
+                s_pm.x[i] += (d > 6.0f) ? 6.0f : ((d < -6.0f) ? -6.0f : d);
+            }
+            else if (s_pm.pm == 2) {
+                s_pm.xd[i] += (wn * wn * ((float)s_pm.cmd[i][2] - s_pm.x[i]) - 2.0f * 0.45f * wn * s_pm.xd[i]) * 0.001f;
+                s_pm.x[i] += s_pm.xd[i] * 0.001f;
+            }
+            else { s_pm.x[i] += (0.64f * ((m < 6) ? s_pm.tq[i] : tq) - s_pm.x[i]) * (0.001f / 0.0107f); }
+            if (s_pm.x[i] < 0.0f) { s_pm.x[i] = 0.0f; s_pm.xd[i] = 0.0f; }
+            if (s_pm.x[i] > 5.0f) {
+                s_pm.acc[i] += s_pm.x[i] * (12.0f / 60000.0f);
+                while (s_pm.acc[i] >= 1.0f) {
+                    s_pm.acc[i] -= 1.0f;
+                    motor_encoder_pulse(i);
+                    D.period[i] = (int32_t)(500000000.0f / s_pm.x[i]);
+                    if (i == 0) { s_travel++; D.travel_pulses++; if (D.cross_pulses > 0) { D.cross_pulses--; } if (D.stop_pulses > 0) { D.stop_pulses--; } }
+                }
+            }
+        }
+        s_pm.tq[i] = tq;
+    }
+}
+
+static void pm_tick(void) { pm_plant(); D.action_err = 0; motor_run(); }
+
+/* 순항 v m/min 에서 'I' → CD cm 교차 대기 정지, 또는(cm < 0) 서 있다 MOVE_MM -cm mm(tagact_move_mm 의 속도 식). 반환 지나침 mm */
+static float pm_stop(int pm, int tst, int vm, int cm, int dcc, float *vmax)
+{
+    int16_t rpm;
+    long from;
+    int t;
+    setup(0);
+    (void)tst;
+#if AGV_DEV_TESTS
+    (void)param_set(P_DEV_TEST, (int16_t)tst);
+#endif
+    (void)param_set_ram(P_GEAR_RATIO, 60);          /* 94.5 rpm 당 1 m/min */
+    (void)param_set_ram(P_SPEED_HIGH, 31);
+    (void)param_set_ram(P_SPEED_LOW, 25);
+    (void)param_set_ram(P_ACC, (int16_t)((dcc == 60) ? 58 : 8));
+    (void)param_set_ram(P_DCC, (int16_t)dcc);
+    memset(&s_pm, 0, sizeof(s_pm));
+    s_pm.pm = pm;
+    rpm = (cm >= 0) ? param_rpm((int16_t)vm) : 0;
+    D.speed_cmd = D.vin_out = D.last_input = rpm;
+    if (cm < 0) {
+        float p = (float)(-cm) * P.one_length_pulse, d = p * (6000.0f / (float)STOP_ENCODER_PPR) - (float)STOP_TAIL_RPM_TICKS;
+        float a = 0.5f * (1.0f / (float)P.acc + 1.0f / (float)P.dcc);
+        float b = (float)(P.acc + P.dcc) * (float)STOP_JERK_DEN / (2.0f * (float)STOP_JERK_NUM) + 15.0f;
+        float v = (d > 0.0f) ? (sqrtf(b * b + 4.0f * a * d) - b) / (2.0f * a) : 0.0f;
+        D.speed_cmd = (int16_t)((v > (float)P.llow_speed) ? P.llow_speed : ((v < (float)P.min_speed) ? P.min_speed : v));
+        D.step = DRIVE_CHANGE_SPEED;
+        D.stop_pulses = (int16_t)(p + 0.5f);
+        D.move_on = 1;
+        D.flag_stopping = 1;
+        from = s_travel;
+        stop_request_tag();
+    }
+    else {
+        for (t = 0; t < 300; t++) {                 /* 순항까지 */
+            if (t == 0) { s_pm.x[0] = s_pm.x[1] = (float)rpm; s_pm.tq[0] = s_pm.tq[1] = (float)rpm / 0.64f;
+                          for (int k = 0; k < 3; k++) { s_pm.cmd[0][k] = s_pm.cmd[1][k] = rpm; } }
+            pm_tick();
+        }
+        (void)param_set_ram(P_CROSS_IN_CM, (int16_t)cm);
+        from = s_travel;
+        acs_cross_in(1);
+    }
+    *vmax = 0.0f;
+    for (t = 0; (t < 3000) && D.flag_run && !((stop_reason() == STOP_REASON_TRAFFIC) && (stop_phase() == STOP_PHASE_COMPLETE)); t++) {
+        pm_tick();
+        if ((float)D.last_input > *vmax) { *vmax = (float)D.last_input; }
+    }
+    for (t = 0; t < 30; t++) { pm_tick(); }
+    *vmax /= P.one_meter_rpm;
+    return travel_mm(from) - ((cm >= 0) ? (float)cm * 10.0f : (float)(-cm));
+}
+
+static void plan_table(void)
+{
+    static const char *pmn[4] = { "", "1차 0.1 s", "지연+22 Hz", "토크(가)" };
+    static const int cms[5] = { 15, 20, 25, 30, 40 }, mms[6] = { 5, 20, 50, 100, 300, 1000 };
+    float vm;
+    printf("정지 지나침 mm(+ 지나침). CD: 순항 v 에서 'I' 뒤 CD cm. MOVE_MM: 서 있다 거리 mm(괄호 최고 m/min). ACC 58·DCC 60, ACC 8·DCC 40\n");
+    for (int pm = 1; pm <= 3; pm++) {
+        for (int tst = 0; tst <= ((pm == 3) && AGV_DEV_TESTS ? 2 : 0); tst += 2) {
+            for (int dv = 0; dv < 2; dv++) {
+                int dcc = dv ? 40 : 60;
+                for (int vi = 0; vi < 2; vi++) {    /* 토크 모형은 31 m/min(2930 rpm)에 DAC 상한(0.64 × 4000 = 2560 rpm)이 닿아 25·20 */
+                    int v = (pm == 3) ? (vi ? 20 : 25) : (vi ? 25 : 31);
+                    printf("  %-10s TST %d DCC %d v%2d | CD", pmn[pm], tst, dcc, v);
+                    for (int k = 0; k < 5; k++) { printf(" %d:%6.1f", cms[k], pm_stop(pm, tst, v, cms[k], dcc, &vm)); }
+                    printf("\n");
+                }
+                printf("  %-10s TST %d DCC %d     | MOVE", pmn[pm], tst, dcc);
+                for (int k = 0; k < 6; k++) { float o = pm_stop(pm, tst, 0, -mms[k], dcc, &vm); printf(" %d:%5.1f(%4.1f)", mms[k], o, vm); }
+                printf("\n");
+            }
+        }
+    }
+}
+
+int main(int argc, char **argv)
 {
     stop_ctrl_t c;
     stop_feedback_t fb;
+
+    if ((argc > 1) && (strcmp(argv[1], "plan") == 0)) { plan_table(); return 0; }
 
     /* 판정 함수 */
     assert(stop_is_position(STOP_REASON_TAG_POSITION) && stop_is_position(STOP_REASON_TURN_ANGLE));

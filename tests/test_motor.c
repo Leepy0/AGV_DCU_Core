@@ -90,17 +90,20 @@ int main(void)
     motor_encoder_pulse(0); D.period[0] = 138888; motor_feedback_update();     /* 3600 */
     assert(D.rpm[0] == 3000);
 
-    /* 속도 PI: 게인, 토크 상한 4000, 음수 없음 */
+    /* 속도 PI(기본: 1표본 되먹임, 피드포워드 고정): 게인, 토크 상한 4000, 음수 없음. 되먹임은 feedback_update 가 쓴다 */
     setup();
     D.control = RUN_TURN;
+    motor_feedback_update();                    /* 되먹임 0 */
     motor_speed_pi(100);
     assert(D.w_cmd[0] == 100 && D.w_err[0] == 100);
-    assert(D.iref_it[0] == 0.2f * 100.0f);
-    assert(D.tq_cmd[0] == (int16_t)(2.2f * 100.0f + D.iref_it[0]));
+    assert(D.iref_it[0] == MOTOR_SPEED_KI * 100.0f);
+    assert(D.tq_cmd[0] == (int16_t)((MOTOR_SPEED_KP * 100.0f + D.iref_it[0]) + MOTOR_SPEED_FF * 100.0f));
     for (int i = 0; i < 3000; i++) { motor_speed_pi(3000); }
     assert(D.tq_cmd[0] == 4000 && D.tq_cmd[1] == 4000 && D.w_pi_out[0] == 4000.0f);
     /* 포화 해소 뒤 적분이 묶여 있어 곧 내려온다 (anti-windup) */
-    D.rpm_avg[0] = 3000;
+    motor_encoder_pulse(0);
+    D.period[0] = 166666;                       /* 3000 rpm */
+    motor_feedback_update();
     for (int i = 0; i < 200; i++) { motor_speed_pi(10); }
     assert(D.tq_cmd[0] == 0);
     /* 지령 0 이면 PI 초기화 */
@@ -799,8 +802,11 @@ int main(void)
     assert(D.guide_kf_init == 1);
     (void)param_set(P_LEGACY_QUIRKS, 0);
 
-    /* 속도 피드포워드: 오차 0 이어도 지령에 비례한 토크 */
+#if AGV_DEV_TESTS
+    /* 예전 속도 루프(TST 2)의 피드포워드 = FF 파라미터: 오차 0 이어도 지령에 비례한 토크. 기본 루프는 FF 파라미터를 쓰지 않는다 */
     setup();
+    assert(speed_pi_test == 1 && motor_speed_ff() == MOTOR_SPEED_FF);
+    speed_pi_test = 0;
     D.control = RUN_TURN;
     D.rpm_avg[0] = D.rpm_avg[1] = 1000;
     motor_speed_pi(1000);
@@ -809,24 +815,27 @@ int main(void)
     motor_speed_pi(1000);
     assert(D.tq_cmd[0] == 100 && D.tq_cmd[1] == 100);
     (void)param_set(P_SPEED_FF, 0);
+    speed_pi_test = 1;
+#endif
 
-    /* 속도 루프 시험(TST): 폐루프 수열을 고치기 전 식(참조)과 한 비트까지 맞춘다. 줄 0 = 고치기 전 상수 그대로,
-     * 새1·새2 = 표 값. 되먹임 선택·ka(포화로 확인)·FF 계수, D.rpm_avg 는 줄과 무관하게 6표본 평균 */
+    /* 속도 루프 표: 폐루프 수열을 참조 식과 한 비트까지 맞춘다. 줄 0 = 예전(TST 2, 53차 TST 0) 상수, 줄 1 = 기본(현장 이미지,
+     * 53차 새1), 줄 2 = 새2. 되먹임 선택·ka(포화로 확인)·FF 계수, D.rpm_avg 는 줄과 무관하게 6표본 평균 */
     {
         static const struct { int fb; float kp, ki, ka, ff; } row[3] = {
-            { 0, 2.2f, 0.2f,  1.0f / 2.2f, -1.0f },   /* 고치기 전: static const ka = 1/MOTOR_SPEED_KP, FF 파라미터 */
+            { 0, 2.2f, 0.2f,  1.0f / 2.2f, -1.0f },   /* 예전: ka = 1/MOTOR_SPEED_KP_OLD, FF 파라미터 */
             { 1, 0.8f, 0.16f, 1.0f / 0.8f, 0.999f },
             { 2, 0.8f, 0.12f, 1.0f / 0.8f, 0.999f }
         };
-        for (int r = 0; r < (AGV_DEV_TESTS ? 3 : 1); r++) {
+        for (int r = (AGV_DEV_TESTS ? 0 : 1); r < (AGV_DEV_TESTS ? 3 : 2); r++) {
             float it[2] = { 0 }, fbk[2] = { 0 }, out[2] = { 0 }, plant[2] = { 0 };
             int16_t h[2][5] = { { 0 } };
             setup();
             (void)param_set_ram(P_SPEED_FF, 250);
 #if AGV_DEV_TESTS
+            assert(speed_pi_test == 1);               /* 기본 */
             speed_pi_test = (int16_t)r;
-            assert(motor_speed_ff() == ((r == 0) ? P.speed_ff : 0.999f));
 #endif
+            assert(motor_speed_ff() == ((r == 0) ? P.speed_ff : 0.999f));
             D.add_speed_l = 120;
             for (int t = 0; t < 400; t++) {
                 int16_t in = (t < 40) ? (int16_t)(t * 50) : ((t < 150) ? 2000 : ((t < 200) ? 0 : ((t < 260) ? 3500 : 900)));
@@ -858,7 +867,7 @@ int main(void)
             (void)param_set_ram(P_SPEED_FF, 0);
         }
 #if AGV_DEV_TESTS
-        speed_pi_test = 0;
+        speed_pi_test = 1;
 #endif
     }
 

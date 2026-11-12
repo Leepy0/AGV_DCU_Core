@@ -12,11 +12,18 @@
 #define D agv_drive
 #define P param_dv
 
+#if AGV_DEV_TESTS
+static int16_t s_tst = 2;     /* setup 이 거는 TST. 기본 동작을 볼 때 0 */
+#endif
+
 static void setup(void)
 {
     fake_reset();
+    memset(&D, 0, sizeof(D));               /* 부팅 앞에 지운다: 부팅이 D.p_kp·D.p_ki 를 잡는다(실기와 같다) */
     fake_params();
-    memset(&D, 0, sizeof(D));
+#if AGV_DEV_TESTS
+    (void)param_set(P_DEV_TEST, s_tst);     /* 아래 시험 대부분은 37차 자동 이득·예전 끝 처리(TST 2)를 본다 */
+#endif
     motor_reset();
     { guide_cfg_t c; guide_cfg_default(&c); guide_configure(&c); guide_reset(); }   /* 'h' 커브 임계 기본 4 */
     stop_reset();
@@ -39,6 +46,7 @@ static uint32_t fnv(uint32_t h, float v)
 
 int main(void)
 {
+#if AGV_DEV_TESTS   /* 37차 자동 이득(K_P·K_I 0)은 TST 2 에만 있다(54차부터 0 = 권장값) */
     /* 평시 속도 r = 1: Kp 35, Ki 하한 0.1 */
     setup();
     D.guide_pos = 3;
@@ -157,6 +165,7 @@ int main(void)
     D.guide_pos = 13;
     steer_run(1);
     assert(D.p_kp == 130.0f * 1.3f);
+#endif
 
     /* 수동 게인이면 자동 계산을 건너뛴다 */
     setup();
@@ -165,6 +174,30 @@ int main(void)
     steer_run(1);
     assert(D.p_kp == 40.0f);
     (void)param_set(P_STEER_KP, 0);
+
+    /* 기본(54차, 현장 이미지): K_P·K_I 0 = 권장값 60·5(Ki 0.5), 0 이 아니면 그 값. 파라미터 칸은 그대로 0 이다 */
+#if AGV_DEV_TESTS
+    s_tst = 0;
+#endif
+    setup();                                    /* 부팅이 잡은 값 */
+    assert(D.p_kp == 60.0f && D.p_ki == 0.5f);
+    (void)param_set(P_STEER_KP, 0);
+    (void)param_set(P_STEER_KI, 0);
+    D.guide_pos = 13;
+    D.guide_span = 16;
+    steer_run(1);
+    assert(D.p_kp == 60.0f && D.p_ki == 0.5f && param_gain(P_STEER_KP) == 60 && param_gain(P_STEER_KI) == 5);
+    assert(param_get(P_STEER_KP) == 0 && param_get(P_STEER_KI) == 0);
+    (void)param_set(P_STEER_KP, 45);
+    (void)param_set(P_STEER_KI, 3);
+    steer_run(1);
+    assert(D.p_kp == 45.0f && D.p_ki == 3.0f * 0.1f);
+    (void)param_set(P_STEER_KP, 0);
+    (void)param_set(P_STEER_KI, 0);
+    assert(D.p_kp == 60.0f && D.p_ki == 0.5f);
+#if AGV_DEV_TESTS
+    s_tst = 2;
+#endif
 
     /* 기본은 불감대가 없다: 작은 편차도 그대로 오차가 된다 */
     setup();
@@ -325,6 +358,7 @@ int main(void)
       steer_run(1);
       steer_run(1); }
 
+#if AGV_DEV_TESTS   /* 아래 둘은 자동 이득(TST 2)의 Kp 로 커브 판정을 본다 */
     /* 결함 수정: 위험 감속 중 커브 부스트를 걸지 않는다. 비트를 켜면 구동작 */
     setup();
     D.risk_stop = 1;
@@ -369,6 +403,7 @@ int main(void)
       steer_run(1);
       assert(D.p_kp == 35.0f * 1.3f);
       (void)param_set(P_GUIDE_CURVE_DETECT, 0); }   /* GSR 값은 무시: 위 결과와 같다 */
+#endif
 
     /* 변화율 항 부호: 기본은 감쇠, QUIRK_DAMP_SIGN_OLD 는 예전 부호. 칼만 상태를 고정해 비교한다.
      * 편차 10단위: 일반 센서 출력 변화 묶음 밖이라 한 번에 나온다 */
@@ -487,7 +522,8 @@ int main(void)
       }
       (void)param_set(P_LEGACY_QUIRKS, 0); }
 
-    /* 곡선 끝 적분 감쇠: 편차 6단위 이상을 지나 4단위 아래로 들어오면 10 ms 마다 0.95 배. 5단위까지만 간 적분은 그대로 */
+#if AGV_DEV_TESTS
+    /* 예전 곡선 끝 적분 감쇠(TST 2): 편차 6단위 이상을 지나 4단위 아래로 들어오면 10 ms 마다 0.95 배. 5단위까지만 간 적분은 그대로 */
     { int k, arm;
       float i0 = 0.0f, i1 = 0.0f;
       for (arm = 0; arm <= 1; arm++) {
@@ -513,13 +549,19 @@ int main(void)
       for (k = 0; k < 60; k++) { steer_run(1); }
       assert(D.p_pi_out - D.p_kp * (float)D.p_err < -30.0f);
       (void)param_set(P_LEGACY_QUIRKS, 0); }
+#endif
 
-    /* TST 0(곡선 끝 처리·속도 비례 적분 시험 끔)은 고치기 전(v0.42.0) 조향과 출력 수열이 한 비트까지 같다.
-     * 정한 입력(편차 오르내림·넘어감·떨림, 곡선 폭, 위험 감속과 속도 바뀜, 다른 선, 후진, 정지)으로 자동 이득·K_P 60 K_I 5·20 ms 조향을
-     * 돌려 출력·이득 비트의 FNV 해시를 v0.42.0 에서 잰 값과 맞춘다 */
+    /* 기본 동작(TST 0, 현장 이미지)은 53차 TST 1(K_P 60 K_I 5 강제, 끝 처리 부호 기준 + 빠른 접근, 속도 비례)과,
+     * TST 2(예전)는 고치기 전(v0.42.0 = 53차 TST 0) 조향과 출력 수열이 한 비트까지 같다. 정한 입력(편차 오르내림·넘어감·떨림,
+     * 곡선 폭, 위험 감속과 속도 바뀜, 다른 선, 후진, 정지)으로 K_P·K_I 0·0, 60·5, 0·0 + 20 ms 조향을 돌려
+     * 출력·이득 비트의 FNV 해시를 v0.44.0 에서 잰 값과 맞춘다(TST 0 판의 K_P·K_I 0 은 권장값 60·5 라 53차 TST 1 의 강제값과 같다) */
     { static const struct { int16_t kp, ki, lg; } run[3] = { { 0, 0, 0 }, { 60, 5, 0 }, { 0, 0, QUIRK_STEER_20MS } };
+      int k, t, m;
+      for (m = 0; m < (AGV_DEV_TESTS ? 2 : 1); m++) {
       uint32_t h = 2166136261u;
-      int k, t;
+#if AGV_DEV_TESTS
+      s_tst = (int16_t)(m ? 2 : 0);
+#endif
       for (k = 0; k < 3; k++) {
           int16_t v = 2000;
           setup();
@@ -545,8 +587,12 @@ int main(void)
               h = fnv(fnv(fnv(fnv(h, D.p_pi_out), D.p_kp), D.p_ki), (float)D.add_speed_l);
           }
       }
-      printf("  TST 0 조향 수열 해시 %08lx\n", (unsigned long)h);
-      assert(h == 0xbf0ff2d4u);                   /* v0.42.0(고치기 전) 값. 개발·현장 빌드 같다 */
+      printf("  TST %d 조향 수열 해시 %08lx\n", m ? 2 : 0, (unsigned long)h);
+      assert(h == (m ? 0xbf0ff2d4u : 0x0aa33808u));   /* 53차 TST 0·1 에서 잰 값. 기본은 개발·현장 빌드 같다 */
+      }
+#if AGV_DEV_TESTS
+      s_tst = 2;
+#endif
       (void)param_set(P_LEGACY_QUIRKS, 0);
       (void)param_set(P_STEER_KP, 0);
       (void)param_set(P_STEER_KI, 0); }

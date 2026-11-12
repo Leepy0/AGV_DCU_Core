@@ -46,7 +46,7 @@ enum {
     P_EMPTY_DCC,            /* 57 EDC: 공차 감속 (적재 13번) */
     P_LOAD_DETECT,          /* 58 LDS: 적재 감지 사용. 0 = 늘 적재(예전과 같다) */
 #if AGV_DEV_TESTS
-    P_DEV_TEST,             /* 59 TST: 임시 시험 고르기 0~8(param_tst_apply, param.c s_tst). 체크섬 밖 EEPROM 82(KEEP 빈 칸). 개발 이미지에만 */
+    P_DEV_TEST,             /* 59 TST: 임시 시험 고르기 0·2(param_tst_apply, param.c s_tst). 체크섬 밖 EEPROM 82(KEEP 빈 칸). 개발 이미지에만 */
 #endif
     P_COUNT
 };
@@ -140,14 +140,18 @@ void     param_profile(int16_t empty);
 int16_t  param_profile_empty(void);
 /* 1·3·12·13번의 지금 프로필 값. 공차이고 공차 값이 쓸 만하면 54~57번, 아니면 그 번호 값 */
 int16_t  param_active(uint16_t idx);
+/* K_P·K_I 를 조향에 쓰는 값. 파라미터 0 = 권장값(54차부터, 실차 53차 TST 1). 0 이 아니면 그 값. 파라미터 칸 자체는 그대로다.
+ * 예전 비교(TST 2)만 0 = 37차 자동 이득(steer.c 가 속도·편차로 다시 잡는다) */
+#define PARAM_KP_DEFAULT 60
+#define PARAM_KI_DEFAULT 5       /* Ki 0.5 */
+int16_t  param_gain(uint16_t idx);
 
 #if AGV_DEV_TESTS
-/* TST(P_DEV_TEST) 임시 시험. 원래 값(K_P·K_I·FF)은 두고 RAM 에서만 덮는다. 조합은 param.c s_tst 표(v0.44.0 에서 번호를 다시 배열).
- * 1~8 은 모두 37차 조향 + 속도 루프 새1(속도 PI 되먹임 1표본 Kp 0.8 Ki 0.16, FF 0.999 고정, motor.h)
- * + 곡선 끝 부호 기준·빠른 접근(steer.c STEER_I_FLIP_*) + 속도 비례 적분. 진입 = 진입 적분 가속, 보조 = 큰 편차 보조 비례(steer.c STEER_ENTRY_RISE):
- *  0 평소, 1 K_P 60 K_I 5(52차 TST 2), 2 1 에서 K_I 10, 3 1 + 진입 ×4, 4 1 + 진입 ×8, 5 1 + 보조, 6 1 + 진입 ×4 + 보조,
- *  7 1 + 교차선 유지, 8 K_P·K_I 파라미터.
- * K_P·K_I 는 읽을 때마다 반영된다(param_get). 나머지 전역과 D.p_kp·D.p_ki 는 이 함수가 맞춘다: 부팅·TST 저장 때, 주행 시작 때(TST 0 이 아니면) */
+/* TST(P_DEV_TEST) 임시 시험. 원래 값(K_P·K_I·FF)은 두고 RAM 에서만 덮는다. 조합은 param.c s_tst 표(v0.45.0 에서 번호를 다시 배열).
+ *  0 기본: 속도 루프 1표본 Kp 0.8 Ki 0.16 FF 0.999 고정(motor.h MOTOR_SPEED_*), 곡선 끝 부호 기준 + 빠른 접근(steer.c STEER_I_FLIP_*),
+ *    속도 비례 적분, K_P·K_I 0 = 권장값 60·5(param_gain). 현장 이미지(AGV_DEV_TESTS 0)와 같다.
+ *  1 비었다(받지 않는다). 2 예전(53차 TST 0): 37차 자동 이득, 예전 끝 처리, 예전 속도 루프(6표본 Kp 2.2 Ki 0.2, FF 파라미터).
+ * 전역과 D.p_kp·D.p_ki 는 이 함수가 맞춘다: 부팅·TST 저장 때, 주행 시작 때(TST 0 이 아니면) */
 void     param_tst_apply(void);
 #endif
 

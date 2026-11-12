@@ -55,13 +55,13 @@ float atanf(float x);
 
 agv_drive_t agv_drive;
 #if AGV_DEV_TESTS
-int16_t speed_pi_test;      /* motor.h */
-/* 속도 루프 시험 표. 줄 = speed_pi_test(0 지금, 1 새1, 2 새2). 값만 고치면 된다.
+int16_t speed_pi_test = 1;  /* motor.h. 부팅 때 TST 가 다시 건다 */
+/* 속도 루프 표. 줄 = speed_pi_test(0 예전, 1 기본, 2 새2). 값만 고치면 된다.
  * fb: PI 되먹임 0 = D.rpm_avg(6표본), 1 = 1표본(D.rpm), 2 = 2표본 평균. ka = 1/Kp(역계산 anti-windup). ff < 0 = 파라미터 FF */
 #define SPI_ROW(fb, kp, ki, ff) { fb, kp, ki, 1.0f / (kp), ff }
 static const struct { int16_t fb; float kp, ki, ka, ff; } s_spi[3] = {
-    SPI_ROW(0, MOTOR_SPEED_KP, MOTOR_SPEED_KI, -1.0f),
-    SPI_ROW(1, 0.8f, 0.16f, 0.999f),    /* 새1 */
+    SPI_ROW(0, MOTOR_SPEED_KP_OLD, MOTOR_SPEED_KI_OLD, -1.0f),
+    SPI_ROW(1, MOTOR_SPEED_KP, MOTOR_SPEED_KI, MOTOR_SPEED_FF),    /* 기본(53차 새1) */
     SPI_ROW(2, 0.8f, 0.12f, 0.999f)     /* 새2 */
 };
 float motor_speed_ff(void) { return (s_spi[speed_pi_test].ff >= 0.0f) ? s_spi[speed_pi_test].ff : P.speed_ff; }
@@ -236,7 +236,7 @@ void motor_speed_pi(int16_t input)
 #else
     static const float ka = 1.0f / MOTOR_SPEED_KP;
     const float kp = MOTOR_SPEED_KP, ki = MOTOR_SPEED_KI;
-#define PI_FB(i) (D.rpm_avg[i])
+#define PI_FB(i) (D.rpm[i])         /* 개발 이미지 줄 1 의 pi_fb 와 같은 값(둘 다 feedback_update 가 쓴다) */
 #endif
     uint16_t i;
 

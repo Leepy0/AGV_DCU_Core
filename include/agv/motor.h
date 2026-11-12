@@ -9,8 +9,12 @@
 #include "agv/param.h"      /* AGV_DEV_TESTS 기본값, motor_speed_ff */
 
 #define MOTOR_TORQUE_LIMIT   4000.0f
-#define MOTOR_SPEED_KP       2.2f
-#define MOTOR_SPEED_KI       0.2f
+/* 속도 PI(54차부터 기본, 53차 시험 새1): 되먹임 1표본(D.rpm), 피드포워드 고정(FF 파라미터는 쓰지 않는다). 역계산 이득 1/Kp */
+#define MOTOR_SPEED_KP       0.8f
+#define MOTOR_SPEED_KI       0.16f
+#define MOTOR_SPEED_FF       0.999f
+#define MOTOR_SPEED_KP_OLD   2.2f       /* 예전(TST 2): 되먹임 D.rpm_avg(6표본), 피드포워드 = FF 파라미터 */
+#define MOTOR_SPEED_KI_OLD   0.2f
 #define MOTOR_RPM_SPIKE      3500
 
 void    motor_reset(void);
@@ -37,13 +41,13 @@ int16_t motor_raw_rpm(uint16_t wheel);          /* 스파이크 컷 전 rpm. 327
 void    motor_spike_set(int16_t rpm);           /* 측정 rpm 스파이크 컷. 0 = 기본 MOTOR_RPM_SPIKE */
 int16_t motor_spike(void);
 
-/* 속도 루프 시험(TST, AGV_DEV_TESTS 에서만 정의). 0 = 지금, 1 = 새1(1표본 되먹임 Kp 0.8 Ki 0.16 FF 0.999),
- * 2 = 새2(2표본 평균 Kp 0.8 Ki 0.12 FF 0.999). PI 오차의 되먹임만 바꾸고 D.rpm_avg 는 그대로다. 값은 motor.c s_spi */
+/* 속도 루프 표 줄(TST, AGV_DEV_TESTS 에서만 변수). 1 = 기본(위 MOTOR_SPEED_*), 0 = 예전(TST 2), 2 = 새2(2표본 평균 Kp 0.8 Ki 0.12 FF 0.999, CCS 로만).
+ * PI 오차의 되먹임만 바꾸고 D.rpm_avg 는 그대로다. 값은 motor.c s_spi. 현장 이미지는 1 고정 */
 #if AGV_DEV_TESTS
 extern int16_t speed_pi_test;
-float   motor_speed_ff(void);                   /* 지금 쓰는 피드포워드 계수(rpm 당 토크). 새1·새2 면 고정값 */
+float   motor_speed_ff(void);                   /* 지금 쓰는 피드포워드 계수(rpm 당 토크). 예전(0)만 FF 파라미터 */
 #else
-#define motor_speed_ff() (param_dv.speed_ff)
+#define motor_speed_ff() (MOTOR_SPEED_FF)
 #endif
 
 /* DA_SCV_Speed_Core. 상태를 인자로 받는 순수 함수. 저크 min(2.4, 한계/8) rpm/틱²(정지 램프 llow -1 은 2.4), acc·dcc 는 가감속도 상한.

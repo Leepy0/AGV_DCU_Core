@@ -53,8 +53,8 @@
 #define STEER_I_EXIT_ARM            6
 #define STEER_I_EXIT_DECAY          0.95f
 #define STEER_I_EXIT_DONE           5.0f      /* 이보다 작아지면 감쇠를 끝낸다 rpm */
-#if AGV_DEV_TESTS
-/* 곡선 끝 처리·속도 비례 적분 시험(TST, param.c s_tst). 예전 규칙은 적분이 곡선을 붙든 채 편차가 4단위 아래로 내려오자
+/* 곡선 끝 처리·속도 비례 적분. 54차부터 기본(steer_exit_test 2, steer_iv_test 1: 실차 53차 TST 1 이 가장 나았다). 현장 이미지는
+ * steer.h 상수, 개발 이미지는 TST(param.c s_tst)가 고르고 예전 규칙은 TST 2. 예전 규칙은 적분이 곡선을 붙든 채 편차가 4단위 아래로 내려오자
  * 곡선 안에서 걸려 0.3 s 만에 -480 → -96 rpm 이 빠졌고, 편차가 3 → 13단위로 다시 벌어졌다(실차 51차 덤프).
  * steer_exit_test 0 예전 규칙, 1 부호 기준(A), 2 A + 빠른 접근(B), 3 끝 처리 없음.
  *  A: 오차와 적분의 부호가 반대(선이 반대쪽으로 넘어감)일 때만 10 ms 마다 STEER_I_FLIP_DECAY 배. 무장 없음. |적분| < STEER_I_EXIT_DONE 은 그대로.
@@ -67,7 +67,10 @@
 #define STEER_I_FAST_UNITS          2
 #define STEER_I_FAST_DECAY          0.95f
 #define STEER_I_V_MIN               200
-/* 곡선 진입 보강 시험(TST, 53차). 실차 52차 TST 2(K_P 60, K_I 5): 반경 약 0.9 m·LOS 30 에서 편차가 0 → 10단위까지 0.41 s,
+#define STEER_ENTRY_JUMP            2         /* LED 한 칸 = 2단위 */
+static struct { int16_t pos[10], k, n, back; } s_ex;   /* B·E: 지난 10번 위치(부호 있음), n 믿는 개수(E 만 쓴다), back 100 ms 앞 */
+#if AGV_DEV_TESTS
+/* 곡선 진입 보강 시험(53차, 54차 TST 표에서 뺐다. CCS 로만). 실차 52차 TST 2(K_P 60, K_I 5): 반경 약 0.9 m·LOS 30 에서 편차가 0 → 10단위까지 0.41 s,
  * 그동안 적분은 48 rpm 뿐이라 위험 감속(10단위)에 들었다. 필요한 조향 640~1050 rpm 에 비례(단위당 약 50 rpm)가 400~500 rpm 모자란다.
  * steer_entry_test(E) 4·8: |위치| ≥ GUIDE_KP_RAMP_LO 이고 100 ms 앞보다 STEER_ENTRY_RISE 단위 이상 커졌고(앞이 0 이거나 같은 쪽),
  *  이번 적분 증가가 |적분| 을 키우는 쪽이면 그 틱의 증가분에 이 배수를 곱한다. 적분 상한·안티와인드업은 그대로.
@@ -77,11 +80,9 @@
  *  상태가 목표를 STEER_PX_RATE rpm/10 ms 로만 따라가(계단 없이 비탈로) 비례에 더한다. 적분을 지울 때 같이 0.
  *  분기·다른 선과 붙음·출발 정렬 중에는 목표 0(출발 옆 10·15단위에서 회전율이 15 → 18 도/s 로 컸다) */
 #define STEER_ENTRY_RISE            2
-#define STEER_ENTRY_JUMP            2         /* LED 한 칸 = 2단위 */
 #define STEER_PX_KNEE               GUIDE_KP_RAMP_LO
 #define STEER_PX_RATE               10.0f
-int16_t steer_exit_test, steer_iv_test, steer_entry_test, steer_px_test;
-static struct { int16_t pos[10], k, n, back; } s_ex;   /* B·E: 지난 10번 위치(부호 있음), n 믿는 개수(E 만 쓴다), back 100 ms 앞 */
+int16_t steer_exit_test = 2, steer_iv_test = 1, steer_entry_test, steer_px_test;   /* 부팅 때 TST 가 다시 건다 */
 static float s_px;                                      /* F 상태 rpm */
 #endif
 
@@ -91,11 +92,6 @@ static struct {
     int16_t previous_speed;
     int16_t i_exit;         /* 곡선 편차를 지났다: 4단위 아래로 들어오면 적분을 뺀다 */
 } s_steer;
-
-#if AGV_DEV_TESTS
-int16_t steer_test_rpm;
-int16_t steer_alg_test;
-float steer_i_out(void) { return s_steer.i_out; }   /* 조향 기록기(steerlog.c)가 읽는다 */
 
 /* B·E 위치 기록. 틱마다 한 번. fast 0(20 ms 조향)은 5번 앞이 100 ms 앞이다 */
 static void hist_push(int16_t pos, int16_t fast)
@@ -109,6 +105,23 @@ static void hist_push(int16_t pos, int16_t fast)
     if (++s_ex.k >= 10) { s_ex.k = 0; }
     if (s_ex.n <= w) { s_ex.n++; }      /* w 보다 크면 back 이 적분을 지운 뒤 기록이다 */
 }
+
+/* 곡선 끝 처리 A·B(위 STEER_I_FLIP_*). dev = |위치|. fast 0(20 ms 조향)은 같은 시간 상수: 두 번 곱하고 100 ms 는 5번 앞 */
+static void exit_test(int16_t dev, int16_t fast)
+{
+    int16_t back = (s_ex.back >= 0) ? s_ex.back : (int16_t)(-s_ex.back);
+    float a = s_steer.i_out;
+    if ((steer_exit_test == 3) || ((a < STEER_I_EXIT_DONE) && (a > -STEER_I_EXIT_DONE))) { return; }
+    if (((float)D.p_err * a) < 0.0f) { s_steer.i_out *= fast ? STEER_I_FLIP_DECAY : (STEER_I_FLIP_DECAY * STEER_I_FLIP_DECAY); }
+    if ((steer_exit_test == 2) && ((a >= STEER_I_FAST_MIN) || (a <= -STEER_I_FAST_MIN)) && ((back - dev) >= STEER_I_FAST_UNITS)) {
+        s_steer.i_out *= fast ? STEER_I_FAST_DECAY : (STEER_I_FAST_DECAY * STEER_I_FAST_DECAY);
+    }
+}
+
+#if AGV_DEV_TESTS
+int16_t steer_test_rpm;
+int16_t steer_alg_test;
+float steer_i_out(void) { return s_steer.i_out; }   /* 조향 기록기(steerlog.c)가 읽는다 */
 
 /* 진입 적분 가속 E(위 steer_entry_test). dev = |위치| */
 static int16_t entry_on(int16_t dev, int16_t fast)
@@ -129,18 +142,6 @@ static float px_run(float geom, int16_t fast)
     else if (s_px > t + step) { s_px -= step; }
     else                      { s_px = t; }
     return s_px;
-}
-
-/* 곡선 끝 처리 시험 A·B(위 STEER_I_FLIP_*). dev = |위치|. fast 0(20 ms 조향)은 같은 시간 상수: 두 번 곱하고 100 ms 는 5번 앞 */
-static void exit_test(int16_t dev, int16_t fast)
-{
-    int16_t back = (s_ex.back >= 0) ? s_ex.back : (int16_t)(-s_ex.back);
-    float a = s_steer.i_out;
-    if ((steer_exit_test == 3) || ((a < STEER_I_EXIT_DONE) && (a > -STEER_I_EXIT_DONE))) { return; }
-    if (((float)D.p_err * a) < 0.0f) { s_steer.i_out *= fast ? STEER_I_FLIP_DECAY : (STEER_I_FLIP_DECAY * STEER_I_FLIP_DECAY); }
-    if ((steer_exit_test == 2) && ((a >= STEER_I_FAST_MIN) || (a <= -STEER_I_FAST_MIN)) && ((back - dev) >= STEER_I_FAST_UNITS)) {
-        s_steer.i_out *= fast ? STEER_I_FAST_DECAY : (STEER_I_FAST_DECAY * STEER_I_FAST_DECAY);
-    }
 }
 
 /* 각도·곡률 추정 조향(시험, steer_alg_test 1). 상태는 진행 방향 기준이고 부호는 가이드 위치와 같다(+ = 테이프가 왼쪽):
@@ -363,13 +364,13 @@ void steer_reset(void)
     s_steer.prev_p_cmd = 0;
     s_steer.previous_speed = 0;
     s_steer.i_exit = 0;
+    s_ex.n = 0;
 #if AGV_DEV_TESTS
     s_est.ran = 0;
     s_sc.lim = 0.0f;
     s_sc.k = 0.0f;
     s_sc.d = 0.0f;
     s_px = 0.0f;
-    s_ex.n = 0;
 #endif
 }
 
@@ -456,7 +457,7 @@ static float gains_and_deadband(float pos, int16_t v_abs, float r, int16_t curve
     float sen = pos;
     int16_t band;
 
-    if (param_get(P_STEER_KP) == 0) {
+    if (param_gain(P_STEER_KP) == 0) {     /* 자동 이득은 TST 2(예전)에서만. 기본은 0 = 권장값(param.c) */
         D.p_kp = (v_abs > 0) ? (GUIDE_KP_MIN + (GUIDE_KP_SPEED_GAIN * r)) : GUIDE_KP_MIN;
         if (D.p_kp > GUIDE_KP_MAX) { D.p_kp = GUIDE_KP_MAX; }
         {
@@ -475,7 +476,7 @@ static float gains_and_deadband(float pos, int16_t v_abs, float r, int16_t curve
             if (D.p_kp > GUIDE_KP_CURVE_MAX) { D.p_kp = GUIDE_KP_CURVE_MAX; }
         }
     }
-    if (param_get(P_STEER_KI) == 0) {
+    if (param_gain(P_STEER_KI) == 0) {
         D.p_ki = (v_abs > 0) ? ((1.0f - r) * GUIDE_KI_PERIOD_SCALE) : (1.0f * GUIDE_KI_PERIOD_SCALE);
         if (D.p_ki < GUIDE_KI_MIN) { D.p_ki = GUIDE_KI_MIN; }
     }
@@ -529,9 +530,9 @@ void steer_run(int16_t tuning_type)
     if (clear_integral) {
         s_steer.i_out = 0.0f;
         s_steer.i_exit = 0;
+        s_ex.n = 0;
 #if AGV_DEV_TESTS
         s_px = 0.0f;
-        s_ex.n = 0;
 #endif
         if (D.control != RUN_DRIVE) { D.p_pi_out = 0.0f; }
     }
@@ -540,13 +541,11 @@ void steer_run(int16_t tuning_type)
     if ((D.flag_stopping || stop_is_braking()) && (s_steer.previous_speed > 0) && (v_abs < s_steer.previous_speed)) {
         s_steer.i_out *= (float)v_abs / (float)s_steer.previous_speed;
     }
-#if AGV_DEV_TESTS
     else if (steer_iv_test && (v_abs != s_steer.previous_speed) && (v_abs >= STEER_I_V_MIN) && (s_steer.previous_speed >= STEER_I_V_MIN)) {
         float k = (float)v_abs / (float)s_steer.previous_speed;     /* C: 위험 감속·재가속에 적분을 속도에 맞춰 옮긴다 */
         if (k > 1.1f) { k = 1.1f; } else if (k < 0.9f) { k = 0.9f; }
         s_steer.i_out *= k;
     }
-#endif
     s_steer.previous_speed = v_abs;
     s_steer.prev_control = D.control;
     s_steer.prev_branch = D.branch_start;
@@ -585,8 +584,8 @@ void steer_run(int16_t tuning_type)
         rate_ff = GUIDE_KD_RATE * (!D.backward ? D.kf_rate : -D.kf_rate) * geom;
         /* 오차 = 지령 - 위치 이므로 감쇠는 -Kd × 위치 변화율이다. 예전 부호는 반대다 */
         if (!param_quirk(QUIRK_DAMP_SIGN_OLD)) { rate_ff = -rate_ff; }
-#if AGV_DEV_TESTS
         if (smooth && (steer_exit_test || steer_entry_test)) { hist_push(D.guide_pos, fast); }
+#if AGV_DEV_TESTS
         if (smooth && steer_px_test) { p_out += px_run(geom, fast); } else { s_px = 0.0f; }
 #endif
 
@@ -605,10 +604,8 @@ void steer_run(int16_t tuning_type)
         }
         if (s_steer.i_out > (float)limit)       { s_steer.i_out = (float)limit; }
         else if (s_steer.i_out < (float)-limit) { s_steer.i_out = (float)-limit; }
-#if AGV_DEV_TESTS
-        if (smooth && steer_exit_test) { exit_test(dev, fast); } else
-#endif
-        if (smooth) {
+        if (smooth && steer_exit_test) { exit_test(dev, fast); }
+        else if (smooth) {
             if (dev >= STEER_I_EXIT_ARM) { s_steer.i_exit = 1; }
             if (s_steer.i_exit && (dev < GUIDE_KP_RAMP_LO)) {
                 s_steer.i_out *= fast ? STEER_I_EXIT_DECAY : (STEER_I_EXIT_DECAY * STEER_I_EXIT_DECAY);
