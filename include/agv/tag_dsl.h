@@ -15,9 +15,14 @@
  *   OBS_ON / OBS_OFF                             장애물 센서 사용
  *   CALL( 인덱스 )                               사용자 함수
  *   ACS_SEND( 종류, 번호 )            보고, 번호 0~255  (2칸)
+ *   ACS_SEND( 종류, STATION(k) )      보고, 번호 = 스테이션 큐[k] (레거시 ACS_Station_Call_Num[k])  (2칸)
+ *   ACS_SEND( 종류, AGV_ID_MINUS(n) ) 보고, 번호 = 호기 번호 - n, n 0~255  (2칸)
+ *   ACS_SEND( STANDBY, 번호 )         대기 보고: 정지, 자동 재전송 늘 켬(레거시 DA_ACS_Standby( n, NONE ) + standby_auto_sending)
+ *   ACS_SEND( STANDBY_RESET, 번호 )   위와 같고 먼저 스테이션 큐를 지운다(레거시 DA_ACS_Standby( n, RESET ))
  *   ACS( 종류, STATION0 )            보고, 번호 = 스테이션 큐[0]  (1칸)
  *   STATION_RESET                    스테이션 큐를 지운다
  * 종류는 seq_dsl.h DSL_INFO_* 이름(LOADING UNLOADING NEXT ARRIVE FINISH PROCESSING STANDBY CALL).
+ * 시퀀스 표의 ACS_SEND( STANDBY, … ) 는 보고만 한다(정지·자동 재전송 없음).
  */
 #ifndef AGV_TAG_DSL_H
 #define AGV_TAG_DSL_H
@@ -55,8 +60,12 @@
 #define OBS_OFF                  (TA_OBS | 0)
 #define CALL(idx)                (TA_CALL | (idx))
 
-#define DSL_TSEND_OK(n)          (0 * sizeof(char[(((n) >= 0) && ((n) < 256)) ? 1 : -1]))
-#define ACS_SEND(info, num)      (TA_ACS_NUM | (uint16_t)((num) + DSL_TSEND_OK(num))), DSL_INFO_##info
+#define DSL_INFO_STANDBY_RESET   (DSL_INFO_STANDBY | TA_ACS_STANDBY_RESET)
+#define DSL_AGV_MINUS_MARK       0x10000L
+#define AGV_ID_MINUS(n)          (DSL_AGV_MINUS_MARK + (n))
+#define DSL_TSEND_OK(n)          (0 * sizeof(char[(((n) >= 0) && (((n) & 0xFFFFL) < 256)) ? 1 : -1]))
+#define DSL_TSEND_FLAG(n)        (DSL_IS_STATION(n) ? TA_ACS_STATION : (((n) >= DSL_AGV_MINUS_MARK) ? TA_ACS_AGV_MINUS : 0))
+#define ACS_SEND(info, num)      (TA_ACS_NUM | (uint16_t)(((num) & 0xFF) + DSL_TSEND_OK(num))), (DSL_INFO_##info | DSL_TSEND_FLAG(num))
 #define ACS(info, src)           DSL_TACS_##src(info)
 #define DSL_TACS_STATION0(info)  (TA_ACS | DSL_INFO_##info)
 #define STATION_RESET            TA_STATION_RESET

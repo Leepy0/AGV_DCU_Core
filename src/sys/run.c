@@ -186,13 +186,14 @@ void run_report_stop(void)
 void run_standby(int16_t id, int16_t reset)
 {
     D.wait_start = 0;
-    if (reset) { acs_station_reset(); }
+    if (reset & RUN_STANDBY_RESET) { acs_station_reset(); }
     s_run.standby = id;
     if ((id > 0) && (D.turn_pulses == 0) && (D.turn_motion == 0)) {
         stop_request_rapid(STOP_REASON_COMMAND);
         D.flag_stopping = 1;
         s_run.standby_auto = 1;
     }
+    if (reset & RUN_STANDBY_AUTO) { s_run.standby_auto = 1; }
     s_run.status_cnt = 0;
     acs_report_slot(ACS_SLOT_STANDBY, id);
 }

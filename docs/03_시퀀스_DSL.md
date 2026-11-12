@@ -368,7 +368,7 @@ TAG_TABLE_END
 
 - `tagact_run(tag)`는 활성 프로파일과 번호가 맞는 첫 규칙을 찾아 액션을 순서대로 실행한다. 규칙이 없으면 아무것도 하지 않는다.
 - 액션은 규칙당 4칸이다. `AGV_TURN`은 2칸을 쓴다. 넘치면 `CALL( 인덱스 )`.
-- 보고·스테이션은 태그 표 파일에서 `agv/tag_dsl.h`를 포함하고 시퀀스 표와 같은 이름으로 쓴다. `ACS_SEND( 종류, 번호 )`(0\~255, 2칸), `ACS( 종류, STATION0 )`(1칸), `STATION_RESET`. 숫자 칸 `( TA_ACS | DSL_INFO_… )`, `( TA_ACS_NUM | n ), DSL_INFO_…`도 쓸 수 있다. 예전 `A_` 이름(`A_STOP` 등)은 v0.47.0 에서 뺐다(대응표는 CHANGELOG v0.47.0).
+- 보고·대기·스테이션은 태그 표 파일에서 `agv/tag_dsl.h`를 포함하고 시퀀스 표와 같은 이름으로 쓴다. `ACS_SEND( 종류, 번호 )`(0\~255, 2칸), 번호 자리에 `STATION(k)`(스테이션 큐[k], 레거시 `ACS_Station_Call_Num[k]`) 또는 `AGV_ID_MINUS(n)`(호기 번호 - n), `ACS( 종류, STATION0 )`(1칸), `STATION_RESET`. 대기 `ACS_SEND( STANDBY, n )`은 레거시 `DA_ACS_Standby( n, NONE )` + `standby_auto_sending = ON`(정지, 자동 재전송 늘 켬), `ACS_SEND( STANDBY_RESET, n )`은 `DA_ACS_Standby( n, RESET )`(먼저 스테이션 큐를 지운다)이다. 예: `TAG( 30, PF_X, AGV_STOP, ACS_SEND( STANDBY, 1 ), STATION_RESET )`. 둘째 칸 = Info | `TA_ACS_STANDBY_RESET`(0x100) | `TA_ACS_AGV_MINUS`(0x200) | `TA_ACS_STATION`(0x400). 시퀀스 표의 `ACS_SEND( STANDBY, … )`는 보고만 한다. `STATION[k]`(대괄호)는 쓰지 않는다: 문자열 첨자 같은 우회는 C 정수 상수식이 아니라 컴파일 때 범위 검사(`sizeof` 배열)와 같이 못 쓰고 표준 밖 확장에 기댄다. 숫자 칸 `( TA_ACS | DSL_INFO_… )`, `( TA_ACS_NUM | n ), DSL_INFO_…`도 쓸 수 있다. 예전 `A_` 이름(`A_STOP` 등)은 v0.47.0 에서 뺐다(대응표는 CHANGELOG v0.47.0).
 - 조건은 `TAG_IF`의 셋째 인자 하나. 확장 조건 둘과 입력 조건 하나를 AND 한다.
 
 | 매크로 | 뜻 |

@@ -93,6 +93,10 @@ static const tag_rule_t s_rules[] = {
     TAG_IF( 22, 0, IF_STATION_DIV( 0, 10, 4 ), OBS_OFF )
     TAG_IF( 23, 0, IF_IN( ANY_ON(IN_EXT_16, IN_START_SW) ), OBS_ON )
     TAG_IF( 23, 0, IF_X( X_NOT(X_CROSS_IN) ), OBS_OFF )
+    /* 대기·도착 보고 (tag_dsl.h) */
+    TAG( 34, 0, AGV_STOP, ACS_SEND( STANDBY, AGV_ID_MINUS(2) ), STATION_RESET )
+    TAG( 35, 0, ACS_SEND( STANDBY_RESET, 14 ) )
+    TAG( 36, 0, ACS_SEND( ARRIVE, STATION(1) ) )
 };
 
 /* 위 20~23 과 같은 규칙의 압축 표. 앞 줄은 다른 프로파일이라 건너뛴다 */
@@ -1492,6 +1496,29 @@ static void align_start(uint16_t next)
     D.flag_turn = 1;
     D.control = RUN_TURN;
     D.guide_all_off = 1;
+}
+
+/* 태그 대기 보고: 번호(호기 - n), 스테이션 큐 지움(뒤·앞), 정지. 도착 보고 번호 = 스테이션 큐[1] */
+static void test_tag_standby(void)
+{
+    boot();
+    acs_station_set(0, 101, 2);
+    acs_station_set(1, 202, 2);
+    D.vin_out = 50;
+    host.sci[HAL_SCI_A].tx_len = 0;
+    (void)tagact_run(36);
+    ticks(2);
+    assert(tx_has('E', 'A'));
+    (void)tagact_run(34);
+    assert(run_standby_num() == AGV_ID - 2 && D.flag_stopping && acs_station_count() == 0);
+    run_standby_clear(0);
+    acs_station_set(0, 101, 1);
+    (void)tagact_run(35);
+    assert(run_standby_num() == 14 && acs_station_count() == 0);
+    ticks(2);
+    assert(tx_has('E', 'B'));
+    run_standby_clear(0);
+    printf("  tag standby ok\n");
 }
 
 /* 정렬 회전: 'h' 로 슬립을 재고, 목표각 근방에서 라인을 찾아 중앙에서 끝낸다 */
@@ -2924,6 +2951,7 @@ int main(void)
     test_para_init();
     test_lamp();
     test_align_turn();
+    test_tag_standby();
     test_tune_entry();
     test_ee_probe();
     test_tune_menu();

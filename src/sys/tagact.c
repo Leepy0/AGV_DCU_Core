@@ -286,6 +286,16 @@ static void autostart(uint16_t sec)
     if (wait != 0u) { run_request_restart(wait); }
 }
 
+/* 태그 보고. 대기('B')는 레거시 DA_ACS_Standby + standby_auto_sending = ON: 정지, 자동 재전송 늘 켬,
+ * TA_ACS_STANDBY_RESET 이면 먼저 스테이션 큐를 지운다 */
+static void tag_acs(uint16_t info, int16_t num)
+{
+    if ((info & 0xFFu) == 'B') {
+        run_standby(num, (int16_t)(RUN_STANDBY_AUTO | ((info & TA_ACS_STANDBY_RESET) ? RUN_STANDBY_RESET : 0)));
+    }
+    else { acs_report(info & 0xFFu, num); }
+}
+
 #ifdef AGV_HOST_BUILD
 void (*tagact_trace)(uint16_t code, uint16_t next);   /* 시험용: 실행하는 동작마다 알린다 */
 #endif
@@ -318,8 +328,11 @@ static void act_exec(uint16_t code, uint16_t next)
     case TA_BRANCH:         tagact_branch((branch_dir_t)arg); break;
     case TA_SEQ:            tagact_stop(); seq_request(arg); break;
     case TA_TAPE_STOP:      D.tape_stop_id = (int16_t)arg; break;
-    case TA_ACS:            acs_report(arg, acs_station_get(0)); break;
-    case TA_ACS_NUM:        acs_report(next, (int16_t)arg); break;
+    case TA_ACS:            tag_acs(arg, acs_station_get(0)); break;
+    case TA_ACS_NUM:
+        tag_acs(next, (next & TA_ACS_STATION) ? acs_station_get(arg)
+                      : (next & TA_ACS_AGV_MINUS) ? (int16_t)(param_get(P_AGV_ID) - (int16_t)arg) : (int16_t)arg);
+        break;
     case TA_OBS:            D.obs_use = (int16_t)arg; break;
     case TA_STATE:          seq_state_set(arg, next); break;
     case TA_STATION_RESET:  acs_station_reset(); break;

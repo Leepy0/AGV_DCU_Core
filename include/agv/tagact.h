@@ -67,7 +67,10 @@ extern void (*tagact_trace)(uint16_t code, uint16_t next);   /* 호스트 시험
 #define TA_SEQ            0x0700   /* 인자: seq_id_t (정지 + 시퀀스 요청) */
 #define TA_TAPE_STOP      0x0800   /* 인자: seq_id_t (테이프 탐색 정지 뒤 시퀀스) */
 #define TA_ACS            0x0900   /* 인자: DSL_INFO_* ; 번호는 스테이션 큐[0] */
-#define TA_ACS_NUM        0x0A00   /* 인자: 번호 상수 (다음 칸에 Info) */
+#define TA_ACS_NUM        0x0A00   /* 인자: 번호 상수 (다음 칸에 Info | TA_ACS_* 비트) */
+#define TA_ACS_STANDBY_RESET 0x0100   /* 다음 칸: Info 'B' 에서 먼저 스테이션 큐를 지운다 */
+#define TA_ACS_AGV_MINUS  0x0200   /* 다음 칸: 번호 = 호기 번호 - 인자 */
+#define TA_ACS_STATION    0x0400   /* 다음 칸: 번호 = 스테이션 큐[인자] */
 #define TA_OBS            0x0B00   /* 인자: on/off */
 #define TA_STATE          0x0C00   /* 인자: 사이트 상태 id (다음 칸: 값) */
 #define TA_STATION_RESET  0x0E00
