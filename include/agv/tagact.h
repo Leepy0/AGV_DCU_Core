@@ -51,6 +51,10 @@ typedef struct {
 #define TAG_COND_STATION_RANGE   XC_STATION
 #define TAG_COND_STATION_RUNNING XC_STATION_RUNNING
 
+#ifdef AGV_HOST_BUILD
+extern void (*tagact_trace)(uint16_t code, uint16_t next);   /* 호스트 시험 전용: 실행 동작 기록 훅. 0 = 끔 */
+#endif
+
 /* 액션 코드: 상위 8비트 종류, 하위 8비트 인자 */
 #define TA_KIND(code)     ((code) >> 8)
 #define TA_ARG(code)      ((code) & 0xFF)

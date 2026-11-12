@@ -260,7 +260,7 @@ typedef unsigned long long dsl_cond_t;
 #define TAG_ACT_BEGIN(name)    static const tag_act_t name[] = { { { 0 } },
 #define TAG_ACTS(...)          { { __VA_ARGS__ } },
 #define TAGP_BEGIN(name)       static const tag_pack_t name[] = {
-#define TAGP(tag, profile, x1, x2, in, act)     { (uint16_t)((tag) | ((profile) << 10)), (uint16_t)((x1) | ((x2) << 8)), (uint16_t)((act) | ((in) << 8)) },
+#define TAGP(tag, profile, x1, x2, in, act)     { (uint16_t)((tag) | ((uint16_t)(profile) << 10)), (uint16_t)((x1) | ((uint16_t)(x2) << 8)), (uint16_t)((act) | ((uint16_t)(in) << 8)) },
 #define TAG_POOL_END           };
 #define TAG_PACKED(name, rules, x, in, act)     const tag_packed_t name = { rules, x, in, act, (uint16_t)(sizeof(rules) / sizeof(rules[0])) };
 
