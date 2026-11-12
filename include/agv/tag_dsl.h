@@ -19,7 +19,7 @@
  *   ACS_SEND( 종류, AGV_ID_MINUS(n) ) 보고, 번호 = 호기 번호 - n, n 0~255  (2칸)
  *   ACS_SEND( STANDBY, 번호 )         대기 보고: 정지, 자동 재전송 늘 켬(레거시 DA_ACS_Standby( n, NONE ) + 자동 재전송 켬)
  *   ACS_SEND( STANDBY_RESET, 번호 )   위와 같고 먼저 스테이션 큐를 지운다(레거시 DA_ACS_Standby( n, RESET ))
- *   ACS( 종류, STATION0 )            보고, 번호 = 스테이션 큐[0]  (1칸)
+ *   ACS( 종류, STATION0 )            보고, 번호 = 스테이션 큐[0]  (1칸. STANDBY_RESET 은 컴파일 오류, ACS_SEND 로)
  *   STATION_RESET                    스테이션 큐를 지운다
  * 종류는 seq_dsl.h DSL_INFO_* 이름(LOADING UNLOADING NEXT ARRIVE FINISH PROCESSING STANDBY CALL).
  * 시퀀스 표의 ACS_SEND( STANDBY, … ) 는 보고만 한다(정지·자동 재전송 없음).
@@ -71,7 +71,9 @@
 #define DSL_TSEND_FLAG(n)        (DSL_IS_STATION(n) ? TA_ACS_STATION : (((n) >= DSL_AGV_MINUS_MARK) ? TA_ACS_AGV_MINUS : 0))
 #define ACS_SEND(info, num)      (TA_ACS_NUM | (uint16_t)(((num) & 0xFF) + DSL_TSEND_OK(num))), (DSL_INFO_##info | DSL_TSEND_FLAG(num))
 #define ACS(info, src)           DSL_TACS_##src(info)
-#define DSL_TACS_STATION0(info)  (TA_ACS | DSL_INFO_##info)
+/* 1칸 형식은 정보 값이 인자 8비트뿐이다. 0xFF 를 넘으면(STANDBY_RESET 등) 윗비트가 동작 코드에 묻히므로 컴파일 오류 */
+#define DSL_TACS_OK(v)           (0 * sizeof(char[((v) <= 0xFF) ? 1 : -1]))
+#define DSL_TACS_STATION0(info)  (TA_ACS | (DSL_INFO_##info + DSL_TACS_OK(DSL_INFO_##info)))
 #define STATION_RESET            TA_STATION_RESET
 
 #endif /* AGV_TAG_DSL_H */

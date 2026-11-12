@@ -9,6 +9,11 @@ $failed = 0
 
 & gcc -std=c99 -DAGV_HOST_BUILD -Iinclude tests/test_dsl.c -o build/t/test_dsl.exe
 if ($LASTEXITCODE -ne 0) { $failed++ } else { & build/t/test_dsl.exe; if ($LASTEXITCODE -ne 0) { $failed++ } }
+# Compile-error tests: each NEG_* in test_dsl.c must fail to compile
+foreach ($n in 'AMP_INPUT', 'NO_DIRECTION', 'PARAM_ZERO', 'MOD_ZERO', 'HIGH_ANY', 'TURN_SPEED', 'ACS1_RESET') {
+    & cmd /c "gcc -std=c99 -DAGV_HOST_BUILD -Iinclude -DNEG_$n -fsyntax-only tests/test_dsl.c >nul 2>nul"
+    if ($LASTEXITCODE -eq 0) { Write-Output "NEG_$n compiled"; $failed++ }
+}
 
 # Both builds: with the tuning t3 dev tests (default) and without (AGV_DEV_TESTS=0, site images)
 foreach ($dv in 1, 0) {

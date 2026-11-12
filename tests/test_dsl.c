@@ -3,7 +3,8 @@
  *
  * 호스트: gcc -std=c99 -DAGV_HOST_BUILD -Iinclude tests/test_dsl.c -o build/test_dsl && build/test_dsl
  * 타깃:   cl2000 -v28 -ml -mt --c99 -Iinclude --compile_only tests/test_dsl.c
- * 컴파일 오류 시험: -DNEG_AMP_INPUT, -DNEG_NO_DIRECTION, -DNEG_PARAM_ZERO, -DNEG_MOD_ZERO, -DNEG_HIGH_ANY, -DNEG_TURN_SPEED 각각 컴파일이 실패해야 한다.
+ * 컴파일 오류 시험: -DNEG_AMP_INPUT, -DNEG_NO_DIRECTION, -DNEG_PARAM_ZERO, -DNEG_MOD_ZERO, -DNEG_HIGH_ANY, -DNEG_TURN_SPEED,
+ * -DNEG_ACS1_RESET 각각 컴파일이 실패해야 한다(tests/run_host.ps1 이 하나씩 본다).
  */
 #include "agv/seq_dsl.h"
 
@@ -132,6 +133,9 @@ TAG_TABLE_BEGIN( site_tags )
 #endif
 #ifdef NEG_TURN_SPEED
     TAG( 39, 1, AGV_TURN( CW, 90, 0, 1, 0, 32 ) )
+#endif
+#ifdef NEG_ACS1_RESET
+    TAG( 44, 1, ACS( STANDBY_RESET, STATION0 ) )                   /* 1칸에 대기 리셋 비트가 들어갈 자리가 없다 */
 #endif
 TAG_TABLE_END
 
