@@ -1010,34 +1010,41 @@ static void test_menu5(void)
 
 #if AGV_DEV_TESTS
 static void boot_keys(uint16_t keys, int keep);
-/* TST 임시 시험: 0~8, EEPROM 82 에 남아 부팅 뒤 되살아난다. LG·OPT·K_P 원래 값은 그대로 두고 읽기만 덮는다 */
+/* TST 임시 시험: 0~8, EEPROM 82 에 남아 부팅 뒤 되살아난다. OPT·K_P·FF 원래 값은 그대로 두고 읽기만 덮는다.
+ * v0.42.0 번호(param.c s_tst): 조향 추정, 속도 루프(0 지금·1 새1·2 새2), 교차선 유지, 반응형 속도, 칼만 위치, K_P 60 */
 static void test_tst(void)
 {
+    static const int16_t want[9][6] = {
+        { 0, 0, 0, 0, 0, 0 }, { 1, 1, 0, 0, 0, 0 }, { 1, 0, 0, 0, 0, 0 }, { 0, 1, 0, 0, 0, 0 }, { 1, 1, 1, 1, 0, 0 },
+        { 0, 1, 0, 0, 1, 0 }, { 0, 1, 0, 0, 0, 1 }, { 0, 0, 1, 0, 0, 0 }, { 0, 2, 0, 0, 0, 0 }
+    };
     char c[5];
-    int16_t lg;
+    int16_t lg, t;
     boot();
     lg = param_get(P_LEGACY_QUIRKS);
-    assert(!(lg & QUIRK_STEER_STEP) && param_get(P_DEV_TEST) == 0 && !guide_hold_test && !rpm_avg_test && param_get(P_STEER_KP) == 0);
+    assert(!(lg & QUIRK_STEER_STEP) && param_get(P_DEV_TEST) == 0 && !guide_hold_test && !speed_pi_test && param_get(P_STEER_KP) == 0);
     ui_param_text(P_DEV_TEST, 5, c);
     assert(memcmp(c, "TST 5", 5) == 0);
     assert(param_set(P_DEV_TEST, 9) != 0);
-    /* v0.40.1 번호: 1 추정+유지+반응형, 2 37차+유지, 3 추정+유지, 4 추정, 5 rpm 2표본, 6 K_P 60, 7 칼만 위치, 8 예전 조향 */
-    assert(param_set(P_DEV_TEST, 6) == 0 && param_get(P_STEER_KP) == PARAM_TST_KP && D.p_kp == (float)PARAM_TST_KP);
-    assert(param_set(P_DEV_TEST, 7) == 0 && param_opt(OPT_KF_POSITION) && param_get(P_OPT_FLAGS) == 0);
-    assert(param_get(P_STEER_KP) == 0 && D.p_kp == 0.0f);
-    assert(param_set(P_DEV_TEST, 8) == 0 && param_quirk(QUIRK_STEER_STEP) && param_get(P_LEGACY_QUIRKS) == lg);
-    assert(!param_opt(OPT_KF_POSITION));
-    assert(param_set(P_DEV_TEST, 4) == 0 && steer_alg_test && !speed_curve_test && !guide_hold_test);
-    assert(param_set(P_DEV_TEST, 1) == 0 && steer_alg_test && speed_curve_test && guide_hold_test);
-    assert(param_set(P_DEV_TEST, 3) == 0 && guide_hold_test && steer_alg_test && !speed_curve_test && !param_quirk(QUIRK_STEER_STEP));
-    assert(param_set(P_DEV_TEST, 5) == 0 && !guide_hold_test && rpm_avg_test && !steer_alg_test);
+    assert(param_set_ram(P_SPEED_FF, 300) == 0);
+    for (t = 8; t >= 0; t--) {
+        const int16_t *w = want[t];
+        assert(param_set(P_DEV_TEST, t) == 0);
+        assert(steer_alg_test == w[0] && speed_pi_test == w[1] && guide_hold_test == w[2] && speed_curve_test == w[3]);
+        assert(param_opt(OPT_KF_POSITION) == w[4] && param_get(P_OPT_FLAGS) == 0);
+        assert(param_get(P_STEER_KP) == (w[5] ? PARAM_TST_KP : 0) && D.p_kp == (float)(w[5] ? PARAM_TST_KP : 0));
+        assert(motor_speed_ff() == (w[1] ? 0.999f : 0.3f) && param_get(P_SPEED_FF) == 300);   /* FF 파라미터는 그대로 */
+        assert(!param_quirk(QUIRK_STEER_STEP) && param_get(P_LEGACY_QUIRKS) == lg);         /* 예전 8(예전 조향)은 없다 */
+    }
+    (void)param_set_ram(P_SPEED_FF, 0);
+    assert(param_set(P_DEV_TEST, 8) == 0 && speed_pi_test == 2);
     ticks(100);
-    assert(host.ee[82] == 5);
-    boot_keys(0, 1);                                  /* 전원을 다시 켜도 5 */
-    assert(param_get(P_DEV_TEST) == 5 && rpm_avg_test);
-    assert(param_set(P_DEV_TEST, 0) == 0 && !rpm_avg_test && !guide_hold_test);
+    assert(host.ee[82] == 8);
+    boot_keys(0, 1);                                  /* 전원을 다시 켜도 8 */
+    assert(param_get(P_DEV_TEST) == 8 && speed_pi_test == 2);
+    assert(param_set(P_DEV_TEST, 0) == 0 && !speed_pi_test && !guide_hold_test);
     boot();
-    assert(param_set(P_DEV_TEST, 2) == 0 && guide_hold_test && !steer_alg_test);
+    assert(param_set(P_DEV_TEST, 7) == 0 && guide_hold_test && !steer_alg_test);
     guide_hold_test = 0;                              /* 주행 시작 때 다시 건다(guide_poll) */
     ticks(120);
     drive_up();
@@ -1145,6 +1152,10 @@ static void test_wt_ff(void)
     assert(wtest_run() == 0 && param_get(P_SPEED_FF) == 0 && agv_wt.ff_old == 0);
     agv_wt.phase = 4; agv_wt.state = 3; agv_wt.ff = 123;
     assert(wtest_run() == 0 && param_get(P_SPEED_FF) == 0);
+    assert(param_set_ram(P_DEV_TEST, 3) == 0);       /* 속도 루프 시험(고정 FF) 중에는 저장하지 않는다 */
+    agv_wt.phase = 4; agv_wt.state = 2;
+    assert(wtest_run() == 0 && param_get(P_SPEED_FF) == 0);
+    assert(param_set_ram(P_DEV_TEST, 0) == 0);
     agv_wt.phase = 4; agv_wt.state = 2;
     assert(wtest_run() == 0 && param_get(P_SPEED_FF) == 123 && agv_wt.ff_old == 0);
     ticks(50);

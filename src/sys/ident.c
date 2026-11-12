@@ -857,7 +857,7 @@ static void rpm_release(void)
     if (!motor_dac_forced()) { return; }
     motor_dac_release();
     for (i = 0; i < 2u; i++) {
-        D.iref_it[i] = (float)D.tq_cmd[i] - P.speed_ff * (float)act;
+        D.iref_it[i] = (float)D.tq_cmd[i] - motor_speed_ff() * (float)act;   /* 속도 루프 시험(TST)이면 고정 FF */
         D.iref_fb[i] = D.w_pi_out[i] = D.iref_it[i];
     }
     steer_reset();

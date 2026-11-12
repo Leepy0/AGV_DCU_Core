@@ -46,7 +46,7 @@ enum {
     P_EMPTY_DCC,            /* 57 EDC: 공차 감속 (적재 13번) */
     P_LOAD_DETECT,          /* 58 LDS: 적재 감지 사용. 0 = 늘 적재(예전과 같다) */
 #if AGV_DEV_TESTS
-    P_DEV_TEST,             /* 59 TST: 임시 시험 고르기 0~8(param_tst_apply). 체크섬 밖 EEPROM 82(KEEP 빈 칸). 개발 이미지에만 */
+    P_DEV_TEST,             /* 59 TST: 임시 시험 고르기 0~8(param_tst_apply, param.c s_tst). 체크섬 밖 EEPROM 82(KEEP 빈 칸). 개발 이미지에만 */
 #endif
     P_COUNT
 };
@@ -142,11 +142,11 @@ int16_t  param_profile_empty(void);
 int16_t  param_active(uint16_t idx);
 
 #if AGV_DEV_TESTS
-/* TST(P_DEV_TEST) 임시 시험. 원래 값(LG·OPT·K_P)은 두고 RAM 에서만 덮는다.
- * 번호는 가치·우선순위 순(v0.40.1):
- *  0 평소(37차 조향), 1 추정 조향 + 교차선 유지 + 반응형 속도, 2 37차 + 교차선 유지, 3 추정 조향 + 교차선 유지, 4 추정 조향,
- *  5 rpm 피드백 평균 2표본, 6 K_P 60 고정(param_get), 7 OPT_KF_POSITION(param_opt), 8 QUIRK_STEER_STEP(param_quirk, LG 256 과 같다).
- * 6~8 은 읽을 때마다 반영된다. 나머지 전역과 D.p_kp 는 이 함수가 맞춘다: 부팅·TST 저장 때, 주행 시작 때(TST 0 이 아니면) */
+/* TST(P_DEV_TEST) 임시 시험. 원래 값(OPT·K_P·FF)은 두고 RAM 에서만 덮는다. 조합은 param.c s_tst 표(v0.42.0 에서 번호를 다시 배열).
+ * 새1 = 속도 PI 되먹임 1표본 Kp 0.8 Ki 0.16, 새2 = 2표본 평균 Kp 0.8 Ki 0.12, 둘 다 FF 0.999 고정(motor.h):
+ *  0 평소(37차 조향), 1 추정 조향 + 새1, 2 추정 조향, 3 새1, 4 추정 조향 + 새1 + 교차선 유지 + 반응형 속도,
+ *  5 칼만 위치(param_opt) + 새1, 6 K_P 60 고정(param_get) + 새1, 7 교차선 유지, 8 새2.
+ * 칼만·K_P 는 읽을 때마다 반영된다. 나머지 전역과 D.p_kp 는 이 함수가 맞춘다: 부팅·TST 저장 때, 주행 시작 때(TST 0 이 아니면) */
 #define PARAM_TST_KP 60
 void     param_tst_apply(void);
 #endif

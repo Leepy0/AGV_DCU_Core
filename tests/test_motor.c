@@ -810,6 +810,58 @@ int main(void)
     assert(D.tq_cmd[0] == 100 && D.tq_cmd[1] == 100);
     (void)param_set(P_SPEED_FF, 0);
 
+    /* 속도 루프 시험(TST): 폐루프 수열을 고치기 전 식(참조)과 한 비트까지 맞춘다. 줄 0 = 고치기 전 상수 그대로,
+     * 새1·새2 = 표 값. 되먹임 선택·ka(포화로 확인)·FF 계수, D.rpm_avg 는 줄과 무관하게 6표본 평균 */
+    {
+        static const struct { int fb; float kp, ki, ka, ff; } row[3] = {
+            { 0, 2.2f, 0.2f,  1.0f / 2.2f, -1.0f },   /* 고치기 전: static const ka = 1/MOTOR_SPEED_KP, FF 파라미터 */
+            { 1, 0.8f, 0.16f, 1.0f / 0.8f, 0.999f },
+            { 2, 0.8f, 0.12f, 1.0f / 0.8f, 0.999f }
+        };
+        for (int r = 0; r < (AGV_DEV_TESTS ? 3 : 1); r++) {
+            float it[2] = { 0 }, fbk[2] = { 0 }, out[2] = { 0 }, plant[2] = { 0 };
+            int16_t h[2][5] = { { 0 } };
+            setup();
+            (void)param_set_ram(P_SPEED_FF, 250);
+#if AGV_DEV_TESTS
+            speed_pi_test = (int16_t)r;
+            assert(motor_speed_ff() == ((r == 0) ? P.speed_ff : 0.999f));
+#endif
+            D.add_speed_l = 120;
+            for (int t = 0; t < 400; t++) {
+                int16_t in = (t < 40) ? (int16_t)(t * 50) : ((t < 150) ? 2000 : ((t < 200) ? 0 : ((t < 260) ? 3500 : 900)));
+                motor_feedback_update();
+                motor_speed_pi(in);
+                for (int i = 0; i < 2; i++) {
+                    int16_t cmd = (int16_t)(in + ((i == 0) ? 120 : 0));
+                    int16_t avg6 = (int16_t)((D.rpm[i] + h[i][0] + h[i][1] + h[i][2] + h[i][3] + h[i][4]) / 6);
+                    int16_t fv = (row[r].fb == 0) ? avg6 : ((row[r].fb == 1) ? D.rpm[i] : (int16_t)((D.rpm[i] + h[i][0]) / 2));
+                    float ff = (row[r].ff < 0.0f) ? 0.25f : row[r].ff, tq;
+                    int16_t err = (int16_t)(cmd - fv);
+                    if (cmd == 0) { err = 0; out[i] = it[i] = fbk[i] = 0.0f; }
+                    it[i] += row[r].ki * ((float)err - row[r].ka * (fbk[i] - out[i]));
+                    fbk[i] = row[r].kp * (float)err + it[i];
+                    out[i] = (fbk[i] > 4000.0f) ? 4000.0f : fbk[i];
+                    tq = out[i] + (ff * (float)cmd);
+                    if (tq > 4000.0f) { tq = 4000.0f; }
+                    assert(D.w_cmd[i] == cmd && D.w_err[i] == err && D.iref_it[i] == it[i] && D.w_pi_out[i] == out[i]);
+                    assert(D.tq_cmd[i] == ((tq > 0.0f) ? (int16_t)tq : 0));
+                    assert(D.rpm_avg[i] == avg6);                       /* 다른 곳이 보는 값은 늘 6표본 평균 */
+                    memmove(&h[i][1], &h[i][0], 4 * sizeof(int16_t));
+                    h[i][0] = D.rpm[i];
+                    /* 바퀴: rpm/DAC 0.64, 1차 지연. 100 rpm 아래면 펄스 없음 */
+                    plant[i] += 0.3f * (0.64f * (float)D.tq_cmd[i] - plant[i]);
+                    if (plant[i] >= 100.0f) { D.period[i] = (int32_t)(500000000.0f / plant[i]); motor_encoder_pulse((uint16_t)i); }
+                }
+                if (t == 255) { assert(D.w_pi_out[1] == 4000.0f); }    /* 3500 rpm 지령: 포화(역계산 ka 가 쓰인다) */
+            }
+            (void)param_set_ram(P_SPEED_FF, 0);
+        }
+#if AGV_DEV_TESTS
+        speed_pi_test = 0;
+#endif
+    }
+
     /* 엔코더 고착: 지령 바닥 이상, 오른쪽만 펄스, 왼쪽은 N 틱 무펄스 */
     setup();
     D.amp_run = 1;

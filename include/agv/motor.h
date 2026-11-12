@@ -6,6 +6,7 @@
 #define AGV_MOTOR_H
 
 #include "agv/types.h"
+#include "agv/param.h"      /* AGV_DEV_TESTS 기본값, motor_speed_ff */
 
 #define MOTOR_TORQUE_LIMIT   4000.0f
 #define MOTOR_SPEED_KP       2.2f
@@ -36,8 +37,14 @@ int16_t motor_raw_rpm(uint16_t wheel);          /* 스파이크 컷 전 rpm. 327
 void    motor_spike_set(int16_t rpm);           /* 측정 rpm 스파이크 컷. 0 = 기본 MOTOR_RPM_SPIKE */
 int16_t motor_spike(void);
 
-/* rpm 피드백 평균 시험(TST 7, AGV_DEV_TESTS 에서만 정의). 0 = 6표본 평균, 1 = 최근 2표본 평균(D.rpm_avg, 속도 PI 피드백) */
-extern int16_t rpm_avg_test;
+/* 속도 루프 시험(TST, AGV_DEV_TESTS 에서만 정의). 0 = 지금, 1 = 새1(1표본 되먹임 Kp 0.8 Ki 0.16 FF 0.999),
+ * 2 = 새2(2표본 평균 Kp 0.8 Ki 0.12 FF 0.999). PI 오차의 되먹임만 바꾸고 D.rpm_avg 는 그대로다. 값은 motor.c s_spi */
+#if AGV_DEV_TESTS
+extern int16_t speed_pi_test;
+float   motor_speed_ff(void);                   /* 지금 쓰는 피드포워드 계수(rpm 당 토크). 새1·새2 면 고정값 */
+#else
+#define motor_speed_ff() (param_dv.speed_ff)
+#endif
 
 /* DA_SCV_Speed_Core. 상태를 인자로 받는 순수 함수. 저크 min(2.4, 한계/8) rpm/틱²(정지 램프 llow -1 은 2.4), acc·dcc 는 가감속도 상한.
  * flags SCV_JERK_OLD = 예전 저크(한계/8)와 목표 0 일 때 stop_floor 아래 0 으로 한 번에(QUIRK_JERK_OLD 도 같다).

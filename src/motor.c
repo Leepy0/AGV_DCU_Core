@@ -55,7 +55,16 @@ float atanf(float x);
 
 agv_drive_t agv_drive;
 #if AGV_DEV_TESTS
-int16_t rpm_avg_test;       /* motor.h */
+int16_t speed_pi_test;      /* motor.h */
+/* 속도 루프 시험 표. 줄 = speed_pi_test(0 지금, 1 새1, 2 새2). 값만 고치면 된다.
+ * fb: PI 되먹임 0 = D.rpm_avg(6표본), 1 = 1표본(D.rpm), 2 = 2표본 평균. ka = 1/Kp(역계산 anti-windup). ff < 0 = 파라미터 FF */
+#define SPI_ROW(fb, kp, ki, ff) { fb, kp, ki, 1.0f / (kp), ff }
+static const struct { int16_t fb; float kp, ki, ka, ff; } s_spi[3] = {
+    SPI_ROW(0, MOTOR_SPEED_KP, MOTOR_SPEED_KI, -1.0f),
+    SPI_ROW(1, 0.8f, 0.16f, 0.999f),    /* 새1 */
+    SPI_ROW(2, 0.8f, 0.12f, 0.999f)     /* 새2 */
+};
+float motor_speed_ff(void) { return (s_spi[speed_pi_test].ff >= 0.0f) ? s_spi[speed_pi_test].ff : P.speed_ff; }
 #endif
 
 static struct {
@@ -70,6 +79,9 @@ static struct {
     int16_t  raw[2];           /* 스파이크 컷 전 rpm */
     int16_t  force[2], forcing;
     int16_t  spike;            /* 스파이크 컷. 0 = MOTOR_RPM_SPIKE */
+#if AGV_DEV_TESTS
+    int16_t  pi_fb[2];         /* 속도 루프 시험(새1·새2)의 PI 되먹임. D.rpm_avg 는 그대로 둔다 */
+#endif
 } s_motor;
 
 /* 정렬 회전 끝: 라인을 잡은 뒤 남은 각(tape_left_guide) */
@@ -154,7 +166,7 @@ void motor_feedback_update(void)
         D.rpm_avg[i] = (int16_t)((D.rpm[i] + s_motor.hist[i][0] + s_motor.hist[i][1] + s_motor.hist[i][2]
                                   + s_motor.hist[i][3] + s_motor.hist[i][4]) / 6);
 #if AGV_DEV_TESTS
-        if (rpm_avg_test) { D.rpm_avg[i] = (int16_t)((D.rpm[i] + s_motor.hist[i][0]) / 2); }
+        s_motor.pi_fb[i] = (s_spi[speed_pi_test].fb == 2) ? (int16_t)((D.rpm[i] + s_motor.hist[i][0]) / 2) : D.rpm[i];
 #endif
         D.rpm_flt[i] = (int16_t)(((float)D.rpm_flt[i] * 0.9f) + ((float)D.rpm_avg[i] * 0.1f));
 
@@ -217,7 +229,15 @@ static int16_t jog_wheel_cmd(uint16_t i, int16_t input)
 
 void motor_speed_pi(int16_t input)
 {
+    const float ff = motor_speed_ff();
+#if AGV_DEV_TESTS
+    const float kp = s_spi[speed_pi_test].kp, ki = s_spi[speed_pi_test].ki, ka = s_spi[speed_pi_test].ka;
+#define PI_FB(i) (s_spi[speed_pi_test].fb ? s_motor.pi_fb[i] : D.rpm_avg[i])
+#else
     static const float ka = 1.0f / MOTOR_SPEED_KP;
+    const float kp = MOTOR_SPEED_KP, ki = MOTOR_SPEED_KI;
+#define PI_FB(i) (D.rpm_avg[i])
+#endif
     uint16_t i;
 
     D.v_cmd = input;
@@ -230,18 +250,18 @@ void motor_speed_pi(int16_t input)
         }
         if (D.w_cmd[i] < 0) { D.w_cmd[i] = 0; }
         D.w_err_1[i] = D.w_err[i];
-        D.w_err[i] = (int16_t)(D.w_cmd[i] - D.rpm_avg[i]);
+        D.w_err[i] = (int16_t)(D.w_cmd[i] - PI_FB(i));
         if (D.w_cmd[i] == 0) {
             D.w_err[i] = 0;
             D.w_pi_out[i] = D.iref_it[i] = D.iref_fb[i] = 0.0f;
         }
         /* 역계산 anti-windup */
-        D.iref_it[i] += MOTOR_SPEED_KI * ((float)D.w_err[i] - ka * (D.iref_fb[i] - D.w_pi_out[i]));
-        D.iref_fb[i] = MOTOR_SPEED_KP * (float)D.w_err[i] + D.iref_it[i];
+        D.iref_it[i] += ki * ((float)D.w_err[i] - ka * (D.iref_fb[i] - D.w_pi_out[i]));
+        D.iref_fb[i] = kp * (float)D.w_err[i] + D.iref_it[i];
         D.w_pi_out[i] = D.iref_fb[i];
         if (D.w_pi_out[i] > MOTOR_TORQUE_LIMIT) { D.w_pi_out[i] = MOTOR_TORQUE_LIMIT; }
         {   /* 피드포워드: 지령 rpm 에 비례한 토크를 더해 PI 가 메울 몫을 줄인다 */
-            float tq = D.w_pi_out[i] + (P.speed_ff * (float)D.w_cmd[i]);
+            float tq = D.w_pi_out[i] + (ff * (float)D.w_cmd[i]);
             if (tq > MOTOR_TORQUE_LIMIT) { tq = MOTOR_TORQUE_LIMIT; }
             D.tq_cmd[i] = (tq > 0.0f) ? (int16_t)tq : 0;
         }
