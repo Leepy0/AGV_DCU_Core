@@ -331,6 +331,25 @@ int16_t motor_scv_speed(int16_t target, int16_t acc, int16_t dcc)
                           (int16_t)((D.step == DRIVE_RISK_STOP) ? SCV_JERK_OLD : 0), &D.scv_accel);
 }
 
+#if AGV_START_ALIGN
+static int16_t s_align_dev = -1;   /* 출발 정렬 속도 상한에 쓰는 편차. 정렬 단계 밖에서는 -1 */
+
+/* 출발 정렬 속도 상한: |위치| ≤ DRIVE_ALIGN_DEV_LO 면 LLOW, ≥ DRIVE_ALIGN_DEV_HI 거나 선이 안 보이면 SPN, 사이는 곧게 잇는다.
+ * 정렬이 나쁠수록 천천히 가서, 조향 상한(|v| × 1)이 같아도 차체가 도는 빠르기가 속도만큼 준다.
+ * 편차가 줄면 바로, 늘면 DRIVE_ALIGN_DEV_HYS 늦게 따른다: 곡선을 따라가며 LED 한 칸(2단위)씩 오가는 위치에 목표가 오르내리지 않게 */
+static int16_t motor_align_cap(void)
+{
+    int16_t dev = (D.guide_pos >= 0) ? D.guide_pos : (int16_t)(-D.guide_pos);
+    if ((s_align_dev < 0) || (dev < s_align_dev))    { s_align_dev = dev; }
+    else if (dev > s_align_dev + DRIVE_ALIGN_DEV_HYS) { s_align_dev = (int16_t)(dev - DRIVE_ALIGN_DEV_HYS); }
+    dev = s_align_dev;
+    if (D.guide_all_off || (dev >= DRIVE_ALIGN_DEV_HI)) { return P.min_speed; }
+    if (dev <= DRIVE_ALIGN_DEV_LO) { return P.llow_speed; }
+    return (int16_t)(P.llow_speed - (int32_t)(P.llow_speed - P.min_speed) * (dev - DRIVE_ALIGN_DEV_LO)
+                                    / (DRIVE_ALIGN_DEV_HI - DRIVE_ALIGN_DEV_LO));
+}
+#endif
+
 /* ---- 주행 단계 ---- */
 
 static void step_change_speed(void)
@@ -385,6 +404,10 @@ void motor_drive_step(void)
 #endif
         if ((D.vin_out >= P.llow_speed)
             && ((D.guide_pos >= GUIDE_RISK_THRESHOLD) || (D.guide_pos <= -GUIDE_RISK_THRESHOLD))
+#if AGV_START_ALIGN
+            /* 출발 정렬 중은 이미 LLOW 아래다. 들어가면 목표가 0.7 × LOS 로 올라 속도 상한이 풀린다 */
+            && (D.start_align != DRIVE_ALIGN_HOLD)
+#endif
 #if AGV_DEV_TESTS
             /* 유지 규칙: 유지·옮기는 중 위치는 덩어리 자리가 아니다. 새로 들어가지 않는다 */
             && (!guide_hold_test || (D.guide_track == GUIDE_TRK_NORMAL))
@@ -399,9 +422,10 @@ void motor_drive_step(void)
     branch_run();
 
 #if AGV_START_ALIGN
-    /* 출발 정렬 단계: 정렬될 때까지 목표 = min(지령, LLOW), 선이 안 보이면 SPN. 지령은 그대로 두어 정렬 뒤 평소 S커브로 간다 */
+    /* 출발 정렬 단계: 끝날 때까지 목표 = min(지령, 편차 상한 motor_align_cap). 지령은 그대로 두어 끝난 뒤 평소 S커브로 간다 */
+    if (D.start_align != DRIVE_ALIGN_HOLD) { s_align_dev = -1; }
     if ((D.start_align == DRIVE_ALIGN_HOLD) && ((D.step == DRIVE_CRUISE) || (D.step == DRIVE_CHANGE_SPEED))) {
-        int16_t cap = D.guide_all_off ? P.min_speed : P.llow_speed;
+        int16_t cap = motor_align_cap();
         if (cap < D.speed_cmd) {
             D.step = DRIVE_CHANGE_SPEED;
             D.cur_speed = motor_scv_speed(cap, P.acc, P.dcc);
@@ -448,7 +472,9 @@ void motor_drive_step(void)
         int16_t risk = (int16_t)((float)P.low_speed * 0.7f);
         D.cur_speed = motor_scv_speed((risk < D.speed_cmd) ? risk : D.speed_cmd, GUIDE_RISK_ACC, GUIDE_RISK_DCC);
         motor_velocity(D.cur_speed);
-        if ((D.cur_speed <= D.speed_cmd) && (D.guide_pos <= GUIDE_REALIGN_RANGE) && (D.guide_pos >= -GUIDE_REALIGN_RANGE)) {
+        /* 선을 잃으면 위치가 0 이라 정렬로 보인다. 선이 보일 때만 센다(선 없이 재가속하지 않는다) */
+        if ((D.cur_speed <= D.speed_cmd) && !D.guide_all_off
+            && (D.guide_pos <= GUIDE_REALIGN_RANGE) && (D.guide_pos >= -GUIDE_REALIGN_RANGE)) {
             D.guide_realign_cnt++;
             if (D.guide_realign_cnt >= GUIDE_REALIGN_TICKS) {
                 D.guide_realign_cnt = 0;

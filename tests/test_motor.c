@@ -283,6 +283,46 @@ int main(void)
     for (int i = 0; i < 2000 && D.step != DRIVE_CRUISE; i++) { motor_drive_step(); assert(D.vin_out <= D.speed_cmd); }
     assert(D.step == DRIVE_CRUISE && D.risk_stop == 0 && D.vin_out == D.speed_cmd);
 
+    /* 위험 감속 중 선을 잃으면 위치 0 이라도 재정렬로 세지 않는다(선 없이 재가속하지 않는다) */
+    setup();
+    for (int i = 0; i < 5000 && D.step != DRIVE_CRUISE; i++) { motor_drive_step(); }
+    D.guide_pos = 12;
+    motor_drive_step();
+    assert(D.step == DRIVE_RISK_STOP);
+    D.guide_pos = 0;
+    D.guide_all_off = 1;
+    for (int i = 0; i < 100; i++) { motor_drive_step(); assert(D.step == DRIVE_RISK_STOP && D.guide_realign_cnt == 0); }
+    D.guide_all_off = 0;
+    for (int i = 0; i < 10; i++) { motor_drive_step(); }
+    assert(D.step == DRIVE_RISK_RESUME);
+
+#if AGV_START_ALIGN
+    /* 출발 정렬 단계: 속도 상한 = |위치| ≤ 3 LLOW, ≥ 10·선 없음 SPN, 사이는 곧게(늘 때는 2단위 늦게). 지령은 그대로, 위험 감속에 안 들어간다 */
+    {
+        static const struct { int16_t pos, off, num; } st[6] = {
+            { 12, 0, -1 }, { 6, 0, 3 }, { 3, 0, 0 }, { 5, 0, 0 }, { 7, 0, 2 }, { 0, 1, -1 } };   /* num: (편차 - 3) 칸, -1 = SPN */
+        setup();
+        D.start_align = DRIVE_ALIGN_HOLD;
+        D.vin_out = D.last_input = P.llow_speed;
+        D.guide_pos = 12;
+        motor_drive_step();
+        assert((D.step != DRIVE_RISK_STOP) && !D.risk_stop);
+        for (int k = 0; k < 6; k++) {
+            int16_t want = (st[k].num < 0) ? P.min_speed
+                         : (int16_t)(P.llow_speed - (int32_t)(P.llow_speed - P.min_speed) * st[k].num / 7);
+            D.guide_pos = st[k].pos;
+            D.guide_all_off = st[k].off;
+            for (int i = 0; i < 2000; i++) { motor_drive_step(); assert((D.step != DRIVE_RISK_STOP) && (D.vin_out <= D.speed_cmd)); }
+            assert((D.vin_out == want) && (D.speed_cmd == P.low_speed));
+        }
+        D.guide_all_off = 0;
+        D.guide_pos = 0;
+        D.start_align = 0;      /* 단계가 끝나면 지령까지 */
+        for (int i = 0; i < 2000; i++) { motor_drive_step(); }
+        assert(D.vin_out == P.low_speed);
+    }
+#endif
+
     /* 트리거 조건: 저속이면 위험 감속 안 함 */
     setup();
     D.vin_out = (int16_t)(P.llow_speed - 1);

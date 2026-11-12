@@ -482,9 +482,11 @@ void steer_run(int16_t tuning_type)
 
         limit = (int16_t)(((D.v_cmd >= 0) ? D.v_cmd : (int16_t)(-D.v_cmd)) * 2);
 #if AGV_START_ALIGN   /* 출발 정렬 조향 상한(drive.h) */
-        if (D.start_align) {    /* 출발 정렬: × 0.5(최소 회전 반경 ≈ 휠 간격), 정렬 뒤 DRIVE_ALIGN_RAMP(30)틱에 × 2 로. (40 - k)/40 */
+        /* 출발 정렬: |v| × 1(평소의 절반). 안쪽 바퀴 지령이 0 아래로 잘리지 않고 바깥은 2배까지, 최소 회전 반경은 평소와 같은
+         * 휠 간격/2 라 따라갈 수 있는 곡선은 그대로 따라간다(× 0.5 는 R 550 아래 곡선을 못 따라갔다). 끝난 뒤 DRIVE_ALIGN_RAMP 틱에 × 2 로 */
+        if (D.start_align) {
             int16_t k = (D.start_align < DRIVE_ALIGN_RAMP) ? D.start_align : DRIVE_ALIGN_RAMP;
-            limit = (int16_t)((int32_t)limit * (40 - k) / 40);
+            limit = (int16_t)((int32_t)limit * (60 - k) / 60);
         }
 #endif
         if (limit > STEER_LIMIT_RPM) { limit = STEER_LIMIT_RPM; }
