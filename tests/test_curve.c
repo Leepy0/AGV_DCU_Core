@@ -3,14 +3,14 @@
  * 실제 코드: 'h' 응답 해석·추적(guide_feed, guide_track, guide_poll), 조향(steer_run), 주행 단계와 위험 감속
  *            (motor_run, motor_drive_step), S커브, rpm 피드백, 곡선 기록기(curvelog_tick).
  * 모형:      바퀴 rpm 은 바퀴 지령(w_cmd)을 1차 지연으로 따라간다(가감속 한계, 최고 rpm). 토크 지령은 쓰지 않는다.
- *            엔코더는 모터 12펄스/회전 그대로 낸다(펄스 길이 = 바퀴 둘레/기어비/12). 조향 추정기는 이 정수 펄스로 적분한다.
+ *            엔코더는 모터 12펄스/회전 그대로 낸다(펄스 길이 = 바퀴 둘레/기어비/12).
  *            강건성(s_m): 실제 휠 간격·GD 배율, 왼쪽 펄스 손실(미끄럼), 오른쪽 바퀴 이동 배율(좌우 바퀴 지름 차).
  *            차동 구동 운동학(휠 간격 × 회전 보정비), 회전 중심에서 GD 앞 센서, 테이프를 0.35 칸 넘게 덮은 LED 가 켜진다.
  *            센서는 10 ms 마다 그때 자세로 답한다(센서 안 지연 없음). 미끄럼·바닥 기울기·하중 없음.
  * 경로:      직선 → 원호(반경·각) → 직선.
  *
  * 인자 없이 돌리면 회귀 검사만 한다. 인자 sweep 은 미지수(LOS, 속도 루프 지연)를 훑은 표를 낸다.
- * 인자 est [자세히 0~2 [스캔 1]] 은 추정 조향(steer_alg_test 1) 대 37차 표, one2 는 한 조건(trace 가능).
+ * one2 는 한 조건(trace 가능, 스캔 인자 있음).
  * 스캔 1: 센서가 6.3 ms(실측)마다만 LED 를 새로 읽는다. 응답은 마지막 스캔 때 자세(2 ms 자세 기록에서 가장 가까운 것).
  */
 #include <assert.h>
@@ -78,8 +78,6 @@ typedef struct {
     int   mode;             /* 0 곡선, 1 옆 4단위 계단 지령, 2 편차 5단위에서 복귀,
                                3 테이프 100 mm 끊김 + 그 안 옆 8단위 자리에 길이 deg mm 인 점(바닥 반사),
                                4 출발 때 회전 중심이 오른쪽으로 deg 단위(센서 위치 +deg) */
-    int   alg;              /* steer_alg_test(AGV_DEV_TESTS): 0 37차, 1 추정 조향 */
-    int   sct;              /* speed_curve_test(AGV_DEV_TESTS): 1 반응형 곡선 속도 */
 } case_t;
 
 typedef struct {
@@ -131,7 +129,6 @@ static const case_t *s_c;
 static float s_st[6000], s_wd[6000], s_j[6000];
 static int   s_trace;       /* one ... 1: 틱마다 찍는다 */
 static int   s_gmask = 7;   /* cmp 에서 돌릴 조향(b0 새, b1 37차, b2 예전) */
-static int   s_sct;         /* 1: 모든 판에 speed_curve_test 1 */
 static int   s_tst, s_kp;   /* sim 이 거는 TST(0 = 부팅 그대로 = 기본), 고정 K_P(0 = 파라미터 그대로). 개발 빌드만 */
 static int   s_ki;          /* tst 표: K_I 파라미터(TST 뒤에 넣는다). 0 = 그대로 */
 
@@ -398,8 +395,6 @@ static void sim(const case_t *c, res_t *r)
     tune_turn_scale_set((int16_t)(TURN_SCALE * 1000.0f + 0.5f));
     curvelog_reset();
 #if AGV_DEV_TESTS
-    steer_alg_test = (int16_t)c->alg;
-    speed_curve_test = (int16_t)(c->sct | s_sct);
     if (s_tst) { assert(param_set_ram(P_DEV_TEST, (int16_t)s_tst) == 0); }
     if (s_kp) { assert(param_set_ram(P_STEER_KP, (int16_t)s_kp) == 0); }
     if (s_ki) { assert(param_set_ram(P_STEER_KI, (int16_t)s_ki) == 0); }
@@ -1258,195 +1253,6 @@ static void acceptance2(void)
 
 
 #if AGV_DEV_TESTS
-/* ---- 추정 조향(steer_alg_test 1) 대 37차 조향 ----
- * 곡선 s_cur6 × 속도 12·25·31 m/min × 바퀴 지연 100·200·300 ms × 센서 32·16칸 × GD 250·500 × 조향 2종.
- * 칸: 편차 최대·RMS mm, 곡선 평균 속도, 위험 감속 틱, 선 잃음 틱, 바퀴 지령 차 흔들림 %·방향 바뀜/s, 출구 넘침 mm, 끝 1 m RMS mm.
- * 합격(GD 250, 조건마다 37차와 견줌): 선 잃음 0, 방향 바뀜 ≤ 37차/2, 편차 최대 ≤ 37차, 끝 RMS ≤ 37차 + 1 mm.
- * 결과는 s_es 에 남긴다 */
-static float med_f(float *v, int n)
-{
-    if (n <= 0) { return 0.0f; }
-    qsort(v, (size_t)n, sizeof(float), cmp_f);
-    return ((n & 1) != 0) ? v[n / 2] : 0.5f * (v[n / 2 - 1] + v[n / 2]);
-}
-
-/* 한 칸(GD·센서) 요약. 기준별 불합격 수는 조건마다 37차와 견준 것. 끝 RMS 는 37차가 끝까지 간 조건만 본다 */
-typedef struct {
-    int   n, nw, lost[2], risk[2], f_lost, f_max, f_flip, f_tail, bad, worse;
-    int   lost_new;         /* 37차는 끝까지 갔는데 추정만 선을 잃은 조건 */
-    float max[2], flip[2], wob[2], eover[2], tail[2];
-} est_sum_t;
-static est_sum_t s_es[2][2];        /* [GD 250·500][wide·일반] */
-
-static void est_table(int print, int scan)
-{
-    static const int   vv[3] = { 12, 25, 31 };
-    static const float tt[3] = { 0.1f, 0.2f, 0.3f };
-    static float mx[2][54], fl[2][54], eo[2][54], wb[2][54], tr[2][54];
-    static const char *an[2] = { "37차", "추정" };
-    int g, l, v, t, i, a;
-    s_scan63 = scan;
-    memset(s_es, 0, sizeof(s_es));
-    for (g = 0; g < 2; g++) {
-        for (l = 0; l < 2; l++) {
-            est_sum_t *e = &s_es[g][l];
-            for (v = 0; v < 3; v++) {
-                for (t = 0; t < 3; t++) {
-                    for (i = 0; i < 6; i++) {
-                        res_t r[2];
-                        int ok0, f_lost, f_max, f_flip, f_tail;
-                        for (a = 0; a < 2; a++) {
-                            case_t c = { l ? 16 : 32, s_cur6[i].r, s_cur6[i].deg, s_cur6[i].dir, vv[v], vv[v], 31, tt[t], 0, 0, a };
-                            s_gd = g ? 500.0f : 250.0f;
-                            sim(&c, &r[a]);
-                            if (print > 1) {
-                                printf("E GD%d L%d v%d t%d %-5s %s | max %5.1f rms %5.1f v %4.1f 위험 %4d 잃음 %3d 흔들림 %5.1f%% 바뀜 %4.1f/s 넘침 %5.1f 끝RMS %4.1f err %d\n",
-                                       g ? 500 : 250, c.leds, c.v_mpm, (int)(c.tau * 1000.0f + 0.5f), s_cur6[i].name, an[a], r[a].max, r[a].rms,
-                                       r[a].v_avg, r[a].risk, r[a].lost, r[a].wob, r[a].wflip, r[a].eover, r[a].tail_rms, r[a].err);
-                            }
-                            mx[a][e->n] = r[a].max;
-                            eo[a][e->n] = r[a].eover;
-                            tr[a][e->n] = r[a].tail_rms;
-                            e->lost[a] += (r[a].lost > 0) || (r[a].err != 0);
-                            e->risk[a] += (r[a].risk > 0);
-                            if (r[a].wob >= 0.0f) { fl[a][e->nw] = r[a].wflip; wb[a][e->nw] = r[a].wob; }
-                        }
-                        if (r[0].wob >= 0.0f) { e->nw++; }
-                        e->n++;
-                        ok0 = (r[0].lost == 0) && (r[0].err == 0);
-                        f_lost = (r[1].lost > 0) || (r[1].err != 0);
-                        f_max = r[1].max > r[0].max;
-                        f_flip = r[1].wflip > 0.5f * r[0].wflip;
-                        f_tail = ok0 && (r[1].tail_rms > r[0].tail_rms + 1.0f);
-                        e->f_lost += f_lost;
-                        e->lost_new += f_lost && ok0;
-                        e->f_max += f_max;
-                        e->f_flip += f_flip;
-                        e->f_tail += f_tail;
-                        e->worse += f_max || (f_lost && ok0) || (r[1].wflip > r[0].wflip) || (r[1].eover > r[0].eover + 1.0f);
-                        if (f_lost || f_max || f_flip || f_tail) {
-                            e->bad++;
-                            if (print > 0) {
-                                printf("  불합격 GD%d L%d v%d t%d %s: 최대 %.1f/%.1f 바뀜 %.1f/%.1f 끝RMS %.1f/%.1f 잃음 %d/%d\n", g ? 500 : 250, l ? 16 : 32,
-                                       vv[v], (int)(tt[t] * 1000.0f + 0.5f), s_cur6[i].name, r[1].max, r[0].max, r[1].wflip, r[0].wflip,
-                                       r[1].tail_rms, r[0].tail_rms, r[1].lost, r[0].lost);
-                            }
-                        }
-                    }
-                }
-            }
-            for (a = 0; a < 2; a++) {
-                e->max[a] = med_f(mx[a], e->n);
-                e->flip[a] = med_f(fl[a], e->nw);
-                e->wob[a] = med_f(wb[a], e->nw);
-                e->eover[a] = med_f(eo[a], e->n);
-                e->tail[a] = med_f(tr[a], e->n);
-                printf("S%s GD%d L%d %-4s | n %d 중앙: 편차최대 %5.1f 바뀜/s %4.1f(정상구간 %d) 흔들림 %4.1f%% 넘침 %4.1f 끝RMS %4.1f | 잃음 조건 %d 위험 감속 조건 %d\n",
-                       scan ? "6.3" : "", g ? 500 : 250, l ? 16 : 32, an[a], e->n, e->max[a], e->flip[a], e->nw, e->wob[a], e->eover[a], e->tail[a],
-                       e->lost[a], e->risk[a]);
-            }
-            printf("S%s GD%d L%d 추정이 37차보다 나쁜 조건 %d/%d(최대·잃음·바뀜·넘침+1 중 하나) | 합격선 밖 %d: 잃음 %d 최대 %d 바뀜 %d 끝RMS %d\n",
-                   scan ? "6.3" : "", g ? 500 : 250, l ? 16 : 32, e->worse, e->n, e->bad, e->f_lost, e->f_max, e->f_flip, e->f_tail);
-        }
-    }
-    s_gd = 250.0f;
-    s_scan63 = 0;
-}
-
-/* 반응형 곡선 속도(speed_curve_test) 표. 조향 2종 × 끔/켬, 태그 없음.
- * 급한 곡선: R 400·500·600 mm 90도 × 31·37 m/min 진입. 완만한 곡선: R 1000·1500·4000 mm × 25 m/min.
- * × 지연 100·200·300 ms × 센서 32·16 × GD 250·500. 칸: 선 잃음 조건, 편차 최대·바뀜/s·출구 넘침·통과 시간·최저 속도 중앙,
- * 위험 감속 조건, 속도 지령 방향 바뀜 최대. 결과는 s_sc_sum 에 남긴다([급·완만][GD][센서][조향][끔·켬]) */
-typedef struct { int n, lost, risk, vflip; float max, flip, eover, pass, vmin; } sc_sum_t;
-static sc_sum_t s_sc_sum[2][2][2][2][2];
-
-static void sc_table(int print)
-{
-    static const float rr[2][3] = { { 400.0f, 500.0f, 600.0f }, { 1000.0f, 1500.0f, 4000.0f } };
-    static const float aa[2][3] = { { 90.0f, 90.0f, 90.0f }, { 90.0f, 90.0f, 45.0f } };
-    static const int   vv[2][2] = { { 31, 37 }, { 25, 25 } };
-    static const float tt[3] = { 0.1f, 0.2f, 0.3f };
-    static float mx[18], fl[18], eo[18], ps[18], vm[18];
-    static const char *gn[2] = { "급", "완만" };
-    int k, g, l, a, s, v, t, i, nv;
-    for (k = 0; k < 2; k++) {
-        nv = k ? 1 : 2;
-        for (g = 0; g < 2; g++) {
-            for (l = 0; l < 2; l++) {
-                for (a = 0; a < 2; a++) {
-                    for (s = 0; s < 2; s++) {
-                        sc_sum_t *e = &s_sc_sum[k][g][l][a][s];
-                        memset(e, 0, sizeof(*e));
-                        for (v = 0; v < nv; v++) {
-                            for (t = 0; t < 3; t++) {
-                                for (i = 0; i < 3; i++) {
-                                    res_t r;
-                                    case_t c = { l ? 16 : 32, rr[k][i], aa[k][i], (i & 1) ? 1 : -1, vv[k][v], vv[k][v], 37, tt[t], 0, 0, a, s };
-                                    s_gd = g ? 500.0f : 250.0f;
-                                    sim(&c, &r);
-                                    if (print) {
-                                        printf("V %s GD%d L%d R%.0f v%d t%d %s %s | max %5.1f 잃음 %3d 바뀜 %4.1f 넘침 %5.1f 통과 %5.2f s 최저 %4.1f 위험 %4d 속도바뀜 %d err %d\n",
-                                               gn[k], g ? 500 : 250, c.leds, c.r_mm, c.v_mpm, (int)(c.tau * 1000.0f + 0.5f), a ? "추정" : "37차",
-                                               s ? "켬" : "끔", r.max, r.lost, r.wflip, r.eover, r.pass_s, r.vmin, r.risk, r.vflip, r.err);
-                                    }
-                                    mx[e->n] = r.max;
-                                    fl[e->n] = r.wflip;
-                                    eo[e->n] = r.eover;
-                                    ps[e->n] = r.pass_s;
-                                    vm[e->n] = r.vmin;
-                                    e->lost += (r.lost > 0) || (r.err != 0);
-                                    e->risk += (r.risk > 0);
-                                    if (r.vflip > e->vflip) { e->vflip = r.vflip; }
-                                    e->n++;
-                                }
-                            }
-                        }
-                        e->max = med_f(mx, e->n);
-                        e->flip = med_f(fl, e->n);
-                        e->eover = med_f(eo, e->n);
-                        e->pass = med_f(ps, e->n);
-                        e->vmin = med_f(vm, e->n);
-                        printf("SV %-4s GD%d L%d %s %s | n %d 잃음 조건 %2d | 중앙: 최대 %5.1f 바뀜/s %4.1f 넘침 %5.1f 통과 %5.2f s 최저 %4.1f m/min | 위험 감속 조건 %2d 속도바뀜 최대 %d\n",
-                               gn[k], g ? 500 : 250, l ? 16 : 32, a ? "추정" : "37차", s ? "켬" : "끔", e->n, e->lost, e->max, e->flip, e->eover,
-                               e->pass, e->vmin, e->risk, e->vflip);
-                    }
-                }
-            }
-        }
-    }
-    s_gd = 250.0f;
-}
-
-/* 잡음(모드 3 끊김 + 바닥 반사 점, 모드 6 30도 교차선): 추정 조향이 37차보다 나쁘지 않다. 반환 나쁜 조건 수 */
-static int est_noise(int print)
-{
-    int g, l, v, k, m, a, worse = 0;
-    for (g = 0; g < 2; g++) {
-        for (l = 0; l < 2; l++) {
-            for (v = 0; v < 2; v++) {
-                for (k = 0; k < 2; k++) {
-                    for (m = 0; m < 2; m++) {
-                        res_t r[2];
-                        for (a = 0; a < 2; a++) {
-                            case_t c = { l ? 16 : 32, 0.0f, k ? 25.0f : 10.0f, 1, v ? 15 : 31, v ? 15 : 31, 31, 0.1f, 0, m ? 6 : 3, a };
-                            s_gd = g ? 500.0f : 250.0f;
-                            sim(&c, &r[a]);
-                        }
-                        if (print) {
-                            printf("N GD%d L%d v%d %s%2.0f | 37차 편차 %5.1f 위치 %2d 잃음 %3d err %d | 추정 편차 %5.1f 위치 %2d 잃음 %3d err %d\n",
-                                   g ? 500 : 250, l ? 16 : 32, v ? 15 : 31, m ? "교차" : "점", k ? 25.0f : 10.0f, r[0].exit_max, r[0].jump, r[0].lost,
-                                   r[0].err, r[1].exit_max, r[1].jump, r[1].lost, r[1].err);
-                        }
-                        worse += (r[1].exit_max > r[0].exit_max + 1.0f) || (r[1].lost > r[0].lost) || ((r[1].err != 0) && (r[0].err == 0));
-                    }
-                }
-            }
-        }
-    }
-    s_gd = 250.0f;
-    return worse;
-}
-
 /* ---- 스캔 주기 시험(t3.8 GS) 추정 모의 ----
  * 360도 제자리 회전 기하: 센서 줄은 회전 중심에서 GD 앞, 테이프는 회전 중심을 지나는 직선. 각 θ 에서 센서 줄 위 테이프 자리
  * u = GD·tanθ (옆 속도 GD·ω/cos²θ), 폭 w/|cosθ|. wide 32칸(6.89 mm), 칸의 0.35 넘게 덮이면 켜짐.
@@ -1923,7 +1729,7 @@ static int wt_table(int los)
 #endif
 
 /* 출발 정렬 표(start): 실차 값 ACC 58, DCC 60, LOS 25, DRS 31, 휠 600, GD 250. 왼쪽 곡선(dir 1), 곡선 위는 접선 방향.
- * 출발 자리 × 센서 32·16 × 조향 37차·추정(AGV_DEV_TESTS) × 바퀴 지연 0.1·0.2·0.3 s. 예전(start_align 0 강제) 대 이 빌드 */
+ * 출발 자리 × 센서 32·16 × 바퀴 지연 0.1·0.2·0.3 s. 예전(start_align 0 강제) 대 이 빌드 */
 /* 곡선 위: 회전 중심이 테이프 위(센서는 바깥으로 R - √(R² - GD²) 벗어남, 손으로 놓은 자리), "추종"은 따라가다 선 자세
  * (센서가 테이프 위, 회전 중심은 안쪽 반경 √(R² - GD²)). 일반 센서는 R551 이하에서 중심이 테이프 위면 선이 안 보인다 */
 #define SA_N    16
@@ -1938,10 +1744,10 @@ static const struct { float r, deg, frac, off, th; int on; const char *name; } s
 typedef struct { float yaw, izero, iclip, dev, align_mm, align_s, end_mm, end_s, t1m, vmax; int lost, err, risk, vflip; uint32_t hash; } sa_res_t;
 typedef struct { int n, c1, c2, c4; float c3, yaw_worst, iz_worst; int c5, clip, r551_ok[2]; } sa_sum_t;
 
-static void sa_run(int k, int leds, int alg, float tau, int old, sa_res_t *o)
+static void sa_run(int k, int leds, float tau, int old, sa_res_t *o)
 {
     res_t r;
-    case_t c = { leds, s_sa_pos[k].r, s_sa_pos[k].deg, 1, 25, 25, 31, tau, 0, 0, alg };
+    case_t c = { leds, s_sa_pos[k].r, s_sa_pos[k].deg, 1, 25, 25, 31, tau, 0, 0 };
     memset(&s_sa, 0, sizeof(s_sa));
     s_sa.on = 1;
     s_sa.old = old;
@@ -1958,10 +1764,10 @@ static void sa_run(int k, int leds, int alg, float tau, int old, sa_res_t *o)
     memset(&s_sa, 0, sizeof(s_sa));
 }
 
-static void sa_line(const char *who, int k, int leds, int alg, int tau_ms, const sa_res_t *o)
+static void sa_line(const char *who, int k, int leds, int tau_ms, const sa_res_t *o)
 {
-    printf("SA %-11s L%2d %s %3d %s | 잃음 %4d 오류 %3d | 회전율 %5.1f 안쪽0 %4.2f 잘림 %4.2f 편차 %5.1f | 확인 %5.0f %5.2f 끝 %5.0f %5.2f | 1m %5.2f 위험 %4d 바뀜 %d 최고 %4.1f\n",
-           s_sa_pos[k].name, leds, alg ? "추정" : "37차", tau_ms, who, o->lost, o->err, o->yaw, o->izero, o->iclip, o->dev,
+    printf("SA %-11s L%2d %3d %s | 잃음 %4d 오류 %3d | 회전율 %5.1f 안쪽0 %4.2f 잘림 %4.2f 편차 %5.1f | 확인 %5.0f %5.2f 끝 %5.0f %5.2f | 1m %5.2f 위험 %4d 바뀜 %d 최고 %4.1f\n",
+           s_sa_pos[k].name, leds, tau_ms, who, o->lost, o->err, o->yaw, o->izero, o->iclip, o->dev,
            o->align_mm, o->align_s, o->end_mm, o->end_s, o->t1m, o->risk, o->vflip, o->vmax);
 }
 
@@ -1972,20 +1778,20 @@ static void sa_line(const char *who, int k, int leds, int alg, int tau_ms, const
 static void start_table(int print, sa_sum_t *s, int *r551_bad)
 {
     static const int taus[3] = { 100, 200, 300 };
-    int k, l, a, t;
+    int k, l, t;
     float spn = 0.0f;
     memset(s, 0, sizeof(*s));
     *r551_bad = 0;
     for (k = 0; k < SA_N; k++) {
         for (l = 32; l >= 16; l -= 16) {
-            for (a = 0; a < (AGV_DEV_TESTS ? 2 : 1); a++) {
+            {
                 for (t = 0; t < 3; t++) {
                     sa_res_t o, n;
                     int pass_o, pass_n;
-                    sa_run(k, l, a, (float)taus[t] * 0.001f, 1, &o);
-                    sa_run(k, l, a, (float)taus[t] * 0.001f, 0, &n);
+                    sa_run(k, l, (float)taus[t] * 0.001f, 1, &o);
+                    sa_run(k, l, (float)taus[t] * 0.001f, 0, &n);
                     spn = (float)P.min_speed / P.one_meter_rpm;
-                    if (print) { sa_line("예전", k, l, a, taus[t], &o); sa_line("이것", k, l, a, taus[t], &n); }
+                    if (print) { sa_line("예전", k, l, taus[t], &o); sa_line("이것", k, l, taus[t], &n); }
                     pass_o = (o.lost == 0) && (o.err == 0);
                     pass_n = (n.lost == 0) && (n.err == 0);
                     s->n++;
@@ -2033,7 +1839,7 @@ static void tst_table(int detail, float tau)
     res_t r;
     printf("  TST   R    v  | 진입단위 편차mm 위험틱(횟수) 평균v | 흔들림%% 바뀜/s | 출구넘침 계단/s | 잃음 오류  (바퀴 지연 %.0f ms)\n", tau * 1000.0f);
     for (g = 0; g < TST_ROWS; g++) {
-        case_t c = { 32, 900.0f, 90.0f, 1, 30, 30, 31, tau, 0, 0, 0 };
+        case_t c = { 32, 900.0f, 90.0f, 1, 30, 30, 31, tau, 0, 0 };
         char nm[8];
         s_tst = rows[g];
         sim(&c, &r);
@@ -2049,7 +1855,7 @@ static void tst_table(int detail, float tau)
         m.v_avg = 1e9f;
         for (i = 0; i < 5; i++) {
             for (j = 0; j < 2; j++) {
-                case_t c = { 32, s_tr[i], 90.0f, 1, vv[j], vv[j], 31, tau, 0, 0, 0 };
+                case_t c = { 32, s_tr[i], 90.0f, 1, vv[j], vv[j], 31, tau, 0, 0 };
                 s_tst = rows[g];
                 sim(&c, &r);
                 snprintf(nm, sizeof(nm), "%d", rows[g]);
@@ -2080,7 +1886,7 @@ static void tst_table(int detail, float tau)
         for (g = 0; g < TST_ROWS; g++) {
             printf("  %d |", rows[g]);
             for (i = 0; i < 2; i++) {       /* 옆 5단위 꺾임, 끊김 100 mm + 40 mm 점 */
-                case_t c = { 32, 0.0f, i ? 40.0f : 5.0f, 1, 31, 31, 31, tau, 0, i ? 3 : 2, 0 };
+                case_t c = { 32, 0.0f, i ? 40.0f : 5.0f, 1, 31, 31, 31, tau, 0, i ? 3 : 2 };
                 s_tst = rows[g];
                 sim(&c, (g == 0) ? &b1[i] : &rr);
                 if (g == 0) { printf(" %s %4.2f", i ? "점" : "꺾임", i ? (float)b1[i].jump : b1[i].over); }
@@ -2089,7 +1895,7 @@ static void tst_table(int detail, float tau)
             }
             for (i = 0; i < 5; i++) {       /* 출발 정렬 */
                 s_tst = rows[g];
-                sa_run(sk[i], 32, 0, tau, 0, (g == 0) ? &s1[i] : &so);
+                sa_run(sk[i], 32, tau, 0, (g == 0) ? &s1[i] : &so);
                 if (g == 0) { printf(" | %s %5.1f", s_sa_pos[sk[i]].name, s1[i].yaw); }
                 else if (so.hash == s1[i].hash) { printf(" | %s     =", s_sa_pos[sk[i]].name); }
                 else { printf(" | %s %5.1f%s", s_sa_pos[sk[i]].name, so.yaw, (so.lost || so.err) ? "!" : ""); }
@@ -2129,8 +1935,8 @@ static uint32_t reg_hash(void)
     for (i = 1; i <= 2; i++) { case_t c = { 32, 0.0f, 5.0f, 1, 31, 31, 31, 0.1f, 0, i }; RH(c); }
     w = 0;                              /* 끊김은 일부러 선을 잃는다. TST 표 곡선은 지표만(반경 0.55 m 30 m/min 등) */
     for (i = 10; i <= 40; i += 10) { case_t c = { 32, 0.0f, (float)i, 1, 31, 31, 31, 0.1f, 0, 3 }; RH(c); }
-    { case_t c = { 32, 900.0f, 90.0f, 1, 30, 30, 31, 0.02f, 0, 0, 0 }; RH(c); }
-    for (i = 0; i < 10; i++) { case_t c = { 32, tr[i / 2], 90.0f, 1, (i & 1) ? 30 : 25, (i & 1) ? 30 : 25, 31, 0.02f, 0, 0, 0 }; RH(c); }
+    { case_t c = { 32, 900.0f, 90.0f, 1, 30, 30, 31, 0.02f, 0, 0 }; RH(c); }
+    for (i = 0; i < 10; i++) { case_t c = { 32, tr[i / 2], 90.0f, 1, (i & 1) ? 30 : 25, (i & 1) ? 30 : 25, 31, 0.02f, 0, 0 }; RH(c); }
 #undef RH
     return h;
 }
@@ -2183,12 +1989,12 @@ int main(int argc, char **argv)
         start_table(1, &s, &bad);
         return (s.c1 || s.c4) ? 1 : 0;
     }
-    if ((argc > 10) && (strcmp(argv[1], "start1") == 0)) {  /* start1 r deg frac off th leds alg tau_ms old [trace] */
-        case_t c = { atoi(argv[7]), (float)atof(argv[2]), (float)atof(argv[3]), 1, 25, 25, 31, (float)atoi(argv[9]) * 0.001f, 0, 0, atoi(argv[8]) };
+    if ((argc > 9) && (strcmp(argv[1], "start1") == 0)) {  /* start1 r deg frac off th leds tau_ms old [trace] */
+        case_t c = { atoi(argv[7]), (float)atof(argv[2]), (float)atof(argv[3]), 1, 25, 25, 31, (float)atoi(argv[8]) * 0.001f, 0, 0 };
         memset(&s_sa, 0, sizeof(s_sa));
-        s_sa.on = 1; s_sa.old = atoi(argv[10]); s_sa.off_u = (float)atof(argv[5]); s_sa.th_deg = (float)atof(argv[6]);
+        s_sa.on = 1; s_sa.old = atoi(argv[9]); s_sa.off_u = (float)atof(argv[5]); s_sa.th_deg = (float)atof(argv[6]);
         s_sa.s0 = (c.r_mm > 0.0f) ? LEAD_MM + c.r_mm * c.deg * PI_F / 180.0f * (float)atof(argv[4]) : 0.0f;
-        s_acc = 58; s_dcc = 60; s_trace = (argc > 11);
+        s_acc = 58; s_dcc = 60; s_trace = (argc > 10);
         sim(&c, &r);
         printf("잃음 %d 오류 %d 회전율 %.1f 안쪽0 %.2f 잘림 %.2f 편차 %.1f 확인 %.0f(%.2f) 끝 %.0f(%.2f) 1m %.2f 위험 %d 바뀜 %d 최고 %.1f\n",
                r.lost, D.stop_err ? D.stop_err : D.system_err, s_sa.yaw_max, s_sa.izero, s_sa.iclip, s_sa.dev_max, s_sa.align_mm, s_sa.align_s,
@@ -2213,21 +2019,13 @@ int main(int argc, char **argv)
                agv_gs.req, agv_gs.err, agv_gs.nt, tm, ed, D.system_err, D.stop_err);
         return 0;
     }
-    if ((argc > 1) && (strcmp(argv[1], "est") == 0)) {  /* est [자세히 0~2 [스캔 6.3 ms 1]] */
-        est_table((argc > 2) ? atoi(argv[2]) : 1, (argc > 3) ? atoi(argv[3]) : 0);
-        printf("GD 250 합격선 밖 %d, 잡음 나쁜 조건 %d\n", s_es[0][0].bad + s_es[0][1].bad, est_noise(1));
-        return 0;
-    }
-    if ((argc > 1) && (strcmp(argv[1], "sc") == 0)) { sc_table((argc > 2) ? atoi(argv[2]) : 0); return 0; }   /* sc [자세히 1] */
-    if ((argc > 1) && (strcmp(argv[1], "estsc") == 0)) { s_sct = 1; est_table(0, 0); s_sct = 0; return 0; }    /* est 표를 모두 켜고 */
-    if ((argc > 8) && (strcmp(argv[1], "one2") == 0)) {  /* one2 alg GD 곡선(0~5, 직선은 6 + 모드, 모드 3·6 은 25 mm) v tau_ms leds scan [trace 0/1 [speed_curve 0/1]] */
-        int i = atoi(argv[4]);
-        case_t c = { atoi(argv[7]), 0.0f, 25.0f, 1, atoi(argv[5]), atoi(argv[5]), 31, (float)atoi(argv[6]) * 0.001f, 0, i - 6, atoi(argv[2]) };
+    if ((argc > 7) && (strcmp(argv[1], "one2") == 0)) {  /* one2 GD 곡선(0~5, 직선은 6 + 모드, 모드 3·6 은 25 mm) v tau_ms leds scan [trace 0/1] */
+        int i = atoi(argv[3]);
+        case_t c = { atoi(argv[6]), 0.0f, 25.0f, 1, atoi(argv[4]), atoi(argv[4]), 31, (float)atoi(argv[5]) * 0.001f, 0, i - 6 };
         if (i < 6) { c.r_mm = s_cur6[i].r; c.deg = s_cur6[i].deg; c.dir = s_cur6[i].dir; c.mode = 0; }
-        s_gd = (float)atoi(argv[3]);
-        s_scan63 = atoi(argv[8]);
-        s_trace = (argc > 9) && atoi(argv[9]);
-        s_sct = (argc > 10) ? atoi(argv[10]) : 0;
+        s_gd = (float)atoi(argv[2]);
+        s_scan63 = atoi(argv[7]);
+        s_trace = (argc > 8) && atoi(argv[8]);
         sim(&c, &r);
         show((i < 6) ? s_cur6[i].name : "직선", &c, &r);
         printf("  흔들림 %.1f%% 바뀜 %.1f/s 넘침 %.1f 끝 RMS %.2f 중심 %.1f\n", r.wob, r.wflip, r.eover, r.tail_rms, r.cerr);
@@ -2240,7 +2038,7 @@ int main(int argc, char **argv)
         printf("  K_P    tau | 편차최대 mm 선잃음틱 위험틱 오류 | 흔들림%% 바뀜/s 끝RMS\n");
         for (k = 0; k < 5; k++) {
             for (d = 100; d <= 300; d += 100) {
-                case_t c = { 32, 0.0f, 0.0f, 1, 25, 25, 31, (float)d * 0.001f, 0, 0, 0 };
+                case_t c = { 32, 0.0f, 0.0f, 1, 25, 25, 31, (float)d * 0.001f, 0, 0 };
                 c.r_mm = s_cur6[2].r; c.deg = s_cur6[2].deg; c.dir = s_cur6[2].dir;
                 s_tst = (kps[k] < 0) ? 0 : 2;
                 s_kp = (kps[k] > 0) ? kps[k] : 0;
@@ -2257,7 +2055,7 @@ int main(int argc, char **argv)
         return 0;
     }
     if ((argc > 5) && (strcmp(argv[1], "tst1") == 0)) {    /* tst1 TST K_I R_mm v [tau_ms(20) [trace]]: TST 한 조건(K_I 0 = TST 그대로) */
-        case_t c = { 32, (float)atof(argv[4]), 90.0f, 1, atoi(argv[5]), atoi(argv[5]), 31, 0.02f, 0, 0, 0 };
+        case_t c = { 32, (float)atof(argv[4]), 90.0f, 1, atoi(argv[5]), atoi(argv[5]), 31, 0.02f, 0, 0 };
         if (argc > 6) { c.tau = (float)atoi(argv[6]) * 0.001f; }
         s_tst = atoi(argv[2]);
         s_ki = atoi(argv[3]);
@@ -2411,36 +2209,6 @@ int main(int argc, char **argv)
         assert((agv_gs.state == 2) && (gsp == TUNE_NO_DATA) && (agv_gs.gsn > 50) && (fabsf(ed) < 1.0f));
         gs_flow(5.0f, 25.0f, 15, 0, 79u, &gsp, &tm, &ed);     /* 라인 없음: 돌지 않고 바로 없음 */
         assert((agv_gs.state == 3) && (gsp == TUNE_NO_DATA) && (tm < 200.0f) && (fabsf(ed) < 0.01f));
-    }
-    {   /* 추정 조향(steer_alg_test 1) 대 37차: 곡선 6 × 12·25·31 m/min × 지연 100·200·300 ms × 센서 32·16 × GD 250·500.
-         * 지시 합격선(GD 250, 조건마다: 잃음 0, 바뀜 ≤ 37차/2, 최대 ≤ 37차, 끝 RMS ≤ 37차 + 1 mm)은 다 맞추지 못했다(v46-est):
-         * 108조건 중 바뀜 26·끝 RMS 14·잃음 1(일반 B 31 m/min 300 ms, 37차도 잃음)·최대 1(같은 조건). 아래는 지금 수준을 지키는 회귀다 */
-        int l;
-        est_table(0, 0);
-        for (l = 0; l < 2; l++) {
-            const est_sum_t *e = &s_es[0][l];
-            assert((e->lost_new == 0) && (e->lost[1] <= e->lost[0]));             /* 37차가 가는 곳에서 선을 잃지 않는다 */
-            assert((e->max[1] < 0.7f * e->max[0]) && (e->f_max <= 1));          /* 편차 최대 중앙 19.7 대 31.3 mm */
-            assert(e->flip[1] <= 0.5f * e->flip[0]);                            /* 바뀜/s 중앙 0.9 대 2.6~2.8 */
-            assert(e->wob[1] <= 0.5f * e->wob[0]);                              /* 흔들림 중앙 13.5 대 29 % */
-            assert(e->tail[1] <= e->tail[0] + 1.0f);                            /* 끝 1 m RMS 중앙 2.6 대 2.6 mm */
-            assert((e->risk[1] < e->risk[0]) && (e->bad <= 16));                /* 위험 감속 조건 11 대 27, 합격선 밖 15·16 */
-        }
-        assert(est_noise(0) == 0);          /* 끊김 + 바닥 반사 점, 30도 교차선 10·25 mm: 37차보다 나쁘지 않다 */
-    }
-    {   /* 반응형 곡선 속도(speed_curve_test 1): 완만한 곡선(R 1·1.5·4 m, 25 m/min)은 추정 조향과 함께 통과 시간 +5% 안·선 잃음 0,
-         * 속도 지령이 오르내리지 않는다(방향 바뀜 많아야 5, 감속 뒤 재가속 1번이 정상). 급한 곡선(R 0.4~0.6 m, 31·37 m/min)
-         * 선 잃음 조건은 끈 때보다 늘지 않는다. 37차 조향 일반 센서는 곡선 안 편차가 커서 완만한 곡선 통과가 +3~18% 느려진다 */
-        int g, l, a;
-        sc_table(0);
-        for (g = 0; g < 2; g++) {
-            for (l = 0; l < 2; l++) {
-                const sc_sum_t *off = &s_sc_sum[1][g][l][1][0], *on = &s_sc_sum[1][g][l][1][1];
-                assert((on->pass <= 1.05f * off->pass) && (on->lost == 0));
-                for (a = 0; a < 2; a++) { assert((s_sc_sum[1][g][l][a][1].vflip <= 5) && (s_sc_sum[0][g][l][a][1].vflip <= 5)); }
-                assert(s_sc_sum[0][g][l][1][1].lost <= s_sc_sum[0][g][l][1][0].lost);
-            }
-        }
     }
     {   /* t3.9 WT: 모형 tau 50·100·200·300 ms 전 과정, 결과 쪽, 측정 중 편차 넘침 → 복귀·정지·없음 */
         wt_res_t wr;

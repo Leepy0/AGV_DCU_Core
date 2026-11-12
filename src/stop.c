@@ -49,10 +49,9 @@ int16_t stop_clamp(int16_t value, int16_t lower, int16_t upper)
     return value;
 }
 
-/* 회전 감속도(rpm/틱). v0.36.0 부터 DCC 그대로(많아야 60). 예전(QUIRK_FLOOR_350)은 DCC/4, 많아야 10 */
+/* 회전 감속도(rpm/틱). v0.36.0 부터 DCC 그대로(많아야 60) */
 static int16_t turn_dcc(int16_t dcc)
 {
-    if (param_quirk(QUIRK_FLOOR_350)) { return stop_clamp((int16_t)(dcc / STOP_TURN_DCC_DIV), 1, STOP_TURN_DCC_MAX); }
     return stop_clamp(dcc, 1, STOP_RAPID_DCC_MAX);
 }
 
@@ -93,7 +92,7 @@ static void set_zero(stop_ctrl_t *c)
 
 /* 위치 제동 진입 혼합 비율 b. 감속도가 저크로 0 에서 필요 감속도까지 오르는 동안(속도는 거의 그대로) 가는 거리의 몫:
  * b ≈ v³·k² / (2·저크·남은²), k = 펄스/(rpm·틱). 이차 항(1 - b/2)은 뺐다(저크가 많아야 1/(1 - b/2) 배). 많아야 0.5.
- * 예전 고정 비율(STOP_ENTRY_BLEND_PCT, LG b11)은 v0.40.0 에서 뺐다(플래시) */
+ * 예전 고정 비율 10%(LG b11)는 버렸다(v0.40.0) */
 static float entry_blend(const stop_ctrl_t *c, float scale)
 {
     float v = (float)c->braking_start_rpm, x = v * scale / (float)c->braking_start_pulses;
@@ -151,7 +150,7 @@ void stop_ctrl_begin(stop_ctrl_t *c, int16_t reason, int16_t entry_rpm, int16_t 
     else {
         c->decel_limit = stop_clamp((int16_t)(dcc / STOP_RAPID_DCC_DIV), 1, STOP_RAPID_DCC_MAX);
         c->phase = STOP_PHASE_DECELERATE;
-        /* 위치 없는 정지는 바닥 0: S커브로 감속도를 풀며 0 에 닿는다. 예전(QUIRK_JERK_OLD, 바닥 350)은 바닥에서 0 으로 한 번에 */
+        /* 위치 없는 정지는 바닥 0: S커브로 감속도를 풀며 0 에 닿는다. 배운 바닥이면 바닥에서 0 으로 */
         if (c->floor_rpm == STOP_FLOOR_RPM) { c->floor_rpm = 0; }
         if (c->command_rpm <= c->floor_rpm) { set_zero(c); }
     }
@@ -167,7 +166,7 @@ static int16_t ramp(stop_ctrl_t *c, int16_t target)
  * STOP_TAIL_MARGIN 만큼 목표를 앞당긴다. 거리 제동은 앞당긴 목표에서 바닥이 되고(펄스 단위 떨림에도 꼬리 전에 바닥에 든다),
  * 계획 거리가 -STOP_TAIL_MARGIN(실제 남은 = 꼬리)이 되면 꼬리로 감속도를 풀며 0 에 내려 실제 목표에 닿는다(바닥에서 0 으로 뛰지 않는다).
  * 바닥을 배워 올렸으면 그 아래는 바퀴가 서므로 앞당기지 않고 예전처럼 바닥으로 목표까지 가서 0 이다.
- * 예전(QUIRK_JERK_OLD = QUIRK_FLOOR_350)은 바닥 350 이라 꼬리가 없다. 꼬리는 감속 한계(20 이상)에 닿지 않아 STOP_TAIL_RPM_TICKS 하나다 */
+ * 꼬리는 감속 한계(20 이상)에 닿지 않아 STOP_TAIL_RPM_TICKS 하나다 */
 static int32_t plan_pulses(const stop_ctrl_t *c, int32_t remaining, float scale)
 {
     if (c->floor_rpm > STOP_FLOOR_RPM) { return remaining; }
@@ -234,14 +233,13 @@ static int16_t cruise_left(const stop_ctrl_t *c, const stop_feedback_t *fb)
            (float)c->maximum_rpm * fb->pulses_per_rpm_tick * 2.0f;
 }
 
-int16_t stop_min_rpm(void) { return param_quirk(QUIRK_FLOOR_350) ? STOP_MIN_RPM : STOP_FLOOR_RPM; }
+int16_t stop_min_rpm(void) { return STOP_FLOOR_RPM; }
 
 /* 바퀴 하나가 멈췄는가. 펄스 사이 바퀴 속도는 지령을 1차 지연으로 따른다고 예측하고(pred_rpm), 그 펄스 간격
- * (RPM_CONST / rpm = 500 / rpm 틱)의 STALL_INTERVAL_FACTOR 배 넘게 펄스가 없으면 멈춤이다. 예전은 고정 STOP_STALL_TICKS */
+ * (RPM_CONST / rpm = 500 / rpm 틱)의 STALL_INTERVAL_FACTOR 배 넘게 펄스가 없으면 멈춤이다 */
 static int16_t stalled(const stop_ctrl_t *c, int16_t idle)
 {
     float lim;
-    if (param_quirk(QUIRK_FLOOR_350)) { return idle >= STOP_STALL_TICKS; }
     if (c->pred_rpm < 1.0f)           { return idle >= STOP_QUIET_TICKS; }
     lim = (float)STALL_INTERVAL_FACTOR * 500.0f / c->pred_rpm;
     return (idle >= STOP_STALL_MIN_TICKS) && ((float)idle > lim);
@@ -300,9 +298,8 @@ int16_t stop_ctrl_update(stop_ctrl_t *c, const stop_feedback_t *fb)
         return ramp(c, 0);
     }
     one_stalled = stalled(c, fb->idle_left) || stalled(c, fb->idle_right);
-    /* 바닥이 낮아 제동 곡선 위에서 바퀴가 멈출 수 있다(짐·마찰). 그 지령부터 바닥을 배운다. 예전(바닥 350)은 300 틱 뒤 실패 */
-    if ((c->phase == STOP_PHASE_DECELERATE) && one_stalled && !param_quirk(QUIRK_FLOOR_350)
-        && (c->command_rpm < STOP_LEARN_MAX_RPM)) {
+    /* 바닥이 낮아 제동 곡선 위에서 바퀴가 멈출 수 있다(짐·마찰). 그 지령부터 바닥을 배운다 */
+    if ((c->phase == STOP_PHASE_DECELERATE) && one_stalled && (c->command_rpm < STOP_LEARN_MAX_RPM)) {
         if (c->command_rpm > c->floor_rpm) { c->floor_rpm = c->command_rpm; }
         c->phase = STOP_PHASE_APPROACH;
         c->floor_hold_ticks = STOP_GRACE_TICKS;

@@ -33,7 +33,6 @@ float atanf(float x);
 #define TAPE_LOST_TICKS      5       /* 라인이 이 틱을 넘게 안 보이면 출발 라인을 벗어난 것 */
 #define TAPE_SLOW_POS        12      /* 새 라인이 이 안에 들면 라인을 잡은 것(단계 2) */
 #define TAPE_CENTER_POS      1       /* 이 안이면 회전을 끝낸다 */
-#define TAPE_CREEP_DEG       2.0f    /* 예전(QUIRK_FLOOR_350): 최저 속도로 도는 마지막 각 */
 /* 회전 끝 한 번의 등감속(v0.38.0, tape_brake). 지령이 v 에서 0 으로 가는 동안 실제가 더 가는 거리 = τ·v_실제(1차 지연·순수 지연 모두) */
 #ifndef TAPE_LAG_TICKS
 #define TAPE_LAG_TICKS       20      /* τ: 지령 → 실제 회전 지연 틱(바퀴 + 센서 10 ms + 응답 1.6 ms) */
@@ -45,7 +44,6 @@ float atanf(float x);
 #ifndef TAPE_NOISE_MARGIN
 #define TAPE_NOISE_MARGIN    4       /* 잡음 각: 센서 끝 이만큼 단위 안쪽(가장자리 포화·덩어리 판정 여유) */
 #endif
-#define TAPE_PLAN_DCC        0.75f   /* 예전(QUIRK_FLOOR_350) 감속 계획 = 회전 감속(DCC/4, 많아야 10) × 이 값. S커브 지연 여유 */
 #define TAPE_SETTLE_TICKS    20      /* 중앙에서 선 뒤 0.2 s 기다리고 바퀴가 서면 편차를 본다 */
 #define TAPE_SETTLE_MAX      100     /* 바퀴가 안 서도 1 s 면 본다 */
 #define TAPE_FIX_MAX         2       /* 보정 횟수 상한 */
@@ -55,16 +53,7 @@ float atanf(float x);
 
 agv_drive_t agv_drive;
 #if AGV_DEV_TESTS
-int16_t speed_pi_test = 1;  /* motor.h. 부팅 때 TST 가 다시 건다 */
-/* 속도 루프 표. 줄 = speed_pi_test(0 예전, 1 기본, 2 새2). 값만 고치면 된다.
- * fb: PI 되먹임 0 = D.rpm_avg(6표본), 1 = 1표본(D.rpm), 2 = 2표본 평균. ka = 1/Kp(역계산 anti-windup). ff < 0 = 파라미터 FF */
-#define SPI_ROW(fb, kp, ki, ff) { fb, kp, ki, 1.0f / (kp), ff }
-static const struct { int16_t fb; float kp, ki, ka, ff; } s_spi[3] = {
-    SPI_ROW(0, MOTOR_SPEED_KP_OLD, MOTOR_SPEED_KI_OLD, -1.0f),
-    SPI_ROW(1, MOTOR_SPEED_KP, MOTOR_SPEED_KI, MOTOR_SPEED_FF),    /* 기본(53차 새1) */
-    SPI_ROW(2, 0.8f, 0.12f, 0.999f)     /* 새2 */
-};
-float motor_speed_ff(void) { return (s_spi[speed_pi_test].ff >= 0.0f) ? s_spi[speed_pi_test].ff : P.speed_ff; }
+float motor_speed_ff(void) { return param_tst_old ? P.speed_ff : MOTOR_SPEED_FF; }
 #endif
 
 static struct {
@@ -79,9 +68,6 @@ static struct {
     int16_t  raw[2];           /* 스파이크 컷 전 rpm */
     int16_t  force[2], forcing;
     int16_t  spike;            /* 스파이크 컷. 0 = MOTOR_RPM_SPIKE */
-#if AGV_DEV_TESTS
-    int16_t  pi_fb[2];         /* 속도 루프 시험(새1·새2)의 PI 되먹임. D.rpm_avg 는 그대로 둔다 */
-#endif
 } s_motor;
 
 /* 정렬 회전 끝: 라인을 잡은 뒤 남은 각(tape_left_guide) */
@@ -165,9 +151,6 @@ void motor_feedback_update(void)
 
         D.rpm_avg[i] = (int16_t)((D.rpm[i] + s_motor.hist[i][0] + s_motor.hist[i][1] + s_motor.hist[i][2]
                                   + s_motor.hist[i][3] + s_motor.hist[i][4]) / 6);
-#if AGV_DEV_TESTS
-        s_motor.pi_fb[i] = (s_spi[speed_pi_test].fb == 2) ? (int16_t)((D.rpm[i] + s_motor.hist[i][0]) / 2) : D.rpm[i];
-#endif
         D.rpm_flt[i] = (int16_t)(((float)D.rpm_flt[i] * 0.9f) + ((float)D.rpm_avg[i] * 0.1f));
 
         s_motor.hist[i][4] = s_motor.hist[i][3];
@@ -230,13 +213,15 @@ static int16_t jog_wheel_cmd(uint16_t i, int16_t input)
 void motor_speed_pi(int16_t input)
 {
     const float ff = motor_speed_ff();
-#if AGV_DEV_TESTS
-    const float kp = s_spi[speed_pi_test].kp, ki = s_spi[speed_pi_test].ki, ka = s_spi[speed_pi_test].ka;
-#define PI_FB(i) (s_spi[speed_pi_test].fb ? s_motor.pi_fb[i] : D.rpm_avg[i])
+#if AGV_DEV_TESTS   /* TST 2: 예전 루프(되먹임 6표본 평균, *_OLD 이득) */
+    static const float ka_new = 1.0f / MOTOR_SPEED_KP, ka_old = 1.0f / MOTOR_SPEED_KP_OLD;
+    const int16_t old = param_tst_old;
+    const float kp = old ? MOTOR_SPEED_KP_OLD : MOTOR_SPEED_KP, ki = old ? MOTOR_SPEED_KI_OLD : MOTOR_SPEED_KI, ka = old ? ka_old : ka_new;
+#define PI_FB(i) (old ? D.rpm_avg[i] : D.rpm[i])
 #else
     static const float ka = 1.0f / MOTOR_SPEED_KP;
     const float kp = MOTOR_SPEED_KP, ki = MOTOR_SPEED_KI;
-#define PI_FB(i) (D.rpm[i])         /* 개발 이미지 줄 1 의 pi_fb 와 같은 값(둘 다 feedback_update 가 쓴다) */
+#define PI_FB(i) (D.rpm[i])
 #endif
     uint16_t i;
 
@@ -277,7 +262,7 @@ void motor_velocity(int16_t input)
         D.p_pi_out = 0.0f;
     }
     /* 평균 지령은 두고 두 바퀴 지령을 검증된 바닥 위에 둔다. 조향 권한은 바닥에서 0 이 된다.
-     * 바닥이 150 이하(새 저크)면 바닥 아래 정지 꼬리도 0. 예전(QUIRK_JERK_OLD, 바닥 350)·배운 바닥은 바닥 아래를 묶지 않는다 */
+     * 바닥이 150 이하면 바닥 아래 정지 꼬리도 0. 배운 바닥은 바닥 아래를 묶지 않는다 */
     int16_t fl = stop_floor_rpm();
     if (stop_is_braking() && ((input >= fl) || (fl <= STOP_FLOOR_RPM))) {
         int16_t limit = (int16_t)(input - fl);
@@ -293,7 +278,7 @@ void motor_velocity(int16_t input)
 
 /* S커브 한 틱. 가속도 *accel 은 저크로만 바뀌고 한계(acc·dcc, 가감속도 상한)를 넘지 않는다.
  * 저크 고정 STOP_JERK_NUM/STOP_JERK_DEN = 2.4 rpm/틱²: 속도 변화가 작으면 한계 전에 풀려 최고 가감속도가 √(2.4 × 변화)쯤이 된다.
- * 예전(SCV_JERK_OLD, QUIRK_JERK_OLD)은 한계/8(어느 속도든 8틱에 한계). 가속도·한계는 많아야 60 남짓이라 16비트로 계산한다.
+ * 예전(SCV_JERK_OLD, 위험 감속)은 한계/8(어느 속도든 8틱에 한계). 가속도·한계는 많아야 60 남짓이라 16비트로 계산한다.
  * 저속 구간 가속 상한(max(5, ACC/2))은 둔다: 저크는 오르는 빠르기만 정하고 엔코더가 드문 구간의 가속도 크기는 그대로 묶어야 한다.
  * 예전 저속 DCC 하한 20(flags b0, min_speed 2배 아래)은 뺐다: P_DCC 한계가 20~60 이라 늘 DCC 그대로였다(공차 값도 그 하한 아래면
  * 적재 값). 인자는 호출자(ident.c 등)를 위해 남긴다.
@@ -307,7 +292,7 @@ int16_t motor_scv_core(int16_t vin, int16_t *vout, int16_t acc, int16_t dcc, int
                 : ((low_acc > SCV_LOW_ACC_MIN) ? low_acc : SCV_LOW_ACC_MIN)) : dcc;
     /* 주행 저크 = min(2.4, 예전 한계/8): 한계 24 미만(예전 저크 1·2)은 예전 저크 그대로라 출발이 예전보다 날카롭지 않다.
      * 정지 램프(llow -1)는 2.4 그대로: 위치 정지 끝 꼬리(STOP_TAIL_RPM_TICKS)가 저크 2.4 로 계산돼 있다.
-     * SCV_JERK_OLD(위험 감속)는 늘 예전 저크. 예전 되돌림 비트(LG b11)의 저크·바닥 계단은 v0.40.0 에서 뺐다(플래시) */
+     * SCV_JERK_OLD(위험 감속)는 늘 예전 저크. LG b11 로 예전 저크·바닥 계단을 되살리던 길은 버렸다(v0.40.0) */
     int16_t slow = (int16_t)((flags & SCV_JERK_OLD) || ((llow >= 0) && (lim < 3 * STOP_JERK_DIV)));
 
     (void)min_speed;
@@ -422,18 +407,11 @@ void motor_drive_step(void)
 
     if (!D.obs_on && !D.flag_stopping
         && ((D.step == DRIVE_CRUISE) || (D.step == DRIVE_CHANGE_SPEED) || (D.step == DRIVE_RISK_RESUME))) {
-#if AGV_DEV_TESTS   /* 반응형 곡선 속도 중에는 안전 바닥으로만: 편차가 센서 반폭(일반 16·wide 32단위)의 80% 넘을 때 */
-        if (!speed_curve_test || ((D.guide_pos > (D.guide_wide ? 25 : 12)) || (D.guide_pos < (D.guide_wide ? -25 : -12))))
-#endif
         if ((D.vin_out >= P.llow_speed)
             && ((D.guide_pos >= GUIDE_RISK_THRESHOLD) || (D.guide_pos <= -GUIDE_RISK_THRESHOLD))
 #if AGV_START_ALIGN
             /* 출발 정렬 중은 이미 LLOW 아래다. 들어가면 목표가 0.7 × LOS 로 올라 속도 상한이 풀린다 */
             && (D.start_align != DRIVE_ALIGN_HOLD)
-#endif
-#if AGV_DEV_TESTS
-            /* 유지 규칙: 유지·옮기는 중 위치는 덩어리 자리가 아니다. 새로 들어가지 않는다 */
-            && (!guide_hold_test || (D.guide_track == GUIDE_TRK_NORMAL))
 #endif
             ) {
             D.risk_stop = 1;
@@ -457,18 +435,6 @@ void motor_drive_step(void)
         }
     }
 #endif
-#if AGV_DEV_TESTS
-    /* 반응형 곡선 속도: 순항·속도 바꿈 중 목표 = min(지령, 곡률·편차 상한). 감·가속은 주행 S커브 그대로 */
-    if (speed_curve_test && ((D.step == DRIVE_CRUISE) || (D.step == DRIVE_CHANGE_SPEED))) {
-        int16_t lim = steer_curve_vlim();
-        if (lim < D.speed_cmd) {
-            D.step = DRIVE_CHANGE_SPEED;
-            D.cur_speed = motor_scv_speed(lim, P.acc, GUIDE_RISK_DCC);   /* 위험 감속과 같은 감속 */
-            motor_velocity(D.cur_speed);
-            return;
-        }
-    }
-#endif
     switch (D.step) {
     case DRIVE_CHANGE_SPEED:
         step_change_speed();
@@ -485,10 +451,6 @@ void motor_drive_step(void)
             break;
         }
         step_change_speed();
-        break;
-    case DRIVE_COMM:
-        D.cur_speed = motor_scv_speed(P.llow_speed, P.acc, P.dcc);
-        motor_velocity(D.cur_speed);
         break;
     case DRIVE_RISK_STOP: {
         /* 지령이 더 낮으면 지령 그대로다. 위험 감속이 속도를 올리지 않고, 아래 풀림 조건(cur_speed <= speed_cmd)이 성립한다 */
@@ -549,29 +511,6 @@ static void tape_end(void)
 
 static int32_t abs32(int32_t v) { return (v < 0) ? -v : v; }
 
-/* 회전 끝 속도: 남은 각(가이드 위치로 고친 펄스)에 비례해 TAPE_CREEP_DEG 에서 최저 회전 속도, 중앙 쪽으로 정지 바닥까지 낮춘다.
- * 중앙에서는 tape_stop 이 0 으로 선다. 예전(QUIRK_FLOOR_350)은 최저 회전 속도 그대로 */
-static int16_t tape_end_speed(float left)
-{
-    float v = (float)P.turn_min * left / (TAPE_CREEP_DEG * tape_deg_pulse());
-    if (param_quirk(QUIRK_FLOOR_350) || (v >= (float)P.turn_min)) { return P.turn_min; }
-    return (v > (float)stop_min_rpm()) ? (int16_t)v : stop_min_rpm();
-}
-
-/* 라인 중앙까지 left 펄스. 마지막 TAPE_CREEP_DEG 만 최저 속도로 가게 거리로 감속한다: v² = 최저² + 2·a·거리.
- * 새 라인을 잡았으면(단계 2) 그 위치로 tape_end_speed 가 더 낮춘다 */
-static int16_t tape_plan(float left)
-{
-    float d = left - TAPE_CREEP_DEG * tape_deg_pulse();
-    float k = ((float)STOP_ENCODER_PPR / 6000.0f) * 2.0f;     /* rpm·틱당 두 바퀴 펄스 */
-    float low = (float)P.turn_min;
-    float v;
-
-    if (d <= 0.0f) { return P.turn_min; }
-    v = sqrtf(low * low + 2.0f * TAPE_PLAN_DCC * (float)stop_turn_dcc() * d / k);
-    return (v >= (float)P.turn_speed) ? P.turn_speed : (int16_t)v;
-}
-
 /* 편차(단위, 소수) → 회전각 펄스 */
 static float guide_offset_to_pulse_f(float guide)
 {
@@ -631,14 +570,11 @@ static int16_t tape_brake(float left)
 
 static int16_t s_fix_side;   /* 보정 시작 때 편차 부호 */
 
-/* 가운데에 왔다. 바닥 속도로 0 칸(또는 넘어 부호가 바뀐 때)에서 선다. 예전(QUIRK_FLOOR_350)은 ±TAPE_CENTER_POS */
+/* 가운데에 왔다. 바닥 속도로 0 칸(또는 넘어 부호가 바뀐 때)에서 선다 */
 static int16_t tape_centered(int32_t pos)
 {
-    if (param_quirk(QUIRK_FLOOR_350)) { return pos <= TAPE_CENTER_POS; }
-    {
-        int16_t side = (D.tape_step == TAPE_STEP_FIX) ? s_fix_side : D.tape_side;
-        return (pos == 0) || ((side != 0) && (((D.guide_pos > 0) ? 1 : -1) != side));
-    }
+    int16_t side = (D.tape_step == TAPE_STEP_FIX) ? s_fix_side : D.tape_side;
+    return (pos == 0) || ((side != 0) && (((D.guide_pos > 0) ? 1 : -1) != side));
 }
 
 /* 라인 찾기 속도 v_잡음: 새 라인이 센서에 보이기 시작하는 각 θ_잡음 = atan((센서 반폭 - 여유) / GD) 안에 설 수 있는 지령 */
@@ -667,12 +603,7 @@ static float tape_left_guide(int32_t turned, int32_t pos)
 /* 새 라인이 보이면 위치로 남은 각을 알 수 있다. 중앙 예상을 고친다. 많아야 탐색 범위 끝 */
 static void tape_refine(int32_t turned, int32_t pos, float hi)
 {
-    if (!param_quirk(QUIRK_FLOOR_350)) {
-        float end = (float)turned + tape_left_guide(turned, pos);
-        D.tape_end_cnt = (end > hi) ? hi : end;
-        return;
-    }
-    float end = (float)turned + (float)abs32(guide_offset_to_pulse((int16_t)pos));
+    float end = (float)turned + tape_left_guide(turned, pos);
     D.tape_end_cnt = (end > hi) ? hi : end;
 }
 
@@ -697,7 +628,6 @@ static int16_t tape_after(int16_t seen, int32_t pos)
         else if (++D.tape_lost_cnt >= TAPE_FIX_LOST_TICKS) { D.tape_fix_end = 3; return tape_stop(); }
         if (seen && tape_centered(pos)) { return tape_stop(); }
         if ((float)D.tape_fix_turned > TAPE_FIX_DEG * tape_deg_pulse()) { D.tape_fix_end = 2; return tape_stop(); }
-        if (param_quirk(QUIRK_FLOOR_350)) { return seen ? tape_end_speed((float)abs32(guide_offset_to_pulse((int16_t)pos))) : P.turn_min; }
         {   /* 보정도 같은 등감속. 다시 가속하지 않는다 */
             int16_t v = seen ? tape_decel(tape_left_guide(D.tape_fix_turned, pos)) : stop_min_rpm();
             if ((D.tape_plan_min > 0) && (v > D.tape_plan_min)) { v = D.tape_plan_min; }
@@ -730,7 +660,6 @@ static int16_t tape_after(int16_t seen, int32_t pos)
             s_tr.have = 0;
             D.tape_plan_min = 0;
             s_fix_side = (D.guide_pos > 0) ? 1 : -1;
-            if (param_quirk(QUIRK_FLOOR_350)) { return tape_end_speed((float)abs32(guide_offset_to_pulse(D.guide_pos))); }
             return tape_decel(tape_left_guide(0, abs32(D.guide_pos)));
         }
     }
@@ -806,17 +735,7 @@ static int16_t tape_adjust(void)
     default:
         break;
     }
-    if (D.tape_align && param_quirk(QUIRK_FLOOR_350)) {    /* 예전: 거리 계획 + 라인 위 마지막 TAPE_CREEP_DEG 를 남은 각에 비례 */
-        int16_t plan = tape_plan(D.tape_end_cnt - (float)turned);
-        if ((D.tape_plan_min > 0) && (plan > D.tape_plan_min)) { plan = D.tape_plan_min; }
-        D.tape_plan_min = plan;
-        if (plan < speed) { speed = plan; }
-        if ((D.tape_step == 2) && seen) {
-            float g = (float)abs32(guide_offset_to_pulse(D.guide_pos));
-            if ((g < TAPE_CREEP_DEG * tape_deg_pulse()) && (tape_end_speed(g) < speed)) { speed = tape_end_speed(g); }
-        }
-    }
-    else if (D.tape_align) {
+    if (D.tape_align) {
         /* 남은 각: 라인 전 엔코더 끝점(회전 보정비·출발 라인 슬립비), 라인 뒤 가이드 경계 + 엔코더 보간(tape_refine) */
         int16_t v;
         if ((D.tape_plan_min < 0) && !s_tr.have) {          /* 라인 찾기: 바닥까지 줄었는데 라인을 못 봤다. v_잡음으로 */

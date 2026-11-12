@@ -376,16 +376,15 @@ static void test_stop_last(void)
 }
 
 /* 정지 끝 계단 없음: 급정지·위치 정지(태그) 모두 바닥 아래로 감속도를 풀며 0 에 닿고, 태그는 목표 3 mm 안.
- * 예전(QUIRK_JERK_OLD, 바닥 350)은 바닥에서 0 으로 한 번에 */
+ * 예전(바닥 350 에서 0 으로 한 번에, LG b11)은 버렸다 */
 static void test_end_step(void)
 {
-    for (int q = 0; q < 2; q++) {
+    for (int q = 0; q < 1; q++) {
         for (int k = 0; k < 2; k++) {
             int16_t prev, step = 0;
             long from;
             int t = 0;
             setup(2000);
-            if (q) { (void)param_set(P_LEGACY_QUIRKS, QUIRK_JERK_OLD); }
             for (; t < 50; t++) { tick(0); }
             from = s_travel;
             D.flag_stopping = 1;
@@ -608,15 +607,14 @@ int main(int argc, char **argv)
     assert(c.phase == STOP_PHASE_FAILED);
     stop_ctrl_begin(&c, STOP_REASON_TAG_DOCKING, 2000, 2000, 10, 20, 100, 0.0f);
     assert(c.phase == STOP_PHASE_FAILED);
-    /* 회전은 감속 제한 dcc 그대로(v0.36.0, 예전 dcc/4 상한 10 은 LG 2048), 가속도 그 아래 */
+    /* 회전은 감속 제한 dcc 그대로(v0.36.0), 가속도 그 아래. LG 2048 에 남은 b11 비트는 무시한다 */
     stop_ctrl_begin(&c, STOP_REASON_TURN_ANGLE, 0, 1000, 60, 60, 500, 0.004f);
     assert(c.phase == STOP_PHASE_CRUISE && c.decel_limit == 60 && c.accel_limit == 60);
-    (void)param_set_ram(P_LEGACY_QUIRKS, QUIRK_FLOOR_350);
+    (void)param_set_ram(P_LEGACY_QUIRKS, 0x800);
     stop_ctrl_begin(&c, STOP_REASON_TURN_ANGLE, 0, 1000, 60, 60, 500, 0.004f);
-    assert(c.decel_limit == 10 && c.accel_limit == 10);
+    assert(c.decel_limit == 60 && c.accel_limit == 60 && c.floor_rpm == STOP_FLOOR_RPM);
     (void)param_set_ram(P_LEGACY_QUIRKS, 0);
-    /* 일반 정지: 바닥 0 이라 바닥 아래 지령도 S커브로 감속도를 풀며 0 에 닿는다(저크 2.4, 끝 계단 없음).
-     * 예전(QUIRK_JERK_OLD)은 바닥(350) 이하면 바로 0 */
+    /* 일반 정지: 바닥 0 이라 바닥 아래 지령도 S커브로 감속도를 풀며 0 에 닿는다(저크 2.4, 끝 계단 없음) */
     stop_ctrl_begin(&c, STOP_REASON_COMMAND, 100, 1000, 10, 20, 0, 0.002f);
     assert(c.phase == STOP_PHASE_DECELERATE && c.floor_rpm == 0);
     memset(&fb, 0, sizeof(fb));
@@ -628,16 +626,7 @@ int main(int argc, char **argv)
           n++;
       }
       assert(c.phase == STOP_PHASE_WAIT_QUIET && c.command_rpm == 0 && n > 5); }
-    (void)param_set_ram(P_LEGACY_QUIRKS, QUIRK_JERK_OLD);
-    stop_ctrl_begin(&c, STOP_REASON_COMMAND, 300, 1000, 10, 20, 0, 0.002f);
-    assert(c.phase == STOP_PHASE_WAIT_QUIET);
-    /* 제동 계획 값. LG b11(바닥 350)은 꼬리 없이 남은 거리 그대로. 진입 혼합은 v0.40.0 부터 늘 새 식(예전 10% 고정은 뺐다) */
-    stop_ctrl_begin(&c, STOP_REASON_TAG_DOCKING, 2000, 2000, 10, 20, 1000, 0.002f);
-    assert(c.braking_start_rpm == 2000 && c.braking_start_pulses == 1000);
-    { float x = 2000.0f * 0.002f / 1000.0f, b = x * x * 2000.0f / 4.8f;
-      assert(fabsf(c.required_decel - 2000.0f * 2000.0f * 0.002f / (2.0f * 1000.0f * (1.0f - b * 0.5f))) < 0.01f); }
-    (void)param_set_ram(P_LEGACY_QUIRKS, 0);
-    /* 새: 계획 거리 = 남은 - 끝 꼬리(1122 rpm·틱 × 0.002 = 2 펄스) - STOP_TAIL_MARGIN.
+    /* 계획 거리 = 남은 - 끝 꼬리(1122 rpm·틱 × 0.002 = 2 펄스) - STOP_TAIL_MARGIN.
      * 진입 혼합 b = (v·k/계획)²·v / (2·2.4). 2000 rpm, 996 펄스면 0.0067. 짧을수록 커지고 많아야 0.5 */
     stop_ctrl_begin(&c, STOP_REASON_TAG_DOCKING, 2000, 2000, 10, 20, 1000, 0.002f);
     assert(c.braking_start_pulses == 1000 - 2 - STOP_TAIL_MARGIN);
@@ -870,15 +859,11 @@ int main(int argc, char **argv)
     motor_velocity(1000);
     assert(D.add_speed_l == 1000 - stop_floor_rpm() && D.add_speed_r == -(1000 - stop_floor_rpm()));
 
-    /* 정렬 속도: 바닥 아래 목표는 정지 바닥(150, 예전 350)으로 */
+    /* 정렬 속도: 바닥 아래 목표는 정지 바닥(150)으로 */
     setup(0);
     assert(stop_alignment_speed(0) == 0);
     D.vin_out = 140;
     assert(stop_alignment_speed(100) > 140);
-    (void)param_set(P_LEGACY_QUIRKS, QUIRK_FLOOR_350);
-    D.vin_out = 340;
-    assert(stop_alignment_speed(100) > 340);
-    (void)param_set(P_LEGACY_QUIRKS, 0);
 
     test_ramp_continuity();
     test_traffic();

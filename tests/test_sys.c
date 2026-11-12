@@ -1011,17 +1011,16 @@ static void test_menu5(void)
 #if AGV_DEV_TESTS
 static void boot_keys(uint16_t keys, int keep);
 /* TST 임시 시험: 0·2, EEPROM 82 에 남아 부팅 뒤 되살아난다. K_P·K_I·FF 원래 값은 그대로 둔다.
- * v0.45.0 번호(param.c s_tst): 0 기본(속도 루프 1, 끝 처리 2, 속도 비례, K_P·K_I 0 = 60·5), 1 비었다,
- * 2 예전(속도 루프 0, 끝 처리 0, 속도 비례 끔, K_P·K_I 0 = 자동 이득). 교차선 유지·진입 가속·보조 비례는 늘 끈다 */
+ * 0 기본(param_tst_old 0: 속도 루프·끝 처리 A+B·속도 비례, K_P·K_I 0 = 60·5), 1 비었다,
+ * 2 예전(param_tst_old 1: 예전 속도 루프·끝 감쇠, 속도 비례 없음, K_P·K_I 0 = 자동 이득) */
 static void test_tst(void)
 {
-    static const int16_t want[3][3] = { { 1, 2, 1 }, { 0 }, { 0, 0, 0 } };     /* spd ex iv */
     char c[5];
     int16_t lg, t, k;
     boot();
     lg = param_get(P_LEGACY_QUIRKS);
-    assert(!(lg & QUIRK_STEER_STEP) && param_get(P_DEV_TEST) == 0 && !guide_hold_test && speed_pi_test == 1 && param_get(P_STEER_KP) == 0);
-    assert(steer_exit_test == 2 && steer_iv_test == 1 && !steer_entry_test && !steer_px_test && param_get(P_STEER_KI) == 0);
+    assert(!(lg & QUIRK_STEER_STEP) && param_get(P_DEV_TEST) == 0 && !param_tst_old && param_get(P_STEER_KP) == 0);
+    assert(param_get(P_STEER_KI) == 0);
     assert(D.p_kp == 60.0f && D.p_ki == 0.5f && motor_speed_ff() == 0.999f);          /* 부팅: K_P·K_I 0 = 권장값 */
     ui_param_text(P_DEV_TEST, 5, c);
     assert(memcmp(c, "TST 5", 5) == 0);
@@ -1031,15 +1030,12 @@ static void test_tst(void)
     for (k = 0; k < 2; k++) {                         /* K_P·K_I 파라미터 45·3, 0·0 */
         assert((param_set_ram(P_STEER_KP, (int16_t)(k ? 0 : 45)) == 0) && (param_set_ram(P_STEER_KI, (int16_t)(k ? 0 : 3)) == 0));
         for (t = 2; t >= 0; t -= 2) {
-            const int16_t *w = want[t];
             assert(param_set(P_DEV_TEST, t) == 0);
-            assert(speed_pi_test == w[0] && steer_exit_test == w[1] && steer_iv_test == w[2]);
-            assert(!guide_hold_test && !steer_entry_test && !steer_px_test);
-            assert(!steer_alg_test && !speed_curve_test && !param_opt(OPT_KF_POSITION) && param_get(P_OPT_FLAGS) == 0);
+            assert(param_tst_old == (t == 2) && param_get(P_OPT_FLAGS) == 0);
             assert(param_get(P_STEER_KP) == (k ? 0 : 45) && param_get(P_STEER_KI) == (k ? 0 : 3));   /* 파라미터 칸은 그대로 */
             assert(param_gain(P_STEER_KP) == (k ? (t ? 0 : 60) : 45) && D.p_kp == (float)param_gain(P_STEER_KP));
             assert(param_gain(P_STEER_KI) == (k ? (t ? 0 : 5) : 3) && D.p_ki == (float)param_gain(P_STEER_KI) * 0.1f);
-            assert(motor_speed_ff() == (w[0] ? 0.999f : 0.3f) && param_get(P_SPEED_FF) == 300);   /* FF 파라미터는 예전 루프만 */
+            assert(motor_speed_ff() == (t ? 0.3f : 0.999f) && param_get(P_SPEED_FF) == 300);   /* FF 파라미터는 예전 루프만 */
             assert(!param_quirk(QUIRK_STEER_STEP) && param_get(P_LEGACY_QUIRKS) == lg);
         }
     }
@@ -1048,19 +1044,19 @@ static void test_tst(void)
     ticks(100);
     assert(host.ee[82] == 2);
     boot_keys(0, 1);                                  /* 전원을 다시 켜도 2 */
-    assert(param_get(P_DEV_TEST) == 2 && speed_pi_test == 0 && steer_exit_test == 0 && steer_iv_test == 0);
+    assert(param_get(P_DEV_TEST) == 2 && param_tst_old);
     for (k = 0; k < 2; k++) {                         /* 53차까지의 1·8 이 EEPROM 에 남아 있으면 부팅 때 0 */
         host.ee[82] = (uint16_t)(k ? 8 : 1);
         boot_keys(0, 1);
-        assert(param_get(P_DEV_TEST) == 0 && speed_pi_test == 1 && steer_exit_test == 2 && steer_iv_test == 1);
+        assert(param_get(P_DEV_TEST) == 0 && !param_tst_old);
     }
     boot();
-    assert(param_set(P_DEV_TEST, 2) == 0 && speed_pi_test == 0);
-    speed_pi_test = 1;                                /* 주행 시작 때 다시 건다(guide_poll, TST 0 이 아니면) */
+    assert(param_set(P_DEV_TEST, 2) == 0 && param_tst_old);
+    param_tst_old = 0;                                /* 주행 시작 때 다시 건다(guide_poll, TST 0 이 아니면) */
     ticks(120);
     drive_up();
     run_scan(20);
-    assert(D.flag_run && (speed_pi_test == 0));
+    assert(D.flag_run && param_tst_old);
     (void)param_set(P_DEV_TEST, 0);
     printf("  TST ok\n");
 }
@@ -2882,45 +2878,6 @@ static void test_steerlog(void)
     printf("  steerlog ok (%lu 표본, 사건 %u)\n", (unsigned long)total, agv_steerlog.ev_n);
 }
 
-/* 넓은 덩어리 유지 규칙(guide_hold_test): 교차선이 한쪽부터 닿아 덩어리 가운데가 +10 이 되는 응답이 와도
- * 켠 것은 위치를 지켜 위험 감속에 들어가지 않는다. 끈 것은 들어간다(지금 동작). 반환: 지나는 동안 위치 최대 */
-static int hold_cross_run(int hold, int *risk)
-{
-    static const struct { uint16_t leds; int n; } seq[] = {
-        { 0xFC00u, 2 },      /* 11~16번 칸: 교차선이 오른쪽부터 닿았다. 가운데 +10 */
-        { 0xFFFFu, 3 },      /* 전부 켜짐 */
-        { 0x0FFFu, 2 },      /* 1~12번 칸: 왼쪽이 남았다. 가운데 -4 */
-        { 0x0C00u, 5 },
-    };
-    int j, k, worst = 0;
-
-    boot();
-    assert(param_set_ram(P_LEGACY_QUIRKS, 0) == 0);
-    guide_hold_test = (int16_t)hold;
-    drive_up();
-    for (k = 0; k < 100; k++) { sl_scan(LED_CENTER); }             /* 가운데에서 출발 정렬을 마친다 */
-    for (k = 0; k < 300; k++) { sl_scan(0x0C00u); }                /* 11·12번 칸: 위치 +6 */
-    assert(D.vin_out > 1000 && D.risk_stop == 0 && D.guide_track == GUIDE_TRK_NORMAL && D.guide_pos == 6);
-    *risk = 0;
-    for (j = 0; j < 4; j++) {
-        for (k = 0; k < seq[j].n; k++) {
-            sl_scan(seq[j].leds);
-            if (D.risk_stop) { *risk = 1; }
-            if (D.guide_pos > worst) { worst = D.guide_pos; }
-            if (-D.guide_pos > worst) { worst = -D.guide_pos; }
-        }
-    }
-    guide_hold_test = 0;
-    return worst;
-}
-
-static void test_hold_cross(void)
-{
-    int risk_off, risk_on, off = hold_cross_run(0, &risk_off), on = hold_cross_run(1, &risk_on);
-    printf("  유지 규칙 교차선: 끈 것 위치 최대 %d 위험 감속 %d, 켠 것 %d %d\n", off, risk_off, on, risk_on);
-    assert(risk_off == 1 && off >= 10);
-    assert(risk_on == 0 && on == 6 && D.guide_track == GUIDE_TRK_NORMAL);
-}
 #else
 #ifdef STEERLOG_N
 #error "AGV_DEV_TESTS 0 이미지에는 조향 기록기가 없어야 한다"
@@ -2984,7 +2941,6 @@ int main(void)
     test_curvelog();
 #if AGV_DEV_TESTS
     test_steerlog();
-    test_hold_cross();
 #endif
     test_edge_release();
     test_turn_scale();

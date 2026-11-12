@@ -160,8 +160,9 @@ typedef struct {
 
 extern all_result_t agv_all;
 
-/* 스윕 목록. 기본은 조향 스위치 넷(QUIRK_STEER_20MS, QUIRK_DAMP_SIGN_OLD, QUIRK_NO_WB_GAIN, OPT_KF_POSITION)의
- * 16 조합. 예전 OPT 값 0,1,2,3,8,9,10,11,16,17,18,19,24,25,26,27 의 조향과 같은 차례다. 위치 소스는 시작 때 값.
+/* 스윕 목록. 기본은 조향 스위치 넷(QUIRK_STEER_20MS, QUIRK_DAMP_SIGN_OLD, QUIRK_NO_WB_GAIN, OPT b3)의
+ * 16 조합. 예전 OPT 값 0,1,2,3,8,9,10,11,16,17,18,19,24,25,26,27 의 조향과 같은 차례다(OPT b3 칼만 위치는 v0.46.0 부터
+ * 안 써서 8~11·24~27 은 0~3·16~19 와 같다). 위치 소스는 시작 때 값.
  * 사이트가 바꿀 때 부팅 때 한 번 부른다. n 은 SWEEP_MAX 에서 자른다. OPT·LG 한계 밖의 칸은 건너뛴다 */
 void ident_sweep_set(const sweep_cand_t *c, uint16_t n);
 void ident_start_all(void);  /* 이후 ident_run, ident_pass, ident_phase, ident_abort, ident_want_h 를 같이 쓴다 */

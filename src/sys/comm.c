@@ -294,7 +294,6 @@ static void traffic_start(int16_t cross_id)
 {
     if (acs_cross_num(ACS_CROSS_IN) > 0) {
         acs_cross_release(ACS_CROSS_IN);
-        if (D.step == DRIVE_COMM) { D.step = DRIVE_CHANGE_SPEED; }
         if ((cross_id == 0) && (D.flag_stopping || !D.flag_run)) { run_wait_start(); }
     }
     else if ((cross_id == 0) && (D.vin_out == 0) && !seq_is_active() && (run_standby_num() == 0)) {

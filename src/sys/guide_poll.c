@@ -66,11 +66,7 @@ static void apply_status(int16_t status, int16_t pos)
         range_error(ERR_GUIDE_RANGE, 1);
     }
     else if (status == GUIDE_ALL_ON) {
-#if AGV_DEV_TESTS
-        D.guide_pos = guide_hold_test ? pos : 0;   /* 유지 규칙: 'h' 추적이 지킨 위치. 'a' 경로는 pos 가 0 이라 그대로 */
-#else
         D.guide_pos = 0;
-#endif
         D.guide_all_on = 1;
     }
     else {

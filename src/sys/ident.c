@@ -128,8 +128,9 @@ stopt_result_t agv_stopt;
 build_result_t agv_build;
 uint16_t       test_keep_mark;
 
-/* 예전 OPT 값 o(b0 10 ms, b1 감쇠 부호, b3 칼만 위치, b4 휠 간격)와 같은 조향 칸. 위치 소스는 'h'(표준) */
-#define OLD_OPT(o) { (int16_t)((o) & OPT_KF_POSITION), \
+/* 예전 OPT 값 o(b0 10 ms, b1 감쇠 부호, b3 칼만 위치, b4 휠 간격)와 같은 조향 칸. 위치 소스는 'h'(표준).
+ * b3 은 v0.46.0 부터 안 쓴다(조향이 무시한다). 목록은 그대로 두어 b3 칸은 b3 없는 칸과 같다 */
+#define OLD_OPT(o) { (int16_t)((o) & 8), \
                      (int16_t)((((o) & 1) ? 0 : QUIRK_STEER_20MS) | (((o) & 2) ? 0 : QUIRK_DAMP_SIGN_OLD) \
                                | (((o) & 16) ? 0 : QUIRK_NO_WB_GAIN)) }
 #if AGV_DEV_TESTS
@@ -147,7 +148,7 @@ static uint16_t s_temp_n = 0xFFFFu;
 /* 고속 스윕 후보 {OPT, LG}. 줄을 바꾸면 후보가 바뀐다(HS_CANDS 줄) */
 static const sweep_cand_t s_hs_cand[HS_CANDS] = {
     { 0,               0 },                                  /* 1 새 조향, 'h' (기준) */
-    { OPT_KF_POSITION, 0 },                                  /* 2 새 조향 + 칼만 위치, 'h' */
+    { 8,               0 },                                  /* 2 예전 칼만 위치(v0.46.0 부터 안 씀: 1 과 같다), 'h' */
     { 0,               QUIRK_STEER_LEGACY },                 /* 3 예전 조향, 'h' */
     { 0,               QUIRK_STEER_LEGACY | QUIRK_SRC_A }    /* 4 예전 조향, 'a' (예전 현장 동작) */
 };
@@ -1600,11 +1601,10 @@ static void stage_end(uint16_t st)
     case 2:
         b->amp = agv_rpmt.amp;
         if (agv_rpmt.low_rpm > 0) {   /* 안정 최저 rpm × 1.2. 정지 바닥(stop_min_rpm) 아래면 선 앞 정지가 실패하니 바닥 이상.
-                                         3 m/min 미만은 파생값 계산이 3 으로 묶으므로 3 이상(예전 바닥 350·4 이상) */
+                                         3 m/min 미만은 파생값 계산이 3 으로 묶으므로 3 이상 */
             float r = (float)agv_rpmt.low_rpm * 1.2f, f = (float)stop_min_rpm();
-            int16_t lo = param_quirk(QUIRK_FLOOR_350) ? 4 : 3;
             int16_t v = (int16_t)ceilf(((r < f) ? f : r) / P.one_meter_rpm);
-            b->min_rec = clamp_p(P_SPEED_MIN, (v < lo) ? lo : v);
+            b->min_rec = clamp_p(P_SPEED_MIN, (v < 3) ? 3 : v);
             if (s_build & BLD_MIN) { (void)param_set(P_SPEED_MIN, b->min_rec); }
         }
         break;

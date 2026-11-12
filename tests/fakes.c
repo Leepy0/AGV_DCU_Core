@@ -75,4 +75,3 @@ void fake_params(void)
     param_default_type(0);
     (void)param_boot(&fake_store, 2611);
 }
-float tune_turn_scale(void) { return 1.0f; }    /* steer.c 추정 조향(AGV_DEV_TESTS)이 휠 간격 보정에 쓴다 */

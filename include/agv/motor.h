@@ -41,18 +41,17 @@ int16_t motor_raw_rpm(uint16_t wheel);          /* 스파이크 컷 전 rpm. 327
 void    motor_spike_set(int16_t rpm);           /* 측정 rpm 스파이크 컷. 0 = 기본 MOTOR_RPM_SPIKE */
 int16_t motor_spike(void);
 
-/* 속도 루프 표 줄(TST, AGV_DEV_TESTS 에서만 변수). 1 = 기본(위 MOTOR_SPEED_*), 0 = 예전(TST 2), 2 = 새2(2표본 평균 Kp 0.8 Ki 0.12 FF 0.999, CCS 로만).
- * PI 오차의 되먹임만 바꾸고 D.rpm_avg 는 그대로다. 값은 motor.c s_spi. 현장 이미지는 1 고정 */
+/* 속도 루프는 기본(위 MOTOR_SPEED_*). 개발 이미지 TST 2(param_tst_old)만 예전(PI 되먹임 D.rpm_avg, *_OLD 이득, FF 파라미터).
+ * D.rpm_avg 는 어느 쪽이든 6표본 평균이다 */
 #if AGV_DEV_TESTS
-extern int16_t speed_pi_test;
-float   motor_speed_ff(void);                   /* 지금 쓰는 피드포워드 계수(rpm 당 토크). 예전(0)만 FF 파라미터 */
+float   motor_speed_ff(void);                   /* 지금 쓰는 피드포워드 계수(rpm 당 토크). 예전(TST 2)만 FF 파라미터 */
 #else
 #define motor_speed_ff() (MOTOR_SPEED_FF)
 #endif
 
 /* DA_SCV_Speed_Core. 상태를 인자로 받는 순수 함수. 저크 min(2.4, 한계/8) rpm/틱²(정지 램프 llow -1 은 2.4), acc·dcc 는 가감속도 상한.
- * flags SCV_JERK_OLD = 예전 저크(한계/8)와 목표 0 일 때 stop_floor 아래 0 으로 한 번에(QUIRK_JERK_OLD 도 같다).
- * b0(예전 DCC 하한 20)과 min_speed 는 쓰지 않는다: P_DCC 한계가 20~60 이라 늘 DCC 그대로였다 */
+ * flags SCV_JERK_OLD = 예전 저크(한계/8, 위험 감속). b0(예전 DCC 하한 20)·min_speed·stop_floor 는 쓰지 않는다:
+ * P_DCC 한계가 20~60 이라 늘 DCC 그대로였고, 바닥 아래 0 으로 한 번에(예전 계단)는 버렸다(v0.40.0) */
 #define SCV_JERK_OLD         0x02
 int16_t motor_scv_core(int16_t vin, int16_t *vout, int16_t acc, int16_t dcc, int16_t llow,
                        int16_t min_speed, int16_t stop_floor, int16_t flags, int16_t *accel);

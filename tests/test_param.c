@@ -52,8 +52,12 @@ int main(void)
     assert(param_get(P_OPT_FLAGS) == 0 && param_get(P_SPEED_FF) == 0 && param_get(P_ENC_STALL_TICKS) == 0);
     assert(param_set(P_OPT_FLAGS, 64) == -1 && param_set(P_OPT_FLAGS, 37) == 0 && param_opt(OPT_PAUSE_RESUME_SMOOTH));
     assert(param_set(P_OPT_FLAGS, 5) == 0 && fake_ee[116] == 5);
-    assert(!param_opt(OPT_KF_POSITION) && param_opt(OPT_RESUME_CRUISE));
+    assert(!param_opt(8) && param_opt(OPT_RESUME_CRUISE));
+#if AGV_DEV_TESTS   /* FF 파생값은 TST 2 예전 속도 루프만 쓴다 */
     assert(param_set(P_SPEED_FF, 120) == 0 && fake_ee[117] == 120 && P.speed_ff == 0.12f);
+#else
+    assert(param_set(P_SPEED_FF, 120) == 0 && fake_ee[117] == 120);
+#endif
     assert(param_set(P_ENC_STALL_TICKS, 30) == 0 && fake_ee[118] == 30 && P.stall_ticks == 30);
     assert(param_boot(&fake_store, 2611) == 0 && param_get(P_OPT_FLAGS) == 5 && param_get(P_SPEED_FF) == 120);
     /* RAM 에만: 값은 바뀌고 EEPROM 은 그대로 */
@@ -175,9 +179,9 @@ int main(void)
     assert(param_boot(&fake_store, 1) == 0);
     assert(param_get(P_LEGACY_QUIRKS) == 5);
     assert(param_quirk(QUIRK_RISK_FLAG) == 1 && param_quirk(QUIRK_H_POSITION) == 0);
-    /* 레거시 비트 b0~b11 까지 4095. 4096 은 넘는다 */
+    /* 레거시 비트 b0~b11 까지 4095(b11 은 안 쓰지만 저장값이 한계 위반이 되지 않게 둔다). 4096 은 넘는다 */
     assert(param_set(P_LEGACY_QUIRKS, 4096) == -1 && param_set(P_LEGACY_QUIRKS, 4095) == 0 && param_quirk(QUIRK_SRC_A) && param_quirk(QUIRK_LOW_ACC)
-           && param_quirk(QUIRK_FLOOR_350));
+           && param_quirk(0x800u));
     assert(param_set(P_LEGACY_QUIRKS, QUIRK_STEER_LEGACY | 0x0F) == 0);
     assert(param_get(P_LEGACY_QUIRKS) == 383 && param_quirk(QUIRK_STEER_20MS) && param_quirk(QUIRK_NO_WB_GAIN));
     assert(param_set(P_LEGACY_QUIRKS, 5) == 0);

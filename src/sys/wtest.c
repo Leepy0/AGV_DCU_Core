@@ -3,7 +3,7 @@
 #if AGV_DEV_TESTS
 #include <string.h>
 #include "agv/drive.h"
-#include "agv/motor.h"      /* speed_pi_test */
+#include "agv/motor.h"
 #include "agv/param.h"
 #include "agv/steer.h"
 #include "agv/tagact.h"
@@ -193,7 +193,7 @@ int wtest_run(void)
             /* 정상(WTOK)이고 범위 안이면 FF 를 저장한다. 선 뒤라 주행 중 토크가 뛰지 않는다.
              * 속도 루프 시험(TST, 고정 FF) 중에는 저장하지 않는다: TST 0 으로 돌아가면 예전 이득에 FF 가 켜진 채 남는다 */
             W.ff_old = param_get(P_SPEED_FF);
-            if ((W.state == 2) && (W.ff >= 0) && (W.ff <= 999) && !speed_pi_test) { (void)param_set(P_SPEED_FF, W.ff); }
+            if ((W.state == 2) && (W.ff >= 0) && (W.ff <= 999) && param_tst_old) { (void)param_set(P_SPEED_FF, W.ff); }
             return 0;
         }
         break;

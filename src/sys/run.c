@@ -612,10 +612,6 @@ static void apply_errors(void)
         D.flag_stopping = 1;
         if (D.stop_err != ERR_STOP_APPROACH) { D.stop_pulses = 0; }
     }
-    if (!D.cross_in_flag && !D.cross_in_on && !D.cross_out_flag && !D.cross_out_on
-        && (D.step == DRIVE_COMM)) {
-        D.step = DRIVE_CHANGE_SPEED;
-    }
 }
 
 /* ---- 조그 (jog_process) ---- */

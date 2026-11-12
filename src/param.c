@@ -1,9 +1,6 @@
 /* param.c - 파라미터 표, 한계, 기본값 3벌, 파생값, 1회 초기화 */
 #include "agv/param.h"
 #include "agv/drive.h"
-#include "agv/guide.h"      /* guide_hold_test (TST) */
-#include "agv/motor.h"      /* speed_pi_test (TST) */
-#include "agv/steer.h"      /* steer_exit_test 등 (TST) */
 
 #define D    agv_drive
 #define PI_F 3.14159265f
@@ -47,29 +44,14 @@ int16_t param_digit(int16_t value, int16_t place)
 int16_t param_get(uint16_t idx)        { return (idx < P_COUNT) ? s_set[idx] : 0; }
 
 #if AGV_DEV_TESTS
-/* TST 조합 표(param.h). 번호 배열은 이 표만 고친다. v0.45.0 에서 번호 뜻이 다시 바뀌었다(54차).
- * spd 속도 루프 0 예전·1 기본·2 새2(speed_pi_test, motor.c s_spi), ex 곡선 끝 적분 처리 0 예전·2 부호 기준 + 빠른 접근(steer_exit_test),
- * iv 속도 비례 적분(steer_iv_test), ag 1 = K_P·K_I 0 이 37차 자동 이득(아니면 권장값, param_gain).
- * 교차선 유지·진입 적분 가속·큰 편차 보조 비례·추정 조향·반응형 속도·칼만 위치는 표에 없다(코드는 남는다. CCS 로만, 칼만 위치는 OPT b3).
- * 1 은 비었다(limit_ok 가 받지 않는다) */
-static const struct { int16_t spd, ex, iv, ag; } s_tst[3] = {
-    /* spd ex iv ag */
-    { 1, 2, 1, 0 },   /* 0 기본(53차 TST 1, 현장 이미지와 같다) */
-    { 1, 2, 1, 0 },   /* 1 비었다 */
-    { 0, 0, 0, 1 }    /* 2 예전(53차 TST 0): 37차 자동 이득·예전 끝 처리·예전 속도 루프. 비교용 */
-};
+/* TST(param.h): 0 기본(현장 이미지와 같다), 2 예전(53차 TST 0. 비교용). 1 은 비었다(limit_ok 가 받지 않는다) */
+int16_t param_tst_old;
 
 void param_tst_apply(void)
 {
-    int16_t t = s_set[P_DEV_TEST];
     D.p_kp = (float)param_gain(P_STEER_KP);      /* 0 이면 steer.c 가 경사로 다시 잡는다 */
     D.p_ki = (float)param_gain(P_STEER_KI) * 0.1f;
-    guide_hold_test = 0;
-    speed_pi_test = s_tst[t].spd;
-    steer_exit_test = s_tst[t].ex;
-    steer_iv_test = s_tst[t].iv;
-    steer_entry_test = 0;
-    steer_px_test = 0;
+    param_tst_old = (int16_t)(s_set[P_DEV_TEST] == 2);
 }
 #endif
 
@@ -77,7 +59,7 @@ int16_t param_gain(uint16_t idx)
 {
     int16_t v = param_get(idx);
 #if AGV_DEV_TESTS
-    if (s_tst[s_set[P_DEV_TEST]].ag) { return v; }
+    if (s_set[P_DEV_TEST] == 2) { return v; }    /* 예전: 0 = 37차 자동 이득 */
 #endif
     return v ? v : ((idx == P_STEER_KP) ? PARAM_KP_DEFAULT : PARAM_KI_DEFAULT);
 }
@@ -201,7 +183,9 @@ static void recalc_all(void)
     param_dv.llow_min = param_rpm(s_limit[P_SPEED_HIGH].low);
     param_dv.turn_min = param_dv.llow_min;
     param_dv.guide_dist_mm = (float)s_set[P_GUIDE_DIST_MM];
+#if AGV_DEV_TESTS
     param_dv.speed_ff = (float)s_set[P_SPEED_FF] / 1000.0f;
+#endif
     param_dv.stall_ticks = s_set[P_ENC_STALL_TICKS];
     param_dv.turn_speed = param_rpm(param_active(P_SPEED_TURN));
     if (param_dv.turn_speed < param_dv.turn_min) { param_dv.turn_speed = param_dv.turn_min; }
@@ -210,9 +194,8 @@ static void recalc_all(void)
     param_dv.target_speed = param_rpm(param_active(P_SPEED_HIGH));
     recalc_low();
     /* SPN 은 3 m/min 이상(LOS 하한과 같다). 범위 표 하한(0)은 두고 파생값만 묶는다: 표를 올리면 저장된 0~2(기본 0)가 부팅 때
-     * 한계 위반으로 모든 파라미터를 기본값으로 되돌린다. 예전(QUIRK_FLOOR_350)은 4 미만이면 6 */
-    if (param_quirk(QUIRK_FLOOR_350)) { param_dv.min_speed = param_rpm((s_set[P_SPEED_MIN] >= 4) ? s_set[P_SPEED_MIN] : 6); }
-    else                              { param_dv.min_speed = param_rpm((s_set[P_SPEED_MIN] >= 3) ? s_set[P_SPEED_MIN] : 3); }
+     * 한계 위반으로 모든 파라미터를 기본값으로 되돌린다 */
+    param_dv.min_speed = param_rpm((s_set[P_SPEED_MIN] >= 3) ? s_set[P_SPEED_MIN] : 3);
     recalc_llow();
 
     param_dv.tag_pulse[0] = 0;
@@ -299,9 +282,9 @@ static void recalc_one(uint16_t i)
     case P_GEAR_RATIO:
     case P_WHEEL_BASE_MM: recalc_all(); break;
     case P_GUIDE_DIST_MM: param_dv.guide_dist_mm = (float)s_set[P_GUIDE_DIST_MM]; break;
-    case P_SPEED_FF:      param_dv.speed_ff = (float)s_set[P_SPEED_FF] / 1000.0f; break;
     case P_ENC_STALL_TICKS: param_dv.stall_ticks = s_set[P_ENC_STALL_TICKS]; break;
 #if AGV_DEV_TESTS
+    case P_SPEED_FF:      param_dv.speed_ff = (float)s_set[P_SPEED_FF] / 1000.0f; break;
     case P_DEV_TEST:      param_tst_apply(); break;
 #endif
     case P_AGV_TYPE:

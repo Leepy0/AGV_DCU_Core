@@ -145,7 +145,7 @@ int main(void)
     motor_speed_pi(500);
     assert(D.w_cmd[0] == 0 && D.w_cmd[1] == 520);
 
-    /* S커브 예전 저크(SCV_JERK_OLD = QUIRK_JERK_OLD, 레거시와 같은 출력): 저속 가속 상한 ACC/2, 목표 도달, 오버슈트 없음, 가속도 연속 */
+    /* S커브 예전 저크(SCV_JERK_OLD, 위험 감속. 레거시와 같은 출력): 저속 가속 상한 ACC/2, 목표 도달, 오버슈트 없음, 가속도 연속 */
     setup();
     v = 0; a = 0;
     { int16_t prev_a = 0;
@@ -202,10 +202,9 @@ int main(void)
       assert(param_set(P_LEGACY_QUIRKS, 0) == 0); }
 
     /* 새 저크(기본): 2.4 rpm/틱² 고정, DCC 는 상한. 31 m/min(2930 rpm) 은 25틱 만에 60, 6 m/min(567) 은 상한 전에 풀려 √(2.4 × 567) ≈ 37,
-     * 목표 0 이면 바닥에서 뛰지 않고 감속도를 풀며 0 에 닿는다(stop_floor 300 이어도). QUIRK_JERK_OLD 면 예전과 같다 */
-    for (int q = 0; q < 1; q++) {          /* v0.40.0: LG b11 의 예전 저크는 뺐다(q 1 은 돌지 않는다) */
+     * 목표 0 이면 바닥에서 뛰지 않고 감속도를 풀며 0 에 닿는다(stop_floor 300 이어도). LG b11 로 되살리던 예전 저크는 버렸다 */
+    for (int q = 0; q < 1; q++) {
         static const int16_t dv[3] = { 567, 2930, 189 };
-        if (q) { assert(param_set(P_LEGACY_QUIRKS, QUIRK_JERK_OLD) == 0); }
         for (int c = 0; c < 3; c++) {
             int16_t peak = 0, prev_a = 0, jmax = 0, last = 0;
             int t = 0, t60 = -1;
@@ -685,16 +684,11 @@ int main(void)
     D.tape_end_cnt = (float)D.tape_turned + (float)P.turn_90 / 90.0f;
     for (int i = 0; i < 2000; i++) { (void)motor_turn_adjust(); }
     assert((D.vin_out <= P.turn_min) && (D.vin_out >= stop_min_rpm()));   /* 1도 앞: 등감속, 다시 올리지 않는다 */
-    /* 라인 위(단계 2)에서 2도 안: 가이드 위치로 남은 각에 비례해 정지 바닥까지 낮춘다. 예전(QUIRK_FLOOR_350)은 최저 회전 속도 */
+    /* 라인 위(단계 2)에서 2도 안: 가이드 위치로 남은 각에 비례해 정지 바닥까지 낮춘다 */
     D.guide_all_off = 0;
     D.guide_pos = 2;                          /* 2단위 = 6.9 mm = 1.6도 */
     for (int i = 0; i < 300; i++) { (void)motor_turn_adjust(); }
     assert((D.tape_step == 2) && (D.vin_out < P.turn_min) && (D.vin_out >= stop_min_rpm()));
-    (void)param_set(P_LEGACY_QUIRKS, QUIRK_FLOOR_350);
-    D.tape_plan_min = 0;                      /* 회전 중 LG 를 바꾼 시험이라 감속 기억을 지운다*/
-    for (int i = 0; i < 300; i++) { (void)motor_turn_adjust(); }
-    assert(D.vin_out == P.turn_min);
-    (void)param_set(P_LEGACY_QUIRKS, 0);
 
     /* motor_run: 플래그가 없으면 리셋 분기. 위험 표시 해제, 비트를 켜면 남는다 */
     setup();
@@ -805,8 +799,8 @@ int main(void)
 #if AGV_DEV_TESTS
     /* 예전 속도 루프(TST 2)의 피드포워드 = FF 파라미터: 오차 0 이어도 지령에 비례한 토크. 기본 루프는 FF 파라미터를 쓰지 않는다 */
     setup();
-    assert(speed_pi_test == 1 && motor_speed_ff() == MOTOR_SPEED_FF);
-    speed_pi_test = 0;
+    assert(!param_tst_old && motor_speed_ff() == MOTOR_SPEED_FF);
+    param_tst_old = 1;
     D.control = RUN_TURN;
     D.rpm_avg[0] = D.rpm_avg[1] = 1000;
     motor_speed_pi(1000);
@@ -815,27 +809,28 @@ int main(void)
     motor_speed_pi(1000);
     assert(D.tq_cmd[0] == 100 && D.tq_cmd[1] == 100);
     (void)param_set(P_SPEED_FF, 0);
-    speed_pi_test = 1;
+    param_tst_old = 0;
 #endif
 
-    /* 속도 루프 표: 폐루프 수열을 참조 식과 한 비트까지 맞춘다. 줄 0 = 예전(TST 2, 53차 TST 0) 상수, 줄 1 = 기본(현장 이미지,
-     * 53차 새1), 줄 2 = 새2. 되먹임 선택·ka(포화로 확인)·FF 계수, D.rpm_avg 는 줄과 무관하게 6표본 평균 */
+    /* 속도 루프: 폐루프 수열을 참조 식과 한 비트까지 맞춘다. 줄 0 = 예전(TST 2, 53차 TST 0) 상수, 줄 1 = 기본(현장 이미지,
+     * 53차 새1). 되먹임 선택·ka(포화로 확인)·FF 계수, D.rpm_avg 는 줄과 무관하게 6표본 평균 */
     {
-        static const struct { int fb; float kp, ki, ka, ff; } row[3] = {
+        static const struct { int fb; float kp, ki, ka, ff; } row[2] = {
             { 0, 2.2f, 0.2f,  1.0f / 2.2f, -1.0f },   /* 예전: ka = 1/MOTOR_SPEED_KP_OLD, FF 파라미터 */
-            { 1, 0.8f, 0.16f, 1.0f / 0.8f, 0.999f },
-            { 2, 0.8f, 0.12f, 1.0f / 0.8f, 0.999f }
+            { 1, 0.8f, 0.16f, 1.0f / 0.8f, 0.999f }
         };
-        for (int r = (AGV_DEV_TESTS ? 0 : 1); r < (AGV_DEV_TESTS ? 3 : 2); r++) {
+        for (int r = (AGV_DEV_TESTS ? 0 : 1); r < 2; r++) {
             float it[2] = { 0 }, fbk[2] = { 0 }, out[2] = { 0 }, plant[2] = { 0 };
             int16_t h[2][5] = { { 0 } };
             setup();
             (void)param_set_ram(P_SPEED_FF, 250);
 #if AGV_DEV_TESTS
-            assert(speed_pi_test == 1);               /* 기본 */
-            speed_pi_test = (int16_t)r;
-#endif
+            assert(!param_tst_old);                   /* 기본 */
+            param_tst_old = (int16_t)(r == 0);
             assert(motor_speed_ff() == ((r == 0) ? P.speed_ff : 0.999f));
+#else
+            assert(motor_speed_ff() == 0.999f);
+#endif
             D.add_speed_l = 120;
             for (int t = 0; t < 400; t++) {
                 int16_t in = (t < 40) ? (int16_t)(t * 50) : ((t < 150) ? 2000 : ((t < 200) ? 0 : ((t < 260) ? 3500 : 900)));
@@ -844,7 +839,7 @@ int main(void)
                 for (int i = 0; i < 2; i++) {
                     int16_t cmd = (int16_t)(in + ((i == 0) ? 120 : 0));
                     int16_t avg6 = (int16_t)((D.rpm[i] + h[i][0] + h[i][1] + h[i][2] + h[i][3] + h[i][4]) / 6);
-                    int16_t fv = (row[r].fb == 0) ? avg6 : ((row[r].fb == 1) ? D.rpm[i] : (int16_t)((D.rpm[i] + h[i][0]) / 2));
+                    int16_t fv = (row[r].fb == 0) ? avg6 : D.rpm[i];
                     float ff = (row[r].ff < 0.0f) ? 0.25f : row[r].ff, tq;
                     int16_t err = (int16_t)(cmd - fv);
                     if (cmd == 0) { err = 0; out[i] = it[i] = fbk[i] = 0.0f; }
@@ -867,7 +862,7 @@ int main(void)
             (void)param_set_ram(P_SPEED_FF, 0);
         }
 #if AGV_DEV_TESTS
-        speed_pi_test = 1;
+        param_tst_old = 0;
 #endif
     }
 

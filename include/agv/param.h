@@ -37,7 +37,7 @@ enum {
     P_PARA_INIT, P_VERSION, P_BAT_DV, P_BAT_PERCENT,
     P_GUIDE_DIST_MM,        /* 50: 회전 중심에서 가이드센서까지 mm. 체크섬 밖 EEPROM 115 에 따로 둔다 */
     P_OPT_FLAGS,            /* 51: 시험용 개선 스위치 비트. 0 = 전부 끔 */
-    P_SPEED_FF,             /* 52: 속도 피드포워드, 1000 rpm 당 토크 지령. 0 = 끔 */
+    P_SPEED_FF,             /* 52 FF: 기본 속도 루프는 안 쓴다(피드포워드 고정 motor.h). 개발 이미지 TST 2(예전 루프)만 1000 rpm 당 토크 지령 */
     P_ENC_STALL_TICKS,      /* 53: 엔코더 고착 판정 틱(10 ms). 0 = 끔 */
     /* 54~58: 공차 프로필. 체크섬 밖 EEPROM 77~81(KEEP 빈 칸). 공차 값이 적재 칸 하한보다 작으면(0 포함) 적재 값을 쓴다 */
     P_EMPTY_SPEED,          /* 54 EDS: 공차 최고 속도 m/min (적재 1번) */
@@ -64,10 +64,8 @@ enum {
 #define QUIRK_STEER_STEP     0x100u /* b8 예전 조향을 되살린다: 속도 연동 불감대(안쪽 0, 선형 구간 안에서만 폭을 뺀다), 편차 문턱에서 Kp 가 한 번에 최대가 된다 */
 #define QUIRK_SRC_A         0x200u /* b9 위치 소스를 예전 'a' 로 되살린다(기본 'h' 전용). 조향 비트와 별개 */
 #define QUIRK_LOW_ACC       0x400u /* b10 저속 구간(llow 아래) 가속 한계를 예전 5 로 둔다(기본 max(5, ACC/2)) */
-#define QUIRK_FLOOR_350     0x800u /* b11 예전 저속: 정지 바닥 350 rpm, 멈춤 판단 고정 10틱, SPN 4 미만은 6, 정렬 회전 끝 최저 회전 속도, 예전 저크·정지 끝 계단 */
-/* 예전 저크(가감속 한계/8, 어느 속도든 8틱에 한계)·정지 끝 계단(바닥에서 0 으로 한 번에). P_LEGACY_QUIRKS 한계가 4095(b0~b11)라
- * 빈 비트가 없어 b11 에 묶는다. 위험 감속(GUIDE_RISK_DCC)은 비트와 상관없이 예전 저크다 */
-#define QUIRK_JERK_OLD      QUIRK_FLOOR_350
+/* b11(2048) 안 씀. 예전 저속(정지 바닥 350, 멈춤 판단 10틱, SPN 4 미만 6, 회전 끝·회전 감속 DCC/4, 예전 저크·정지 끝 계단)은
+ * 버렸다(v0.40.0·v0.46.0). 값이 남아 있어도 무시한다. 한계 4095 는 그대로(저장값이 한계 위반이 되지 않게) */
 #define QUIRK_STEER_LEGACY  (QUIRK_STEER_20MS | QUIRK_DAMP_SIGN_OLD | QUIRK_NO_WB_GAIN | QUIRK_STEER_STEP)
 #define QUIRK_PAUSE_FULL_STOP 0x80u /* b7 일시정지(장애물·PAUSE) 감속 중 원인이 풀려도 0 까지 서고 다시 출발한다(예전 동작) */
 
@@ -81,9 +79,9 @@ enum {
 #define PARAM_EMPTY_ADDR0        77    /* 54~58 번 → 77~81 */
 
 /* P_OPT_FLAGS 비트. 기본 0 = 끔. 실차 A/B 뒤 기본값을 정한다.
- * b0·b1·b4 는 기본 동작이 되어 비었다(값이 남아 있어도 무시한다). 예전 동작은 QUIRK_STEER_LEGACY */
+ * b0·b1·b4 는 기본 동작이 되어 비었다(값이 남아 있어도 무시한다). 예전 동작은 QUIRK_STEER_LEGACY.
+ * b3(8, 칼만 위치를 조향 입력으로)은 버렸다(v0.46.0). 값이 남아 있어도 무시한다 */
 #define OPT_RESUME_CRUISE  0x04u   /* 일시정지 재개 때 남은 거리가 길면 최대 속도까지 가속한다 */
-#define OPT_KF_POSITION    0x08u   /* 조향 입력을 칼만 추정 위치로 쓴다 (기존 원시값) */
 #define OPT_PAUSE_RESUME_SMOOTH 0x20u /* 비었다(v0.26 기본 동작). 예전 동작은 QUIRK_PAUSE_FULL_STOP */
 
 /* 저장 계층. 부팅 경로의 write 는 끝난 뒤 돌아와야 한다.
@@ -102,7 +100,9 @@ typedef struct {
     int16_t target_speed, low_speed, llow_speed, min_speed, turn_speed, jog_speed;
     int16_t llow_min, turn_min;                     /* gLLow_Minimum_Speed, gTurn_Minimum_Speed */
     float   guide_dist_mm;                          /* P_GUIDE_DIST_MM */
-    float   speed_ff;                               /* P_SPEED_FF / 1000: rpm 당 토크 */
+#if AGV_DEV_TESTS
+    float   speed_ff;                               /* P_SPEED_FF / 1000: rpm 당 토크. TST 2 예전 속도 루프만 */
+#endif
     int16_t stall_ticks;                            /* P_ENC_STALL_TICKS */
     int16_t turn_16, turn_32, turn_90, turn_180;
     int16_t tag_pulse[12];                          /* const_Tag_Num_Pulse */
@@ -147,12 +147,16 @@ int16_t  param_active(uint16_t idx);
 int16_t  param_gain(uint16_t idx);
 
 #if AGV_DEV_TESTS
-/* TST(P_DEV_TEST) 임시 시험. 원래 값(K_P·K_I·FF)은 두고 RAM 에서만 덮는다. 조합은 param.c s_tst 표(v0.45.0 에서 번호를 다시 배열).
+/* TST(P_DEV_TEST) 임시 시험. 원래 값(K_P·K_I·FF)은 두고 RAM 에서만 덮는다.
  *  0 기본: 속도 루프 1표본 Kp 0.8 Ki 0.16 FF 0.999 고정(motor.h MOTOR_SPEED_*), 곡선 끝 부호 기준 + 빠른 접근(steer.c STEER_I_FLIP_*),
  *    속도 비례 적분, K_P·K_I 0 = 권장값 60·5(param_gain). 현장 이미지(AGV_DEV_TESTS 0)와 같다.
- *  1 비었다(받지 않는다). 2 예전(53차 TST 0): 37차 자동 이득, 예전 끝 처리, 예전 속도 루프(6표본 Kp 2.2 Ki 0.2, FF 파라미터).
- * 전역과 D.p_kp·D.p_ki 는 이 함수가 맞춘다: 부팅·TST 저장 때, 주행 시작 때(TST 0 이 아니면) */
+ *  1 비었다(받지 않는다). 2 예전(53차 TST 0, param_tst_old 1): 37차 자동 이득, 예전 끝 감쇠, 속도 비례 없음,
+ *    예전 속도 루프(6표본 Kp 2.2 Ki 0.2, FF 파라미터).
+ * param_tst_old 와 D.p_kp·D.p_ki 는 이 함수가 맞춘다: 부팅·TST 저장 때, 주행 시작 때(TST 0 이 아니면) */
+extern int16_t param_tst_old;
 void     param_tst_apply(void);
+#else
+#define param_tst_old 0          /* 현장 이미지는 기본 동작 고정 */
 #endif
 
 #endif /* AGV_PARAM_H */

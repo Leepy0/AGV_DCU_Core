@@ -10,7 +10,7 @@
 
 #include "agv/types.h"
 
-#define STOP_MIN_RPM             350    /* 예전 정지 바닥(QUIRK_FLOOR_350). 바닥 rpm 시험 기준 속도 */
+#define STOP_MIN_RPM             350    /* 바닥 rpm 시험 기준 속도(예전 정지 바닥 값) */
 /* 정지 바닥. 엔코더는 펄스 간격 캡처라 펄스가 오면 속도가 정확하다. 150 rpm 은 바퀴당 펄스 간격 33 ms(3틱)라
  * 멈춤 판단(예측 간격 × 2 = 67 ms)과 정착(0.15 s)이 10 ms 주기로 가린다. 약 1.6 m/min(94.5 rpm 당 1 m/min). 실제 멈춤은 학습이 올린다 */
 #define STOP_FLOOR_RPM           150
@@ -22,7 +22,6 @@
 #define STOP_LEARN_MAX_RPM       900    /* 학습 상한. 하한은 정지 바닥 */
 #define STOP_DISTANCE_TOL_MM     3.0f
 #define STOP_ANGLE_TOL_DEG       0.3f
-#define STOP_STALL_TICKS         10
 #define STOP_QUIET_TICKS         15     /* 두 바퀴 모두 조용해야 끝난다 */
 #define STOP_GRACE_TICKS         20     /* 바닥 속도에서 학습 전 머무는 시간 */
 #define STOP_LEARN_INTERVAL      15
@@ -31,15 +30,12 @@
 #define STOP_MOVE_CONFIRM        2
 #define STOP_FEEDBACK_DELAY      5
 /* 저크(가속도 변화) 고정 STOP_JERK_NUM / STOP_JERK_DEN = 2.4 rpm/틱²: DCC 60 에 25틱(0.25 s). 가감속 한계는 상한일 뿐이라
- * 속도 변화 Δv 가 작으면 최고 가감속도가 √(2.4 × Δv) 쯤에서 풀린다. 예전(QUIRK_JERK_OLD)은 한계/STOP_JERK_DIV */
+ * 속도 변화 Δv 가 작으면 최고 가감속도가 √(2.4 × Δv) 쯤에서 풀린다. 예전(위험 감속 SCV_JERK_OLD)은 한계/STOP_JERK_DIV */
 #define STOP_JERK_NUM            12
 #define STOP_JERK_DEN            5
 #define STOP_JERK_DIV            8
-#define STOP_TURN_DCC_DIV        4
-#define STOP_ENTRY_BLEND_PCT     10     /* 위치 제동 초반의 진입 혼합 구간. 0 이면 등감속 */
-#define STOP_TAIL_MARGIN         2      /* 위치 정지: 끝 꼬리 앞 바닥 속도로 가는 펄스(거리 제동이 꼬리 전에 바닥에 들게) */
+#define STOP_TAIL_MARGIN        2      /* 위치 정지: 끝 꼬리 앞 바닥 속도로 가는 펄스(거리 제동이 꼬리 전에 바닥에 들게) */
 #define STOP_TAIL_RPM_TICKS      1122   /* 위치 정지 끝 꼬리: 바닥 150 에서 0 까지 저크 S커브로 가는 거리(rpm·틱, 19틱, 2.2 펄스). test_stop 이 확인 */
-#define STOP_TURN_DCC_MAX        10
 #define STOP_RAPID_DCC_DIV       1
 #define STOP_RAPID_DCC_MAX       60
 #define STOP_ENCODER_PPR         12
@@ -94,7 +90,7 @@ typedef struct {
  * 넘침 = 목표 지점부터 선 자리까지 진행 방향 거리. 남은 거리 카운터는 0 에서 멈추니 바퀴 누적 펄스로 잰다.
  * CCS Expressions 에 stop_last 를 넣고 본다 */
 typedef struct {
-    int16_t  reason;            /* 1~5 */
+    int16_t  reason;            /* 1~6(6 = MOVE_MM) */
     int16_t  entry_rpm;         /* 시작 때 지령 */
     float    target_mm;         /* 시작 때 남은 거리 */
     float    overshoot_mm;      /* + 지나침, - 못 미침 */
@@ -135,7 +131,7 @@ int16_t stop_is_braking(void);
 int16_t stop_phase(void);
 int16_t stop_reason(void);
 int16_t stop_floor_rpm(void);
-int16_t stop_min_rpm(void);        /* 정지 바닥 하한: STOP_FLOOR_RPM, 예전(QUIRK_FLOOR_350) STOP_MIN_RPM */
+int16_t stop_min_rpm(void);        /* 정지 바닥 하한: STOP_FLOOR_RPM */
 const stop_ctrl_t *stop_ctrl(void);
 
 #endif /* AGV_STOP_H */
