@@ -142,11 +142,11 @@ int16_t  param_profile_empty(void);
 int16_t  param_active(uint16_t idx);
 
 #if AGV_DEV_TESTS
-/* TST(P_DEV_TEST) 임시 시험. 원래 값(K_P·K_I·FF)은 두고 RAM 에서만 덮는다. 조합은 param.c s_tst 표(v0.43.0 에서 번호를 다시 배열).
- * 1~8 은 모두 37차 조향 + 속도 루프 새1(속도 PI 되먹임 1표본 Kp 0.8 Ki 0.16, FF 0.999 고정, motor.h).
- * 끝 = 곡선 끝 적분 처리(steer.c STEER_I_FLIP_*), 비례 = 속도 비례 적분:
- *  0 평소, 1 K_P 60 K_I 5 부호 기준 비례, 2 1 + 빠른 접근, 3 1 에서 K_I 10, 4 1 에서 끝 처리 없음, 5 1 에서 비례 끔,
- *  6 K_P 60 K_I 파라미터 예전 끝 처리(51차 TST 6), 7 1 + 교차선 유지, 8 K_P·K_I 파라미터 부호 기준 비례.
+/* TST(P_DEV_TEST) 임시 시험. 원래 값(K_P·K_I·FF)은 두고 RAM 에서만 덮는다. 조합은 param.c s_tst 표(v0.44.0 에서 번호를 다시 배열).
+ * 1~8 은 모두 37차 조향 + 속도 루프 새1(속도 PI 되먹임 1표본 Kp 0.8 Ki 0.16, FF 0.999 고정, motor.h)
+ * + 곡선 끝 부호 기준·빠른 접근(steer.c STEER_I_FLIP_*) + 속도 비례 적분. 진입 = 진입 적분 가속, 보조 = 큰 편차 보조 비례(steer.c STEER_ENTRY_RISE):
+ *  0 평소, 1 K_P 60 K_I 5(52차 TST 2), 2 1 에서 K_I 10, 3 1 + 진입 ×4, 4 1 + 진입 ×8, 5 1 + 보조, 6 1 + 진입 ×4 + 보조,
+ *  7 1 + 교차선 유지, 8 K_P·K_I 파라미터.
  * K_P·K_I 는 읽을 때마다 반영된다(param_get). 나머지 전역과 D.p_kp·D.p_ki 는 이 함수가 맞춘다: 부팅·TST 저장 때, 주행 시작 때(TST 0 이 아니면) */
 void     param_tst_apply(void);
 #endif

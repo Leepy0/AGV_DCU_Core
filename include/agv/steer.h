@@ -19,6 +19,10 @@ extern int16_t speed_curve_test;
 extern int16_t steer_exit_test;
 /* 개발 시험만. 1 = 속도 지령이 바뀌면 적분에 |v| 비(한 틱 0.9~1.1)를 곱한다 */
 extern int16_t steer_iv_test;
+/* 개발 시험만(TST, steer.c STEER_ENTRY_RISE 설명). 곡선 진입 적분 가속 배수: 0 끔, 4·8 */
+extern int16_t steer_entry_test;
+/* 개발 시험만. 1 = 큰 편차 보조 비례(4단위 넘는 몫의 기울기 2배, 10 ms 에 10 rpm 씩 따라간다) */
+extern int16_t steer_px_test;
 int16_t steer_curve_vlim(void);    /* 곡률·편차로 본 속도 상한 rpm. 주행 틱마다 한 번 부른다 */
 
 #endif /* AGV_STEER_H */

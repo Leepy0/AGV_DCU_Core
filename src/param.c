@@ -45,22 +45,23 @@ int16_t param_digit(int16_t value, int16_t place)
 }
 
 #if AGV_DEV_TESTS
-/* TST 조합 표(param.h). 번호 배열은 이 표만 고친다. v0.43.0 에서 번호 뜻이 다시 바뀌었다(52차).
+/* TST 조합 표(param.h). 번호 배열은 이 표만 고친다. v0.44.0 에서 번호 뜻이 다시 바뀌었다(53차).
  * spd 속도 루프 0 지금·1 새1·2 새2(speed_pi_test, motor.c s_spi), hold 교차선 덩어리 유지(guide_hold_test),
  * kp·ki K_P·K_I 강제값(0 = 파라미터. 원래 값은 두고 param_get 만 덮는다. 파라미터 화면에도 강제값이 보인다),
- * ex 곡선 끝 적분 처리 0 예전·1 부호 기준·2 부호 기준 + 빠른 접근·3 없음(steer_exit_test), iv 속도 비례 적분(steer_iv_test).
- * 추정 조향·반응형 속도(steer_alg_test·speed_curve_test)와 칼만 위치는 표에서 뺐다(코드는 남는다. 칼만 위치는 OPT b3) */
-static const struct { int16_t spd, hold, kp, ki, ex, iv; } s_tst[9] = {
-    /* spd hold kp  ki ex iv */
-    { 0, 0,  0,  0, 0, 0 },   /* 0 평소 */
-    { 1, 0, 60,  5, 1, 1 },   /* 1 핵심 후보 */
-    { 1, 0, 60,  5, 2, 1 },   /* 2 출구 넘침 줄이기 */
-    { 1, 0, 60, 10, 1, 1 },   /* 3 적분 빠르게 */
-    { 1, 0, 60,  5, 3, 1 },   /* 4 끝 처리 없이(비교) */
-    { 1, 0, 60,  5, 1, 0 },   /* 5 속도 비례 끔 */
-    { 1, 0, 60,  0, 0, 0 },   /* 6 51차 TST 6 그대로(기준) */
-    { 1, 1, 60,  5, 1, 1 },   /* 7 교차선 유지 */
-    { 1, 0,  0,  0, 1, 1 }    /* 8 값 조정용(K_P·K_I 는 파라미터) */
+ * ex 곡선 끝 적분 처리 0 예전·1 부호 기준·2 부호 기준 + 빠른 접근·3 없음(steer_exit_test), iv 속도 비례 적분(steer_iv_test),
+ * en 진입 적분 가속 배수(steer_entry_test), px 큰 편차 보조 비례(steer_px_test).
+ * 추정 조향·반응형 속도(steer_alg_test·speed_curve_test)와 칼만 위치는 표에 없다(코드는 남는다. 칼만 위치는 OPT b3) */
+static const struct { int16_t spd, hold, kp, ki, ex, iv, en, px; } s_tst[9] = {
+    /* spd hold kp  ki ex iv en px */
+    { 0, 0,  0,  0, 0, 0, 0, 0 },   /* 0 평소 */
+    { 1, 0, 60,  5, 2, 1, 0, 0 },   /* 1 52차 TST 2 그대로(기준) */
+    { 1, 0, 60, 10, 2, 1, 0, 0 },   /* 2 적분 2배 */
+    { 1, 0, 60,  5, 2, 1, 4, 0 },   /* 3 진입 적분 가속 ×4 */
+    { 1, 0, 60,  5, 2, 1, 8, 0 },   /* 4 진입 적분 가속 ×8 */
+    { 1, 0, 60,  5, 2, 1, 0, 1 },   /* 5 큰 편차 보조 비례 */
+    { 1, 0, 60,  5, 2, 1, 4, 1 },   /* 6 3 + 5 */
+    { 1, 1, 60,  5, 2, 1, 0, 0 },   /* 7 1 + 교차선 유지 */
+    { 1, 0,  0,  0, 2, 1, 0, 0 }    /* 8 값 조정용(K_P·K_I 는 파라미터) */
 };
 
 int16_t param_get(uint16_t idx)
@@ -79,6 +80,8 @@ void param_tst_apply(void)
     speed_pi_test = s_tst[t].spd;
     steer_exit_test = s_tst[t].ex;
     steer_iv_test = s_tst[t].iv;
+    steer_entry_test = s_tst[t].en;
+    steer_px_test = s_tst[t].px;
 }
 #else
 int16_t param_get(uint16_t idx)        { return (idx < P_COUNT) ? s_set[idx] : 0; }

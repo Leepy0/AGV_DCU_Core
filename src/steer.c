@@ -67,8 +67,22 @@
 #define STEER_I_FAST_UNITS          2
 #define STEER_I_FAST_DECAY          0.95f
 #define STEER_I_V_MIN               200
-int16_t steer_exit_test, steer_iv_test;
-static struct { int16_t pos[10], k; } s_ex;    /* B: 지난 10번 |위치| */
+/* 곡선 진입 보강 시험(TST, 53차). 실차 52차 TST 2(K_P 60, K_I 5): 반경 약 0.9 m·LOS 30 에서 편차가 0 → 10단위까지 0.41 s,
+ * 그동안 적분은 48 rpm 뿐이라 위험 감속(10단위)에 들었다. 필요한 조향 640~1050 rpm 에 비례(단위당 약 50 rpm)가 400~500 rpm 모자란다.
+ * steer_entry_test(E) 4·8: |위치| ≥ GUIDE_KP_RAMP_LO 이고 100 ms 앞보다 STEER_ENTRY_RISE 단위 이상 커졌고(앞이 0 이거나 같은 쪽),
+ *  이번 적분 증가가 |적분| 을 키우는 쪽이면 그 틱의 증가분에 이 배수를 곱한다. 적분 상한·안티와인드업은 그대로.
+ *  분기·다른 선과 붙음·시험 지령 편이(p_test)·출발 정렬 중과, 적분을 지우거나 위치가 한 틱에 STEER_ENTRY_JUMP 단위 넘게 뛴 뒤
+ *  100 ms 동안은 걸지 않는다. 뜀 조건이 없으면 직선의 옆 5단위 꺾임에서 걸려 넘침이 1.5 → 2.2단위(×8)였다. 곡선 모의 70조건은 같다.
+ * steer_px_test(F) 1: 목표 = K_P × geom × sign(오차) × max(0, |오차| - STEER_PX_KNEE)(4단위 넘는 몫의 기울기가 2배).
+ *  상태가 목표를 STEER_PX_RATE rpm/10 ms 로만 따라가(계단 없이 비탈로) 비례에 더한다. 적분을 지울 때 같이 0.
+ *  분기·다른 선과 붙음·출발 정렬 중에는 목표 0(출발 옆 10·15단위에서 회전율이 15 → 18 도/s 로 컸다) */
+#define STEER_ENTRY_RISE            2
+#define STEER_ENTRY_JUMP            2         /* LED 한 칸 = 2단위 */
+#define STEER_PX_KNEE               GUIDE_KP_RAMP_LO
+#define STEER_PX_RATE               10.0f
+int16_t steer_exit_test, steer_iv_test, steer_entry_test, steer_px_test;
+static struct { int16_t pos[10], k, n, back; } s_ex;   /* B·E: 지난 10번 위치(부호 있음), n 믿는 개수(E 만 쓴다), back 100 ms 앞 */
+static float s_px;                                      /* F 상태 rpm */
 #endif
 
 static struct {
@@ -83,15 +97,45 @@ int16_t steer_test_rpm;
 int16_t steer_alg_test;
 float steer_i_out(void) { return s_steer.i_out; }   /* 조향 기록기(steerlog.c)가 읽는다 */
 
+/* B·E 위치 기록. 틱마다 한 번. fast 0(20 ms 조향)은 5번 앞이 100 ms 앞이다 */
+static void hist_push(int16_t pos, int16_t fast)
+{
+    int16_t w = fast ? 10 : 5, j = (int16_t)(s_ex.k - w), d;
+    if (j < 0) { j = (int16_t)(j + 10); }
+    s_ex.back = s_ex.pos[j];
+    d = (int16_t)(s_ex.pos[(s_ex.k == 0) ? 9 : (s_ex.k - 1)] - pos);
+    if ((d > STEER_ENTRY_JUMP) || (d < -STEER_ENTRY_JUMP)) { s_ex.n = 0; }  /* 한 번에 LED 한 칸 넘게 뛰었다: E 는 100 ms 쉰다 */
+    s_ex.pos[s_ex.k] = pos;
+    if (++s_ex.k >= 10) { s_ex.k = 0; }
+    if (s_ex.n <= w) { s_ex.n++; }      /* w 보다 크면 back 이 적분을 지운 뒤 기록이다 */
+}
+
+/* 진입 적분 가속 E(위 steer_entry_test). dev = |위치| */
+static int16_t entry_on(int16_t dev, int16_t fast)
+{
+    int16_t b = s_ex.back, ab = (b >= 0) ? b : (int16_t)(-b);
+    return (int16_t)((s_ex.n > (fast ? 10 : 5)) && (D.branch_start == 0) && (D.p_test == 0) && (D.start_align == 0) && (dev >= GUIDE_KP_RAMP_LO)
+                     && ((dev - ab) >= STEER_ENTRY_RISE) && ((b == 0) || ((b > 0) == (D.guide_pos > 0)))
+                     && (((float)D.p_err * s_steer.i_out) >= 0.0f));
+}
+
+/* 큰 편차 보조 비례 F(위 steer_px_test). 반환 = 비례에 더할 rpm */
+static float px_run(float geom, int16_t fast)
+{
+    float t = 0.0f, step = fast ? STEER_PX_RATE : (STEER_PX_RATE * 2.0f);
+    int16_t e = D.p_err, a = (int16_t)(((e >= 0) ? e : -e) - STEER_PX_KNEE);
+    if ((a > 0) && (D.branch_start == 0) && (D.guide_track == GUIDE_TRK_NORMAL) && (D.start_align == 0)) { t = D.p_kp * (float)((e > 0) ? a : -a) * geom; }
+    if (s_px < t - step)      { s_px += step; }
+    else if (s_px > t + step) { s_px -= step; }
+    else                      { s_px = t; }
+    return s_px;
+}
+
 /* 곡선 끝 처리 시험 A·B(위 STEER_I_FLIP_*). dev = |위치|. fast 0(20 ms 조향)은 같은 시간 상수: 두 번 곱하고 100 ms 는 5번 앞 */
 static void exit_test(int16_t dev, int16_t fast)
 {
-    int16_t j = (int16_t)(s_ex.k - (fast ? 10 : 5)), back;
+    int16_t back = (s_ex.back >= 0) ? s_ex.back : (int16_t)(-s_ex.back);
     float a = s_steer.i_out;
-    if (j < 0) { j = (int16_t)(j + 10); }
-    back = s_ex.pos[j];
-    s_ex.pos[s_ex.k] = dev;
-    if (++s_ex.k >= 10) { s_ex.k = 0; }
     if ((steer_exit_test == 3) || ((a < STEER_I_EXIT_DONE) && (a > -STEER_I_EXIT_DONE))) { return; }
     if (((float)D.p_err * a) < 0.0f) { s_steer.i_out *= fast ? STEER_I_FLIP_DECAY : (STEER_I_FLIP_DECAY * STEER_I_FLIP_DECAY); }
     if ((steer_exit_test == 2) && ((a >= STEER_I_FAST_MIN) || (a <= -STEER_I_FAST_MIN)) && ((back - dev) >= STEER_I_FAST_UNITS)) {
@@ -324,6 +368,8 @@ void steer_reset(void)
     s_sc.lim = 0.0f;
     s_sc.k = 0.0f;
     s_sc.d = 0.0f;
+    s_px = 0.0f;
+    s_ex.n = 0;
 #endif
 }
 
@@ -483,6 +529,10 @@ void steer_run(int16_t tuning_type)
     if (clear_integral) {
         s_steer.i_out = 0.0f;
         s_steer.i_exit = 0;
+#if AGV_DEV_TESTS
+        s_px = 0.0f;
+        s_ex.n = 0;
+#endif
         if (D.control != RUN_DRIVE) { D.p_pi_out = 0.0f; }
     }
 
@@ -535,10 +585,18 @@ void steer_run(int16_t tuning_type)
         rate_ff = GUIDE_KD_RATE * (!D.backward ? D.kf_rate : -D.kf_rate) * geom;
         /* 오차 = 지령 - 위치 이므로 감쇠는 -Kd × 위치 변화율이다. 예전 부호는 반대다 */
         if (!param_quirk(QUIRK_DAMP_SIGN_OLD)) { rate_ff = -rate_ff; }
+#if AGV_DEV_TESTS
+        if (smooth && (steer_exit_test || steer_entry_test)) { hist_push(D.guide_pos, fast); }
+        if (smooth && steer_px_test) { p_out += px_run(geom, fast); } else { s_px = 0.0f; }
+#endif
 
         /* 다른 선과 붙은 동안의 오차를 적분에 쌓지 않는다 */
         if (!clear_integral && !D.flag_stopping && !stop_is_braking() && (D.guide_track == GUIDE_TRK_NORMAL)) {
-            i_candidate = s_steer.i_out + (D.p_ki * (float)D.p_err * geom * i_scale);
+            float di = D.p_ki * (float)D.p_err * geom * i_scale;
+#if AGV_DEV_TESTS
+            if (smooth && steer_entry_test && entry_on(dev, fast)) { di *= (float)steer_entry_test; }
+#endif
+            i_candidate = s_steer.i_out + di;
             unsat = p_out + i_candidate + rate_ff;
             /* 이미 포화된 출력을 더 미는 방향일 때만 적분을 멈춘다 */
             if (!(((unsat > (float)limit) && (D.p_err > 0)) || ((unsat < (float)-limit) && (D.p_err < 0)))) {
@@ -576,6 +634,7 @@ void steer_run(int16_t tuning_type)
         if ((steer_alg_test == 1) && (D.branch_start == 0) && !param_quirk(QUIRK_STEER_STEP)) { est_run(limit); }
         if (steer_test_rpm != 0) {   /* t3.9 바퀴 지연 측정: 바퀴 지령 차를 시험이 준다. 적분은 쌓지 않고 복귀 때 이 값에서 계단 완화 */
             s_steer.i_out = 0.0f;
+            s_px = 0.0f;
             D.p_pi_out = (float)steer_test_rpm;
             D.add_speed_l = (int16_t)(steer_test_rpm + D.offset_kp);
             D.add_speed_r = (int16_t)(-steer_test_rpm - D.offset_kp);

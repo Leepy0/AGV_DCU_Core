@@ -640,6 +640,105 @@ int main(void)
           assert((a < -10.0f) && (near0(b - a * cs[c].k) < 1e-4f * near0(a)));
       }
       printf("  속도 비례 적분 C ok\n"); }
+
+    /* E(steer_entry_test): |위치| ≥ 4 이고 100 ms 앞보다 2단위 이상 커졌을 때(같은 쪽·앞이 0) |적분| 을 키우는 증가분만 배수.
+     * 각 판을 끈 것(0)과 견준다. 1 오르는 위치(1단위 40 ms): 4단위 앞은 한 비트까지 같고, 처음 걸린 틱의 증가가 정확히 4배,
+     * 오름이 멈추고 100 ms 뒤로는 증가가 같다. 2 옆 6단위 뜀(꺾임): 100 ms 쉬고 그 뒤로는 오르지 않아 끝까지 같다.
+     * 3 적분이 반대쪽인 채 오르는 위치: 적분이 0 을 지날 때까지 같다. 4 반대쪽에서 한 틱 1단위로 넘어와 오르는 위치: 100 ms 앞이 반대쪽인 동안 같다 */
+    { static float i0[160], ie[160];
+      static int16_t pos[160];
+      int c, k, n = 160, first;
+      for (c = 0; c < 4; c++) {
+          for (k = 0; k < n; k++) {
+              if (c == 0)      { pos[k] = (int16_t)((k < 20) ? 0 : ((k < 52) ? -((k - 20) / 4) : -8)); }
+              else if (c == 1) { pos[k] = (int16_t)((k < 20) ? 0 : -6); }
+              else if (c == 2) { pos[k] = (int16_t)((k < 100) ? 3 : -((k - 100) / 4)); }
+              else             { pos[k] = (int16_t)((k < 20) ? 3 : ((k < 33) ? (3 - (k - 20)) : -10)); }
+          }
+          for (k = 0; k < 2; k++) {
+              int t;
+              setup();
+              steer_exit_test = steer_iv_test = steer_px_test = 0;
+              steer_entry_test = (int16_t)(k ? 4 : 0);
+              (void)param_set(P_STEER_KP, 60);
+              (void)param_set(P_STEER_KI, 5);
+              D.vin_out = D.v_cmd = P.target_speed;
+              for (t = 0; t < n; t++) {
+                  D.guide_pos = pos[t];
+                  steer_run(1);
+                  (k ? ie : i0)[t] = steer_i_out();
+              }
+          }
+          first = -1;
+          for (k = 1; k < n; k++) {
+              if ((ie[k] != i0[k]) && (first < 0)) { first = k; }
+          }
+          printf("  진입 E 판 %d: 처음 다름 %d 틱, 끝 적분 %.1f / 끔 %.1f\n", c, first, ie[n - 1], i0[n - 1]);
+          if (c == 0) {
+              assert((first >= 20 + 16) && (pos[first] <= -4) && (pos[first - 10] - pos[first] >= 2));
+              assert(near0((ie[first] - ie[first - 1]) - 4.0f * (i0[first] - i0[first - 1])) < 1e-3f);
+              for (k = 52 + 11; k < n; k++) { assert(near0((ie[k] - ie[k - 1]) - (i0[k] - i0[k - 1])) < 1e-3f); }
+              assert(ie[n - 1] > i0[n - 1] + 20.0f);
+          }
+          else if (c == 1) { assert(first < 0); }
+          else if (c == 2) {
+              for (k = 100; (k < n) && (i0[k] < 0.0f); k++) { assert(ie[k] == i0[k]); }
+              assert((k < n) && (first >= k));
+          }
+          else { assert((first < 0) || (pos[first - 10] <= 0)); }
+      }
+      (void)param_set(P_STEER_KP, 0);
+      (void)param_set(P_STEER_KI, 0);
+      steer_entry_test = 0; }
+
+    /* F(steer_px_test): 목표 = K_P × geom × sign(오차) × (|오차| - 4), 틱당 10 rpm 으로 따라가 비례에 더한다. 끈 것과 같은 입력의 출력 차를 본다.
+     * 일반 센서 편차 12단위(계단 완화 밖): 켠 틱부터 10, 20, ... 으로 오르고 목표에서 멈춘다. 적분을 지우면 0 에서 다시 오른다.
+     * |오차| 4단위 안에서만 움직이면 출력이 한 비트까지 같다 */
+    { static float o0[400], of[400];
+      float geom, tgt;
+      int k, m;
+      for (m = 0; m < 2; m++) {
+          setup();
+          steer_exit_test = steer_iv_test = steer_entry_test = steer_px_test = 0;
+          (void)param_set(P_STEER_KP, 60);
+          D.vin_out = D.v_cmd = P.target_speed;
+          D.guide_pos = 12;
+          for (k = 0; k < 400; k++) {
+              if (m && (k == 100)) { steer_px_test = 1; }
+              D.obs_on = (int16_t)(k == 300);           /* 적분을 지운다 */
+              steer_run(1);
+              (m ? of : o0)[k] = D.p_pi_out;
+          }
+      }
+      geom = 250.0f / P.guide_dist_mm;
+      geom *= ((float)param_get(P_WHEEL_BASE_MM) * 10.0f) / 600.0f;
+      tgt = 60.0f * 8.0f * geom;
+      printf("  보조 비례 F: 목표 %.1f, 차 %.1f %.1f … %.1f, 지운 뒤 %.1f\n", tgt, o0[100] - of[100], o0[101] - of[101], o0[299] - of[299], o0[300] - of[300]);
+      for (k = 0; k < 100; k++) { assert(of[k] == o0[k]); }
+      for (k = 100; k < 300; k++) {
+          float want = 10.0f * (float)(k - 99);
+          if (want > tgt) { want = tgt; }
+          assert(near0((o0[k] - of[k]) - want) < 0.01f);      /* 위치 + → 오차 - → 출력 - 쪽 */
+      }
+      assert(near0((o0[300] - of[300]) - 10.0f) < 0.01f);
+      setup();
+      steer_px_test = 0;
+      { uint32_t h[2];
+        for (m = 0; m < 2; m++) {
+            setup();
+            steer_px_test = (int16_t)m;
+            (void)param_set(P_STEER_KP, 60);
+            D.vin_out = D.v_cmd = P.target_speed;
+            h[m] = 2166136261u;
+            for (k = 0; k < 300; k++) {
+                D.guide_pos = (int16_t)(((k / 10) % 9) - 4);
+                steer_run(1);
+                h[m] = fnv(h[m], D.p_pi_out);
+            }
+        }
+        assert(h[0] == h[1]); }
+      steer_px_test = 0;
+      (void)param_set(P_STEER_KP, 0); }
 #endif
 
     puts("test_steer ok");
