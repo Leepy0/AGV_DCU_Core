@@ -9,7 +9,8 @@
 #include "agv/param.h"      /* AGV_DEV_TESTS 기본값, motor_speed_ff */
 
 #define MOTOR_TORQUE_LIMIT   4000.0f
-/* 속도 PI(54차부터 기본, 53차 시험 새1): 되먹임 1표본(D.rpm), 피드포워드 고정(FF 파라미터는 쓰지 않는다). 역계산 이득 1/Kp */
+/* 속도 PI(54차부터 기본, 53차 시험 새1): 되먹임 1표본(D.rpm), 피드포워드 고정(FF 파라미터는 쓰지 않는다). 역계산 이득 1/Kp,
+ * 포화 기준은 PI + 피드포워드 합 [0, 4000](v0.48.0. 예전 루프 TST 2 는 PI 단독 4000) */
 #define MOTOR_SPEED_KP       0.8f
 #define MOTOR_SPEED_KI       0.16f
 #define MOTOR_SPEED_FF       0.999f

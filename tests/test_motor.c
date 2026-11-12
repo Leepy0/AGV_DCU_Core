@@ -30,6 +30,71 @@ static void setup(void)
     D.speed_cmd = P.low_speed;
 }
 
+/* 바퀴 모형 (가)(앱 analysis/speedloop 맞춤, test_curve·test_stop 의 토크 모형): 0.64 rpm/DAC, τ 10.7 ms, 순수 지연 6.2 ms.
+ * tau 는 관성 배율(speedloop Plant.scaled)을 건 시정수. 1 ms 칸으로 적분하고 모터 12펄스/회전마다 주기를 넣는다 */
+static struct { float x[2], tq[2], acc[2], tau; } s_wh;
+
+static void wheel_tick(void)
+{
+    for (uint16_t i = 0; i < 2; i++) {
+        float tq = (float)D.tq_cmd[i];
+        for (int m = 0; m < 10; m++) {
+            s_wh.x[i] += (0.64f * ((m < 6) ? s_wh.tq[i] : tq) - s_wh.x[i]) * (0.001f / s_wh.tau);
+            if (s_wh.x[i] <= 5.0f) { continue; }
+            s_wh.acc[i] += s_wh.x[i] * (12.0f / 60000.0f);
+            while (s_wh.acc[i] >= 1.0f) {
+                s_wh.acc[i] -= 1.0f;
+                motor_encoder_pulse(i);
+                D.period[i] = (int32_t)(500000000.0f / s_wh.x[i]);
+            }
+        }
+        s_wh.tq[i] = tq;
+    }
+}
+
+/* 합 포화(PI + FF·지령을 [0, 4000] 으로 자름)를 모형 (가)로 본다.
+ * kind 0(τ 10.7 ms): 1800 rpm 직진에서 바깥 바퀴(왼쪽) 지령을 틱당 50 씩 2800 까지(모형 최고 2560 위) 올려 0.5 s 두고 틱당 50 씩 내린다.
+ *   stuck = 내리기 시작한 뒤 토크 4000 틱 수, rel = 내리기 시작부터 처음 4000 아래가 될 때까지 틱(지령이 2560 아래로 오는 데 5틱)
+ * kind 1: 2363 rpm(25 m/min)에서 틱당 60 rpm(DCC 60) 일정 감속으로 바닥 150 에 닿아 머문다. 맞춘 τ 10.7 ms 로는 합이 0 아래로
+ *   잘리지 않아(감속 20~60, 고치기 전후 토크 0 틱 0) 관성 9.3배(τ 0.1 s, test_curve 기본 바퀴 시정수)로 본다.
+ *   stuck = 감속 시작부터 토크 0 틱 수, rel = 바닥에 닿은 뒤 토크 0 틱 수, vmin = 바닥에 닿은 뒤 바퀴 최저 rpm */
+static void sat_run(int kind, int *stuck, int *rel, float *vmin)
+{
+    int16_t v = kind ? 2363 : 1800, add = 0;
+    int t, t0 = kind ? 150 : 220, on = -1;
+    setup();
+    memset(&s_wh, 0, sizeof(s_wh));
+    s_wh.tau = kind ? 0.1f : 0.0107f;
+    D.control = kind ? RUN_TURN : RUN_DRIVE;
+    *stuck = 0;
+    *rel = 0;
+    *vmin = 1e9f;
+    for (t = 0; t < 450; t++) {
+        if (kind == 0) {
+            if ((t >= 150) && (t < 170))     { add = (int16_t)(add + 50); }
+            else if ((t >= t0) && (add > 0)) { add = (int16_t)(add - 50); }
+            D.add_speed_l = add;
+        }
+        else if (t >= t0) { v = (int16_t)((v > 210) ? (v - 60) : 150); }
+        wheel_tick();
+        motor_feedback_update();
+        motor_speed_pi(v);
+        if (t < t0) { continue; }
+        if (kind == 0) {
+            if (D.tq_cmd[0] == 4000) { (*stuck)++; }
+            else if (on < 0) { on = t; *rel = t - t0; }
+        }
+        else {
+            if (D.tq_cmd[0] == 0) { (*stuck)++; }
+            if ((v == 150) && (on < 0)) { on = t; }
+            if (on >= 0) {
+                if (D.tq_cmd[0] == 0) { (*rel)++; }
+                if (s_wh.x[0] < *vmin) { *vmin = s_wh.x[0]; }
+            }
+        }
+    }
+}
+
 int main(void)
 {
     int16_t v, a;
@@ -99,7 +164,8 @@ int main(void)
     assert(D.iref_it[0] == MOTOR_SPEED_KI * 100.0f);
     assert(D.tq_cmd[0] == (int16_t)((MOTOR_SPEED_KP * 100.0f + D.iref_it[0]) + MOTOR_SPEED_FF * 100.0f));
     for (int i = 0; i < 3000; i++) { motor_speed_pi(3000); }
-    assert(D.tq_cmd[0] == 4000 && D.tq_cmd[1] == 4000 && D.w_pi_out[0] == 4000.0f);
+    /* 합 포화: PI 몫은 4000 - FF·지령까지(v0.48.0, 예전은 PI 단독 4000) */
+    assert(D.tq_cmd[0] == 4000 && D.tq_cmd[1] == 4000 && D.w_pi_out[0] == 4000.0f - MOTOR_SPEED_FF * 3000.0f);
     /* 포화 해소 뒤 적분이 묶여 있어 곧 내려온다 (anti-windup) */
     motor_encoder_pulse(0);
     D.period[0] = 166666;                       /* 3000 rpm */
@@ -848,6 +914,10 @@ int main(void)
                     out[i] = (fbk[i] > 4000.0f) ? 4000.0f : fbk[i];
                     tq = out[i] + (ff * (float)cmd);
                     if (tq > 4000.0f) { tq = 4000.0f; }
+                    if (row[r].fb == 1) {       /* 기본(v0.48.0): 합 포화를 PI 몫 [-FF·지령, 4000 - FF·지령] 으로 되돌린다. 토크는 같다 */
+                        float s = fbk[i] + (ff * (float)cmd);
+                        out[i] = (s > 4000.0f) ? (4000.0f - (ff * (float)cmd)) : ((s < 0.0f) ? -(ff * (float)cmd) : fbk[i]);
+                    }
                     assert(D.w_cmd[i] == cmd && D.w_err[i] == err && D.iref_it[i] == it[i] && D.w_pi_out[i] == out[i]);
                     assert(D.tq_cmd[i] == ((tq > 0.0f) ? (int16_t)tq : 0));
                     assert(D.rpm_avg[i] == avg6);                       /* 다른 곳이 보는 값은 늘 6표본 평균 */
@@ -857,13 +927,24 @@ int main(void)
                     plant[i] += 0.3f * (0.64f * (float)D.tq_cmd[i] - plant[i]);
                     if (plant[i] >= 100.0f) { D.period[i] = (int32_t)(500000000.0f / plant[i]); motor_encoder_pulse((uint16_t)i); }
                 }
-                if (t == 255) { assert(D.w_pi_out[1] == 4000.0f); }    /* 3500 rpm 지령: 포화(역계산 ka 가 쓰인다) */
+                if (t == 255) { assert(D.tq_cmd[1] == 4000 && D.w_pi_out[1] < D.iref_fb[1]); }    /* 3500 rpm 지령: 포화(역계산 ka 가 쓰인다) */
             }
             (void)param_set_ram(P_SPEED_FF, 0);
         }
 #if AGV_DEV_TESTS
         param_tst_old = 0;
 #endif
+    }
+
+    {   /* 합 포화 되돌림(v0.48.0): 모형 (가)에서 고치기 전(v0.47.0, PI 단독 4000 만 봄)보다 4000·0 에 덜 붙는다 */
+        int st, rl;
+        float vm;
+        sat_run(0, &st, &rl, &vm);
+        printf("  합 포화 위: 내린 뒤 토크 4000 %d틱, 풀림 %d틱\n", st, rl);
+        assert(st <= 5 && rl <= 5);                     /* 고치기 전 18틱·18틱 */
+        sat_run(1, &st, &rl, &vm);
+        printf("  합 포화 아래: 감속부터 토크 0 %d틱, 바닥 뒤 토크 0 %d틱, 바닥 뒤 최저 %.0f rpm\n", st, rl, vm);
+        assert(st <= 25 && rl <= 20 && vm > 50.0f);     /* 고치기 전 47틱·42틱·6 rpm */
     }
 
     /* 엔코더 고착: 지령 바닥 이상, 오른쪽만 펄스, 왼쪽은 N 틱 무펄스 */

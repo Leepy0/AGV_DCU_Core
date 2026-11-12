@@ -240,15 +240,27 @@ void motor_speed_pi(int16_t input)
             D.w_err[i] = 0;
             D.w_pi_out[i] = D.iref_it[i] = D.iref_fb[i] = 0.0f;
         }
-        /* 역계산 anti-windup */
+        /* 역계산 anti-windup: 지난 틱에 PI 가 낼 수 있는 범위를 넘은 만큼(iref_fb - w_pi_out)을 적분에 되돌린다 */
         D.iref_it[i] += ki * ((float)D.w_err[i] - ka * (D.iref_fb[i] - D.w_pi_out[i]));
         D.iref_fb[i] = kp * (float)D.w_err[i] + D.iref_it[i];
         D.w_pi_out[i] = D.iref_fb[i];
-        if (D.w_pi_out[i] > MOTOR_TORQUE_LIMIT) { D.w_pi_out[i] = MOTOR_TORQUE_LIMIT; }
         {   /* 피드포워드: 지령 rpm 에 비례한 토크를 더해 PI 가 메울 몫을 줄인다 */
-            float tq = D.w_pi_out[i] + (ff * (float)D.w_cmd[i]);
-            if (tq > MOTOR_TORQUE_LIMIT) { tq = MOTOR_TORQUE_LIMIT; }
-            D.tq_cmd[i] = (tq > 0.0f) ? (int16_t)tq : 0;
+            float f = ff * (float)D.w_cmd[i], tq;
+#if AGV_DEV_TESTS
+            if (old) {      /* 예전 루프(TST 2)는 견줄 기준이라 그대로: PI 단독 상한만 본다 */
+                if (D.w_pi_out[i] > MOTOR_TORQUE_LIMIT) { D.w_pi_out[i] = MOTOR_TORQUE_LIMIT; }
+                tq = D.w_pi_out[i] + f;
+                if (tq > MOTOR_TORQUE_LIMIT) { tq = MOTOR_TORQUE_LIMIT; }
+                D.tq_cmd[i] = (tq > 0.0f) ? (int16_t)tq : 0;
+                continue;
+            }
+#endif
+            /* 출력 단은 합 PI + f 를 [0, 4000] 으로 자른다(w_cmd ≥ 0, 후진은 방향 출력이 맡는다).
+             * 그래서 PI 가 낼 수 있는 범위는 [-f, 4000 - f]. 합이 묶이지 않으면 예전과 비트까지 같다 */
+            tq = D.w_pi_out[i] + f;
+            if (tq > MOTOR_TORQUE_LIMIT) { tq = MOTOR_TORQUE_LIMIT; D.w_pi_out[i] = MOTOR_TORQUE_LIMIT - f; }
+            else if (tq < 0.0f)          { tq = 0.0f;               D.w_pi_out[i] = -f; }
+            D.tq_cmd[i] = (int16_t)tq;
         }
     }
 }
