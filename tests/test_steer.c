@@ -5,6 +5,7 @@
 #include "agv/guide.h"
 #include "agv/motor.h"
 #include "agv/steer.h"
+#include "agv/steerlog.h"
 #include "agv/stop.h"
 #include "fakes.h"
 
@@ -26,6 +27,15 @@ static void setup(void)
 }
 
 static float near0(float x) { return (x < 0.0f) ? -x : x; }
+
+static uint32_t fnv(uint32_t h, float v)
+{
+    uint32_t b;
+    int i;
+    memcpy(&b, &v, sizeof(b));
+    for (i = 0; i < 4; i++) { h = (h ^ ((b >> (i * 8)) & 0xFFu)) * 16777619u; }
+    return h;
+}
 
 int main(void)
 {
@@ -503,6 +513,134 @@ int main(void)
       for (k = 0; k < 60; k++) { steer_run(1); }
       assert(D.p_pi_out - D.p_kp * (float)D.p_err < -30.0f);
       (void)param_set(P_LEGACY_QUIRKS, 0); }
+
+    /* TST 0(곡선 끝 처리·속도 비례 적분 시험 끔)은 고치기 전(v0.42.0) 조향과 출력 수열이 한 비트까지 같다.
+     * 정한 입력(편차 오르내림·넘어감·떨림, 곡선 폭, 위험 감속과 속도 바뀜, 다른 선, 후진, 정지)으로 자동 이득·K_P 60 K_I 5·20 ms 조향을
+     * 돌려 출력·이득 비트의 FNV 해시를 v0.42.0 에서 잰 값과 맞춘다 */
+    { static const struct { int16_t kp, ki, lg; } run[3] = { { 0, 0, 0 }, { 60, 5, 0 }, { 0, 0, QUIRK_STEER_20MS } };
+      uint32_t h = 2166136261u;
+      int k, t;
+      for (k = 0; k < 3; k++) {
+          int16_t v = 2000;
+          setup();
+          (void)param_set(P_LEGACY_QUIRKS, run[k].lg);
+          (void)param_set(P_STEER_KP, run[k].kp);
+          (void)param_set(P_STEER_KI, run[k].ki);
+          for (t = 0; t < 3000; t++) {
+              int16_t ph = (int16_t)(t % 600), a;
+              D.guide_wide = (int16_t)((t / 1500) & 1);
+              D.guide_pos = (int16_t)((ph < 150) ? (ph / 10) : ((ph < 300) ? (14 - (ph - 150) / 12)
+                          : ((ph < 400) ? (2 - (ph - 300) / 16) : (((ph * 7) % 5) - 2))));
+              a = (D.guide_pos >= 0) ? D.guide_pos : (int16_t)(-D.guide_pos);
+              D.guide_span = (a > 8) ? 5 : 2;
+              D.guide_track = ((ph >= 420) && (ph < 440)) ? GUIDE_TRK_EDGE : GUIDE_TRK_NORMAL;
+              D.risk_stop = (int16_t)((a >= 10) || (D.risk_stop && (a > 3)));
+              D.backward = (int16_t)((t >= 2400) && (t < 2700));
+              D.flag_stopping = (int16_t)(t >= 2800);
+              if (D.flag_stopping)  { v = (int16_t)((v > 10) ? (v - 10) : 0); }
+              else if (D.risk_stop) { v = (int16_t)((v > 1420) ? (v - 20) : 1400); }
+              else                  { v = (int16_t)((v < 1985) ? (v + 15) : 2000); }
+              D.vin_out = D.v_cmd = v;
+              steer_run(1);
+              h = fnv(fnv(fnv(fnv(h, D.p_pi_out), D.p_kp), D.p_ki), (float)D.add_speed_l);
+          }
+      }
+      printf("  TST 0 조향 수열 해시 %08lx\n", (unsigned long)h);
+      assert(h == 0xbf0ff2d4u);                   /* v0.42.0(고치기 전) 값. 개발·현장 빌드 같다 */
+      (void)param_set(P_LEGACY_QUIRKS, 0);
+      (void)param_set(P_STEER_KP, 0);
+      (void)param_set(P_STEER_KI, 0); }
+
+#if AGV_DEV_TESTS
+    /* A(steer_exit_test 1): 오차와 적분의 부호가 반대일 때만 10 ms 마다 0.9 배, 무장 없음. 6단위를 지난 뒤 3단위(예전 규칙이면
+     * 감쇠)에서는 계속 쌓인다. 20 ms 조향은 같은 시간 상수(0.81). |적분| < 5 rpm 은 부호가 반대여도 쌓이는 만큼만 */
+    { int k, slow;
+      for (slow = 0; slow <= 1; slow++) {
+          float i0, i1, i2;
+          setup();
+          (void)param_set(P_LEGACY_QUIRKS, slow ? QUIRK_STEER_20MS : 0);
+          steer_exit_test = 1;
+          D.vin_out = D.v_cmd = P.target_speed;
+          D.guide_pos = 6;
+          for (k = 0; k < 400; k++) { steer_run(1); }
+          D.guide_pos = 3;
+          steer_run(1);
+          i0 = steer_i_out();
+          steer_run(1);
+          i1 = steer_i_out();                       /* 오차 -3: 한 틱에 d = i1 - i0 */
+          D.guide_pos = -1;                         /* 선이 반대쪽으로 넘어갔다: 오차 +1, 적분은 음수 */
+          steer_run(1);
+          i2 = steer_i_out();
+          printf("  끝 처리 A %s: %.2f → %.2f → %.2f\n", slow ? "20 ms" : "10 ms", i0, i1, i2);
+          assert((i0 < -30.0f) && (i1 < i0));
+          assert(near0(i2 - (i1 + (i0 - i1) / 3.0f) * (slow ? 0.81f : 0.9f)) < 1e-3f);
+      }
+      (void)param_set(P_LEGACY_QUIRKS, 0);
+      setup();
+      steer_exit_test = 1;
+      D.vin_out = D.v_cmd = P.target_speed;
+      D.guide_pos = 1;
+      for (k = 0; k < 40; k++) { steer_run(1); }
+      { float i0, i1, i2;
+        D.guide_pos = -1;
+        steer_run(1);
+        i0 = steer_i_out();
+        steer_run(1);
+        i1 = steer_i_out();
+        steer_run(1);
+        i2 = steer_i_out();
+        assert((i0 < 0.0f) && (i0 > -5.0f) && (i1 > i0) && (near0((i2 - i1) - (i1 - i0)) < 1e-4f)); } }
+
+    /* B(steer_exit_test 2): |적분| ≥ 100 rpm 이고 100 ms 동안 |위치| 가 2단위 이상 줄면 그 틱도 0.95 배.
+     * 곡선 안 빠르기(1단위 120 ms)·작은 적분(< 100)은 A 만 켠 것과 한 비트까지 같다. 위치는 내내 적분 쪽(A 는 안 걸린다) */
+    { static const struct { int16_t ki, per; int fire; } cs[] = { { 5, 5, 1 }, { 5, 12, 0 }, { 0, 5, 0 } };
+      int c, k, m;
+      for (c = 0; c < 3; c++) {
+          float ia[2];
+          for (m = 1; m <= 2; m++) {
+              setup();
+              (void)param_set(P_STEER_KI, cs[c].ki);
+              steer_exit_test = (int16_t)m;
+              D.vin_out = D.v_cmd = P.target_speed;
+              D.guide_pos = 10;
+              for (k = 0; k < (cs[c].ki ? 300 : 100); k++) { steer_run(1); }
+              assert(cs[c].ki ? (steer_i_out() < -100.0f) : (steer_i_out() > -100.0f));
+              for (k = 0; k < 40; k++) {
+                  D.guide_pos = (int16_t)(10 - k / cs[c].per);
+                  steer_run(1);
+              }
+              ia[m - 1] = steer_i_out();
+          }
+          printf("  끝 처리 B K_I %d 1단위 %d0 ms: A %.1f, A+B %.1f\n", cs[c].ki, cs[c].per, ia[0], ia[1]);
+          if (cs[c].fire) { assert(near0(ia[1]) < 0.9f * near0(ia[0])); }
+          else            { assert(ia[1] == ia[0]); }
+      }
+      (void)param_set(P_STEER_KI, 0); }
+
+    /* C(steer_iv_test 1): 속도 지령 크기가 바뀌면 적분에 |v| 비를 곱한다. 한 틱 0.9~1.1, 두 틱 다 200 rpm 이상일 때만.
+     * 정지 중 감속은 예전 식(묶지 않음) 하나만 건다. 오차 0 인 틱이라 쌓이는 몫이 없다 */
+    { static const struct { int16_t v0, v1, stop; float k; } cs[] = {
+          { 2000, 1900, 0, 0.95f }, { 2000, 1000, 0, 0.9f }, { 1000, 1500, 0, 1.1f }, { 1000, 1050, 0, 1.05f },
+          { 300, 199, 0, 1.0f }, { 199, 250, 0, 1.0f }, { 1500, 1500, 0, 1.0f }, { 2000, 1000, 1, 0.5f } };
+      int c, k;
+      for (c = 0; c < (int)(sizeof(cs) / sizeof(cs[0])); c++) {
+          float a, b;
+          setup();
+          steer_iv_test = 1;
+          D.vin_out = D.v_cmd = cs[c].v0;
+          D.guide_pos = 5;                          /* 6 아래: 예전 끝 처리가 무장되지 않는다 */
+          for (k = 0; k < 200; k++) { steer_run(1); }
+          D.guide_pos = 0;
+          steer_run(1);
+          a = steer_i_out();
+          D.flag_stopping = cs[c].stop;
+          D.vin_out = D.v_cmd = cs[c].v1;
+          steer_run(1);
+          b = steer_i_out();
+          assert((a < -10.0f) && (near0(b - a * cs[c].k) < 1e-4f * near0(a)));
+      }
+      printf("  속도 비례 적분 C ok\n"); }
+#endif
 
     puts("test_steer ok");
     return 0;

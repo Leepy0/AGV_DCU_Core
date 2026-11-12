@@ -15,6 +15,10 @@ extern int16_t steer_test_rpm;
 extern int16_t steer_alg_test;
 /* 개발 시험만. 반응형 곡선 속도: 0 = 지금 그대로, 1 = 주행 목표 = min(지령, steer_curve_vlim()), 위험 감속은 편차가 센서 반폭 80% 넘을 때만 */
 extern int16_t speed_curve_test;
+/* 개발 시험만(TST, steer.c STEER_I_FLIP_* 설명). 곡선 끝 적분 처리: 0 예전(무장 + 4단위 아래 감쇠), 1 부호 기준, 2 부호 기준 + 빠른 접근, 3 없음 */
+extern int16_t steer_exit_test;
+/* 개발 시험만. 1 = 속도 지령이 바뀌면 적분에 |v| 비(한 틱 0.9~1.1)를 곱한다 */
+extern int16_t steer_iv_test;
 int16_t steer_curve_vlim(void);    /* 곡률·편차로 본 속도 상한 rpm. 주행 틱마다 한 번 부른다 */
 
 #endif /* AGV_STEER_H */

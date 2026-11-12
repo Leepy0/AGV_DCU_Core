@@ -3,7 +3,7 @@
 #include "agv/drive.h"
 #include "agv/guide.h"      /* guide_hold_test (TST) */
 #include "agv/motor.h"      /* speed_pi_test (TST) */
-#include "agv/steer.h"      /* steer_alg_test·speed_curve_test (TST) */
+#include "agv/steer.h"      /* steer_exit_test·steer_iv_test (TST) */
 
 #define D    agv_drive
 #define PI_F 3.14159265f
@@ -45,45 +45,45 @@ int16_t param_digit(int16_t value, int16_t place)
 }
 
 #if AGV_DEV_TESTS
-/* TST 조합 표(param.h). 번호 배열은 이 표만 고친다. v0.42.0 에서 번호 뜻이 바뀌었다.
- * est 추정 조향(steer_alg_test), spd 속도 루프 0 지금·1 새1·2 새2(speed_pi_test, motor.c s_spi), hold 교차선 덩어리 유지,
- * curve 반응형 곡선 속도, kf 칼만 위치(OPT 8), kp K_P 60 고정. kf·kp 는 원래 값을 두고 읽기만 덮는다 */
-static const struct { int16_t est, spd, hold, curve, kf, kp; } s_tst[9] = {
-    /* est spd hold curve kf kp */
-    { 0, 0, 0, 0, 0, 0 },   /* 0 평소 */
-    { 1, 1, 0, 0, 0, 0 },   /* 1 추정 조향 + 새1 */
-    { 1, 0, 0, 0, 0, 0 },   /* 2 추정 조향 */
-    { 0, 1, 0, 0, 0, 0 },   /* 3 새1 */
-    { 1, 1, 1, 1, 0, 0 },   /* 4 추정 조향 + 새1 + 교차선 유지 + 반응형 속도 */
-    { 0, 1, 0, 0, 1, 0 },   /* 5 칼만 위치 + 새1 */
-    { 0, 1, 0, 0, 0, 1 },   /* 6 K_P 60 + 새1 */
-    { 0, 0, 1, 0, 0, 0 },   /* 7 교차선 유지 */
-    { 0, 2, 0, 0, 0, 0 }    /* 8 새2 */
+/* TST 조합 표(param.h). 번호 배열은 이 표만 고친다. v0.43.0 에서 번호 뜻이 다시 바뀌었다(52차).
+ * spd 속도 루프 0 지금·1 새1·2 새2(speed_pi_test, motor.c s_spi), hold 교차선 덩어리 유지(guide_hold_test),
+ * kp·ki K_P·K_I 강제값(0 = 파라미터. 원래 값은 두고 param_get 만 덮는다. 파라미터 화면에도 강제값이 보인다),
+ * ex 곡선 끝 적분 처리 0 예전·1 부호 기준·2 부호 기준 + 빠른 접근·3 없음(steer_exit_test), iv 속도 비례 적분(steer_iv_test).
+ * 추정 조향·반응형 속도(steer_alg_test·speed_curve_test)와 칼만 위치는 표에서 뺐다(코드는 남는다. 칼만 위치는 OPT b3) */
+static const struct { int16_t spd, hold, kp, ki, ex, iv; } s_tst[9] = {
+    /* spd hold kp  ki ex iv */
+    { 0, 0,  0,  0, 0, 0 },   /* 0 평소 */
+    { 1, 0, 60,  5, 1, 1 },   /* 1 핵심 후보 */
+    { 1, 0, 60,  5, 2, 1 },   /* 2 출구 넘침 줄이기 */
+    { 1, 0, 60, 10, 1, 1 },   /* 3 적분 빠르게 */
+    { 1, 0, 60,  5, 3, 1 },   /* 4 끝 처리 없이(비교) */
+    { 1, 0, 60,  5, 1, 0 },   /* 5 속도 비례 끔 */
+    { 1, 0, 60,  0, 0, 0 },   /* 6 51차 TST 6 그대로(기준) */
+    { 1, 1, 60,  5, 1, 1 },   /* 7 교차선 유지 */
+    { 1, 0,  0,  0, 1, 1 }    /* 8 값 조정용(K_P·K_I 는 파라미터) */
 };
 
 int16_t param_get(uint16_t idx)
 {
-    if ((idx == P_STEER_KP) && s_tst[s_set[P_DEV_TEST]].kp) { return PARAM_TST_KP; }
+    if ((idx == P_STEER_KP) && s_tst[s_set[P_DEV_TEST]].kp) { return s_tst[s_set[P_DEV_TEST]].kp; }
+    if ((idx == P_STEER_KI) && s_tst[s_set[P_DEV_TEST]].ki) { return s_tst[s_set[P_DEV_TEST]].ki; }
     return (idx < P_COUNT) ? s_set[idx] : 0;
-}
-int16_t param_opt(uint16_t bit)
-{
-    return ((((uint16_t)s_set[P_OPT_FLAGS] | (s_tst[s_set[P_DEV_TEST]].kf ? OPT_KF_POSITION : 0u)) & bit) != 0) ? 1 : 0;
 }
 
 void param_tst_apply(void)
 {
     int16_t t = s_set[P_DEV_TEST];
-    D.p_kp = (float)param_get(P_STEER_KP);       /* TST 6 이면 60. 0 이면 steer.c 가 경사로 다시 잡는다 */
+    D.p_kp = (float)param_get(P_STEER_KP);       /* 0 이면 steer.c 가 경사로 다시 잡는다 */
+    D.p_ki = (float)param_get(P_STEER_KI) * 0.1f;
     guide_hold_test = s_tst[t].hold;
-    steer_alg_test = s_tst[t].est;
-    speed_curve_test = s_tst[t].curve;
     speed_pi_test = s_tst[t].spd;
+    steer_exit_test = s_tst[t].ex;
+    steer_iv_test = s_tst[t].iv;
 }
 #else
 int16_t param_get(uint16_t idx)        { return (idx < P_COUNT) ? s_set[idx] : 0; }
-int16_t param_opt(uint16_t bit)        { return (((uint16_t)s_set[P_OPT_FLAGS] & bit) != 0) ? 1 : 0; }
 #endif
+int16_t param_opt(uint16_t bit)        { return (((uint16_t)s_set[P_OPT_FLAGS] & bit) != 0) ? 1 : 0; }
 int16_t param_quirk(uint16_t bit)      { return (((uint16_t)s_set[P_LEGACY_QUIRKS] & bit) != 0) ? 1 : 0; }
 
 int16_t param_rpm(int16_t m_per_min)
@@ -292,8 +292,8 @@ static void recalc_one(uint16_t i)
         param_dv.forback_mode = param_digit(s_set[P_TURN_FORBACK], 1);
         break;
     case P_STOP_LEN_MM:   recalc_stop_len(); break;
-    case P_STEER_KP:      D.p_kp = (float)s_set[P_STEER_KP]; break;
-    case P_STEER_KI:      D.p_ki = (float)s_set[P_STEER_KI] * 0.1f; break;
+    case P_STEER_KP:      D.p_kp = (float)param_get(P_STEER_KP); break;          /* TST 강제값이 있으면 그것 */
+    case P_STEER_KI:      D.p_ki = (float)param_get(P_STEER_KI) * 0.1f; break;
     case P_WHEEL_DIA_MM:
     case P_GEAR_RATIO:
     case P_WHEEL_BASE_MM: recalc_all(); break;

@@ -53,6 +53,23 @@
 #define STEER_I_EXIT_ARM            6
 #define STEER_I_EXIT_DECAY          0.95f
 #define STEER_I_EXIT_DONE           5.0f      /* 이보다 작아지면 감쇠를 끝낸다 rpm */
+#if AGV_DEV_TESTS
+/* 곡선 끝 처리·속도 비례 적분 시험(TST, param.c s_tst). 예전 규칙은 적분이 곡선을 붙든 채 편차가 4단위 아래로 내려오자
+ * 곡선 안에서 걸려 0.3 s 만에 -480 → -96 rpm 이 빠졌고, 편차가 3 → 13단위로 다시 벌어졌다(실차 51차 덤프).
+ * steer_exit_test 0 예전 규칙, 1 부호 기준(A), 2 A + 빠른 접근(B), 3 끝 처리 없음.
+ *  A: 오차와 적분의 부호가 반대(선이 반대쪽으로 넘어감)일 때만 10 ms 마다 STEER_I_FLIP_DECAY 배. 무장 없음. |적분| < STEER_I_EXIT_DONE 은 그대로.
+ *  B: |적분| ≥ STEER_I_FAST_MIN 이고 100 ms 동안 |위치| 가 STEER_I_FAST_UNITS 단위 이상 줄면(곡선이 끝나 선이 빠르게 돌아온다)
+ *     그 틱도 STEER_I_FAST_DECAY 배. 곡선 안에서 적분이 편차를 줄이는 빠르기(실측 1단위 120~750 ms)에는 걸리지 않는다.
+ * steer_iv_test 1(C): 곡선에 필요한 조향은 속도에 비례한다. 속도 지령이 바뀌면 적분에 |v| 비(한 틱 0.9~1.1)를 곱한다.
+ *  두 틱 다 STEER_I_V_MIN 이상일 때만. 정지 중 줄이기(아래 flag_stopping)가 먼저다 */
+#define STEER_I_FLIP_DECAY          0.90f
+#define STEER_I_FAST_MIN            100.0f
+#define STEER_I_FAST_UNITS          2
+#define STEER_I_FAST_DECAY          0.95f
+#define STEER_I_V_MIN               200
+int16_t steer_exit_test, steer_iv_test;
+static struct { int16_t pos[10], k; } s_ex;    /* B: 지난 10번 |위치| */
+#endif
 
 static struct {
     float i_out;
@@ -65,6 +82,22 @@ static struct {
 int16_t steer_test_rpm;
 int16_t steer_alg_test;
 float steer_i_out(void) { return s_steer.i_out; }   /* 조향 기록기(steerlog.c)가 읽는다 */
+
+/* 곡선 끝 처리 시험 A·B(위 STEER_I_FLIP_*). dev = |위치|. fast 0(20 ms 조향)은 같은 시간 상수: 두 번 곱하고 100 ms 는 5번 앞 */
+static void exit_test(int16_t dev, int16_t fast)
+{
+    int16_t j = (int16_t)(s_ex.k - (fast ? 10 : 5)), back;
+    float a = s_steer.i_out;
+    if (j < 0) { j = (int16_t)(j + 10); }
+    back = s_ex.pos[j];
+    s_ex.pos[s_ex.k] = dev;
+    if (++s_ex.k >= 10) { s_ex.k = 0; }
+    if ((steer_exit_test == 3) || ((a < STEER_I_EXIT_DONE) && (a > -STEER_I_EXIT_DONE))) { return; }
+    if (((float)D.p_err * a) < 0.0f) { s_steer.i_out *= fast ? STEER_I_FLIP_DECAY : (STEER_I_FLIP_DECAY * STEER_I_FLIP_DECAY); }
+    if ((steer_exit_test == 2) && ((a >= STEER_I_FAST_MIN) || (a <= -STEER_I_FAST_MIN)) && ((back - dev) >= STEER_I_FAST_UNITS)) {
+        s_steer.i_out *= fast ? STEER_I_FAST_DECAY : (STEER_I_FAST_DECAY * STEER_I_FAST_DECAY);
+    }
+}
 
 /* 각도·곡률 추정 조향(시험, steer_alg_test 1). 상태는 진행 방향 기준이고 부호는 가이드 위치와 같다(+ = 테이프가 왼쪽):
  *   y 회전 중심 옆 편차 mm, ψ 차체 방향 - 테이프 방향 rad(+ = 오른쪽으로 돌아 있다), κ 테이프 곡률 1/m(+ = 오른쪽으로 굽는다).
@@ -457,6 +490,13 @@ void steer_run(int16_t tuning_type)
     if ((D.flag_stopping || stop_is_braking()) && (s_steer.previous_speed > 0) && (v_abs < s_steer.previous_speed)) {
         s_steer.i_out *= (float)v_abs / (float)s_steer.previous_speed;
     }
+#if AGV_DEV_TESTS
+    else if (steer_iv_test && (v_abs != s_steer.previous_speed) && (v_abs >= STEER_I_V_MIN) && (s_steer.previous_speed >= STEER_I_V_MIN)) {
+        float k = (float)v_abs / (float)s_steer.previous_speed;     /* C: 위험 감속·재가속에 적분을 속도에 맞춰 옮긴다 */
+        if (k > 1.1f) { k = 1.1f; } else if (k < 0.9f) { k = 0.9f; }
+        s_steer.i_out *= k;
+    }
+#endif
     s_steer.previous_speed = v_abs;
     s_steer.prev_control = D.control;
     s_steer.prev_branch = D.branch_start;
@@ -507,6 +547,9 @@ void steer_run(int16_t tuning_type)
         }
         if (s_steer.i_out > (float)limit)       { s_steer.i_out = (float)limit; }
         else if (s_steer.i_out < (float)-limit) { s_steer.i_out = (float)-limit; }
+#if AGV_DEV_TESTS
+        if (smooth && steer_exit_test) { exit_test(dev, fast); } else
+#endif
         if (smooth) {
             if (dev >= STEER_I_EXIT_ARM) { s_steer.i_exit = 1; }
             if (s_steer.i_exit && (dev < GUIDE_KP_RAMP_LO)) {
