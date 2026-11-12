@@ -36,6 +36,13 @@ foreach ($dv in 1, 0) {
         & "build/t/test_curve$sfx.exe"
         if ($LASTEXITCODE -ne 0) { Write-Output "FAIL curve$sfx"; $failed++ }
     }
+    # Packed tag table re-entrancy (user function calls tagact_run again)
+    & gcc -std=gnu99 -Wall -DAGV_HOST_BUILD $dev -Iinclude -Ihal/host tests/test_tagpk.c @sys -o "build/t/test_tagpk$sfx.exe" -lm
+    if ($LASTEXITCODE -ne 0) { Write-Output "BUILD FAIL tagpk$sfx"; $failed++ }
+    else {
+        & "build/t/test_tagpk$sfx.exe"
+        if ($LASTEXITCODE -ne 0) { Write-Output "FAIL tagpk$sfx"; $failed++ }
+    }
 }
 if ($failed -ne 0) { Write-Output "FAILED: $failed"; exit 1 }
 Write-Output 'ALL PASSED'

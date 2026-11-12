@@ -21,7 +21,8 @@ float sqrtf(float x);
 
 static const tag_rule_t *s_rules;
 static const tag_packed_t *s_pk;   /* 압축 표. 0 = s_rules */
-static tag_rule_t s_hit;           /* 압축 표에서 맞춰 보는 규칙을 펼친 칸 */
+static tag_rule_t s_hit;           /* 압축 표에서 맞춰 보는 규칙을 펼친 칸. rule_find 가 다시 불리면 덮인다.
+                                    * 돌려받은 포인터를 사용자 함수 호출 뒤에 쓰지 않는다 */
 static uint16_t s_nrules, s_profile, s_display_tag;
 
 void tagact_bind(const tag_rule_t *rules, uint16_t n, uint16_t profile)
@@ -333,9 +334,11 @@ int tagact_run(uint16_t tag)
     if (tune_active()) { return 0; }         /* 튜닝 주행은 태그를 쓰지 않는다 */
     r = rule_find(tag);
     if (r != 0) {
-        for (i = 0; (i < 4u) && (r->act[i] != 0u); i++) {
-            uint16_t second = has_second_word(r->act[i]);
-            act_exec(r->act[i], (uint16_t)((second && (i < 3u)) ? r->act[i + 1u] : 0u));
+        uint16_t act[4];                      /* 사용자 함수가 tagact_run 을 다시 불러도 s_hit 가 덮이지 않게 복사 */
+        for (i = 0; i < 4u; i++) { act[i] = r->act[i]; }
+        for (i = 0; (i < 4u) && (act[i] != 0u); i++) {
+            uint16_t second = has_second_word(act[i]);
+            act_exec(act[i], (uint16_t)((second && (i < 3u)) ? act[i + 1u] : 0u));
             i = (uint16_t)(i + second);
         }
     }
