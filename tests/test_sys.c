@@ -1601,6 +1601,23 @@ static void test_tag_standby(void)
     ticks(2);
     assert(tx_has('E', 'B'));
     run_standby_clear(0);
+    /* 자동 재전송(1분)은 번호가 0 보다 클 때만: 34 번 = 호기 - 2 가 0 이면 다시 보내지 않는다 */
+    for (int k = 0; k < 2; k++) {
+        int resent = 0;
+        (void)param_set_ram(P_AGV_ID, (int16_t)(2 + k));
+        (void)tagact_run(34);
+        assert(run_standby_num() == k);
+        acs_slot_clear(ACS_SLOT_STANDBY);                /* 첫 보고는 받은 셈 */
+        for (int t = 0; t < 6100; t++) {
+            host.sci[HAL_SCI_A].tx_len = 0;
+            tick();
+            resent |= tx_has('E', 'B');
+        }
+        assert(resent == k);
+        acs_slot_clear(ACS_SLOT_STANDBY);
+        run_standby_clear(0);
+    }
+    (void)param_set_ram(P_AGV_ID, AGV_ID);
     printf("  tag standby ok\n");
 }
 

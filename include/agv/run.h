@@ -38,7 +38,7 @@ void     run_report_start(void);           /* DA_ACS_Start */
 void     run_report_stop(void);            /* DA_ACS_Stop */
 void     run_standby(int16_t id, int16_t reset);   /* reset: RUN_STANDBY_* 비트 */
 #define  RUN_STANDBY_RESET  1   /* 먼저 스테이션 큐를 지운다(레거시 DA_ACS_Standby 의 RESET) */
-#define  RUN_STANDBY_AUTO   2   /* 자동 재전송을 늘 켠다(회전 중에도). 태그 표 대기 보고 */
+#define  RUN_STANDBY_AUTO   2   /* 번호 > 0 이면 자동 재전송을 늘 켠다(회전 중에도). 태그 표 대기 보고 */
 void     run_standby_clear(int16_t id);
 int16_t  run_standby_num(void);
 void     run_standby_auto_off(void);

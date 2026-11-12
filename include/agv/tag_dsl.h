@@ -17,7 +17,7 @@
  *   ACS_SEND( 종류, 번호 )            보고, 번호 0~255  (2칸)
  *   ACS_SEND( 종류, STATION(k) )      보고, 번호 = 스테이션 큐[k] (레거시 ACS_Station_Call_Num[k])  (2칸)
  *   ACS_SEND( 종류, AGV_ID_MINUS(n) ) 보고, 번호 = 호기 번호 - n, n 0~255  (2칸)
- *   ACS_SEND( STANDBY, 번호 )         대기 보고: 정지, 자동 재전송 늘 켬(레거시 DA_ACS_Standby( n, NONE ) + 자동 재전송 켬)
+ *   ACS_SEND( STANDBY, 번호 )         대기 보고: 정지, 번호 > 0 이면 자동 재전송 늘 켬(레거시 DA_ACS_Standby( n, NONE ) + 자동 재전송 켬)
  *   ACS_SEND( STANDBY_RESET, 번호 )   위와 같고 먼저 스테이션 큐를 지운다(레거시 DA_ACS_Standby( n, RESET ))
  *   ACS( 종류, STATION0 )            보고, 번호 = 스테이션 큐[0]  (1칸. STANDBY_RESET 은 컴파일 오류, ACS_SEND 로)
  *   STATION_RESET                    스테이션 큐를 지운다

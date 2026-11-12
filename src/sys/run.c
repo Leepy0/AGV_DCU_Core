@@ -193,7 +193,7 @@ void run_standby(int16_t id, int16_t reset)
         D.flag_stopping = 1;
         s_run.standby_auto = 1;
     }
-    if (reset & RUN_STANDBY_AUTO) { s_run.standby_auto = 1; }
+    if ((reset & RUN_STANDBY_AUTO) && (id > 0)) { s_run.standby_auto = 1; }   /* 번호 0 이하(호기 - n 이 0 이하 등)는 되풀이해 보내지 않는다 */
     s_run.status_cnt = 0;
     acs_report_slot(ACS_SLOT_STANDBY, id);
 }
