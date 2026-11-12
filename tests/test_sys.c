@@ -895,6 +895,16 @@ static void test_ui(void)
     key(KEY_MODE);
     assert(D.ui_mode == UI_AUTO);
     assert(host.sci[HAL_SCI_A].brr == 0x51);
+    D.flag_run = 1;                                   /* 자동 표시: 뺀 8 은 건너뛰고, 저장된 8 은 역 번호로 */
+    param_dv.display_mode = DISP_STATION;
+    key(KEY_UP);
+    assert(param_dv.display_mode == DISP_EXT_IO);
+    key(KEY_DOWN);
+    assert(param_dv.display_mode == DISP_STATION);
+    param_dv.display_mode = DISP_GONE_8;
+    ticks(2);
+    assert(param_dv.display_mode == DISP_STATION);
+    D.flag_run = 0;
     printf("  ui ok\n");
 }
 

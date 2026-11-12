@@ -381,6 +381,7 @@ static void up_down(int16_t sign)
 {
     if ((D.ui_mode == UI_AUTO) && D.flag_run) {
         int16_t low, up, v = (int16_t)(P.display_mode + sign);
+        if (v == DISP_GONE_8) { v = (int16_t)(v + sign); }
         param_limit(P_DISPLAY_MODE, &low, &up);
         if (v > up)  { v = low; }
         if (v < low) { v = up; }
@@ -693,8 +694,11 @@ static int16_t run_value(void)
 
 static void show_run(void)
 {
-    static const char mark[] = " SCTLVRNK";   /* 항목별 첫 글자 */
-    int16_t v = run_value();
+    static const char mark[] = " SCTLVRN";   /* 항목별 첫 글자 */
+    int16_t v;
+
+    if (P.display_mode == DISP_GONE_8) { P.display_mode = DISP_STATION; }   /* EEPROM 값은 그대로 */
+    v = run_value();
 
     if (v > 0) {
         s_ui.digit[0] = digit_of(v, 10000);
@@ -714,7 +718,7 @@ static void show_run(void)
             s_ui.digit[1] = DIGIT_NONE;
             show_number_tail(comm_recent_num(), 1);
         }
-        else if ((P.display_mode >= DISP_SET_SPEED) && (P.display_mode <= DISP_STOCK)) {
+        else if ((P.display_mode >= DISP_SET_SPEED) && (P.display_mode <= DISP_STATION)) {
             s_ui.digit[0] = letter(mark[P.display_mode]);
         }
     }

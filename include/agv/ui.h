@@ -19,9 +19,10 @@ enum { UI_GROUP_SPEED = 1, UI_GROUP_RUN, UI_GROUP_CAR, UI_GROUP_COMM, UI_GROUP_I
 #define UI_PARA_LAMP_LAST  93
 #define UI_LAMP_EXT_COUNT  3
 
-/* 자동 표시 항목 (P_DISPLAY_MODE) */
+/* 자동 표시 항목 (P_DISPLAY_MODE). 번호는 EEPROM 에 남는 값이라 바꾸지 않는다.
+ * 8(재고)은 뺐다: UP/DOWN 은 건너뛰고, 저장된 8 은 DISP_STATION 으로 보인다 */
 enum { DISP_SET_SPEED = 1, DISP_CUR_SPEED, DISP_TOTAL_TIME, DISP_TAG_COUNT, DISP_BAT_V, DISP_BAT_RATE,
-       DISP_STATION, DISP_STOCK, DISP_EXT_IO, DISP_TAG_INFO };
+       DISP_STATION, DISP_GONE_8, DISP_EXT_IO, DISP_TAG_INFO };
 
 void     ui_reset(void);
 void     ui_isr(uint16_t key_input);    /* 2 ms: 키 스캔, 깜박임, 7세그 한 자리 */
