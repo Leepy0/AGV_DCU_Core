@@ -149,7 +149,8 @@ void motor_feedback_update(void)
         if (cur > cut) { D.rpm[i] = s_motor.pre_rpm[i]; }
         else           { s_motor.pre_rpm[i] = D.rpm[i] = (int16_t)cur; }
 
-        D.rpm_avg[i] = (int16_t)((D.rpm[i] + s_motor.hist[i][0] + s_motor.hist[i][1] + s_motor.hist[i][2]
+        /* 합은 32비트: 컷이 지령 × 5/4 + 600 이라 표본이 5462 를 넘으면 여섯 합이 16비트 int 를 넘는다 */
+        D.rpm_avg[i] = (int16_t)(((int32_t)D.rpm[i] + s_motor.hist[i][0] + s_motor.hist[i][1] + s_motor.hist[i][2]
                                   + s_motor.hist[i][3] + s_motor.hist[i][4]) / 6);
         D.rpm_flt[i] = (int16_t)(((float)D.rpm_flt[i] * 0.9f) + ((float)D.rpm_avg[i] * 0.1f));
 
