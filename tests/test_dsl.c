@@ -4,7 +4,7 @@
  * 호스트: gcc -std=c99 -DAGV_HOST_BUILD -Iinclude tests/test_dsl.c -o build/test_dsl && build/test_dsl
  * 타깃:   cl2000 -v28 -ml -mt --c99 -Iinclude --compile_only tests/test_dsl.c
  * 컴파일 오류 시험: -DNEG_AMP_INPUT, -DNEG_NO_DIRECTION, -DNEG_PARAM_ZERO, -DNEG_MOD_ZERO, -DNEG_HIGH_ANY, -DNEG_TURN_SPEED,
- * -DNEG_ACS1_RESET 각각 컴파일이 실패해야 한다(tests/run_host.ps1 이 하나씩 본다).
+ * -DNEG_ACS1_RESET, -DNEG_PIN_TWICE, -DNEG_PIN_ANY, -DNEG_PIN_ONE 각각 컴파일이 실패해야 한다(tests/run_host.ps1 이 하나씩 본다).
  */
 #include "agv/seq_dsl.h"
 
@@ -89,8 +89,18 @@ SEQ_BEGIN( ext )
     ACS_SEND( NEXT, STATION(0) )                                             /* 17 = ACS( NEXT, STATION0 ) */
     ACS_SEND( NEXT, STATION(2) )                                             /* 18 = ACS( NEXT, STATION(2) ) */
     ACS_SEND( LOADING, 599 )                                                 /* 19 */
+    WAIT( IN( OFF(SEN_H), ON(IN_EXT_4), ON(SEN_A, SEN_A) ) )                 /* 20 같은 핀 같은 뜻 겹침은 된다 */
 #ifdef NEG_HIGH_ANY
     WAIT( ANY_ON(SEN_H) )
+#endif
+#ifdef NEG_PIN_TWICE
+    WAIT( IN( ON(SEN_H), ON(IN_EXT_4) ) )                                    /* 같은 핀 반대 극성: 핀 0 이면서 1 */
+#endif
+#ifdef NEG_PIN_ANY
+    WAIT( IN( ANY_ON(IN_EXT_4, SEN_A), ON(SEN_H) ) )                         /* ON(SEN_H) 가 ANY_ON 에 묻힌다 */
+#endif
+#ifdef NEG_PIN_ONE
+    WAIT( IN( ON(SEN_H, IN_EXT_4) ) )
 #endif
 SEQ_END
 
@@ -203,6 +213,7 @@ int main(void)
         assert(e[18].arg1 == SEQ_NUM_STATION(2) && e[18].timeout == 0);
         assert(e[19].arg0 == 'L' && e[19].arg1 == SEQ_NUM_CONST && e[19].timeout == 599);
         assert(e[16].on == 0x5UL && e[16].off == 0xAUL);                    /* ON(H) 는 off 쪽, OFF(H) 는 on 쪽 */
+        assert(e[20].on == 0x9UL && e[20].off == 0);                        /* OFF(H) = 핀 활성 = ON(IN_EXT_4) */
         assert(demo_steps[1].xc == 0);                                       /* 예전 스텝은 0 */
     }
     /* 태그: 확장 조건 둘 + 입력 조건. 새 칸은 act 뒤 */

@@ -63,7 +63,7 @@
 typedef unsigned long long dsl_cond_t;
 #define DSL_COND_ON(c)   ((uint32_t)(c))
 #define DSL_COND_OFF(c)  ((uint32_t)((c) >> 32))
-/* 양쪽 절반에 같이 선 비트 = "그중 하나라도 ON". ON(x) 와 OFF(x) 를 같이 쓰면 ANY_ON(x) 로 읽힌다 */
+/* 양쪽 절반에 같이 선 비트 = "그중 하나라도 ON". ANY_ON 만 그렇게 쓴다(아래 IN 이 겹침을 막는다) */
 
 #define DSL_STEP(kind, target, a0, a1, to, on, off, out)                                     \
     { (uint16_t)(kind), (uint16_t)(target), (uint16_t)(a0), (uint16_t)(a1), (uint16_t)(to), 0u, \
@@ -76,17 +76,26 @@ typedef unsigned long long dsl_cond_t;
       DSL_COND_ON(c), DSL_COND_OFF(c), (uint32_t)(any2) },
 
 /* ---- 조건 ----
- * ON( a ) = a 가 활성(자재 감지, 신호 들어옴), OFF( a ) = 비활성. 핀 레벨은 io_map.h 의 이름이 정한다 */
-#define ON(...)          (((dsl_cond_t)DSL_FMASK(DSL_LBIT, __VA_ARGS__)) | (((dsl_cond_t)DSL_FMASK(DSL_HBIT, __VA_ARGS__)) << 32))
-#define OFF(...)         ((((dsl_cond_t)DSL_FMASK(DSL_LBIT, __VA_ARGS__)) << 32) | ((dsl_cond_t)DSL_FMASK(DSL_HBIT, __VA_ARGS__)))
+ * ON( a ) = a 가 활성(자재 감지, 신호 들어옴), OFF( a ) = 비활성. 핀 레벨은 io_map.h 의 이름이 정한다.
+ * 한 조건 안에서 같은 핀을 반대 극성으로 겹쳐 쓰면(ON(SENH_1) 과 ON(SEN_1), ANY_ON(SEN_1, …) 과 ON(SENH_1) 등) 양쪽 절반에 같은
+ * 비트가 서서 ANY_ON 으로 읽히거나 한쪽이 묻힌다. 컴파일 오류로 막는다. 같은 핀을 같은 뜻(같은 절반)으로 두 번 쓰는 것은 된다 */
+#define DSL_NOX(m)       (0 * sizeof(char[((m) == 0) ? 1 : -1]))
+#define DSL_ONOFF(lo, hi, ...)  ((((dsl_cond_t)DSL_FMASK(lo, __VA_ARGS__)) | (((dsl_cond_t)DSL_FMASK(hi, __VA_ARGS__)) << 32)) \
+                                 + DSL_NOX(DSL_FMASK(DSL_LBIT, __VA_ARGS__) & DSL_FMASK(DSL_HBIT, __VA_ARGS__)))
+#define ON(...)          DSL_ONOFF(DSL_LBIT, DSL_HBIT, __VA_ARGS__)
+#define OFF(...)         DSL_ONOFF(DSL_HBIT, DSL_LBIT, __VA_ARGS__)
 /* 나열한 신호 중 하나라도 켜짐. 같은 마스크를 양쪽 절반에 넣는다. 예: IN( ANY_ON(S1, S2), OFF(S5) ) */
 #define ANY_ON(...)      (((dsl_cond_t)DSL_MASK(__VA_ARGS__)) | (((dsl_cond_t)DSL_MASK(__VA_ARGS__)) << 32))
+/* IN 인자마다 앞 인자들의 합 p 와 견준다: p 의 한 절반과 이 인자의 다른 절반이 겹치면 오류(ANY_ON 은 두 절반이라 어느 겹침이든 오류) */
+#define DSL_XK(p, c)     ((dsl_cond_t)(p) & (((dsl_cond_t)(c) >> 32) | ((dsl_cond_t)(c) << 32)))
 #define DSL_IN1(a)       (a)
-#define DSL_IN2(a, b)    ((a) | (b))
-#define DSL_IN3(a, b, c)             ((a) | (b) | (c))
-#define DSL_IN4(a, b, c, d)          ((a) | (b) | (c) | (d))
-#define DSL_IN5(a, b, c, d, e)       ((a) | (b) | (c) | (d) | (e))
-#define DSL_IN6(a, b, c, d, e, f)    ((a) | (b) | (c) | (d) | (e) | (f))
+#define DSL_IN2(a, b)    (((a) | (b)) + DSL_NOX(DSL_XK(a, b)))
+#define DSL_IN3(a, b, c)             (((a) | (b) | (c)) + DSL_NOX(DSL_XK(a, b) | DSL_XK((a) | (b), c)))
+#define DSL_IN4(a, b, c, d)          (((a) | (b) | (c) | (d)) + DSL_NOX(DSL_XK(a, b) | DSL_XK((a) | (b), c) | DSL_XK((a) | (b) | (c), d)))
+#define DSL_IN5(a, b, c, d, e)       (((a) | (b) | (c) | (d) | (e)) + DSL_NOX(DSL_XK(a, b) | DSL_XK((a) | (b), c) \
+                                      | DSL_XK((a) | (b) | (c), d) | DSL_XK((a) | (b) | (c) | (d), e)))
+#define DSL_IN6(a, b, c, d, e, f)    (((a) | (b) | (c) | (d) | (e) | (f)) + DSL_NOX(DSL_XK(a, b) | DSL_XK((a) | (b), c) \
+                                      | DSL_XK((a) | (b) | (c), d) | DSL_XK((a) | (b) | (c) | (d), e) | DSL_XK((a) | (b) | (c) | (d) | (e), f)))
 #define IN(...)          DSL_CAT(DSL_IN, DSL_NARG(__VA_ARGS__))(__VA_ARGS__)
 #define NO_IN            ((dsl_cond_t)0)
 /* 두 번째 "하나라도 ON" 묶음: (a||b) && (c||d). WHEN_ANY2·WAIT_ANY2 의 둘째 인자 */
