@@ -249,6 +249,7 @@ static void recalc_one(uint16_t i)
         break;
     case P_SPEED_TURN:
         param_dv.turn_speed = param_rpm(param_active(P_SPEED_TURN));
+        if (param_dv.turn_speed < param_dv.turn_min) { param_dv.turn_speed = param_dv.turn_min; }   /* recalc_all 과 같은 하한 */
         recalc_turn_pulses();
         break;
     case P_AUTO_DRIVE_MODE:
