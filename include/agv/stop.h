@@ -125,6 +125,7 @@ int16_t stop_blocking_reason(void);
 int16_t stop_alignment_speed(int16_t target_rpm);
 int16_t stop_turn_dcc(void);                   /* 회전 감속. 일반·정렬 회전이 같은 값을 쓴다 */
 int16_t stop_turn_speed(int16_t target_rpm);   /* 정렬 회전 속도 경사 */
+int16_t stop_turn_vmax(void);                  /* 이번 회전 속도 상한 rpm: 태그 지정 D.turn_rpm, 0 이면 P.turn_speed */
 void    stop_now(void);                       /* RFID 재시도 보상으로 이미 지나친 경우 즉시 0 지령 */
 
 int16_t stop_is_braking(void);

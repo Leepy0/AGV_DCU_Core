@@ -118,6 +118,7 @@ typedef struct {
     int16_t turn_motion;             /* Turn_Direction: 0 없음, MOTION_CCW, MOTION_CW */
     int16_t turn_90;                 /* 지금 회전의 90도 두 바퀴 펄스 = 휠 간격 값 × 회전 보정비. tagact_turn 이 넣는다 */
     int16_t turn_obs_use;            /* Turn_OBS_Use */
+    int16_t turn_rpm;                /* 이번 회전 속도 rpm(태그 지정). 0 = 자동 P.turn_speed. tagact_turn 이 넣고 회전 끝에 0 */
     int16_t tape_align;              /* DA_Tape_Turn_Angle_Align */
     int16_t tape_slow;               /* 1 = 정렬 회전을 처음부터 최저 속도로 돈다 */
     int16_t tape_origin, tape_origin_ok;   /* 회전 시작 때의 가이드 위치. 슬립은 이 값과의 차로 잰다 */

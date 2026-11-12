@@ -62,7 +62,8 @@ extern void (*tagact_trace)(uint16_t code, uint16_t next);   /* 호스트 시험
 #define TA_STOP_AUTOSTART 0x0200   /* 인자: 초, 0 = P_AUTO_START_SEC */
 #define TA_SPEED          0x0300   /* 인자: 0 HIGH, 1 LOW, 2 LLOW, 3 MIN, 10~ m/min */
 #define TA_FORBACK        0x0400   /* 인자: dir_t */
-#define TA_TURN           0x0500   /* 인자: dir | (deg/90)<<2 ; 다음 칸: fb | auto<<4 | obs<<8 */
+#define TA_TURN           0x0500   /* 인자: dir | (deg/90)<<2 ; 다음 칸: fb | auto<<4 | obs<<8 (0~7) | m/min<<11 (0 = 자동) */
+#define TA_TURN_SPEED_SHIFT 11
 #define TA_BRANCH         0x0600   /* 인자: branch_dir_t */
 #define TA_SEQ            0x0700   /* 인자: seq_id_t (정지 + 시퀀스 요청) */
 #define TA_TAPE_STOP      0x0800   /* 인자: seq_id_t (테이프 탐색 정지 뒤 시퀀스) */
@@ -93,8 +94,8 @@ void tagact_stop_length(void);   /* 방향별 정지 거리 뒤 멈춘다 */
 void tagact_stop_after_mm(int32_t mm);   /* 지금 자리에서 mm 만큼 더 가서 멈춘다. 현장 센서 정지용(레거시 FL_check: 센서가 켜지면 FL 만큼 가서 정지) */
 void tagact_speed(uint16_t level);
 void tagact_forback(dir_t d);
-void tagact_turn(turn_dir_t d, uint16_t deg, dir_t fb, uint16_t autostart, uint16_t obs);
-void tagact_turn_align(turn_dir_t d, uint16_t deg, uint16_t next);   /* next: fb | auto<<4 | obs<<8 */
+void tagact_turn(turn_dir_t d, uint16_t deg, dir_t fb, uint16_t autostart, uint16_t obs);   /* 회전 속도 자동 */
+void tagact_turn_align(turn_dir_t d, uint16_t deg, uint16_t next);   /* next: TA_TURN 둘째 칸(속도 포함) */
 void tagact_turn_align_stopped(turn_dir_t d, uint16_t deg, uint16_t next);   /* 멈춘 자리에서 바로 */
 void tagact_turn_align_cross(turn_dir_t d, uint16_t deg, uint16_t next);     /* 교차선 기준: GD 뒤 정지 */
 void tagact_branch(branch_dir_t d);

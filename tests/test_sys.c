@@ -93,6 +93,11 @@ static const tag_rule_t s_rules[] = {
     TAG_IF( 22, 0, IF_STATION_DIV( 0, 10, 4 ), OBS_OFF )
     TAG_IF( 23, 0, IF_IN( ANY_ON(IN_EXT_16, IN_START_SW) ), OBS_ON )
     TAG_IF( 23, 0, IF_X( X_NOT(X_CROSS_IN) ), OBS_OFF )
+    /* 회전 속도 지정(m/min): 15, 최저 아래 1, 한계 위 31, 생략(자동) */
+    TAG( 30, 0, AGV_TURN( CW, 90, 0, 0, 0, 15 ) )
+    TAG( 31, 0, AGV_TURN( CW, 90, 0, 0, 0, 1 ) )
+    TAG( 32, 0, AGV_TURN( CW, 90, 0, 0, 0, 31 ) )
+    TAG( 33, 0, AGV_TURN( CW, 90, 0, 0, 0 ) )
     /* 대기·도착 보고 (tag_dsl.h) */
     TAG( 34, 0, AGV_STOP, ACS_SEND( STANDBY, AGV_ID_MINUS(2) ), STATION_RESET )
     TAG( 35, 0, ACS_SEND( STANDBY_RESET, 14 ) )
@@ -1506,6 +1511,74 @@ static void align_start(uint16_t next)
     D.flag_turn = 1;
     D.control = RUN_TURN;
     D.guide_all_off = 1;
+}
+
+/* 태그 회전을 걸고 회전 상태로 넘긴다(정지는 끝난 것으로 본다) */
+static void tag_turn_start(uint16_t tag)
+{
+    D.vin_out = 50;
+    D.flag_run = 0;
+    (void)tagact_run(tag);
+    assert(D.turn_pulses > 0);
+    stop_reset();
+    D.flag_stopping = 0;
+    D.stop_pulses = 0;
+    D.vin_out = 0;
+    D.flag_turn = 1;
+    D.control = RUN_TURN;
+}
+
+/* 회전 틱을 돌려 가장 큰 지령을 돌려준다. stop_at = 1 이면 중간에 STOP 명령 */
+static int16_t tag_turn_run(int stop_mid)
+{
+    int16_t vmax = 0;
+    int i;
+    for (i = 0; (i < 5000) && (D.flag_turn || D.turn_motion); i++) {
+        if (stop_mid && (i == 100)) { run_command_stop(); }
+        turn_scan(LED_CENTER, (D.turn_pulses > 0) ? 4 : 0);   /* 다 돌면 바퀴가 선다 */
+        if (D.vin_out > vmax) { vmax = D.vin_out; }
+    }
+    assert(!D.flag_turn && (D.turn_motion == 0));
+    return vmax;
+}
+
+/* 태그 회전 속도: 지정값이 회전 한 번의 상한, 공차·최저·한계, 끝·STOP 뒤 자동 */
+static void test_turn_speed(void)
+{
+    int16_t v15, v;
+
+    boot();
+    (void)param_set(P_TURN_FORBACK, 10);
+    v15 = param_rpm(15);
+    assert(P.turn_speed != v15);
+    tag_turn_start(30);
+    assert(D.turn_rpm == v15 && stop_turn_vmax() == v15);
+    (void)param_set(P_EMPTY_TURN, 10);               /* 공차 ETN 10 으로 바뀌어도 지정값 */
+    param_profile(1);
+    printf("  공차 회전 속도 %d rpm (ETN 10 = %d)\n", P.turn_speed, param_rpm(10));
+    assert(P.turn_speed == param_rpm(10) && stop_turn_vmax() == v15);
+    v = tag_turn_run(0);
+    printf("  태그 회전 15 m/min: 상한 %d rpm, 지령 최대 %d rpm\n", v15, v);
+    assert((v <= v15) && (v > v15 - 30));
+    assert(D.turn_rpm == 0);                         /* 끝나면 자동 */
+    param_profile(0);
+    tag_turn_start(33);                              /* 다음 자동 회전은 파라미터 */
+    assert(D.turn_rpm == 0 && stop_turn_vmax() == P.turn_speed);
+    (void)tag_turn_run(0);
+
+    tag_turn_start(31);                              /* 1 m/min: 최저 속도로 */
+    assert(D.turn_rpm == P.turn_min);
+    (void)tag_turn_run(0);
+    tag_turn_start(32);                              /* 31 m/min: TNS 한계(25)로 */
+    assert(D.turn_rpm == param_rpm(25));
+    (void)tag_turn_run(0);
+
+    tag_turn_start(30);                              /* 회전 중 STOP: 다음 회전에 남지 않는다 */
+    (void)tag_turn_run(1);
+    assert(D.turn_rpm == 0);
+    tag_turn_start(33);
+    assert(stop_turn_vmax() == P.turn_speed);
+    printf("  turn speed ok\n");
 }
 
 /* 태그 대기 보고: 번호(호기 - n), 스테이션 큐 지움(뒤·앞), 정지. 도착 보고 번호 = 스테이션 큐[1] */
@@ -2961,6 +3034,7 @@ int main(void)
     test_para_init();
     test_lamp();
     test_align_turn();
+    test_turn_speed();
     test_tag_standby();
     test_tune_entry();
     test_ee_probe();

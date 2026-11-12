@@ -3,7 +3,7 @@
  *
  * 호스트: gcc -std=c99 -DAGV_HOST_BUILD -Iinclude tests/test_dsl.c -o build/test_dsl && build/test_dsl
  * 타깃:   cl2000 -v28 -ml -mt --c99 -Iinclude --compile_only tests/test_dsl.c
- * 컴파일 오류 시험: -DNEG_AMP_INPUT, -DNEG_NO_DIRECTION, -DNEG_PARAM_ZERO, -DNEG_MOD_ZERO, -DNEG_HIGH_ANY 각각 컴파일이 실패해야 한다.
+ * 컴파일 오류 시험: -DNEG_AMP_INPUT, -DNEG_NO_DIRECTION, -DNEG_PARAM_ZERO, -DNEG_MOD_ZERO, -DNEG_HIGH_ANY, -DNEG_TURN_SPEED 각각 컴파일이 실패해야 한다.
  */
 #include "agv/seq_dsl.h"
 
@@ -126,8 +126,12 @@ TAG_TABLE_BEGIN( site_tags )
     TAG( 40, 1, AGV_STOP, ACS_SEND( STANDBY, AGV_ID_MINUS(73) ), STATION_RESET )                  /* 14 */
     TAG( 41, 1, ACS_SEND( STANDBY_RESET, 14 ), ACS( ARRIVE, STATION0 ), AGV_STOP )                /* 15 */
     TAG( 42, 1, ACS_SEND( ARRIVE, 115 ), ACS_SEND( ARRIVE, STATION(1) ) )                         /* 16 */
+    TAG( 38, 1, AGV_TURN_ALIGN( CCW, 180, DIR_TOGGLE, 1, 1, 15 ) )                                /* 17 회전 속도 */
 #ifdef NEG_MOD_ZERO
     TAG_IF( 37, 1, IF_STATION_MOD(0, 0, 3), AGV_STOP )
+#endif
+#ifdef NEG_TURN_SPEED
+    TAG( 39, 1, AGV_TURN( CW, 90, 0, 1, 0, 32 ) )
 #endif
 TAG_TABLE_END
 
@@ -222,6 +226,8 @@ int main(void)
            && site_tags[15].act[2] == (TA_ACS | 'A') && site_tags[15].act[3] == TA_STOP);
     assert(site_tags[16].act[0] == (TA_ACS_NUM | 115) && site_tags[16].act[1] == 'A'
            && site_tags[16].act[2] == (TA_ACS_NUM | 1) && site_tags[16].act[3] == ('A' | TA_ACS_STATION));
+    assert(site_tags[17].act[0] == (TA_TURN_ALIGN | TURN_CCW | (2 << 2))
+           && site_tags[17].act[1] == (DIR_TOGGLE | (1 << 4) | (1 << 8) | (15 << TA_TURN_SPEED_SHIFT)));
 
     puts("test_dsl ok");
     return 0;

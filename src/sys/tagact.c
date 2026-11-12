@@ -134,6 +134,18 @@ void tagact_forback(dir_t d)
 
 static int16_t s_turn_from_stop;   /* 1 = 멈춘 상태에서도 회전을 건다 (튜닝 모드) */
 static int16_t s_turn_stop_len;    /* 0 = 정지 거리(SL). 교차선 기준이면 센서 거리(GD) */
+static int16_t s_turn_rpm;         /* 다음 tagact_turn 이 걸 회전 속도 rpm. 0 = 자동. 태그 둘째 칸에서 */
+
+/* 태그 둘째 칸의 회전 속도 m/min → rpm. 0 = 자동. TNS 한계를 넘으면 한계, 회전 최저 속도 아래면 최저 속도 */
+static int16_t turn_rpm(uint16_t next)
+{
+    int16_t v = (int16_t)(next >> TA_TURN_SPEED_SHIFT), low, up;
+
+    if (v == 0) { return 0; }
+    param_limit(P_SPEED_TURN, &low, &up);
+    v = param_rpm((v > up) ? up : v);
+    return (v < P.turn_min) ? P.turn_min : v;
+}
 
 /* 제자리 회전 90도 펄스. 튜닝 모드가 잰 회전 보정비가 있으면 건다(일반·정렬 회전 모두). 없으면 휠 간격 값 그대로 */
 static int16_t turn_90(void)
@@ -163,6 +175,7 @@ void tagact_turn(turn_dir_t d, uint16_t deg, dir_t fb, uint16_t autostart, uint1
         }
         fb = (dir_t)((int16_t)fb - DIR_TOGGLE);
     }
+    D.turn_rpm = s_turn_rpm;          /* 회전마다 새로 정한다. 시퀀스·정렬 호출은 0(자동) */
     tagact_forback(fb);
     D.turn_motion = (d == TURN_CW) ? MOTION_CW : MOTION_CCW;
     D.turn_90 = turn_90();
@@ -179,7 +192,9 @@ void tagact_turn_align(turn_dir_t d, uint16_t deg, uint16_t next)
     int16_t before = D.turn_pulses;
     uint16_t fb = next & 0xFu;
 
-    tagact_turn(d, deg, (dir_t)fb, (uint16_t)((next >> 4) & 0xFu), (uint16_t)((next >> 8) & 0xFu));
+    s_turn_rpm = turn_rpm(next);
+    tagact_turn(d, deg, (dir_t)fb, (uint16_t)((next >> 4) & 0xFu), (uint16_t)((next >> 8) & 0x7u));
+    s_turn_rpm = 0;
     if ((before != 0) || (D.turn_pulses <= 0)) { return; }
     D.tape_total_pulse = D.turn_pulses;
     D.tape_target_cnt = D.tape_end_cnt = (float)D.turn_pulses;
@@ -314,8 +329,10 @@ static void act_exec(uint16_t code, uint16_t next)
     case TA_SPEED:          tagact_speed(arg); break;
     case TA_FORBACK:        tagact_forback((dir_t)arg); break;
     case TA_TURN:
+        s_turn_rpm = turn_rpm(next);
         tagact_turn((turn_dir_t)(arg & 3u), (uint16_t)((arg >> 2) * 90u), (dir_t)(next & 0xFu),
-                    (uint16_t)((next >> 4) & 0xFu), (uint16_t)((next >> 8) & 0xFu));
+                    (uint16_t)((next >> 4) & 0xFu), (uint16_t)((next >> 8) & 0x7u));
+        s_turn_rpm = 0;
         break;
     case TA_TURN_ALIGN:
         tagact_turn_align((turn_dir_t)(arg & 3u), (uint16_t)((arg >> 2) * 90u), next);

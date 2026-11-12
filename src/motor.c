@@ -523,10 +523,11 @@ static int16_t tape_decel(float left)
 {
     float k = ((float)STOP_ENCODER_PPR / 6000.0f) * 2.0f;
     float a = TAPE_PLAN_SHARE * (float)stop_turn_dcc(), at = a * (float)TAPE_LAG_TICKS, v;
+    int16_t vmax = stop_turn_vmax();
     left -= guide_offset_to_pulse_f((float)TAPE_CENTER_POS);
     v = (left > 0.0f) ? (sqrtf((at * at) + (2.0f * a * left / k)) - at) : 0.0f;
     if (v < (float)stop_min_rpm()) { return stop_min_rpm(); }
-    return (v >= (float)P.turn_speed) ? P.turn_speed : (int16_t)v;
+    return (v >= (float)vmax) ? vmax : (int16_t)v;
 }
 
 /* 정렬 회전 끝 한 번의 등감속. 매 틱 필요 감속도 a = v_지령² / (2·(left/k - τ·v_실제)), v_실제 = 두 바퀴 rpm 평균.
@@ -672,7 +673,7 @@ static int16_t tape_after(int16_t seen, int32_t pos)
  * 탐색 범위 = 보정 전·후 목표 둘 다 ± tape_max. 라인을 보면 위치로 중앙 예상(tape_end_cnt)을 고치고 거기까지 거리로 감속한다 */
 static int16_t tape_adjust(void)
 {
-    int16_t speed = D.tape_slow ? P.turn_min : P.turn_speed;
+    int16_t speed = D.tape_slow ? P.turn_min : stop_turn_vmax();
     int32_t turned = D.tape_turned;
     float   total = (float)D.tape_total_pulse;
     float   lo = ((D.tape_target_cnt < total) ? D.tape_target_cnt : total) - (float)D.tape_max;
@@ -762,7 +763,7 @@ int16_t motor_turn_adjust(void)
     int16_t aligning = D.tape_align, speed;
 
     s_direct = 0;
-    speed = aligning ? tape_adjust() : P.turn_speed;
+    speed = aligning ? tape_adjust() : stop_turn_vmax();
 
     if ((D.turn_obs_use == 1)
         && (((P.for_obs == 1) && !D.backward && D.obs_f) || ((P.back_obs == 1) && (D.backward == 1) && D.obs_b))) {

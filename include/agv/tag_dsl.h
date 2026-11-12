@@ -7,7 +7,7 @@
  *   AGV_AUTOSTART( 초 ) / AGV_AUTOSTART_PARAM   서고 그 초(또는 AS) 뒤 다시 출발
  *   AGV_SPEED( HIGH | LOW | LLOW | MIN )        주행 속도 단계
  *   AGV_FORBACK( FWD | BACK | TOGGLE )          전후진
- *   AGV_TURN( 방향, 각도, 회전 뒤 방향, 자동 출발, 장애물 )   제자리 회전. _ALIGN 주행로 정렬, _TAPE 교차 테이프 뒤
+ *   AGV_TURN( 방향, 각도, 회전 뒤 방향, 자동 출발, 장애물[, 속도] )   제자리 회전. _ALIGN 주행로 정렬, _TAPE 교차 테이프 뒤
  *   AGV_BRANCH( LEFT | RIGHT )                  분기
  *   AGV_TAPE_STOP( 시퀀스 )                     교차 테이프에서 서고 시퀀스(SEQ_ 뺀 이름)
  *   SEQ_START( 시퀀스 )                          서고 시퀀스 시작(SEQ_ 뺀 이름: LOAD, UNLOAD, LOAD_1 …)
@@ -46,12 +46,16 @@
 #define DSL_TSPD_MIN             3
 #define AGV_SPEED(level)         (TA_SPEED | DSL_TSPD_##level)
 #define AGV_FORBACK(dir)         (TA_FORBACK | DIR_##dir)
-#define AGV_TURN(dir, deg, fb, autostart, obs) \
-    (TA_TURN | TURN_##dir | (((deg) / 90) << 2)), ((fb) | ((autostart) << 4) | ((obs) << 8))
-#define AGV_TURN_ALIGN(dir, deg, fb, autostart, obs) \
-    (TA_TURN_ALIGN | TURN_##dir | (((deg) / 90) << 2)), ((fb) | ((autostart) << 4) | ((obs) << 8))
-#define AGV_TURN_TAPE(dir, deg, fb, autostart, obs) \
-    (TA_TURN_TAPE | TURN_##dir | (((deg) / 90) << 2)), ((fb) | ((autostart) << 4) | ((obs) << 8))
+/* 회전 속도 m/min 0~31, 0 이나 생략 = 자동(TNS·ETN). 지정하면 적재·공차와 상관없이 그 회전 한 번만 그 속도
+ * (회전 최저 속도~TNS 한계로 묶는다). 장애물 0~7. 둘째 칸: fb b0~3 | 자동 출발 b4~7 | 장애물 b8~10 | 속도 b11~15 */
+#define DSL_TURN_OK(obs, v)      (0 * sizeof(char[(((obs) >= 0) && ((obs) < 8) && ((v) >= 0) && ((v) < 32)) ? 1 : -1]))
+#define DSL_TURN_ACT4(k, deg, fb, autostart, obs)     DSL_TURN_ACT5(k, deg, fb, autostart, obs, 0)
+#define DSL_TURN_ACT5(k, deg, fb, autostart, obs, v)  \
+    ((k) | (((deg) / 90) << 2)), ((fb) | ((autostart) << 4) | ((obs) << 8) | (((v) << TA_TURN_SPEED_SHIFT) + DSL_TURN_OK(obs, v)))
+#define DSL_TURN_ACT(k, ...)     DSL_CAT(DSL_TURN_ACT, DSL_NARG(__VA_ARGS__))(k, __VA_ARGS__)
+#define AGV_TURN(dir, ...)       DSL_TURN_ACT(TA_TURN | TURN_##dir, __VA_ARGS__)
+#define AGV_TURN_ALIGN(dir, ...) DSL_TURN_ACT(TA_TURN_ALIGN | TURN_##dir, __VA_ARGS__)
+#define AGV_TURN_TAPE(dir, ...)  DSL_TURN_ACT(TA_TURN_TAPE | TURN_##dir, __VA_ARGS__)
 #define AGV_BRANCH(dir)          (TA_BRANCH | BRANCH_##dir)
 #define AGV_TAPE_STOP(seq)       (TA_TAPE_STOP | SEQ_##seq)
 #define SEQ_START(seq)           (TA_SEQ | SEQ_##seq)

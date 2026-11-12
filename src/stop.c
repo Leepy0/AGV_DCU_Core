@@ -498,7 +498,7 @@ void stop_begin_runtime(int16_t reason)
 {
     stop_feedback_t fb;
     int16_t entry = (D.last_input >= 0) ? D.last_input : (int16_t)(-D.last_input);
-    int16_t maximum = (reason == STOP_REASON_TURN_ANGLE) ? P.turn_speed : D.speed_cmd;
+    int16_t maximum = (reason == STOP_REASON_TURN_ANGLE) ? stop_turn_vmax() : D.speed_cmd;
 
     if ((reason != STOP_REASON_TURN_ANGLE) && (maximum < entry)) { maximum = entry; }
     /* 바닥 속도 아래는 바퀴가 안 돈다. 그 구간을 건너뛰어 회전 시작 지연을 줄인다 */
@@ -540,6 +540,7 @@ static void finish(void)
     if ((reason == STOP_REASON_TURN_ANGLE) || (!stop_is_position(reason) && !stop_is_pause(reason))) {
         D.turn_pulses = 0;
         D.turn_motion = 0;
+        D.turn_rpm = 0;                     /* 태그 지정 회전 속도는 이 회전까지 */
         D.tape_align = 0;
     }
     D.flag_stopping = 1;
@@ -658,6 +659,7 @@ int16_t stop_run(void)
         D.wait_start = D.run_restart = 0;
         D.turn_motion = 0;
         D.turn_pulses = 0;
+        D.turn_rpm = 0;
         if ((motor_idle_ticks(0) >= STOP_QUIET_TICKS) && (motor_idle_ticks(1) >= STOP_QUIET_TICKS)) {
             D.flag_ready = D.flag_run = D.flag_jog_on = D.flag_turn = 0;
             D.amp_run = 0;
@@ -774,6 +776,8 @@ static int16_t turn_ramp(int16_t target_rpm, int16_t acc, int16_t dcc)
 int16_t stop_alignment_speed(int16_t target_rpm) { return turn_ramp(target_rpm, P.acc, P.dcc); }
 
 int16_t stop_turn_dcc(void) { return turn_dcc(P.dcc); }
+
+int16_t stop_turn_vmax(void) { return (D.turn_rpm > 0) ? D.turn_rpm : P.turn_speed; }
 
 int16_t stop_turn_speed(int16_t target_rpm)
 {
