@@ -51,7 +51,7 @@
 #define DSL_TURN_OK(obs, v)      (0 * sizeof(char[(((obs) >= 0) && ((obs) < 8) && ((v) >= 0) && ((v) < 32)) ? 1 : -1]))
 #define DSL_TURN_ACT4(k, deg, fb, autostart, obs)     DSL_TURN_ACT5(k, deg, fb, autostart, obs, 0)
 #define DSL_TURN_ACT5(k, deg, fb, autostart, obs, v)  \
-    ((k) | (((deg) / 90) << 2)), ((fb) | ((autostart) << 4) | ((obs) << 8) | (((v) << TA_TURN_SPEED_SHIFT) + DSL_TURN_OK(obs, v)))
+    ((k) | (((deg) / 90) << 2)), ((fb) | ((autostart) << 4) | ((obs) << 8) | (((uint16_t)(v) << TA_TURN_SPEED_SHIFT) + DSL_TURN_OK(obs, v)))
 #define DSL_TURN_ACT(k, ...)     DSL_CAT(DSL_TURN_ACT, DSL_NARG(__VA_ARGS__))(k, __VA_ARGS__)
 #define AGV_TURN(dir, ...)       DSL_TURN_ACT(TA_TURN | TURN_##dir, __VA_ARGS__)
 #define AGV_TURN_ALIGN(dir, ...) DSL_TURN_ACT(TA_TURN_ALIGN | TURN_##dir, __VA_ARGS__)

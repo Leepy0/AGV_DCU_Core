@@ -103,7 +103,7 @@ typedef unsigned long long dsl_cond_t;
 
 /* ---- 확장 조건 (입력이 아닌 조건). X_* 는 세 값 "코드, a, b" 로 펼쳐진다 ----
  * 시퀀스 WHEN_IF·WAIT_IF 와 태그 규칙 IF_X 가 같이 쓴다 */
-#define DSL_SLOT(k)      ((((k) & 0xFF) << 8) + (0 * sizeof(char[((k) < 256) ? 1 : -1])))
+#define DSL_SLOT(k)      (((uint16_t)((k) & 0xFF) << 8) + (0 * sizeof(char[((k) < 256) ? 1 : -1])))   /* 16비트 int: 부호 없이 민다 */
 #define DSL_NZ(n)        (0 * sizeof(char[((n) != 0) ? 1 : -1]))
 #define X_ALWAYS                     XC_NONE, 0, 0
 #define X_FORWARD                    XC_FORWARD, 0, 0

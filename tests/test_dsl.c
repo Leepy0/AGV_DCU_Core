@@ -138,6 +138,7 @@ TAG_TABLE_BEGIN( site_tags )
     TAG( 41, 1, ACS_SEND( STANDBY_RESET, 14 ), ACS( ARRIVE, STATION0 ), AGV_STOP )                /* 15 */
     TAG( 42, 1, ACS_SEND( ARRIVE, 115 ), ACS_SEND( ARRIVE, STATION(1) ) )                         /* 16 */
     TAG( 38, 1, AGV_TURN_ALIGN( CCW, 180, DIR_TOGGLE, 1, 1, 15 ) )                                /* 17 회전 속도 */
+    TAG( 46, 1, AGV_TURN( CW, 90, 0, 1, 7, 31 ) )                                                 /* 18 속도 16 이상: b15 */
 #ifdef NEG_MOD_ZERO
     TAG_IF( 37, 1, IF_STATION_MOD(0, 0, 3), AGV_STOP )
 #endif
@@ -243,6 +244,7 @@ int main(void)
            && site_tags[16].act[2] == (TA_ACS_NUM | 1) && site_tags[16].act[3] == ('A' | TA_ACS_STATION));
     assert(site_tags[17].act[0] == (TA_TURN_ALIGN | TURN_CCW | (2 << 2))
            && site_tags[17].act[1] == (DIR_TOGGLE | (1 << 4) | (1 << 8) | (15 << TA_TURN_SPEED_SHIFT)));
+    assert(site_tags[18].act[1] == 0xFF10u);                             /* 31 << 11 | 7 << 8 | 1 << 4 */
 
     puts("test_dsl ok");
     return 0;
