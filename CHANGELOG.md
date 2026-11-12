@@ -1,5 +1,22 @@
 # 변경 이력
 
+## v0.47.0 (2026-11-13, 표 표기 정리, 태그 대기 보고·회전 속도, 재고 표시 삭제)
+
+단계별 커밋: 1단계 표기(데이터 같음) → 2단계 사용자 함수를 표 동작으로 → 3단계 동작 바꾸기(재고 표시, 회전 속도).
+
+- 1단계 ACS 보고 종류: 한 글자(`ACS( L, … )`, `DSL_INFO_L`)를 레거시 함수 이름으로. `LOADING` `UNLOADING` `NEXT` `ARRIVE` `FINISH` `PROCESSING` `STANDBY` `CALL`(값은 그대로 'L' 'U' 'N' 'A' 'F' 'P' 'B' 'C'). 한 글자 이름은 없앴다.
+- 1단계 `ACS_N( 종류, 번호 )` → `ACS_SEND( 종류, 번호 )`. 번호 자리에 `STATION(k)`(스테이션 큐[k], 0x20000 + k 상수식): 시퀀스 표에서는 `ACS( 종류, STATION(k) )`(k 0 은 `STATION0`)와 같은 스텝. 대괄호 `STATION[k]` 는 쓰지 않는다(정수 상수식이 아니어서 `sizeof` 범위 검사와 못 쓰고 표준 밖 확장에 기댄다).
+- 1단계 입력 극성: `ON( x )` = x 활성, `OFF( x )` = 비활성. 논리 0 이 활성인 입력(같은 핀을 차종마다 반대 극성으로 쓰는 경우)은 사이트 `io_map.h` 가 `IN_ACTIVE_HIGH( 논리 ID )` 로 표시하고 `ON()`·`OFF()` 가 컴파일 때 반대쪽 마스크로 보낸다. 표 형식·해석기는 같다. 표시한 이름을 `ANY_ON`·`ANY2_ON`·출력·`LOAD_SENSORS` 에 쓰면 컴파일 오류. `DSL_MASKn` 은 비트 함수를 첫 인자로 받는다(`DSL_FMASK`).
+- 1단계 태그 동작 이름: `A_` 를 빼고 `agv/tag_dsl.h` 로 옮겼다(태그 표 파일은 이 헤더를 포함한다). 차가 움직이는 동작은 `AGV_`, 시퀀스와 뜻이 같은 동작은 같은 이름(헤더가 시퀀스 매크로를 태그 칸으로 다시 정의한다).
+  - `A_STOP` → `AGV_STOP`, `A_AUTOSTART( s )`·`A_AUTOSTART_PARAM` → `AGV_AUTOSTART( s )`·`AGV_AUTOSTART_PARAM`, `A_SPEED_HIGH`·`LOW`·`LLOW`·`MIN` → `AGV_SPEED( HIGH )` 등, `A_FORBACK( d )` → `AGV_FORBACK( d )`, `A_TURN`·`A_TURN_ALIGN`·`A_TURN_TAPE` → `AGV_TURN`·`AGV_TURN_ALIGN`·`AGV_TURN_TAPE`, `A_BRANCH( d )` → `AGV_BRANCH( d )`, `A_TAPE_STOP( SEQ_x )` → `AGV_TAPE_STOP( x )`.
+  - `A_SEQ( SEQ_x )` → `SEQ_START( x )`, `A_ACT( id )` → `ACT_START( id )`, `A_OBS_ON`·`A_OBS_OFF` → `OBS_ON`·`OBS_OFF`, `A_CALL( i )` → `CALL( i )`, `A_STATION_RESET` → `STATION_RESET`, `( TA_ACS_NUM | n ), DSL_INFO_x` → `ACS_SEND( x, n )`, `( TA_ACS | DSL_INFO_x )` → `ACS( x, STATION0 )`.
+- 2단계 태그 대기 보고·번호: `ACS_SEND( STANDBY, n )` = 정지 + 대기 보고 + 자동 재전송 늘 켬(레거시 `DA_ACS_Standby( n, NONE )` + 자동 재전송 켬), `ACS_SEND( STANDBY_RESET, n )` 은 먼저 스테이션 큐를 지운다(`DA_ACS_Standby( n, RESET )`). 태그 `ACS_SEND` 번호 자리에 `STATION(k)`, `AGV_ID_MINUS(n)`(호기 번호 - n). `run_standby` 둘째 인자 비트 `RUN_STANDBY_RESET`(1, 예전 1 과 같다)·`RUN_STANDBY_AUTO`(2). `TA_ACS_NUM` 둘째 칸 0x100 대기 리셋, 0x200 호기 - 인자, 0x400 스테이션 큐[인자]. `TA_ACS`·`TA_ACS_NUM` 의 Info 'B' 는 대기 동작이다. 시퀀스 표의 `ACS_SEND( STANDBY, … )` 는 보고만 한다.
+- 3단계 자동 표시 `DSM`(9번) 8(재고, 늘 0)을 뺐다. 뒤 번호(9 외부 입출력, 10 태그)는 그대로. UP/DOWN 은 8 을 건너뛰고, EEPROM 에 8 이 남은 차는 7(역 번호)로 보인다(저장값은 그대로). `ui.h` `DISP_GONE_8`.
+- 3단계 태그 회전 속도: `AGV_TURN`·`_ALIGN`·`_TAPE` 여섯째 인자 m/min(0\~31, 0·생략 = 자동). 둘째 칸 b11\~15(`TA_TURN_SPEED_SHIFT`), 장애물은 b8\~10(0\~7)으로 줄였다. 지정하면 적재·공차와 상관없이 그 회전 한 번만 그 속도(회전 최저 속도\~`TNS` 한계 25). 회전 끝 감속·정렬(`motor.c`)과 회전 정지 계획(`stop.c`)이 `stop_turn_vmax()`(= `D.turn_rpm` 또는 `P.turn_speed`)를 상한으로 본다. `tagact_turn` 이 회전마다 새로 넣고(시퀀스·정렬 호출은 0), 회전 끝·STOP·오류 정지에서 0. 속도 0 이면 동작은 같다.
+- 비트 확인: 조향 해시 `0aa33808`·`bf0ff2d4`, 곡선 해시 `97564846`·`bbbaafc2` 그대로.
+- 플래시(타입 143 남은 워드, 개발·현장): v0.46.0 0xEC9·0x2810 → 1단계 같음 → 2단계 0xEC6·0x280D → 재고 표시 삭제 0xEBB·0x2803 → 회전 속도 0xE72·0x27BA.
+- 시험: `test_dsl` 논리 0 활성 입력·`NEG_HIGH_ANY`·`ACS_SEND` `STATION`·태그 이름·대기·회전 속도 칸·`NEG_TURN_SPEED`, `test_sys` 태그 대기·도착 보고, 자동 표시 8, 태그 회전 속도(지정 15 → 지령 최대 945 rpm = 15 m/min, 공차 `ETN` 10 이어도 15, 1 → 최저, 31 → 25, 끝난 뒤·STOP 뒤 다음 회전은 자동). CHANGELOG v0.45.0 제목 줄을 되살렸다.
+
 ## v0.46.0 (2026-11-12, 버린 시험 코드 삭제, 배포 준비)
 
 - 까닭: 실차에서 채택되지 않은 시험과 켜는 길이 없는 되돌림 경로를 코드째 지운다. 동작은 바꾸지 않는다.
@@ -11,7 +28,8 @@
 - 플래시(타입 143, 개발 이미지): 남은 워드 0x545 → 0xEC9. 현장 빌드(`AGV_DEV_TESTS` 0): 0x2617 → 0x2810.
 - 시험: 지운 기능의 호스트 시험·모의 표(`test_curve` `est`·`sc`·`estsc`, `test_guide` 유지 규칙, `test_steer` E·F)를 지웠다. 끝 처리 A·B·속도 비례 C 시험은 기본(`TST` 0)에서 본다. `stop.h` `stop_last.reason` 주석 1\~6.
 - 주의: `OPT` 에 8 을 넣어 둔 차, `LG` 에 2048 을 넣어 둔 차는 그 비트가 무시된다. docs/07 4절 40번.
- (2026-11-12, 기본 동작 전환: 53차 `TST` 1 조합, `TST` 0·2)
+
+## v0.45.0 (2026-11-12, 기본 동작 전환: 53차 `TST` 1 조합, `TST` 0·2)
 
 - 까닭: 실차 53차에서 `TST` 1(`K_P` 60, `K_I` 5, 속도 루프 새1, 곡선 끝 부호 기준 + 빠른 접근, 속도 비례 적분)이 가장 나았다. `K_I` 10 은 크게 돌며 반응이 느렸고, 진입 적분 가속·큰 편차 보조 비례는 나은 점이 없었다. 교차선 급감속은 재현되지 않았다. 조향 실험을 끝내고 이 조합을 확정한다.
 - 바꿈(현장 이미지 포함 모든 빌드): 속도 루프 = PI 되먹임 1표본(`D.rpm`), Kp 0.8, Ki 0.16, 역계산 1/Kp, 피드포워드 0.999 고정(`motor.h` `MOTOR_SPEED_*`). `FF` 파라미터는 쓰지 않는다(EEPROM 값은 그대로). 곡선 끝 적분 처리 = 부호 기준 + 빠른 접근, 속도 비례 적분(`steer.c` `STEER_I_FLIP_*`, 현장 이미지는 `steer.h` 상수). `K_P`·`K_I` 0 = 권장값 60·5(Ki 0.5), 0 이 아니면 그 값(`param_gain`, 53차 `TST` 8 과 같다). 파라미터 칸은 그대로 0 으로 보인다.

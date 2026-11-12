@@ -123,7 +123,7 @@ TAG_TABLE_BEGIN( site_tags )
     TAG_IF( 34, 1, IF_X2_IN( X_FORWARD, X_NOT(X_CROSS_OUT), IN( ON(SEN_A) ) ), AGV_STOP )           /* 11 */
     TAG_IF( 35, 1, IF_BACKWARD, AGV_STOP )                                                          /* 12 */
     TAG( 43, 1, ACS_SEND( ARRIVE, 115 ), ACS( ARRIVE, STATION0 ), STATION_RESET )                 /* 13 */
-    TAG( 40, 1, AGV_STOP, ACS_SEND( STANDBY, AGV_ID_MINUS(73) ), STATION_RESET )                  /* 14 */
+    TAG( 40, 1, AGV_STOP, ACS_SEND( STANDBY, AGV_ID_MINUS(10) ), STATION_RESET )                  /* 14 */
     TAG( 41, 1, ACS_SEND( STANDBY_RESET, 14 ), ACS( ARRIVE, STATION0 ), AGV_STOP )                /* 15 */
     TAG( 42, 1, ACS_SEND( ARRIVE, 115 ), ACS_SEND( ARRIVE, STATION(1) ) )                         /* 16 */
     TAG( 38, 1, AGV_TURN_ALIGN( CCW, 180, DIR_TOGGLE, 1, 1, 15 ) )                                /* 17 회전 속도 */
@@ -220,7 +220,7 @@ int main(void)
     /* 태그 보고·스테이션 (tag_dsl.h) */
     assert(site_tags[13].act[0] == (TA_ACS_NUM | 115) && site_tags[13].act[1] == 'A'
            && site_tags[13].act[2] == (TA_ACS | 'A') && site_tags[13].act[3] == TA_STATION_RESET);
-    assert(site_tags[14].act[0] == TA_STOP && site_tags[14].act[1] == (TA_ACS_NUM | 73)
+    assert(site_tags[14].act[0] == TA_STOP && site_tags[14].act[1] == (TA_ACS_NUM | 10)
            && site_tags[14].act[2] == ('B' | TA_ACS_AGV_MINUS) && site_tags[14].act[3] == TA_STATION_RESET);
     assert(site_tags[15].act[0] == (TA_ACS_NUM | 14) && site_tags[15].act[1] == ('B' | TA_ACS_STANDBY_RESET)
            && site_tags[15].act[2] == (TA_ACS | 'A') && site_tags[15].act[3] == TA_STOP);

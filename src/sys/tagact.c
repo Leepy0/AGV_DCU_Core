@@ -301,7 +301,7 @@ static void autostart(uint16_t sec)
     if (wait != 0u) { run_request_restart(wait); }
 }
 
-/* 태그 보고. 대기('B')는 레거시 DA_ACS_Standby + standby_auto_sending = ON: 정지, 자동 재전송 늘 켬,
+/* 태그 보고. 대기('B')는 레거시 DA_ACS_Standby + 자동 재전송 켬 = ON: 정지, 자동 재전송 늘 켬,
  * TA_ACS_STANDBY_RESET 이면 먼저 스테이션 큐를 지운다 */
 static void tag_acs(uint16_t info, int16_t num)
 {
