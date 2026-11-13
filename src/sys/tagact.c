@@ -25,13 +25,16 @@ static tag_rule_t s_hit;           /* 압축 표에서 맞춰 보는 규칙을 �
                                     * 돌려받은 포인터를 사용자 함수 호출 뒤에 쓰지 않는다 */
 static uint16_t s_nrules, s_profile, s_display_tag;
 static uint16_t s_tag;             /* 지금 처리 중인 태그 번호(ACS_SEND( …, TAG_NUM ± n )) */
+static void fs_clear(void);        /* 센서 정지 요청을 지운다(아래 tagact_tick) */
 
+/* 표를 묶을 때(부팅·표 바꿈) 걸린 센서 정지 요청은 지운다(앞 표의 뒤 동작을 실행하지 않게) */
 void tagact_bind(const tag_rule_t *rules, uint16_t n, uint16_t profile)
 {
     s_rules = rules;
     s_pk = 0;
     s_nrules = n;
     s_profile = profile;
+    fs_clear();
 }
 
 void tagact_bind_packed(const tag_packed_t *t, uint16_t profile)
@@ -40,6 +43,7 @@ void tagact_bind_packed(const tag_packed_t *t, uint16_t profile)
     s_pk = t;
     s_nrules = t->n;
     s_profile = profile;
+    fs_clear();
 }
 
 /* 압축 규칙 i 를 s_hit 에 펼친다 */
@@ -487,6 +491,7 @@ static struct {
     uint32_t arm_p, on_p;    /* 요청·기준 자리 펄스 */
 } s_fs;
 
+static void     fs_clear(void) { s_fs.w2 = 0; }
 static uint32_t fs_pulses(void) { return run_pulses(D.backward ? 1u : 0u); }
 static int32_t  fs_mm(uint32_t from) { return (int32_t)((float)(fs_pulses() - from) / P.one_length_pulse); }
 
