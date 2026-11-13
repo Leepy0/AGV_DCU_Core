@@ -27,6 +27,9 @@
  *   ACS_SEND( 종류, 번호 )            보고, 번호 0~255  (2칸)
  *   ACS_SEND( 종류, STATION(k) )      보고, 번호 = 스테이션 큐[k] (레거시 ACS_Station_Call_Num[k])  (2칸)
  *   ACS_SEND( 종류, AGV_ID_MINUS(n) ) 보고, 번호 = 호기 번호 - n, n 0~255  (2칸)
+ *   ACS_SEND( 종류, STATION(k) ± n )   보고, 번호 = 스테이션 큐[k] ± n, n -128~127  (2칸)
+ *   ACS_SEND( 종류, TAG_NUM ± n )      보고, 번호 = 지금 태그 번호 ± n, n -128~127  (2칸)
+ *   AGV_WAIT_START / AGV_WAIT_CANCEL    출발 대기 걸기·풀기
  *   ACS_SEND( STANDBY, 번호 )         대기 보고: 정지(분류 2·3·4 규칙에서는 그 정지), 번호 > 0 이면 자동 재전송 늘 켬(레거시 DA_ACS_Standby( n, NONE ) + 자동 재전송 켬)
  *   ACS_SEND( STANDBY_RESET, 번호 )   위와 같고 먼저 스테이션 큐를 지운다(레거시 DA_ACS_Standby( n, RESET ))
  *   ACS( 종류, STATION0 )            보고, 번호 = 스테이션 큐[0]  (1칸. STANDBY_RESET 은 컴파일 오류, ACS_SEND 로)
@@ -117,11 +120,22 @@ enum { AGV_STOP = TA_STOP };
 #define CALL(idx)                (TA_CALL | (idx))
 
 #define DSL_INFO_STANDBY_RESET   (DSL_INFO_STANDBY | TA_ACS_STANDBY_RESET)
+/* 번호 칸: 숫자 0~255, AGV_ID_MINUS(n)(n 0~255), STATION(k) ± n, TAG_NUM ± n(지금 태그 번호, n -128~127) */
 #define DSL_AGV_MINUS_MARK       0x10000L
 #define AGV_ID_MINUS(n)          (DSL_AGV_MINUS_MARK + (n))
-#define DSL_TSEND_OK(n)          (0 * sizeof(char[(((n) >= 0) && (((n) & 0xFFFFL) < 256)) ? 1 : -1]))
-#define DSL_TSEND_FLAG(n)        (DSL_IS_STATION(n) ? TA_ACS_STATION : (((n) >= DSL_AGV_MINUS_MARK) ? TA_ACS_AGV_MINUS : 0))
-#define ACS_SEND(info, num)      (TA_ACS_NUM | (uint16_t)(((num) & 0xFF) + DSL_TSEND_OK(num))), (DSL_INFO_##info | DSL_TSEND_FLAG(num))
+#define DSL_TAG_NUM_MARK         0x40000L
+#define TAG_NUM                  DSL_TAG_NUM_MARK
+#define DSL_IS_AGVMINUS(n)       (((n) >= DSL_AGV_MINUS_MARK) && ((n) <= DSL_AGV_MINUS_MARK + 255L))
+#define DSL_IS_TAGNUM(n)         (((n) >= DSL_TAG_NUM_MARK - 128L) && ((n) <= DSL_TAG_NUM_MARK + 127L))
+#define DSL_TSEND_OK(n)          (0 * sizeof(char[((((n) >= 0) && ((n) <= 255)) || DSL_IS_AGVMINUS(n) || DSL_IS_TAGNUM(n) \
+                                                   || (DSL_IS_STATION(n) && (DSL_ST_M(n) == 0) && (DSL_ST_N(n) >= -128L) && (DSL_ST_N(n) <= 127L))) ? 1 : -1]))
+#define DSL_TSEND_ARG(n)         ((DSL_IS_STATION(n) ? DSL_ST_N(n) : (DSL_IS_TAGNUM(n) ? ((n) - DSL_TAG_NUM_MARK) : (long)(n))) & 0xFFL)
+#define DSL_TSEND_FLAG(n)        (DSL_IS_STATION(n) ? (TA_ACS_STATION | ((uint16_t)DSL_ST_K(n) << TA_ACS_K_SHIFT)) \
+                                  : (DSL_IS_TAGNUM(n) ? TA_ACS_TAG_NUM : (DSL_IS_AGVMINUS(n) ? TA_ACS_AGV_MINUS : 0)))
+#define ACS_SEND(info, num)      (TA_ACS_NUM | (uint16_t)(DSL_TSEND_ARG(num) + DSL_TSEND_OK(num))), (uint16_t)(DSL_INFO_##info | DSL_TSEND_FLAG(num))
+/* 출발 대기 걸기·풀기(run_wait_start·run_wait_cancel, 레거시 Flag_Wait_Start = ON·OFF) */
+#define AGV_WAIT_START           (TA_WAIT | 1)
+#define AGV_WAIT_CANCEL          (TA_WAIT | 0)
 #define ACS(info, src)           DSL_TACS_##src(info)
 /* 1칸 형식은 정보 값이 인자 8비트뿐이다. 0xFF 를 넘으면(STANDBY_RESET 등) 윗비트가 동작 코드에 묻히므로 컴파일 오류 */
 #define DSL_TACS_OK(v)           (0 * sizeof(char[((v) <= 0xFF) ? 1 : -1]))

@@ -236,7 +236,10 @@ uint16_t seq_xcond(uint16_t c, uint16_t a, uint16_t b, uint16_t tag)
         else           { ok = (uint16_t)(D.cross_in_on || (!(slot & 2u) && D.cross_in_flag)); }
         break;
     case XC_ERR_EQ:          ok = (uint16_t)(D.action_err == (int16_t)a); break;
-    case XC_PARAM_EQ:        ok = (uint16_t)(param_get(slot) == (int16_t)a); break;
+    case XC_PARAM_EQ:
+        v = param_get(slot);
+        ok = (uint16_t)(((b != 0u) ? param_digit(v, (int16_t)b) : v) == (int16_t)a);
+        break;
     case XC_PARAM_GE:        ok = (uint16_t)(param_get(slot) >= (int16_t)a); break;
     case XC_PARAM_LE:        ok = (uint16_t)(param_get(slot) <= (int16_t)a); break;
     case XC_ID:
@@ -246,8 +249,7 @@ uint16_t seq_xcond(uint16_t c, uint16_t a, uint16_t b, uint16_t tag)
     case XC_KEY:             ok = (uint16_t)(ui_key() == a); break;
     case XC_STATION_MOD:     ok = (uint16_t)((a != 0u) && ((st % (int16_t)a) == (int16_t)b)); break;
     case XC_STATION_DIV:     ok = (uint16_t)((a != 0u) && ((st / (int16_t)a) == (int16_t)b)); break;
-    case XC_TAG_MINUS_EQ_ST: ok = (uint16_t)((int16_t)(tag - a) == st); break;
-    case XC_TAG_EQ_ST:       ok = (uint16_t)((int16_t)tag == st); break;
+    case XC_TAG_NUM:         ok = (uint16_t)((int16_t)tag == (int16_t)(((b != 0u) ? (st % (int16_t)b) : st) + (int16_t)a)); break;
     default:                 return 0;
     }
     return (c & XC_NOT) ? (uint16_t)!ok : ok;

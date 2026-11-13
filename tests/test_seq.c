@@ -1021,8 +1021,19 @@ int main(void)
     assert(seq_xcond(X_STATION(1, 41, 43), 0) && !seq_xcond(X_STATION(1, 43, 50), 0));
     assert(seq_xcond(X_STATION_MOD(0, 10, 3), 0) && !seq_xcond(X_STATION_MOD(0, 10, 4), 0));
     assert(seq_xcond(X_STATION_DIV(2, 100, 1), 0) && seq_xcond(X_STATION_DIV(2, 10, 14), 0));
-    assert(seq_xcond(X_TAG_MINUS_EQ_STATION(1, 20), 62) && !seq_xcond(X_TAG_MINUS_EQ_STATION(1, 20), 61));
-    assert(seq_xcond(X_TAG_EQ_STATION(0), 43) && !seq_xcond(X_TAG_EQ_STATION(0), 44));
+    /* 태그 번호 == 큐[k] ± n, 큐[k] % m + n(n 앞뒤 어느 쪽이든) */
+    assert(seq_xcond(X_TAG_NUM(STATION(1) + 20), 62) && !seq_xcond(X_TAG_NUM(STATION(1) + 20), 61));
+    assert(seq_xcond(X_TAG_NUM(STATION(0)), 43) && !seq_xcond(X_TAG_NUM(STATION(0)), 44));
+    assert(seq_xcond(X_TAG_NUM(STATION(2) - 45), 100) && !seq_xcond(X_TAG_NUM(STATION(2) - 45), 190));
+    assert(seq_xcond(X_TAG_NUM(MOD(STATION(2), 100) + 7), 52) && seq_xcond(X_TAG_NUM(7 + MOD(STATION(2), 100)), 52));
+    assert(seq_xcond(X_TAG_NUM(MOD(STATION(0), 10)), 3) && !seq_xcond(X_TAG_NUM(MOD(STATION(0), 10)), 43));
+    assert(seq_xcond(X_TAG_NUM(STATION(23) - 2048), (uint16_t)-2048) && seq_xcond(X_TAG_NUM(STATION(0) + 2047), 2090));
+    /* 파라미터 값 == v, 자릿수 파라미터의 한 자리(TFB 십의 자리 회전 모드, 일의 자리 전후진 모드) */
+    assert(param_set(P_TURN_FORBACK, 12) == 0);
+    assert(seq_xcond(X_PARAM(TFB, 12), 0) && seq_xcond(X_PARAM(TFB_1, 2), 0) && seq_xcond(X_PARAM(TFB_10, 1), 0));
+    assert(!seq_xcond(X_PARAM(TFB_1, 1), 0) && !seq_xcond(X_PARAM(TFB, 2), 0) && seq_xcond(X_NOT(X_PARAM(TFB_1, 1)), 0));
+    assert(param_set(P_TURN_FORBACK, 11) == 0);
+    assert(!seq_xcond(X_PARAM(TFB_1, 2), 0) && seq_xcond(X_PARAM(TFB_1, 1), 0));
     assert(seq_xcond(X_PARAM_GE(P_STATION_NO, 4), 0) && !seq_xcond(X_PARAM_GE(P_STATION_NO, 5), 0));
     assert(seq_xcond(X_PARAM_LE(P_STATION_NO, 4), 0) && !seq_xcond(X_PARAM_LE(P_STATION_NO, 3), 0));
     assert(seq_xcond(X_ID(7, 7), 0) && !seq_xcond(X_NOT(X_ID(7, 7)), 0));

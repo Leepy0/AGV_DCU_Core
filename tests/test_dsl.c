@@ -114,6 +114,9 @@ SEQ_BEGIN( ext )
 #ifdef NEG_SEQ_OLD5
     AGV_TURN( CW, 90, 0, 1, 0, 0 )                                           /* 예전 6인자(장애물, 속도) */
 #endif
+#ifdef NEG_SEQ_SEND_N
+    ACS_SEND( NEXT, STATION(0) + 1 )                                         /* 시퀀스 보고는 STATION(k) 만 */
+#endif
 #ifdef NEG_SEQ_SPEED
     AGV_TURN( CW, 90, 0, 1, 32 )                                             /* 속도 32 이상 */
 #endif
@@ -179,10 +182,10 @@ TAG_TABLE_BEGIN( site_tags )
     TAG_IF( 10, 1, IF_IN( ANY_ON(SEN_A, SEN_B) ), SEQ_START( LOAD ) )                               /* 4 */
     TAG_IF( 61, 1, IF_X2( X_ID(5, 5), X_STATION(1, 42, 42) ), AGV_TURN(CCW, 90, 0, 1, 0) )        /* 5 */
     TAG_IF( 62, 1, IF_X_IN( X_ID(1, 9), IN( OFF(SEN_A) ) ), AGV_STOP )                              /* 6 */
-    TAG_IF( 30, 1, IF_TAG_MINUS_EQ_STATION(1, 20), AGV_STOP )                                       /* 7 */
+    TAG_IF( 30, 1, IF_TAG_NUM( STATION(1) + 20 ), AGV_STOP )                                        /* 7 */
     TAG_IF( 31, 1, IF_STATION_MOD(0, 10, 3), AGV_STOP )                                             /* 8 */
     TAG_IF( 32, 1, IF_STATION_DIV(2, 100, 1), AGV_STOP )                                            /* 9 */
-    TAG_IF( 33, 1, IF_TAG_EQ_STATION(0), AGV_STOP )                                                 /* 10 */
+    TAG_IF( 33, 1, IF_TAG_NUM( STATION(0) ), AGV_STOP )                                             /* 10 */
     TAG_IF( 34, 1, IF_X2_IN( X_FORWARD, X_NOT(X_CROSS_OUT), IN( ON(SEN_A) ) ), AGV_STOP )           /* 11 */
     TAG_IF( 35, 1, IF_BACKWARD, AGV_STOP )                                                          /* 12 */
     TAG( 43, 1, ACS_SEND( ARRIVE, 115 ), ACS( ARRIVE, STATION0 ), STATION_RESET )                 /* 13 */
@@ -194,6 +197,48 @@ TAG_TABLE_BEGIN( site_tags )
     TAG( 47, 1, AGV_TURN( CW, 90, 0, 1, 0, TAPE ), SEQ_START( TAPE, LOAD ), AGV_SPEED_MMIN( 20 ) )  /* 19 */
     TAG( 48, 1, AGV_STOP( 255 ), AGV_STOP( 0 ), AGV_STOP( TAPE ), AGV_STOP( TAPE_GD ) )          /* 20 정지 4분류(cm) */
     TAG( 49, 1, SEQ_START( 12, LOAD ), SEQ_START( TAPE_GD, UNLOAD ), AGV_STOP )                   /* 21 */
+    /* 태그 번호 식·보고 번호 식·파라미터 조건·출발 대기·범위 규칙(v0.53.0) */
+    TAG_IF( 50, 1, IF_TAG_NUM( STATION(0) + 100 ), ACS_SEND( ARRIVE, STATION(0) + 100 ), ACS_SEND( ARRIVE, TAG_NUM - 5 ) )   /* 22 */
+    TAG_IF( 51, 1, IF_TAG_NUM( 7 + MOD( STATION(2), 10 ) ), AGV_WAIT_START, AGV_WAIT_CANCEL )                                /* 23 */
+    TAG_IF( 52, 1, IF_TAG_NUM( STATION(3) - 20 ), ACS_SEND( ARRIVE, STATION(23) - 128 ) )                                   /* 24 */
+    TAG_IF( 53, 1, IF_PARAM( TFB_1, 2 ), AGV_STOP )                                                                          /* 25 */
+    TAG_IF( 54, 1, IF_PARAM( AS, 5 ), AGV_STOP )                                                                             /* 26 */
+    TAG_RANGE( 101, 120, 1, ACS_SEND( ARRIVE, STATION(0) + 100 ) )                                                           /* 27 */
+    TAG_RANGE_IF( 101, 120, 1, IF_TAG_NUM( STATION(0) + 100 ), ACS_SEND( ARRIVE, STATION(0) + 100 ), AGV_STOP, AGV_AUTOSTART_PARAM )   /* 28 */
+    TAG_IF( 55, 1, IF_TAG_NUM( MOD( STATION(1), 4 ) ), ACS_SEND( ARRIVE, TAG_NUM + 127 ) )                                  /* 29 */
+#ifdef NEG_TAGNUM_PLAIN
+    TAG_IF( 39, 1, IF_TAG_NUM( 5 ), AGV_STOP )                     /* 식은 STATION 으로 */
+#endif
+#ifdef NEG_TAGNUM_N
+    TAG_IF( 39, 1, IF_TAG_NUM( STATION(0) + 3000 ), AGV_STOP )     /* n -2048~2047 */
+#endif
+#ifdef NEG_MOD_N
+    TAG_IF( 39, 1, IF_TAG_NUM( MOD( STATION(0) + 1, 3 ) ), AGV_STOP )   /* MOD 안은 STATION(k) 만 */
+#endif
+#ifdef NEG_MOD_M0
+    TAG_IF( 39, 1, IF_TAG_NUM( MOD( STATION(0), 0 ) ), AGV_STOP )  /* m 1~255 */
+#endif
+#ifdef NEG_SEND_N
+    TAG( 39, 1, ACS_SEND( ARRIVE, STATION(0) + 128 ) )             /* 보고 n -128~127 */
+#endif
+#ifdef NEG_SEND_MOD
+    TAG( 39, 1, ACS_SEND( ARRIVE, MOD( STATION(0), 3 ) ) )         /* 보고는 MOD 없음 */
+#endif
+#ifdef NEG_SEND_TAG
+    TAG( 39, 1, ACS_SEND( ARRIVE, TAG_NUM + 128 ) )
+#endif
+#ifdef NEG_SEND_BIG
+    TAG( 39, 1, ACS_SEND( ARRIVE, 256 ) )                          /* 숫자 0~255 */
+#endif
+#ifdef NEG_PARAM_NAME
+    TAG_IF( 39, 1, IF_PARAM( FOO, 1 ), AGV_STOP )                  /* 정하지 않은 FND 이름 */
+#endif
+#ifdef NEG_RANGE_ORDER
+    TAG_RANGE( 120, 101, 1, AGV_STOP )                             /* lo <= hi */
+#endif
+#ifdef NEG_RANGE_MAX
+    TAG_RANGE( 1000, 1024, 1, AGV_STOP )                           /* hi <= 1023 */
+#endif
 #ifdef NEG_TAG_AUTO16
     TAG( 39, 1, AGV_TURN( CW, 90, 0, 16 ) )                        /* 자동 출발 0~15 */
 #endif
@@ -248,9 +293,9 @@ TAG_TABLE_BEGIN( site_tags )
 TAG_TABLE_END
 
 #ifdef __TMS320C28XX__
-/* 타깃 크기 확인: 스텝 12워드, 태그 규칙 16워드 */
+/* 타깃 크기 확인: 스텝 12워드, 태그 규칙 18워드(v0.53.0 범위 끝 칸) */
 typedef char step_size_is_12[(sizeof(seq_step_t) == 12) ? 1 : -1];
-typedef char rule_size_is_16[(sizeof(tag_rule_t) == 16) ? 1 : -1];
+typedef char rule_size_is_18[(sizeof(tag_rule_t) == 18) ? 1 : -1];
 #endif
 
 #ifdef AGV_HOST_BUILD
@@ -324,10 +369,10 @@ int main(void)
     assert(site_tags[5].cond2 == (XC_STATION | (1 << 8)) && site_tags[5].cond2_a == 42 && site_tags[5].cond2_b == 42);
     assert(site_tags[5].act[0] == (TA_TURN | TURN_CCW | (1 << 2)) && site_tags[5].act[1] == (1 << 4) && site_tags[5].in_on == 0);
     assert(site_tags[6].cond == XC_ID && site_tags[6].cond2 == 0 && site_tags[6].in_off == 0x1UL);
-    assert(site_tags[7].cond == (XC_TAG_MINUS_EQ_ST | (1 << 8)) && site_tags[7].cond_a == 20);
+    assert(site_tags[7].cond == (XC_TAG_NUM | (1 << 8)) && site_tags[7].cond_a == 20 && site_tags[7].cond_b == 0);
     assert(site_tags[8].cond == XC_STATION_MOD && site_tags[8].cond_a == 10 && site_tags[8].cond_b == 3);
     assert(site_tags[9].cond == (XC_STATION_DIV | (2 << 8)) && site_tags[9].cond_a == 100 && site_tags[9].cond_b == 1);
-    assert(site_tags[10].cond == XC_TAG_EQ_ST);
+    assert(site_tags[10].cond == XC_TAG_NUM && site_tags[10].cond_a == 0 && site_tags[10].cond_b == 0);
     assert(site_tags[11].cond == XC_FORWARD && site_tags[11].cond2 == (XC_CROSS | (1 << 8) | XC_NOT) && site_tags[11].in_on == 0x1UL);
     assert(site_tags[12].cond == TAG_COND_BACKWARD && site_tags[12].act[0] == TA_STOP);
     /* 태그 보고·스테이션 (tag_dsl.h) */
@@ -338,7 +383,23 @@ int main(void)
     assert(site_tags[15].act[0] == (TA_ACS_NUM | 14) && site_tags[15].act[1] == ('B' | TA_ACS_STANDBY_RESET)
            && site_tags[15].act[2] == (TA_ACS | 'A') && site_tags[15].act[3] == TA_STOP);
     assert(site_tags[16].act[0] == (TA_ACS_NUM | 115) && site_tags[16].act[1] == 'A'
-           && site_tags[16].act[2] == (TA_ACS_NUM | 1) && site_tags[16].act[3] == ('A' | TA_ACS_STATION));
+           && site_tags[16].act[2] == TA_ACS_NUM && site_tags[16].act[3] == ('A' | TA_ACS_STATION | (1u << TA_ACS_K_SHIFT)));
+    /* v0.53.0: 태그 번호 식(큐[k] % m + n), 보고 번호 식, 파라미터 조건(자리), 출발 대기, 범위 규칙 */
+    assert(site_tags[22].cond == XC_TAG_NUM && site_tags[22].cond_a == 100 && site_tags[22].cond_b == 0);
+    assert(site_tags[22].act[0] == (TA_ACS_NUM | 100) && site_tags[22].act[1] == ('A' | TA_ACS_STATION)
+           && site_tags[22].act[2] == (TA_ACS_NUM | 0xFB) && site_tags[22].act[3] == ('A' | TA_ACS_TAG_NUM));
+    assert(site_tags[23].cond == (XC_TAG_NUM | (2 << 8)) && site_tags[23].cond_a == 7 && site_tags[23].cond_b == 10);
+    assert(site_tags[23].act[0] == (TA_WAIT | 1) && site_tags[23].act[1] == TA_WAIT);
+    assert(site_tags[24].cond == (XC_TAG_NUM | (3 << 8)) && site_tags[24].cond_a == (uint16_t)-20 && site_tags[24].cond_b == 0);
+    assert(site_tags[24].act[0] == (TA_ACS_NUM | 0x80) && site_tags[24].act[1] == ('A' | TA_ACS_STATION | (23u << TA_ACS_K_SHIFT)));
+    assert(site_tags[25].cond == (XC_PARAM_EQ | (P_TURN_FORBACK << 8)) && site_tags[25].cond_a == 2 && site_tags[25].cond_b == 1);
+    assert(site_tags[26].cond == (XC_PARAM_EQ | (P_AUTO_START_SEC << 8)) && site_tags[26].cond_a == 5 && site_tags[26].cond_b == 0);
+    assert(site_tags[27].tag == 101 && site_tags[27].tag_hi == 120 && site_tags[27].cond == 0 && site_tags[27].act[0] == (TA_ACS_NUM | 100));
+    assert(site_tags[28].tag == 101 && site_tags[28].tag_hi == 120 && site_tags[28].cond == XC_TAG_NUM && site_tags[28].cond_a == 100
+           && site_tags[28].act[2] == TA_STOP && site_tags[28].act[3] == TA_STOP_AUTOSTART);
+    assert(site_tags[29].cond == (XC_TAG_NUM | (1 << 8)) && site_tags[29].cond_a == 0 && site_tags[29].cond_b == 4
+           && site_tags[29].act[0] == (TA_ACS_NUM | 127));
+    assert(site_tags[21].tag_hi == 0 && site_tags[0].tag_hi == 0);
     assert(site_tags[17].act[0] == (TA_TURN_ALIGN | TURN_CCW | (2 << 2))
            && site_tags[17].act[1] == (DIR_TOGGLE | (1 << 4) | (1 << 8) | (15 << TA_TURN_SPEED_SHIFT)));
     assert(site_tags[18].act[0] == (TA_TURN | TURN_CW | (1 << 2)) && site_tags[18].act[1] == 0xF910u);   /* 31 << 11 | OBS 1 << 8 | 1 << 4 */

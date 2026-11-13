@@ -98,15 +98,14 @@ enum {
     XC_STATION_RUNNING,   /* 위 조건 + 아직 정지가 걸리지 않음 */
     XC_CROSS,             /* 교차로. 칸 비트0: 0 IN, 1 OUT. 비트1: 0 대기 또는 유지, 1 유지만 */
     XC_ERR_EQ,            /* action_err == a */
-    XC_PARAM_EQ,          /* 파라미터[칸] == a */
+    XC_PARAM_EQ,          /* 파라미터[칸] == a. b != 0 이면 그 자리(1·10·100) 숫자 == a(자릿수 파라미터) */
     XC_PARAM_GE,          /* 파라미터[칸] >= a */
     XC_PARAM_LE,          /* 파라미터[칸] <= a */
     XC_ID,                /* a <= P_AGV_ID <= b */
     XC_KEY,               /* 지금 눌린 키 == a. 키를 소비하지 않는다 */
     XC_STATION_MOD,       /* 큐[칸] % a == b */
     XC_STATION_DIV,       /* 큐[칸] / a == b */
-    XC_TAG_MINUS_EQ_ST,   /* 태그 - a == 큐[칸]. 태그 표 전용 */
-    XC_TAG_EQ_ST          /* 태그 == 큐[칸]. 태그 표 전용 */
+    XC_TAG_NUM            /* 태그 == (b ? 큐[칸] % b : 큐[칸]) + a(a 부호 있음). 태그 표 전용(시퀀스는 태그 0) */
 };
 #define XC_NOT  0x80u
 

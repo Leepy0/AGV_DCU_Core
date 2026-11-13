@@ -124,8 +124,60 @@ typedef unsigned long long dsl_cond_t;
 #define X_STATION_RUNNING(k, lo, hi) (XC_STATION_RUNNING | DSL_SLOT(k)), (lo), (hi)
 #define X_STATION_MOD(k, n, m)       (XC_STATION_MOD | DSL_SLOT(k)), ((n) + DSL_NZ(n)), (m)
 #define X_STATION_DIV(k, n, m)       (XC_STATION_DIV | DSL_SLOT(k)), ((n) + DSL_NZ(n)), (m)
-#define X_TAG_MINUS_EQ_STATION(k, n) (XC_TAG_MINUS_EQ_ST | DSL_SLOT(k)), (n), 0   /* 태그 표 전용 */
-#define X_TAG_EQ_STATION(k)          (XC_TAG_EQ_ST | DSL_SLOT(k)), 0, 0          /* 태그 표 전용 */
+/* 지금 태그 번호 == 식. 식은 스테이션 큐 식(아래 STATION): STATION(k), STATION(k) ± n, MOD( STATION(k), m ),
+ * n + MOD( STATION(k), m ). 태그 표 전용. 예: 레거시 "Station[0] == Tag - 100" 은 X_TAG_NUM( STATION(0) + 100 ) */
+#define X_TAG_NUM(e)                 (XC_TAG_NUM | DSL_SLOT(DSL_ST_K(e))), (uint16_t)(DSL_ST_N(e) + DSL_ST_OK(e)), (uint16_t)DSL_ST_M(e)
+/* 파라미터 값 == v. 이름은 FND 이름(아래 DSL_PRM_*). 자릿수 파라미터의 한 자리는 이름_자리(TFB_1 전후진 모드, TFB_10 회전 모드) */
+#define X_PARAM(name, v)             DSL_XPRM(DSL_PRM_##name, v)
+#define DSL_XPRM(...)                DSL_XPRM_(__VA_ARGS__)
+#define DSL_XPRM_(p, place, v)       (XC_PARAM_EQ | DSL_SLOT(p)), (v), (place)
+#define DSL_PRM_DRS   P_SPEED_HIGH, 0
+#define DSL_PRM_LOS   P_SPEED_LOW, 0
+#define DSL_PRM_TNS   P_SPEED_TURN, 0
+#define DSL_PRM_ATD   P_AUTO_DRIVE_MODE, 0
+#define DSL_PRM_ITM   P_INTERFACE_MODE, 0
+#define DSL_PRM_SND   P_SOUND, 0
+#define DSL_PRM_BPS   P_BUMPER_USE, 0
+#define DSL_PRM_OBS   P_OBS_USE, 0
+#define DSL_PRM_DSM   P_DISPLAY_MODE, 0
+#define DSL_PRM_BO    P_BAT_OFFSET_DV, 0
+#define DSL_PRM_JSP   P_SPEED_JOG, 0
+#define DSL_PRM_ACC   P_ACC, 0
+#define DSL_PRM_DCC   P_DCC, 0
+#define DSL_PRM_AS    P_AUTO_START_SEC, 0
+#define DSL_PRM_ST    P_STATION_NO, 0
+#define DSL_PRM_TFB   P_TURN_FORBACK, 0
+#define DSL_PRM_TFB_1  P_TURN_FORBACK, 1
+#define DSL_PRM_TFB_10 P_TURN_FORBACK, 10
+#define DSL_PRM_SL    P_STOP_LEN_MM, 0
+#define DSL_PRM_K_P   P_STEER_KP, 0
+#define DSL_PRM_K_I   P_STEER_KI, 0
+#define DSL_PRM_WS    P_WHEEL_DIA_MM, 0
+#define DSL_PRM_RG    P_GEAR_RATIO, 0
+#define DSL_PRM_WW    P_WHEEL_BASE_MM, 0
+#define DSL_PRM_ID    P_AGV_ID, 0
+#define DSL_PRM_AT    P_AGV_TYPE, 0
+#define DSL_PRM_LO    P_LAMP_EXT_USE, 0
+#define DSL_PRM_SPN   P_SPEED_MIN, 0
+#define DSL_PRM_CML   P_COMM_LINK, 0
+#define DSL_PRM_FL    P_STOP_LEN_FWD_MM, 0
+#define DSL_PRM_ASS   P_ACS_STANDBY, 0
+#define DSL_PRM_BGO   P_BRANCH_OFFSET, 0
+#define DSL_PRM_CD    P_CROSS_IN_CM, 0
+#define DSL_PRM_WRT   P_ACS_RETRY_LEGACY, 0
+#define DSL_PRM_CT    P_ACS_RETRY_SEC, 0
+#define DSL_PRM_EST   P_ERR_REPORT_MIN, 0
+#define DSL_PRM_RCI   P_CROSS_RETRY_100MS, 0
+#define DSL_PRM_SR    P_STEER_RPM_OFFSET, 0
+#define DSL_PRM_GTO   P_GUIDE_TIMEOUT, 0
+#define DSL_PRM_AV    P_ACS_VERSION, 0
+#define DSL_PRM_GD    P_GUIDE_DIST_MM, 0
+#define DSL_PRM_ES    P_ENC_STALL_TICKS, 0
+#define DSL_PRM_EDS   P_EMPTY_SPEED, 0
+#define DSL_PRM_ETN   P_EMPTY_TURN, 0
+#define DSL_PRM_EAC   P_EMPTY_ACC, 0
+#define DSL_PRM_EDC   P_EMPTY_DCC, 0
+#define DSL_PRM_LDS   P_LOAD_DETECT, 0
 #define X_NOT(x)                     DSL_XNOT_(x)
 #define DSL_XNOT_(k, a, b)           ((k) | XC_NOT), a, b
 
@@ -254,12 +306,22 @@ typedef unsigned long long dsl_cond_t;
 #define DSL_INFO_STANDBY    'B'
 #define DSL_INFO_CALL       'C'
 /* 번호 자리의 스테이션 큐 번호: ACS_SEND( NEXT, STATION(1) ) = 레거시 DA_ACS_Next( ACS_Station_Call_Num[1] ). k 0~23.
- * 상수식이라 정적 표에 쓴다(ACS( 종류, STATION(k) ) 의 출처 자리에서는 이름으로 붙는다) */
-#define DSL_STATION_MARK       0x20000L
-#define STATION(k)             (DSL_STATION_MARK + (k) + (0 * sizeof(char[(((k) >= 0) && ((k) < ACS_STATION_MAX)) ? 1 : -1])))
-#define DSL_IS_STATION(n)      ((n) >= DSL_STATION_MARK)
-#define DSL_SEND_OK(n)         (0 * sizeof(char[(((n) >= 0) && (((n) < 0x10000L) || DSL_IS_STATION(n))) ? 1 : -1]))
-#define DSL_SEND_SRC(n)        (DSL_IS_STATION(n) ? ((((n) & 0xFF) == 0) ? SEQ_NUM_STATION0 : SEQ_NUM_STATION((n) & 0xFF)) : SEQ_NUM_CONST)
+ * 상수식이라 정적 표에 쓴다(ACS( 종류, STATION(k) ) 의 출처 자리에서는 이름으로 붙는다).
+ * 스테이션 큐 식: STATION(k) ± n, MOD( STATION(k), m ), n + MOD( STATION(k), m ) 를 C 연산 그대로 쓴다(IF_TAG_NUM, 태그 ACS_SEND).
+ * 값 = 표식 2^29 + k << 16 + m << 21 + n. n 은 -2048~2047(넘으면 비트 12~15 가 서서 컴파일 오류), m 1~255.
+ * 시퀀스 ACS_SEND 는 STATION(k) 만 받는다(± n, MOD 는 컴파일 오류) */
+#define DSL_STATION_MARK       0x20000000L
+#define STATION(k)             (DSL_STATION_MARK + ((long)(k) << 16) + (0 * sizeof(char[(((k) >= 0) && ((k) < ACS_STATION_MAX)) ? 1 : -1])))
+#define DSL_ST_T(v)            ((long)(v) - DSL_STATION_MARK + 0x800L)
+#define DSL_IS_STATION(v)      ((DSL_ST_T(v) >= 0L) && (DSL_ST_T(v) < (1L << 29)) && ((DSL_ST_T(v) & 0xF000L) == 0L))
+#define DSL_ST_K(v)            ((int)((DSL_ST_T(v) >> 16) & 0x1FL))
+#define DSL_ST_N(v)            ((long)(DSL_ST_T(v) & 0xFFFL) - 0x800L)
+#define DSL_ST_M(v)            ((int)((DSL_ST_T(v) >> 21) & 0xFFL))
+#define DSL_ST_OK(v)           (0 * sizeof(char[DSL_IS_STATION(v) ? 1 : -1]))
+#define DSL_ST_PLAIN(v)        (DSL_IS_STATION(v) && (DSL_ST_N(v) == 0L) && (DSL_ST_M(v) == 0))
+#define MOD(x, m)              ((x) + ((long)(m) << 21) + (0 * sizeof(char[(DSL_ST_PLAIN(x) && ((m) >= 1) && ((m) <= 255)) ? 1 : -1])))
+#define DSL_SEND_OK(n)         (0 * sizeof(char[((((n) >= 0) && ((n) < 0x10000L)) || DSL_ST_PLAIN(n)) ? 1 : -1]))
+#define DSL_SEND_SRC(n)        (DSL_IS_STATION(n) ? ((DSL_ST_K(n) == 0) ? SEQ_NUM_STATION0 : SEQ_NUM_STATION(DSL_ST_K(n))) : SEQ_NUM_CONST)
 #define ACS(info, src)         DSL_STEP(SK_ACS, SEQ_NO_LABEL, DSL_INFO_##info, SEQ_NUM_##src, 0, 0, 0, 0)
 /* 번호 상수 0~65535 또는 STATION(k). STATION(k) 는 ACS( 종류, STATION(k) ) 와 같은 스텝(k 0 은 STATION0) */
 #define ACS_SEND(info, num)    DSL_STEP(SK_ACS, SEQ_NO_LABEL, DSL_INFO_##info, DSL_SEND_SRC(num) + DSL_SEND_OK(num), \
@@ -344,6 +406,14 @@ typedef unsigned long long dsl_cond_t;
 #define DSL_TAG_(t, p, k1, a1, b1, k2, a2, b2, on, off, acts)                                         \
     { (uint16_t)(t), (uint16_t)(p), (uint16_t)(k1), (uint16_t)(a1), (uint16_t)(b1), { DSL_UNPAREN acts }, \
       (uint16_t)(k2), (uint16_t)(a2), (uint16_t)(b2), (uint32_t)(on), (uint32_t)(off) },
+/* 범위 규칙: 한 규칙이 태그 lo~hi 를 받는다(lo <= hi <= 1023). 고르는 순서는 다른 규칙과 같다(표에 적힌 순서, 먼저 맞는 하나) */
+#define DSL_TRANGE_OK(lo, hi)  (0 * sizeof(char[(((lo) >= 0) && ((lo) <= (hi)) && ((hi) <= 1023)) ? 1 : -1]))
+#define TAG_RANGE(lo, hi, profile, ...)  \
+    { (uint16_t)(lo), (uint16_t)(profile), TAG_COND_NONE, 0, 0, { __VA_ARGS__ }, 0, 0, 0, 0UL, 0UL, (uint16_t)((hi) + DSL_TRANGE_OK(lo, hi)) },
+#define TAG_RANGE_IF(lo, hi, profile, cond, ...)  DSL_TAGR_(lo, hi, profile, cond, (__VA_ARGS__))
+#define DSL_TAGR_(lo, hi, p, k1, a1, b1, k2, a2, b2, on, off, acts)                                    \
+    { (uint16_t)(lo), (uint16_t)(p), (uint16_t)(k1), (uint16_t)(a1), (uint16_t)(b1), { DSL_UNPAREN acts }, \
+      (uint16_t)(k2), (uint16_t)(a2), (uint16_t)(b2), (uint32_t)(on), (uint32_t)(off), (uint16_t)((hi) + DSL_TRANGE_OK(lo, hi)) },
 
 /* 압축 표 (생성기용, tagact.h tag_packed_t). 번호 0 칸(없음)은 BEGIN 이 넣는다.
  * TAGP(태그, 프로파일, 확장 조건 1 번호, 확장 조건 2 번호, 입력 번호, 동작 번호) */
@@ -357,6 +427,11 @@ typedef unsigned long long dsl_cond_t;
 #define TAGP(tag, profile, x1, x2, in, act)     { (uint16_t)((tag) | ((uint16_t)(profile) << 10)), (uint16_t)((x1) | ((uint16_t)(x2) << 8)), (uint16_t)((act) | ((uint16_t)(in) << 8)) },
 #define TAG_POOL_END           };
 #define TAG_PACKED(name, rules, x, in, act)     const tag_packed_t name = { rules, x, in, act, (uint16_t)(sizeof(rules) / sizeof(rules[0])) };
+/* 범위 규칙이 있는 압축 표: TAG_RANGE_P( 규칙 번호, hi ) 를 규칙 번호 순서로. 그 규칙의 TAGP 태그가 lo 다 */
+#define TAG_RANGES_BEGIN(name) static const tag_range_t name[] = {
+#define TAG_RANGE_P(i, hi)     { (uint16_t)(i), (uint16_t)(hi) },
+#define TAG_PACKED_R(name, rules, x, in, act, rng)  \
+    const tag_packed_t name = { rules, x, in, act, (uint16_t)(sizeof(rules) / sizeof(rules[0])), rng, (uint16_t)(sizeof(rng) / sizeof(rng[0])) };
 
 #define IF_X(x)                x, X_ALWAYS, 0UL, 0UL
 #define IF_X2(x1, x2)          x1, x2, 0UL, 0UL
@@ -373,8 +448,9 @@ typedef unsigned long long dsl_cond_t;
 #define IF_ID(lo, hi)                    IF_X(X_ID(lo, hi))
 #define IF_STATION_MOD(k, n, m)          IF_X(X_STATION_MOD(k, n, m))
 #define IF_STATION_DIV(k, n, m)          IF_X(X_STATION_DIV(k, n, m))
-#define IF_TAG_MINUS_EQ_STATION(k, n)    IF_X(X_TAG_MINUS_EQ_STATION(k, n))
-#define IF_TAG_EQ_STATION(k)             IF_X(X_TAG_EQ_STATION(k))
+#define IF_TAG_NUM(e)                    IF_X(X_TAG_NUM(e))
+/* 이름은 붙여서 넘긴다(사이트 매크로가 펼쳐지지 않게) */
+#define IF_PARAM(name, v)                IF_X(DSL_XPRM(DSL_PRM_##name, v))
 
 /* 태그 동작 이름(AGV_STOP, AGV_TURN, SEQ_START, ACS_SEND …)은 agv/tag_dsl.h. 태그 표 파일은 그 헤더를 포함한다 */
 

@@ -22,7 +22,8 @@ typedef struct {
     uint16_t cond2_b;
     uint32_t in_on;      /* 입력 조건. 시퀀스 WHEN 과 같은 인코딩 (양쪽에 선 비트 = 하나라도 ON) */
     uint32_t in_off;
-} tag_rule_t;            /* C28x 16워드 */
+    uint16_t tag_hi;     /* 범위 규칙(TAG_RANGE)이면 받는 마지막 태그, 0 = 태그 하나 */
+} tag_rule_t;            /* C28x 18워드 */
 
 /* 압축 표(생성기용). 규칙은 3워드이고 조건·입력·동작은 중복을 없앤 표의 번호다. 번호 0 = 없음(조건 없음, 입력 없음, 동작 없음).
  * 표 번호는 0~255, 태그 0~1023, 프로파일 0~63. 맞은 규칙은 tag_rule_t 로 펼쳐 같은 길로 돈다 */
@@ -34,12 +35,15 @@ typedef struct {
     uint16_t x;          /* 확장 조건 1 번호 | 확장 조건 2 번호 << 8 */
     uint16_t ai;         /* 동작 번호 | 입력 조건 번호 << 8 */
 } tag_pack_t;
+typedef struct { uint16_t i, hi; } tag_range_t;            /* 범위 규칙: 규칙 번호 i(오름차순)가 태그 lo(규칙의 태그)~hi 를 받는다 */
 typedef struct {
     const tag_pack_t *rules;
     const tag_x_t    *x;
     const tag_in_t   *in;
     const tag_act_t  *act;
     uint16_t          n;
+    const tag_range_t *ranges;   /* 0 = 범위 규칙 없음 */
+    uint16_t          nranges;
 } tag_packed_t;
 
 /* 예전 이름 */
@@ -70,8 +74,11 @@ extern void (*tagact_trace)(uint16_t code, uint16_t next);   /* 호스트 시험
 #define TA_ACS            0x0900   /* 인자: DSL_INFO_* ; 번호는 스테이션 큐[0] */
 #define TA_ACS_NUM        0x0A00   /* 인자: 번호 상수 (다음 칸에 Info | TA_ACS_* 비트) */
 #define TA_ACS_STANDBY_RESET 0x0100   /* 다음 칸: Info 'B' 에서 먼저 스테이션 큐를 지운다 */
-#define TA_ACS_AGV_MINUS  0x0200   /* 다음 칸: 번호 = 호기 번호 - 인자 */
-#define TA_ACS_STATION    0x0400   /* 다음 칸: 번호 = 스테이션 큐[인자] */
+#define TA_ACS_SRC        0x0600   /* 다음 칸 번호 출처(둘 중 하나): 0 상수 = 인자 0~255 */
+#define TA_ACS_AGV_MINUS  0x0200   /* 번호 = 호기 번호 - 인자 */
+#define TA_ACS_STATION    0x0400   /* 번호 = 스테이션 큐[다음 칸 >> TA_ACS_K_SHIFT] + 인자(부호 8비트 -128~127) */
+#define TA_ACS_TAG_NUM    0x0600   /* 번호 = 지금 태그 번호 + 인자(부호 8비트) */
+#define TA_ACS_K_SHIFT    11       /* 다음 칸 b11~15: 스테이션 큐 칸 k */
 #define TA_OBS            0x0B00   /* 인자: on/off */
 #define TA_STATE          0x0C00   /* 인자: 사이트 상태 id (다음 칸: 값) */
 #define TA_STATION_RESET  0x0E00
@@ -83,6 +90,7 @@ extern void (*tagact_trace)(uint16_t code, uint16_t next);   /* 호스트 시험
  * 규칙에 분류 2·3·4 가 있으면 그 정지가 이긴다(같은 규칙의 TA_STOP·자동 출발·대기 보고가 태그 자리 SL 정지를 걸지 않는다) */
 #define TA_STOP_CM        0x1200   /* 인자: 정지 거리 cm 0~255(SL 과 같은 단위, 0 = 바로 정지). 태그를 읽은 자리에서 잰다 */
 #define TA_TAPE_STOP_GD   0x1300   /* 인자: seq_id_t(0 = 시퀀스 없음). 교차선을 찾아 GD 더 가서 정지 뒤 시퀀스 */
+#define TA_WAIT           0x1500   /* 인자: 1 대기 시작(run_wait_start), 0 대기 풀기(run_wait_cancel). AGV_WAIT_START·AGV_WAIT_CANCEL */
 #define TA_STOP_KIND_TAPE    3     /* D.tape_stop_kind: 교차선에서 바로 정지 */
 #define TA_STOP_KIND_TAPE_GD 4     /* D.tape_stop_kind: 교차선 뒤 GD 가서 정지 */
 

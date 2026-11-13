@@ -103,8 +103,8 @@ static const tag_rule_t s_rules[] = {
     TAG_IF( 20, 0, IF_X2_IN( X_ID(AGV_ID, AGV_ID), X_STATION(1, 42, 42), IN( ON(IN_START_SW) ) ), AGV_SPEED( LOW ) )
     TAG_IF( 20, 0, IF_X2( X_ID(AGV_ID, AGV_ID), X_STATION(1, 42, 42) ), AGV_SPEED( MIN ) )
     TAG_IF( 20, 0, IF_ID( 8, 9 ), AGV_SPEED( HIGH ) )
-    TAG_IF( 21, 0, IF_TAG_MINUS_EQ_STATION( 0, 10 ), OBS_ON )
-    TAG_IF( 21, 0, IF_TAG_EQ_STATION( 0 ), OBS_OFF )
+    TAG_IF( 21, 0, IF_TAG_NUM( STATION(0) + 10 ), OBS_ON )
+    TAG_IF( 21, 0, IF_TAG_NUM( STATION(0) ), OBS_OFF )
     TAG_IF( 22, 0, IF_STATION_MOD( 0, 10, 3 ), OBS_ON )
     TAG_IF( 22, 0, IF_STATION_DIV( 0, 10, 4 ), OBS_OFF )
     TAG_IF( 23, 0, IF_IN( ANY_ON(IN_EXT_16, IN_START_SW) ), OBS_ON )
@@ -131,6 +131,16 @@ static const tag_rule_t s_rules[] = {
     TAG( 47, 0, AGV_STOP( 30 ) )
     TAG( 44, 0, AGV_AUTOSTART( 1 ), SEQ_START( TAPE, LOAD ) )
     TAG( 45, 0, AGV_STOP( TAPE ), ACS_SEND( STANDBY, 7 ), AGV_AUTOSTART( 1 ) )
+    /* v0.53.0: 범위 규칙(큐[0] + 100 인 태그에서 서고 보고, 아니면 보고만), 태그 번호 식, 보고 번호 식, 파라미터 조건, 출발 대기 */
+    TAG_RANGE_IF( 101, 120, 0, IF_TAG_NUM( STATION(0) + 100 ), ACS_SEND( ARRIVE, STATION(0) + 100 ), AGV_STOP, AGV_AUTOSTART_PARAM )
+    TAG_RANGE( 101, 120, 0, ACS_SEND( ARRIVE, STATION(0) + 100 ) )
+    TAG( 110, 0, OBS_ON )                                     /* 앞 범위 규칙이 먼저 맞는다 */
+    TAG_IF( 121, 0, IF_PARAM( TFB_1, 2 ), AGV_WAIT_START )
+    TAG( 121, 0, AGV_WAIT_CANCEL )
+    TAG( 122, 0, ACS_SEND( ARRIVE, TAG_NUM - 100 ), ACS_SEND( LOADING, STATION(1) - 2 ) )
+    TAG( 130, 0, OBS_OFF )                                    /* 뒤 범위 규칙보다 먼저 */
+    TAG_RANGE( 125, 135, 0, OBS_ON )
+    TAG_IF( 140, 0, IF_TAG_NUM( 100 + MOD( STATION(1), 100 ) ), OBS_ON )
 };
 
 /* 위 20~23 과 같은 규칙의 압축 표. 앞 줄은 다른 프로파일이라 건너뛴다 */
@@ -138,11 +148,14 @@ TAG_X_BEGIN( s_px )
     TAG_X( X_ID(AGV_ID, AGV_ID) )            /* 1 */
     TAG_X( X_STATION(1, 42, 42) )            /* 2 */
     TAG_X( X_ID(8, 9) )                      /* 3 */
-    TAG_X( X_TAG_MINUS_EQ_STATION(0, 10) )   /* 4 */
-    TAG_X( X_TAG_EQ_STATION(0) )             /* 5 */
+    TAG_X( X_TAG_NUM( STATION(0) + 10 ) )    /* 4 */
+    TAG_X( X_TAG_NUM( STATION(0) ) )         /* 5 */
     TAG_X( X_STATION_MOD(0, 10, 3) )         /* 6 */
     TAG_X( X_STATION_DIV(0, 10, 4) )         /* 7 */
     TAG_X( X_NOT(X_CROSS_IN) )               /* 8 */
+    TAG_X( X_TAG_NUM( STATION(0) + 100 ) )   /* 9 */
+    TAG_X( X_PARAM( TFB_1, 2 ) )             /* 10 */
+    TAG_X( X_TAG_NUM( 100 + MOD( STATION(1), 100 ) ) )   /* 11 */
 TAG_POOL_END
 TAG_IN_BEGIN( s_pin )
     TAG_IN( IN( ON(IN_START_SW) ) )                  /* 1 */
@@ -154,6 +167,11 @@ TAG_ACT_BEGIN( s_pact )
     TAG_ACTS( AGV_SPEED( HIGH ) )   /* 3 */
     TAG_ACTS( OBS_ON )       /* 4 */
     TAG_ACTS( OBS_OFF )      /* 5 */
+    TAG_ACTS( ACS_SEND( ARRIVE, STATION(0) + 100 ), AGV_STOP, AGV_AUTOSTART_PARAM )   /* 6 */
+    TAG_ACTS( ACS_SEND( ARRIVE, STATION(0) + 100 ) )                                   /* 7 */
+    TAG_ACTS( AGV_WAIT_START )                                                         /* 8 */
+    TAG_ACTS( AGV_WAIT_CANCEL )                                                        /* 9 */
+    TAG_ACTS( ACS_SEND( ARRIVE, TAG_NUM - 100 ), ACS_SEND( LOADING, STATION(1) - 2 ) )   /* 10 */
 TAG_POOL_END
 TAGP_BEGIN( s_prules )
     TAGP( 20, 63, 0, 0, 0, 3 )
@@ -166,8 +184,22 @@ TAGP_BEGIN( s_prules )
     TAGP( 22, 0, 7, 0, 0, 5 )
     TAGP( 23, 0, 0, 0, 2, 4 )
     TAGP( 23, 0, 8, 0, 0, 5 )
+    TAGP( 101, 0, 9, 0, 0, 6 )     /* 10: 101~120 */
+    TAGP( 101, 0, 0, 0, 0, 7 )     /* 11: 101~120 */
+    TAGP( 110, 0, 0, 0, 0, 4 )
+    TAGP( 121, 0, 10, 0, 0, 8 )
+    TAGP( 121, 0, 0, 0, 0, 9 )
+    TAGP( 122, 0, 0, 0, 0, 10 )
+    TAGP( 130, 0, 0, 0, 0, 5 )
+    TAGP( 125, 0, 0, 0, 0, 4 )     /* 17: 125~135 */
+    TAGP( 140, 0, 11, 0, 0, 4 )
 TAG_POOL_END
-TAG_PACKED( s_tag_pk, s_prules, s_px, s_pin, s_pact )
+TAG_RANGES_BEGIN( s_prange )
+    TAG_RANGE_P( 10, 120 )
+    TAG_RANGE_P( 11, 120 )
+    TAG_RANGE_P( 17, 135 )
+TAG_POOL_END
+TAG_PACKED_R( s_tag_pk, s_prules, s_px, s_pin, s_pact, s_prange )
 
 static int s_manual_count;
 void site_register(void)
@@ -672,12 +704,81 @@ static void tag_cond_checks(void)
     acs_station_reset();
 }
 
+/* v0.53.0 태그 표 문법: 범위 규칙(표 순서 그대로), 태그 번호 식, 파라미터 조건(자리) */
+static void tag_expr_checks(void)
+{
+    uint16_t a[4];
+    int16_t tfb = param_get(P_TURN_FORBACK);
+
+    acs_station_set(0, 5, 2);
+    acs_station_set(1, 240, 2);
+    assert((tagact_dry_run(105, a, 4) == 4) && (a[0] == (TA_ACS_NUM | 100)) && (a[2] == TA_STOP) && (a[3] == TA_STOP_AUTOSTART));
+    assert((tagact_dry_run(106, a, 4) == 2) && (a[0] == (TA_ACS_NUM | 100)) && (a[1] == ('A' | TA_ACS_STATION)));
+    assert((tagact_dry_run(101, a, 4) == 2) && (tagact_dry_run(120, a, 4) == 2));
+    assert((tagact_dry_run(110, a, 4) == 2) && (a[0] == (TA_ACS_NUM | 100)));   /* 범위가 뒤 110 규칙보다 앞 */
+    assert((tagact_dry_run(100, a, 4) == 0) && (tagact_dry_run(0, a, 4) == 0));
+    acs_station_set(0, 10, 2);
+    assert((tagact_dry_run(110, a, 4) == 4) && (tagact_dry_run(105, a, 4) == 2));
+    assert((tagact_dry_run(125, a, 4) == 1) && (a[0] == OBS_ON) && (tagact_dry_run(135, a, 4) == 1) && (a[0] == OBS_ON));
+    assert((tagact_dry_run(130, a, 4) == 1) && (a[0] == OBS_OFF));
+    assert((tagact_dry_run(136, a, 4) == 0) && (tagact_dry_run(124, a, 4) == 0));
+    assert((tagact_dry_run(140, a, 4) == 1) && (a[0] == OBS_ON));
+    acs_station_set(1, 241, 2);
+    assert(tagact_dry_run(140, a, 4) == 0);
+    assert(param_set(P_TURN_FORBACK, 12) == 0);
+    assert((tagact_dry_run(121, a, 4) == 1) && (a[0] == AGV_WAIT_START));
+    assert(param_set(P_TURN_FORBACK, 11) == 0);
+    assert((tagact_dry_run(121, a, 4) == 1) && (a[0] == AGV_WAIT_CANCEL));
+    (void)param_set(P_TURN_FORBACK, tfb);
+    acs_station_reset();
+}
+
+/* 보낸 프레임에서 종류·Info 가 맞는 마지막 것의 번호(3자리). 없으면 -1 */
+static int tx_num(uint16_t type, uint16_t info)
+{
+    host_sci_t *a = &host.sci[HAL_SCI_A];
+    int i, n = -1;
+    for (i = 0; i + 19 < a->tx_len; i++) {
+        if ((a->tx[i] == 2) && (a->tx[i + 1] == type) && (a->tx[i + 6] == info)) {
+            n = (a->tx[i + 7] - '0') * 100 + (a->tx[i + 8] - '0') * 10 + (a->tx[i + 9] - '0');
+        }
+    }
+    return n;
+}
+
 static void test_tag_cond(void)
 {
+    int16_t tfb;
+
     boot();
     tag_cond_checks();
+    tag_expr_checks();
     tagact_bind_packed(&s_tag_pk, 0);         /* 압축 표도 같은 답 */
     tag_cond_checks();
+    tag_expr_checks();
+    /* 실행(압축 표): 범위 규칙의 정지·보고 번호(큐[0] + 100), 태그 번호·큐[1] 식 보고, 출발 대기 걸기·풀기 */
+    acs_station_set(0, 5, 2);
+    acs_station_set(1, 240, 2);
+    D.vin_out = 50;
+    host.sci[HAL_SCI_A].tx_len = 0;
+    (void)tagact_run(105);
+    assert(D.flag_stopping);
+    ticks(2);
+    assert(tx_num('E', 'A') == 105);
+    D.flag_stopping = 0;
+    host.sci[HAL_SCI_A].tx_len = 0;
+    (void)tagact_run(122);
+    ticks(4);
+    assert((tx_num('E', 'A') == 22) && (tx_num('E', 'L') == 238));
+    tfb = param_get(P_TURN_FORBACK);
+    assert(param_set(P_TURN_FORBACK, 12) == 0);
+    (void)tagact_run(121);
+    assert(D.wait_start == 1);
+    assert(param_set(P_TURN_FORBACK, 11) == 0);
+    (void)tagact_run(121);
+    assert(D.wait_start == 0);
+    (void)param_set(P_TURN_FORBACK, tfb);
+    acs_station_reset();
     boot();
     printf("  tag cond ok\n");
 }

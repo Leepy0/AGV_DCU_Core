@@ -24,6 +24,7 @@ static const tag_packed_t *s_pk;   /* 압축 표. 0 = s_rules */
 static tag_rule_t s_hit;           /* 압축 표에서 맞춰 보는 규칙을 펼친 칸. rule_find 가 다시 불리면 덮인다.
                                     * 돌려받은 포인터를 사용자 함수 호출 뒤에 쓰지 않는다 */
 static uint16_t s_nrules, s_profile, s_display_tag;
+static uint16_t s_tag;             /* 지금 처리 중인 태그 번호(ACS_SEND( …, TAG_NUM ± n )) */
 
 void tagact_bind(const tag_rule_t *rules, uint16_t n, uint16_t profile)
 {
@@ -306,26 +307,36 @@ void tagact_compensate(int32_t pulses)
 
 /* ---- 표 ---- */
 
-static uint16_t cond_ok(const tag_rule_t *r)
+/* 태그 번호 조건(IF_TAG_NUM)은 규칙의 태그가 아니라 읽은 태그로 본다(범위 규칙) */
+static uint16_t cond_ok(const tag_rule_t *r, uint16_t tag)
 {
-    return seq_xcond(r->cond, r->cond_a, r->cond_b, r->tag) && seq_xcond(r->cond2, r->cond2_a, r->cond2_b, r->tag)
+    return seq_xcond(r->cond, r->cond_a, r->cond_b, tag) && seq_xcond(r->cond2, r->cond2_a, r->cond2_b, tag)
         && seq_mask_true(io_in_mask(), r->in_on, r->in_off);
+}
+
+/* 규칙이 받는 태그: lo 하나, 또는 범위 규칙 lo~hi(hi 0 = 하나) */
+static uint16_t tag_in(uint16_t tag, uint16_t lo, uint16_t hi)
+{
+    return (uint16_t)((tag == lo) || ((tag > lo) && (tag <= hi)));
 }
 
 static const tag_rule_t *rule_find(uint16_t tag)
 {
-    uint16_t i;
+    uint16_t i, j = 0;
     uint16_t profile = (s_profile != 0u) ? s_profile : seq_profile();
 
     for (i = 0; i < s_nrules; i++) {
         const tag_rule_t *r;
         if (s_pk != 0) {
-            uint16_t tp = s_pk->rules[i].tp, pf = (uint16_t)(tp >> 10);
-            if (((tp & 0x3FFu) != tag) || ((pf != 0u) && (pf != profile))) { continue; }
+            uint16_t tp = s_pk->rules[i].tp, pf = (uint16_t)(tp >> 10), hi = 0;
+            while ((j < s_pk->nranges) && (s_pk->ranges[j].i < i)) { j++; }   /* 범위 칸은 규칙 번호 순서 */
+            if ((j < s_pk->nranges) && (s_pk->ranges[j].i == i)) { hi = s_pk->ranges[j].hi; }
+            if (!tag_in(tag, (uint16_t)(tp & 0x3FFu), hi) || ((pf != 0u) && (pf != profile))) { continue; }
             r = pk_rule(i);
+            s_hit.tag_hi = hi;
         }
         else { r = &s_rules[i]; }
-        if ((r->tag == tag) && ((r->profile == 0u) || (r->profile == profile)) && cond_ok(r)) { return r; }
+        if (tag_in(tag, r->tag, r->tag_hi) && ((r->profile == 0u) || (r->profile == profile)) && cond_ok(r, tag)) { return r; }
     }
     return 0;
 }
@@ -394,6 +405,18 @@ static void tag_acs(uint16_t info, int16_t num, int16_t cls)
     else { acs_report(info & 0xFFu, num); }
 }
 
+/* 보고 번호(TA_ACS_NUM): 상수 = 인자, 호기 - 인자, 스테이션 큐[k] + 인자, 태그 + 인자(뒤 둘의 인자는 부호 8비트) */
+static int16_t acs_num(uint16_t arg, uint16_t next)
+{
+    int16_t n = (int16_t)((int16_t)(arg ^ 0x80u) - 0x80);
+    switch (next & TA_ACS_SRC) {
+    case TA_ACS_AGV_MINUS: return (int16_t)(param_get(P_AGV_ID) - (int16_t)arg);
+    case TA_ACS_STATION:   return (int16_t)(acs_station_get((uint16_t)(next >> TA_ACS_K_SHIFT)) + n);
+    case TA_ACS_TAG_NUM:   return (int16_t)((int16_t)s_tag + n);
+    default:               return (int16_t)arg;
+    }
+}
+
 #ifdef AGV_HOST_BUILD
 void (*tagact_trace)(uint16_t code, uint16_t next);   /* 시험용: 실행하는 동작마다 알린다 */
 #endif
@@ -434,9 +457,10 @@ static void act_exec(uint16_t code, uint16_t next, int16_t cls)
         }
         break;
     case TA_ACS:            tag_acs(arg, acs_station_get(0), cls); break;
-    case TA_ACS_NUM:
-        tag_acs(next, (next & TA_ACS_STATION) ? acs_station_get(arg)
-                      : (next & TA_ACS_AGV_MINUS) ? (int16_t)(param_get(P_AGV_ID) - (int16_t)arg) : (int16_t)arg, cls);
+    case TA_ACS_NUM:        tag_acs(next, acs_num(arg, next), cls); break;
+    case TA_WAIT:
+        if (arg != 0u) { run_wait_start(); }
+        else           { run_wait_cancel(); }
         break;
     case TA_OBS:            D.obs_use = (int16_t)arg; break;
     case TA_STATE:          seq_state_set(arg, next); break;
@@ -458,12 +482,13 @@ int tagact_run(uint16_t tag)
     int16_t was_stopping = D.flag_stopping;
     int16_t prev_len = D.stop_pulses;
     const tag_rule_t *r;
-    uint16_t i, irq, carg = 0;
+    uint16_t i, irq, carg = 0, prev_tag = s_tag;
     int16_t cls = 0;
     int started;
 
     if (tune_active()) { return 0; }         /* 튜닝 주행은 태그를 쓰지 않는다 */
     if (s_depth++ == 0) { s_len_set = 0; }
+    s_tag = tag;
     r = rule_find(tag);
     if (r != 0) {
         uint16_t act[4];                      /* 사용자 함수가 tagact_run 을 다시 불러도 s_hit 가 덮이지 않게 복사 */
@@ -489,6 +514,7 @@ int tagact_run(uint16_t tag)
         s_len_set = 1;
     }
     s_depth--;
+    s_tag = prev_tag;                        /* 사용자 함수가 다시 부른 안쪽 태그가 바깥 번호를 덮지 않게 */
     s_display_tag = tag;
     irq = hal_irq_save();
     D.straight_cnt = 0;
