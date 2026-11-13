@@ -482,6 +482,7 @@ static void act_exec(uint16_t code, uint16_t next, int16_t cls)
 static struct {
     uint16_t w2, cm;         /* 둘째 칸(입력·유지틱·FL, 0 = 요청 없음), 거리 cm */
     uint16_t rest[2];        /* 확정 때 실행할 뒤 칸 */
+    uint16_t tag;            /* 요청한 태그 번호(뒤 칸의 ACS_SEND( …, TAG_NUM ) 가 확정 때 쓴다) */
     int16_t  ticks, off;     /* 기준 뒤 틱(-1 = 감지 전), 이어진 꺼짐 틱 */
     uint32_t arm_p, on_p;    /* 요청·기준 자리 펄스 */
 } s_fs;
@@ -507,6 +508,7 @@ static void fs_arm(const uint16_t *act, uint16_t i, int16_t cls)
     s_fs.ticks = -1;
     s_fs.off = 0;
     s_fs.arm_p = fs_pulses();
+    s_fs.tag = s_tag;
 }
 
 void tagact_tick(void)
@@ -537,15 +539,17 @@ void tagact_tick(void)
         int32_t left = ((s_fs.w2 & TA_FS_FL) ? (int32_t)param_get(P_STOP_LEN_FWD_MM) : (int32_t)s_fs.cm) * 10L - fs_mm(s_fs.on_p);
         s_fs.w2 = 0;
         tagact_stop_after_mm((left > 0) ? left : 1L);
+        s_tag = s_fs.tag;
         for (k = 0; (k < 2u) && (s_fs.rest[k] != 0u); k++) {   /* 뒤 동작: 시퀀스 요청·전후진 등(정지는 이미 걸었다) */
             uint16_t second = has_second_word(s_fs.rest[k]);
             act_exec(s_fs.rest[k], (second && (k == 0u)) ? s_fs.rest[1] : 0u, 0);
             k = (uint16_t)(k + second);
         }
+        s_tag = 0;
     }
 }
 
-/* 이번 태그 처리에서 정지 거리를 이미 정했다. 번호 변환 별칭(1xx·2xx)은 사용자 함수가 tagact_run 을 다시 부르므로, 안쪽 규칙이
+/* 이번 태그 처리에서 정지 거리를 이미 정했다. 사용자 함수가 tagact_run 을 다시 부르면(예전 번호 변환 별칭 등) 안쪽 규칙이
  * 정한 정지 방식(분류 2 거리 등)을 바깥 호출이 SL 로 덮지 않게 한다 */
 static int16_t s_depth, s_len_set;
 

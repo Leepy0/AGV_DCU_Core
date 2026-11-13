@@ -176,6 +176,7 @@ static const tag_rule_t s_rules[] = {
     TAG_IF( 140, 0, IF_TAG_NUM( 100 + MOD( STATION(1), 100 ) ), OBS_ON )
     /* 센서 정지 + 범위 규칙: 뒤 동작은 확정 때(펼친 표·압축 표 같게) */
     TAG_RANGE( 150, 155, 0, AGV_STOP( 30, FROM_SENSOR( IN_EXT_4, 10 ) ), SEQ_START( LOAD ), AGV_FORBACK( TOGGLE ) )
+    TAG_RANGE( 160, 165, 0, AGV_STOP( 30, FROM_SENSOR( IN_EXT_4, 10 ) ), ACS_SEND( ARRIVE, TAG_NUM ) )   /* 확정 때도 읽은 태그 번호 */
     /* 센서 정지: 센서가 켜진 자리부터 거리만큼. 뒤 동작은 확정 때 */
     TAG( 49, 0, AGV_STOP( FL, FROM_SENSOR( IN_EXT_4, 100 ) ), SEQ_START( LOAD ), AGV_FORBACK( TOGGLE ) )
     TAG( 50, 0, AGV_STOP( 1, FROM_SENSOR( IN_EXT_4, 20 ) ) )             /* 10 mm: 확정 때 이미 넘었다 */
@@ -213,6 +214,8 @@ TAG_ACT_BEGIN( s_pact )
     TAG_ACTS( AGV_WAIT_START )                                                         /* 8 */
     TAG_ACTS( AGV_WAIT_CANCEL )                                                        /* 9 */
     TAG_ACTS( ACS_SEND( ARRIVE, TAG_NUM - 100 ), ACS_SEND( LOADING, STATION(1) - 2 ) )   /* 10 */
+    TAG_ACTS( AGV_STOP( 30, FROM_SENSOR( IN_EXT_4, 10 ) ), SEQ_START( LOAD ), AGV_FORBACK( TOGGLE ) )   /* 11 */
+    TAG_ACTS( AGV_STOP( 30, FROM_SENSOR( IN_EXT_4, 10 ) ), ACS_SEND( ARRIVE, TAG_NUM ) )              /* 12 */
 TAG_POOL_END
 TAGP_BEGIN( s_prules )
     TAGP( 20, 63, 0, 0, 0, 3 )
@@ -234,11 +237,15 @@ TAGP_BEGIN( s_prules )
     TAGP( 130, 0, 0, 0, 0, 5 )
     TAGP( 125, 0, 0, 0, 0, 4 )     /* 17: 125~135 */
     TAGP( 140, 0, 11, 0, 0, 4 )
+    TAGP( 150, 0, 0, 0, 0, 11 )    /* 19: 150~155 */
+    TAGP( 160, 0, 0, 0, 0, 12 )    /* 20: 160~165 */
 TAG_POOL_END
 TAG_RANGES_BEGIN( s_prange )
     TAG_RANGE_P( 10, 120 )
     TAG_RANGE_P( 11, 120 )
     TAG_RANGE_P( 17, 135 )
+    TAG_RANGE_P( 19, 155 )
+    TAG_RANGE_P( 20, 165 )
 TAG_POOL_END
 TAG_PACKED_R( s_tag_pk, s_prules, s_px, s_pin, s_pact, s_prange )
 
@@ -3954,6 +3961,27 @@ static void test_from_sensor(void)
         (void)tagact_run(49);
         for (t = 0; (t < 9000) && !D.stop_err; t++) { run_scan(1); }
         assert((D.stop_err == ERR_SENSOR_STOP_MISS) && (t >= lim) && (t <= lim + 3));
+    }
+    /* 범위 규칙의 센서 정지(펼친 표·압축 표 같은 틱·거리): 앞에서 태그 때는 아무것도, 뒤 동작은 확정 때.
+     * 확정 때 보고의 TAG_NUM 도 읽은 태그 번호 */
+    for (i = 0; i < 2; i++) {
+        fs_res_t c;
+        fs_up(0);
+        if (i) { tagact_bind_packed(&s_tag_pk, 0); }
+        (void)tagact_run(152);
+        assert(!seq_request_flag[SEQ_LOAD] && (s_fs_fb == 0) && !D.flag_stopping);
+        fs_run(40, 5, 999, 0, &c);
+        assert((c.t == 15) && c.seq && (s_fs_fb == 1) && !D.stop_err);
+        if (i == 0) { b = c; } else { assert((c.t == b.t) && (c.sp == b.sp)); }
+        run_seq_init();
+        fs_up(0);
+        if (i) { tagact_bind_packed(&s_tag_pk, 0); }
+        (void)tagact_run(163);
+        host.sci[HAL_SCI_A].tx_len = 0;
+        fs_run(40, 5, 999, 0, &c);
+        ticks(2);
+        assert((c.t == 15) && (tx_num('E', 'A') == 163));
+        run_seq_init();
     }
     /* 교차선 요청과 한 규칙: 표 오류 */
     fs_up(0);
