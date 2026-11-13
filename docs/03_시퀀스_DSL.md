@@ -575,6 +575,38 @@ v0.51.1·v0.51.2 에서 더한 때:
 - 16칸 센서 차종은 넓은 분기·합류선이 있는 곳에서 오인정, 넓은 주행선의 T 모양에서 놓침이 남는다. 적용 전 현장 선 배치를 확인한다.
 - 시퀀스 이동 중 ACS 교통 정지가 걸리면 277 로 서고 리셋이 필요하다. 시퀀스 이동 경로에 교차로를 두지 않는다(교차로 태그를 만나면 290).
 
+### 5.4 수동 조작 표와 적재 조건
+
+`DA_Manual_Act` 의 호기별 `if / else if / else` 사슬(수동 버튼 → 리프트·벨트 출력)을 표로 쓴다. 매크로는 `agv/seq_dsl.h`, 엔진은 `src/sys/manual.c`(`agv/manual.h`).
+
+```c
+MANUAL_BEGIN( site_manual_rows )
+    /* 호기,         모드, 조건,                                출력 */
+    MAN( ID(4, 5),   IDLE, IN( ON(IN_EXT_7), OFF(IN_EXT_1) ),  BELT( 1, CW ) )
+    MAN( ID(4, 5),   IDLE, IN( ON(IN_EXT_8), OFF(IN_EXT_2) ),  BELT( 1, CCW ) )
+    MAN_ELSE( ID(4, 5), IDLE,                                   BELT( 1, OFF ) )
+    MAN( ID(10, 25), IDLE, IN( ON(IN_IF_1) ),                  ON( OUT_IF_2 ) )    /* 그 출력만 켠다 */
+    MAN_ELSE( ID(10, 25), IDLE,                                 BELT( 1, OFF ), OFF( OUT_IF_1, OUT_IF_2 ) )
+    MAN( ID(63),     JOG,  KEY( UP ),                          BELT( 1, CW ) )
+    MAN_ELSE( ID(63), JOG,                                      BELT( 1, OFF ) )
+    MAN_OBS_B( ID(10, 25), IN_EXT_6 )      /* 매 틱 agv_drive.obs_b_ext = 입력 */
+    MAN_FB_SW( ID(63), IN_EXT_7 )          /* 수동 방향 전환 스위치 입력. 맞는 줄이 없으면 IN_IF_5 */
+MANUAL_END
+```
+
+- 한 사슬 = `MAN` 줄 여럿 + 끝의 `MAN_ELSE` 한 줄. 위에서부터 호기·모드·조건이 맞는 첫 `MAN` 줄의 출력만 쓰고, 맞는 줄이 없으면 `MAN_ELSE` 줄을 쓴다. 쓰지 않은 출력은 그대로 둔다(한 가지에서 출력 하나만 켜는 레거시 가지가 그대로 옮겨진다). 모든 사슬은 `MAN_ELSE` 로 닫는다(할 일이 없으면 `NO_OUT`). 한 호기에 사슬이 여럿이어도 된다(벨트 셋을 따로 도는 차종).
+- 호기 `ID( n )`·`ID( 처음, 끝 )`(0\~255). 모드 `IDLE` = 자동 화면에서 대기(`run_is_idle()`, 준비 아님, STOP 아님), `JOG` = 조그 화면이고 STOP 아님.
+- 조건 `IN( ON(…), OFF(…) )`(3.3절과 같다), `KEY( UP )`(지금 눌린 키, 소비하지 않음), `NO_IN`(늘 참).
+- 출력 `ON( … )`·`OFF( … )`·`BELT( n, CW | CCW | OFF )`, 여럿이면 모두. `BELT` 는 3.5절 `BELTn_CW`·`BELTn_CCW` 마스크로 그 방향 마스크를 켜고 그 벨트의 나머지 출력을 끈다(`BELT_ON` 스텝과 같은 값). 한 출력을 켜면서 끄면 컴파일 오류.
+- 넘기기: `manual_bind( 표, 줄 수, 프로파일 표, 행 수 )`, `site_manual()` 에서 `manual_tick()`. 줄 하나 10워드(C28x).
+- 표로 쓰지 않는 것(상태기계·주행 명령·오류 값 비교)은 `site_manual()` C 에 남긴다.
+
+적재 조건: 프로파일 표에 조건 하나나 둘을 적는다. 하나라도 참이면 적재, 조건이 비면 컴파일 오류. `seq_site_t.load_fn = manual_load` 로 넘긴다. 이 칸이 없는 프로파일은 `PROFILE_LOAD` 의 센서 묶음을 쓴다.
+
+```c
+PROFILE_LOAD_IF( PF_ANT, 0, 4, 5, IN( ON(ANT_TOP) ), IN( OFF(ANT_BOTTOM), ON(ANT_CART) ) )
+```
+
 ## 6. 도구
 
 생성기는 없다. 표는 C 파일이 원본이다.

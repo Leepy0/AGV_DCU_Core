@@ -153,8 +153,9 @@ typedef struct {
 typedef int (*seq_call_fn)(seq_ctx_t *ctx);
 
 /* agv_type 0 = 타입 무관. 빌드가 곧 사이트인 경우에 쓴다.
- * load_mask: 적재 센서 입력 비트(하나라도 켜지면 적재). 0 = 정의 없음(LDS 를 켜도 늘 적재) */
-typedef struct { uint16_t profile, agv_type, id_from, id_to; uint32_t load_mask; } profile_row_t;
+ * load_mask: 적재 센서 입력 비트(하나라도 켜지면 적재). 0 = 정의 없음(LDS 를 켜도 늘 적재)
+ * load_if: 적재 조건 둘 {켬, 끔, 켬, 끔}(하나라도 참이면 적재, agv/manual.h PROFILE_LOAD_IF). 0 = 없음 */
+typedef struct { uint16_t profile, agv_type, id_from, id_to; uint32_t load_mask; const uint32_t *load_if; } profile_row_t;
 
 typedef struct {
     const seq_def_t *seqs;          uint16_t nseqs;

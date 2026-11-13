@@ -1,5 +1,11 @@
 # 변경 이력
 
+## 다음 버전 (수동 조작 표 `MAN`·`MAN_ELSE`, 프로파일 적재 조건 `PROFILE_LOAD_IF`)
+
+- 수동 조작 표(`agv/seq_dsl.h` `MANUAL_BEGIN`·`MAN`·`MAN_ELSE`·`MAN_FB_SW`·`MAN_OBS_B`, 엔진 `src/sys/manual.c`): `DA_Manual_Act` 의 호기별 `if / else if / else` 사슬을 한 줄 한 가지로 쓴다. 첫 맞는 줄의 출력만 쓰고, 없으면 `MAN_ELSE`, 쓰지 않은 출력은 그대로. 모드 `IDLE`·`JOG`, 조건 `IN`·`KEY( UP )`·`NO_IN`, 출력 `ON`·`OFF`·`BELT( n, CW | CCW | OFF )`. 줄 하나 10워드. docs/03 5.4절.
+- `profile_row_t` 끝에 `load_if`(적재 조건 둘, 하나라도 참이면 적재). `PROFILE_LOAD_IF( …, IN( … )[, IN( … )] )`, `seq_site_t.load_fn = manual_load`. 행이 6 → 8워드.
+- `tests/test_manual.c`(사슬·else·출력 유지·BELT 값·적재 조건)와 컴파일 오류 시험 넷(켜면서 끔, 없는 벨트 방향, 호기 범위 거꾸로, 빈 적재 조건).
+
 ## v0.52.0 (2026-11-13, 시퀀스 벨트 정지 조건: `BELT_ON( n, 방향, UNTIL( 조건 ) )`·`WAIT_BELTS`)
 
 - `BELT_ON( n, 방향, UNTIL( 조건 ) )`: 벨트를 켜고 그 벨트의 정지 조건을 건 뒤 기다리지 않고 다음 스텝(새 스텝 `SK_BELT_UNTIL`). 코어가 시퀀스가 살아 있는 동안 매 틱 조건을 보고(스텝보다 먼저, 스텝을 평가하지 않는 틱은 `run_seq` 의 `seq_belt_tick`) 참이면 그 벨트 출력 둘(CW·CCW)을 끄고 조건을 지운다. 켤 때 이미 참이면 그 틱에 끈다. 끝 센서가 켜진 틱에 벨트가 선다(예전 사용자 함수와 같은 틱).

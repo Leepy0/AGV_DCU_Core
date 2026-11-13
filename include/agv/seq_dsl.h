@@ -11,6 +11,7 @@
 #define AGV_SEQ_DSL_H
 
 #include "agv/seq.h"
+#include "agv/manual.h"
 #include "agv/acs.h"
 #include "agv/tagact.h"
 #include "agv/io.h"
@@ -201,10 +202,19 @@ typedef unsigned long long dsl_cond_t;
 #define ACT_MAP_END              SEQ_MAP_END
 
 #define PROFILE_TABLE_BEGIN(name)  const profile_row_t name[] = {
-#define PROFILE(profile, type, from, to)  { (uint16_t)(profile), (uint16_t)(type), (uint16_t)(from), (uint16_t)(to), 0UL },
+#define PROFILE(profile, type, from, to)  { (uint16_t)(profile), (uint16_t)(type), (uint16_t)(from), (uint16_t)(to), 0UL, 0 },
 /* 적재 센서가 있는 프로파일. mask = LOAD_SENSORS(SEN_1, ...) 하나라도 켜지면 적재 */
-#define PROFILE_LOAD(profile, type, from, to, mask)  { (uint16_t)(profile), (uint16_t)(type), (uint16_t)(from), (uint16_t)(to), (uint32_t)(mask) },
+#define PROFILE_LOAD(profile, type, from, to, mask)  { (uint16_t)(profile), (uint16_t)(type), (uint16_t)(from), (uint16_t)(to), (uint32_t)(mask), 0 },
 #define LOAD_SENSORS(...)          DSL_MASK(__VA_ARGS__)
+/* 적재 조건 하나나 둘, 하나라도 참이면 적재: PROFILE_LOAD_IF( 프로파일, 타입, 처음, 끝, IN( … )[, IN( … )] ).
+ * 조건이 비면(NO_IN) 컴파일 오류. seq_site_t.load_fn = manual_load 일 때 쓴다(agv/manual.h) */
+#define DSL_LIF_OK(c)        (0 * sizeof(char[((c) != 0) ? 1 : -1]))
+#define DSL_LIF1(c)          DSL_LIF2(c, c)
+#define DSL_LIF2(c1, c2)     (const uint32_t[4]){ DSL_COND_ON(c1) + DSL_LIF_OK(c1), DSL_COND_OFF(c1), \
+                                                  DSL_COND_ON(c2) + DSL_LIF_OK(c2), DSL_COND_OFF(c2) }
+#define PROFILE_LOAD_IF(profile, type, from, to, ...)                                \
+    { (uint16_t)(profile), (uint16_t)(type), (uint16_t)(from), (uint16_t)(to), 0UL, \
+      DSL_CAT(DSL_LIF, DSL_NARG(__VA_ARGS__))(__VA_ARGS__) },
 #define PROFILE_TABLE_END          };
 
 /* ---- 라벨·분기 ---- */
@@ -394,6 +404,45 @@ typedef unsigned long long dsl_cond_t;
 #define CALL(idx)              DSL_STEP(SK_CALL, SEQ_NO_LABEL, idx, 0, 0, 0, 0, 0)
 #define END_STOP               DSL_STEP(SK_END_STOP, SEQ_NO_LABEL, 0, 0, 0, 0, 0, 0)
 #define END_ERROR(code)        DSL_STEP(SK_END_ERROR, SEQ_NO_LABEL, code, 0, 0, 0, 0, 0)
+
+/* ---- 수동 조작 표 (agv/manual.h, docs/03 5.4절) ----
+ * MAN( 호기, 모드, 조건, 출력… ) 사슬의 가지, MAN_ELSE( 호기, 모드, 출력… ) 사슬 끝. 모든 사슬은 MAN_ELSE 로 닫는다
+ * (할 일이 없으면 NO_OUT). 한 호기에 사슬이 여럿이어도 된다.
+ * 호기: ID( n ) 또는 ID( 처음, 끝 ), 0~255.
+ * 모드: IDLE 자동 화면에서 대기(run_is_idle(), 준비 아님, STOP 아님), JOG 조그 화면이고 STOP 아님.
+ * 조건: IN( ON(…), OFF(…) ), KEY( UP )(지금 눌린 키, 소비하지 않음), NO_IN(늘 참).
+ * 출력(여럿이면 모두): ON( 출력… ) 켬, OFF( 출력… ) 끔, BELT( n, CW | CCW | OFF ). 한 출력을 켜면서 끄면 컴파일 오류.
+ *   BELT 는 사이트 BELTn_CW·BELTn_CCW 마스크로 그 방향 마스크를 켜고 그 벨트의 나머지 출력을 끈다(BELT_ON 스텝과 같은 값).
+ * MAN_FB_SW( 호기, 입력 ): 수동 방향 전환 스위치 입력(맞는 줄이 없으면 IN_IF_5). MAN_OBS_B( 호기, 입력 ): 매 틱
+ * agv_drive.obs_b_ext = 그 입력. 둘 다 모드와 상관없이 매 틱 */
+#define MANUAL_BEGIN(name)  const man_row_t name[] = {
+#define MANUAL_END          };
+#define ID(...)             DSL_CAT(DSL_MID, DSL_NARG(__VA_ARGS__))(__VA_ARGS__)
+#define DSL_MID1(n)         DSL_MID2(n, n)
+#define DSL_MID2(lo, hi)    ((uint16_t)((lo) | ((uint16_t)(hi) << 8)) \
+                             + (0 * sizeof(char[(((lo) >= 0) && ((lo) <= (hi)) && ((hi) < 256)) ? 1 : -1])))
+#define DSL_MM_IDLE         MAN_K_IDLE
+#define DSL_MM_JOG          MAN_K_JOG
+/* 조건 칸은 첫 낱말을 붙여 "키, 입력 조건" 둘로 펼친다 */
+#define DSL_MC_IN(...)      0, IN(__VA_ARGS__)
+#define DSL_MC_NO_IN        0, NO_IN
+#define DSL_MC_KEY(k)       KEY_##k, NO_IN
+/* 출력 값은 조건과 같은 64비트: 하위 32비트 켬, 상위 32비트 끔 */
+#define DSL_MWSET(set, clr) ((dsl_cond_t)(uint32_t)(set) | ((dsl_cond_t)(uint32_t)(clr) << 32))
+#define DSL_MW1(x)          ((dsl_cond_t)(x))
+#define DSL_MW(...)         DSL_FMASK(DSL_MW1, __VA_ARGS__)
+#define BELT(n, d)              DSL_MBELT_##d(BELT##n##_CW, BELT##n##_CCW)
+#define DSL_MBELT_CW(cw, ccw)   DSL_MWSET((cw) + DSL_BELT_OK(cw), (ccw) & ~(uint32_t)(cw))
+#define DSL_MBELT_CCW(cw, ccw)  DSL_MWSET((ccw) + DSL_BELT_OK(ccw), (cw) & ~(uint32_t)(ccw))
+#define DSL_MBELT_OFF(cw, ccw)  DSL_MWSET(0UL, (cw) | (ccw))
+#define DSL_MROW_(...)      DSL_MROW(__VA_ARGS__)
+#define DSL_MROW(ids, kind, key, c, w)                                                                \
+    { (uint16_t)(ids), (uint16_t)((uint16_t)(kind) | ((uint16_t)(key) << 8)) + DSL_NOX(DSL_COND_ON(w) & DSL_COND_OFF(w)), \
+      DSL_COND_ON(c), DSL_COND_OFF(c), DSL_COND_ON(w), DSL_COND_OFF(w) },
+#define MAN(ids, mode, cond, ...)   DSL_MROW_(ids, DSL_MM_##mode, DSL_MC_##cond, DSL_MW(__VA_ARGS__))
+#define MAN_ELSE(ids, mode, ...)    DSL_MROW_(ids, DSL_MM_##mode | MAN_F_ELSE, 0, NO_IN, DSL_MW(__VA_ARGS__))
+#define MAN_FB_SW(ids, pin)  { (uint16_t)(ids), MAN_K_FB_SW, 0UL, 0UL, (uint32_t)(pin) + DSL_ID_OK(pin), 0UL },
+#define MAN_OBS_B(ids, pin)  { (uint16_t)(ids), MAN_K_OBS_B, 0UL, 0UL, (uint32_t)(pin) + DSL_ID_OK(pin), 0UL },
 
 /* ---- 태그 표 ---- */
 #define TAG_TABLE_BEGIN(name)  const tag_rule_t name[] = {
