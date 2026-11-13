@@ -391,7 +391,7 @@ void motor_drive_step(void)
         if (((P.for_obs > 0) && !D.backward && (D.obs_f || D.obs_f_ext)) ||
             ((P.back_obs > 0) && (D.backward == 1) && (D.obs_b || D.obs_b_ext))) {
             /* 시퀀스 이동(AGV_MOVE)은 위치 정지·교차선 찾기와 같이 감속 단계로 넘기지 않는다(장애물은 일시정지로 선다) */
-            if ((D.tape_stop_id == 0) && (D.tape_turn_dir == 0) && (D.turn_motion == 0) && (D.stop_pulses == 0) && (D.move_on == 0)) {
+            if ((D.tape_stop_kind == 0) && (D.tape_turn_dir == 0) && (D.turn_motion == 0) && (D.stop_pulses == 0) && (D.move_on == 0)) {
                 obs_sensor = 1;
             }
         }

@@ -1815,6 +1815,26 @@ static void test_tape_turn_request(void)
     tag_frame(1, '2', 0);
     run_scan(1);
     assert(!tx_has('A', 'E') && !D.flag_stopping && (D.tape_turn_dir == TURN_CW));
+
+    /* ACS 교통 정지로 서 있는 동안: 요청은 남고(보류), 같은 자리 태그를 다시 읽어도 버린다. 다시 출발해도 요청은 남는다 */
+    {
+        char b[32];
+        int i;
+        sprintf(b, "W1B%02dC00000000000", AGV_ID);
+        b[8] = '0';                                   /* 'C' '0': 교통 정지(교차 대기 없음 = 명령 정지) */
+        send_frame(b, 0);
+        for (i = 0; (i < 400) && D.flag_run; i++) { guide_reply(0); tick(); }
+        assert(!D.flag_run && (D.tape_turn_dir == TURN_CW));
+        host.sci[HAL_SCI_A].tx_len = 0;
+        tag_frame(43, '4', 0);
+        guide_reply(0);
+        tick();
+        assert(!tx_has('A', 'E') && (D.tape_turn_dir == TURN_CW));
+        b[8] = '1';                                   /* 'C' '1': 출발 */
+        send_frame(b, 0);
+        for (i = 0; (i < 400) && !D.flag_ready && !D.flag_run; i++) { guide_reply(0); tick(); }
+        assert((D.flag_ready || D.flag_run) && (D.tape_turn_dir == TURN_CW));
+    }
     boot();
     printf("  tape turn request ok\n");
 }
@@ -3069,8 +3089,97 @@ static void test_tape_turn(void)
     assert(D.tape_align == 1);
     assert(D.turn_pulses == P.turn_90);
     assert(D.flag_stopping == 1);
-    assert(D.stop_pulses == (int16_t)(P.guide_dist_mm * P.one_length_pulse + 0.5f));   /* 교차선은 GD */
+    /* 교차선 뒤 GD 구간: GD + 기본 반폭(10 mm) - 응답 늦음. 조향 보정 0 */
+    assert((D.stop_pulses >= (int16_t)(P.guide_dist_mm * P.one_length_pulse))
+           && (D.stop_pulses <= (int16_t)((P.guide_dist_mm + 10.0f) * P.one_length_pulse + 0.5f)));
+    assert(D.steer_hold == 1);
     printf("  tape turn ok\n");
+}
+
+/* 'h' 응답 하나와 엔코더 흉내로 주행 스캔 */
+static void led_scan(uint16_t leds, int n)
+{
+    while (n-- > 0) {
+        host_sci_t *b = &host.sci[HAL_SCI_B];
+        if (b->rx_pos == b->rx_len) { b->rx_len = b->rx_pos = 0; }
+        guide_led_reply(leds);
+        run_encoder(0, 20000);
+        run_encoder(1, 20000);
+        tick();
+    }
+}
+
+/* 교차선 인정: 새 응답이 이어서 두 번(아닌 응답에 0, 응답 없는 틱은 세지 않음), 주행 테이프가 켠 칸은 세지 않는다('h' 소스) */
+static void test_tape_rule(void)
+{
+    boot();
+    (void)param_set_ram(P_LEGACY_QUIRKS, 0);
+    drive_up();
+    led_scan(0x0180u, 20);                      /* 주행 테이프 칸 8·9 */
+    D.tape_stop_kind = 3;
+    led_scan(0x01FFu, 1);                       /* 왼쪽 칸 1~7 이 다 켜짐: 교차선 위 한 번 */
+    assert(D.tape_stop_kind == 3);
+    led_scan(0x0180u, 1);                       /* 아닌 응답: 0 으로 */
+    led_scan(0x01FFu, 1);
+    assert(D.tape_stop_kind == 3);
+    run_encoder(0, 20000);                      /* 새 응답 없는 틱은 세지 않는다 */
+    tick();
+    assert(D.tape_stop_kind == 3);
+    led_scan(0x01FFu, 1);                       /* 이어서 두 번째: 인정, 바로 정지(분류 3) */
+    assert((D.tape_stop_kind == 0) && D.flag_stopping && (D.stop_pulses == 0));
+
+    boot();                                     /* 넓은 주행 테이프(6칸): 예전 규칙(합 6 이상)은 바로 인정했다 */
+    (void)param_set_ram(P_LEGACY_QUIRKS, 0);
+    drive_up();
+    led_scan(0x07E0u, 20);
+    D.tape_stop_kind = 3;
+    led_scan(0x07E0u, 20);
+    assert((D.tape_stop_kind == 3) && !D.flag_stopping);
+    led_scan(0x0FE0u, 5);                       /* 한 칸 넓어져도(끝까지 안 닿음) 교차선이 아니다 */
+    assert((D.tape_stop_kind == 3) && !D.flag_stopping);
+    led_scan(0xFFE0u, 2);                       /* 오른쪽 칸 12~16 이 끝까지 다 켜짐 */
+    assert((D.tape_stop_kind == 0) && D.flag_stopping);
+    printf("  tape rule ok\n");
+}
+
+/* 다른 정지가 진행 중이거나 주행 중이 아니면 교차선 요청은 보류: 요청 칸은 두고 정지 거리·속도 지령을 건드리지 않는다 */
+static void tape_guard_run(int req, int16_t *sp, int16_t *cmd, int n)
+{
+    int i;
+    boot();
+    (void)param_set(P_TURN_FORBACK, 10);
+    drive_up();
+    run_scan(30);
+    tagact_stop_length();                       /* 일반 태그 정지 */
+    if (req == 1) { D.tape_turn_dir = TURN_CW; D.tape_turn_deg = 90; D.tape_turn_next = 0; }
+    if (req == 2) { D.tape_stop_kind = 4; D.tape_stop_id = 3; }
+    for (i = 0; i < n; i++) {
+        run_scan(1);
+        sp[i] = D.stop_pulses;
+        cmd[i] = D.speed_cmd;
+    }
+    assert((D.tape_turn_dir == ((req == 1) ? TURN_CW : 0)) && (D.tape_stop_kind == ((req == 2) ? 4 : 0)) && D.flag_stopping);
+}
+
+static void test_tape_guard(void)
+{
+    int16_t sp[3][40], cmd[3][40], v;
+    int i, k;
+    for (k = 0; k < 3; k++) { tape_guard_run(k, sp[k], cmd[k], 40); }
+    for (k = 1; k < 3; k++) {
+        for (i = 0; i < 40; i++) { assert((sp[k][i] == sp[0][i]) && (cmd[k][i] == cmd[0][i])); }
+    }
+    boot();                                     /* 서 있을 때: 보류, 지령 그대로 */
+    (void)param_set(P_TURN_FORBACK, 10);
+    v = D.speed_cmd;
+    D.tape_stop_kind = 3;
+    ticks(3);
+    assert((D.tape_stop_kind == 3) && (D.speed_cmd == v));
+    D.tape_stop_kind = 0;
+    D.tape_turn_dir = TURN_CW;
+    ticks(3);
+    assert((D.tape_turn_dir == TURN_CW) && (D.speed_cmd == v));
+    printf("  tape guard ok\n");
 }
 
 /* 전원을 켤 때 MODE + UP: 입력 번호 표시, 출력 번호 선택, SET 켬, RESET 끔 */
@@ -3305,6 +3414,8 @@ int main(void)
     test_edge_release();
     test_turn_scale();
     test_tape_turn();
+    test_tape_rule();
+    test_tape_guard();
     test_io_test();
     test_acs_off();
     test_keep_results();

@@ -417,6 +417,7 @@ static void key_mode(void)
         if (!D.flag_run && !D.flag_jog_on) {
             D.ui_mode = UI_JOG;
             D.control = RUN_JOG;
+            run_tape_req_clear();             /* 수동으로 옮기면 보류 중인 교차선 요청은 뜻을 잃는다 */
             if (!D.system_err && !D.stop_err && !D.estop) { D.flag_jog_on = 1; }
         }
     }

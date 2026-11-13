@@ -94,36 +94,43 @@ void tagact_stop_after_mm(int32_t mm)
  *   거리 d(rpm·틱) = 펄스 / (12/6000) − 끝 꼬리(STOP_TAIL_RPM_TICKS) 를
  *   d = A·v² + B·v 로 본다. A = (1/ACC + 1/DCC)/2(등가속·등감속), B = (ACC + DCC)/(2·2.4)(저크로 가감속도가 오르내리는 동안
  *   속도가 거의 그대로인 몫, 정지 램프 저크 2.4) + 15틱(순항 판정 여유 2틱 + 제동 여유 8 + 지연 5. stop.c braking_pulses·cruise_left).
- * v 가 커도 제동점은 정지 제어가 정한다(cruise_left). 이 값은 짧은 거리에서 가속만 하다 바로 서는 것을 막는 상한이다 */
-void tagact_move_mm(int16_t mm)
+ * v 가 커도 제동점은 정지 제어가 정한다(cruise_left). 이 값은 짧은 거리에서 가속만 하다 바로 서는 것을 막는 상한이다.
+ * 반환: 1 걸었다, 0 지금은 못 건다(다음 스캔에 다시), -1 거리가 1 mm 아래이거나 정지 거리 펄스(16비트)를 넘는다 */
+static int16_t move_free(void)   /* 서 있고 회전·정지·다른 이동이 없다 */
+{
+    return !D.flag_run && !D.flag_ready && !D.flag_stopping && (D.move_on == 0)
+        && (D.turn_motion == 0) && (D.turn_pulses == 0) && !D.flag_turn;
+}
+
+int16_t tagact_move_mm(int16_t mm)
 {
     float pulses = (float)mm * P.one_length_pulse, d, a, b, v;
     int16_t acc = (P.acc > 0) ? P.acc : 1, dcc = (P.dcc > 0) ? P.dcc : 1;
 
-    if ((mm < 1) || D.flag_run || D.flag_ready || D.flag_stopping || (D.move_on != 0)) { return; }
-    if (pulses > 32767.0f) { pulses = 32767.0f; }
+    if ((mm < 1) || (pulses > 32767.0f)) { return -1; }
+    if (!move_free()) { return 0; }
     d = pulses * (6000.0f / (float)STOP_ENCODER_PPR) - (float)STOP_TAIL_RPM_TICKS;
     a = 0.5f * (1.0f / (float)acc + 1.0f / (float)dcc);
     b = (float)(acc + dcc) * (float)STOP_JERK_DEN / (2.0f * (float)STOP_JERK_NUM) + 15.0f;
     v = (d > 0.0f) ? (sqrtf(b * b + 4.0f * a * d) - b) / (2.0f * a) : 0.0f;
     if (v > (float)P.llow_speed) { v = (float)P.llow_speed; }
     if (v < (float)P.min_speed)  { v = (float)P.min_speed; }
-    D.move_pulses = (int16_t)(pulses + 0.5f);
+    D.move_pulses = (int32_t)(pulses + 0.5f);
     D.move_speed = (int16_t)v;
     D.move_on = 1;
+    return 1;
 }
 
-/* 시퀀스 AGV_MOVE( 한계 mm, TAPE ). 서 있을 때만 건다. run.c 가 출발시키고 찾는 속도로 가다 다음 교차선에서 선다(run.c move_tape_tick).
- * 한계 거리는 D.move_pulses, 넘기면 오류 258 */
-void tagact_move_tape(int16_t lim_mm)
+/* 시퀀스 AGV_MOVE( 한계 mm, TAPE… ). 서 있을 때만 건다. run.c 가 출발시키고 찾는 속도로 가다 다음 교차선에서 선다(run.c move_tape_tick).
+ * kind 4(TAPE_GD)는 GD 더 가서 선다. 한계 거리는 D.move_pulses(32비트), 넘기면 오류 258. 반환은 tagact_move_mm 과 같다 */
+int16_t tagact_move_tape(int16_t lim_mm, int16_t kind)
 {
-    float pulses = (float)lim_mm * P.one_length_pulse;
-
-    if ((lim_mm < 1) || D.flag_run || D.flag_ready || D.flag_stopping || (D.move_on != 0)) { return; }
-    if (pulses > 32767.0f) { pulses = 32767.0f; }
-    D.move_pulses = (int16_t)(pulses + 0.5f);
+    if (lim_mm < 1) { return -1; }
+    if (!move_free()) { return 0; }
+    D.move_pulses = (int32_t)((float)lim_mm * P.one_length_pulse + 0.5f);
     D.move_on = 1;
-    run_move_tape_start();
+    run_move_tape_start((kind == 4) ? 4 : 3);
+    return 1;
 }
 
 void tagact_speed(uint16_t level)

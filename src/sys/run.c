@@ -210,23 +210,40 @@ void run_standby_clear(int16_t id)
 
 /* ---- 초기화 ---- */
 
-/* 교차 테이프 찾기(tape_seek)와 시퀀스 교차선까지 이동(move_tape_tick) 상태. 아래 "교차선에서 서는 방식" 절 */
-static struct { int16_t prev_id; uint32_t start_len; int16_t hits; } s_tape;
-static struct { int16_t on, armed, ticks; uint32_t start; } s_mt;
-static int16_t tape_seek_speed(void);
+/* 교차 테이프 찾기(tape_seek)와 시퀀스 교차선까지 이동(move_tape_tick) 상태. 아래 "교차선" 절 */
+static struct { int16_t prev_id; uint32_t start_len; } s_tape;
+static struct { int16_t on, armed, ticks, kind; uint32_t start; } s_mt;
+static int16_t seek_rpm(int16_t kind);
+static void gd_end(void);
+static int16_t tape_busy(void);
 
-void run_seq_init(void)
+/* 교차선 요청(분류 3·4 정지와 정지 뒤 시퀀스, 교차선 회전)과 GD 구간을 지운다. 처리 완료·한계 초과 말고는 사람의 STOP·비상 정지·
+ * 오류(범퍼 포함)·수동 전환·ACS 작업 취소(run_seq_init 을 부르는 곳)에서만 지운다. 다시 출발(start_run: START·ACS 출발·자동 출발)은
+ * 지우지 않는다: 다른 정지로 서는 동안 보류한 요청을 다시 달리면 이어 찾는다. 레거시는 출발(Initial_Start)에서도 지웠다 */
+void run_tape_req_clear(void)
+{
+    gd_end();
+    D.tape_stop_id = 0;
+    D.tape_stop_kind = 0;
+    D.tape_turn_dir = 0;
+    D.tape_turn_deg = 0;
+    D.tape_turn_next = 0;
+}
+
+static void seq_init_keep_tape(void)
 {
     seq_abort_all();
     D.move_on = 0;
     s_mt.on = 0;
     comm_recent_clear();
     acs_cross_clear();
-    D.tape_stop_id = 0;
-    D.tape_turn_dir = 0;
-    D.tape_turn_deg = 0;
-    D.tape_turn_next = 0;
     D.stopping_process = 0;
+}
+
+void run_seq_init(void)
+{
+    seq_init_keep_tape();
+    run_tape_req_clear();
 }
 
 static void tape_clear(void)
@@ -271,7 +288,7 @@ static void start_run(void)
     D.cross_in_on = D.cross_out_on = 0;
     s_run.standby_auto = 0;
     s_run.standby_cnt = 0;
-    if (D.move_on == 0) { run_seq_init(); }   /* MOVE_MM 출발은 시퀀스를 살려 둔다 */
+    if (D.move_on == 0) { seq_init_keep_tape(); }   /* MOVE_MM 출발은 시퀀스를 살려 둔다. 교차선 요청은 출발로 지우지 않는다 */
     s_run.wait_sec = 0;
     s_run.wait_ticks = 0;
     link_guide_init();
@@ -478,7 +495,8 @@ static void auto_run(void)
             s_run.seq_go = (int16_t)seq_is_active();
             start_run();
             /* 서 있는 지금부터 센다(엔코더 ISR 이 줄인다). 정지는 주행 첫 틱에 건다. 교차선까지 이동은 위치 정지가 없다(한계만) */
-            D.stop_pulses = s_mt.on ? 0 : D.move_pulses;
+            D.stop_pulses = s_mt.on ? 0 : (int16_t)D.move_pulses;
+            D.tape_stop_kind = D.tape_stop_id = D.tape_turn_dir = 0;    /* 남은 교차선 요청이 이동보다 먼저 돌지 않게 */
             D.move_on = 2;
         }
         else if (D.wait_start) {
@@ -827,12 +845,11 @@ static void auto_speed_change(void)
 static void drive_pre(void)
 {
     start_low_speed();
-    if ((D.move_on == 2) && s_mt.on) {  /* AGV_MOVE( 한계, TAPE ) 첫 주행 틱: 찾는 속도로 간다. 서는 것은 move_tape_tick */
-        D.speed_cmd = tape_seek_speed();
+    if ((D.move_on == 2) && s_mt.on) {  /* AGV_MOVE( 한계, TAPE… ) 첫 주행 틱: 찾는 속도로 간다. 서는 것은 move_tape_tick */
+        D.speed_cmd = seek_rpm(s_mt.kind);
         s_mt.start = s_pulses[0];
         s_mt.armed = 0;
         s_mt.ticks = 0;
-        s_tape.hits = 0;
         D.move_on = 3;
     }
     else if (D.move_on == 2) {          /* MOVE_MM 첫 주행 틱: 지금 자리에서 move_pulses 앞에 선다(stop_run 이 STOP_REASON_MOVE 로 건다) */
@@ -841,28 +858,17 @@ static void drive_pre(void)
         D.flag_stopping = 1;
         D.move_on = 3;
     }
-    if (tune_active()) { return; }      /* 튜닝·식별 시험은 속도를 스스로 정한다 */
+    if (tune_active() || tape_busy()) { return; }   /* 튜닝·식별 시험, 시퀀스 이동·교차선 찾기·GD 구간은 속도를 스스로 정한다 */
     start_switch_high();
     if (D.obs_use) { auto_speed_change(); }
 }
 
-/* ---- 테이프 찾아 정지 (DA_Tape_Stop) ---- */
+/* ---- 교차선 찾아 서기 (DA_Tape_Stop·DA_Tape_Turn) ---- */
 
-static uint16_t led_total(void)
-{
-    uint16_t i, n = 0;
-    uint32_t v = D.guide_wide ? D.guide_led32 : (uint32_t)D.guide_led;
-    for (i = 0; i < 16u; i++) { n = (uint16_t)(n + (uint16_t)((v >> i) & 1UL)); }
-    return n;
-}
-
-/* 레거시 DA_Tape_Turn·DA_Tape_Stop 과 같다: LED1~16(wide 는 좌우 32 중 앞 16) 합이 6 이상인 응답 두 번.
- * 10 으로 올렸을 때 wide 센서가 교차 테이프를 못 보고 지나쳤다(5호기) */
-#define TAPE_LED_MIN 6
-#define TAPE_ID_TURN (-1)   /* 시퀀스 번호와 겹치지 않는 회전 탐색 표시 */
+#define TAPE_ID_TURN (-1)   /* 분류(3·4)와 겹치지 않는 회전 탐색 표시 */
 
 /* 정렬 회전 앞 교차 테이프 찾기 속도. 센서가 회전 중심보다 GD 앞이라 테이프를 본 뒤 GD 안에 서면 된다.
- * 인정(LED 6개 이상 2응답) 지연 t 동안 v·t 를 가고, 감속도 k·DCC(1 = 100 rpm/s)로 GD - 여유 - v·t 안에 선다:
+ * 인정(새 응답 두 번) 지연 t 동안 v·t 를 가고, 감속도 k·DCC(1 = 100 rpm/s)로 GD - 여유 - v·t 안에 선다:
  * v² = 2·k·a·(d0 - v·t) → v = √((k·a·t)² + 2·k·a·d0) - k·a·t. SPN 과 min(LOS, 12 m/min) 사이로 묶는다.
  * 모의(test_curve tape, DCC 20·50, GD 250·400, 바퀴 지연 50·150 ms): k 0.5 는 회전 중심 정지 위치가 SPN 4 보다
  * 최대 17 mm 더 나갔다. k 0.15 + 12 m/min 상한에서 +5 mm 안. 테이프 정지(바로 섬)는 속도만큼 더 가서 SPN 그대로 */
@@ -885,57 +891,220 @@ int16_t run_seek_rpm(void)
     return (r > (float)P.min_speed) ? (int16_t)r : P.min_speed;
 }
 
-/* ---- 교차선에서 서는 방식: 이 셋이 한 곳이다 ----
- * 교차선 정지(SEQ_START( TAPE, x )·AGV_STOP( TAPE ))와 시퀀스 AGV_MOVE( 한계, TAPE ) 가 같이 쓴다. 정렬 회전 앞 찾기(TAPE_ID_TURN)는
- * 회전 중심을 선 위에 세우는 다른 방식이라 찾기 속도(run_seek_rpm)·GD 뒤 정지(tagact_turn_align_cross)를 따로 쓴다.
- * 지금(사용자 결정 전): 찾는 속도 = 최저 속도(SPN), 인정 = tape_hit, 서기 = 본 자리에서 바로(정지 거리 0) */
-static int16_t tape_seek_speed(void) { return P.min_speed; }
+/* ---- 교차선: 인정(run_tape_rx), 찾아 서기(tape_stop), 교차선 뒤 GD 구간(gd_*) ----
+ * 분류 3(AGV_STOP( TAPE )·SEQ_START( TAPE, x )·AGV_MOVE( 한계, TAPE ))은 SPN 으로 찾아 본 자리에서 바로 선다.
+ * 분류 4(… TAPE_GD)와 교차선 회전은 run_seek_rpm 으로 찾아 GD 구간 루틴으로 회전 중심을 교차선 가운데에 세운다 */
 
-/* 인정: LED 합 6 이상인 스캔을 누적 두 번(레거시 DA_Tape_Stop·DA_Tape_Turn 과 같다: 6 미만 스캔에 0 으로 돌리지 않고,
- * 새 응답이 아니라 호출(10 ms 틱)마다 센다). 인정하면 0 으로 돌린다 */
-static int16_t tape_hit(void)
+/* 인정: 새 가이드 응답마다 본다. 한쪽 끝 칸부터 주행 테이프 덩어리 바로 옆까지 다 켜졌고 그 칸이 TAPE_SIDE_MIN(일반 센서
+ * TAPE_SIDE_MIN_N) 이상이며, 끝 칸이 켜진 뒤 TAPE_FILL_MM 안에 찼으면, 또는 전부 켜짐이면 교차선 위 응답이다.
+ * 주행 테이프가 켠 칸은 세지 않는다. 비스듬한 분기선은 센서 줄에서 폭 / cos(각)만 켜져 주행 테이프 옆부터 끝까지를 채우지 못하고,
+ * 바깥에서 쓸고 들어오는 합류선은 끝 칸이 켜지고 한참 뒤에 찬다. 교차선은 방향 오차 몇 도면 한두 응답에 찬다.
+ * 찾는 중 교차선 위 응답이 이어서 두 번이면 인정한다(아닌 응답에 0, 응답마다 한 번).
+ * 주행 테이프 덩어리는 교차선 위가 아닌 응답에서 추적기가 고른 덩어리(폭 ≤ 배운 폭 + 2)를 기억한다. 교차선이 붙는 응답은
+ * 추적기가 넓어진 덩어리를 내므로 쓰지 않는다 */
+#ifndef TAPE_SIDE_MIN
+#define TAPE_SIDE_MIN    8
+#endif
+#ifndef TAPE_SIDE_MIN_N
+#define TAPE_SIDE_MIN_N  4
+#endif
+#ifndef TAPE_FILL_MM
+#define TAPE_FILL_MM     20.0f
+#endif
+static struct {
+    int16_t  sat;            /* 마지막 응답이 교차선 위 */
+    int16_t  hits;           /* 찾는 중 교차선 위 응답이 이어진 수(2 에서 멈춤) */
+    int16_t  clear;          /* 교차선 위가 아닌 응답이 이어진 수(2 에서 멈춤). 시퀀스 이동 출발 때 선을 벗어남 */
+    uint16_t lane;           /* 주행 테이프 덩어리: 시작 칸 | 끝 칸 << 8. 0 = 모름(가운데 두 칸) */
+    uint32_t first;          /* 이어진 교차선 위 응답 첫째 때 travel_pulses(앞 가장자리) */
+    int16_t  end_on[2];      /* 왼쪽(칸 1)·오른쪽 끝 칸이 지난 응답에 켜져 있었다 */
+    int16_t  fill[2];        /* 그 쪽이 다 찼다: 0 아님, 1 끝 칸이 켜진 뒤 TAPE_FILL_MM 안에 참(교차선), 2 늦게 참 */
+    uint32_t end_at[2];      /* 그 끝 칸이 켜진 때 travel_pulses */
+} s_cr;
+
+/* 교차선 뒤 GD 구간(분류 4 정지·교차선 회전·AGV_MOVE( 한계, TAPE_GD )): 인정한 틱부터 설 때까지 조향 보정 0(D.steer_hold,
+ * 두 바퀴 같은 지령, 적분 지움). 교차선이 센서 밑을 지나며 위치가 튀어도 차를 돌리지 않는다. 선이 교차선에서 끝나도 "선 없음"
+ * 오류를 내지 않는다. 정지 거리 = GD + 반폭 - 응답 늦음 - 앞 가장자리(첫 교차선 위 응답) 뒤 간 거리. 반폭은 TAPE_HALF_MM 으로 걸고,
+ * 뒤 가장자리(교차선 위가 아닌 응답이 이어서 두 번, 첫 응답 자리)를 보면 (뒤 - 앞) / 2 로 고친다. 앞 가장자리 뒤 TAPE_BACK_MM 을
+ * 가도 못 보면 교차선이 적어도 그만큼 넓은 것이라 반폭 TAPE_BACK_MM / 2 로 고친다 */
+#define TAPE_HALF_MM     10.0f
+#define TAPE_BACK_MM     60.0f
+#ifndef TAPE_LAG_MS
+#define TAPE_LAG_MS      18.0f   /* 앞·뒤 가장자리 모두 늦게 본다: 응답 10 ms + 센서 스캔 나이 + 응답 사이 평균 5 ms. 모의로 맞춤 */
+#endif
+run_tape_last_t run_tape_last;
+static struct {
+    int16_t  kind;           /* 0 없음, 3 바로 정지, 4 GD 정지, TAPE_ID_TURN 교차선 회전. 인정부터 설 때까지 */
+    int16_t  edge;           /* 0 분류 3, 1 뒤 가장자리 기다림, 2 봄, 3 못 봄 */
+    int16_t  miss, ticks;
+    uint32_t front, back, start;
+} s_gd;
+
+/* 교차선 요청을 처리하는 상태: 주행 중이고 다른 정지·회전이 진행 중이 아니다(flag_stopping·turn_motion). 아니면 요청을 두고(보류)
+ * 속도 지령·인정을 건드리지 않는다. 장애물 일시정지는 정지 제어의 일시정지가 맡는다(flag_stopping 아님, 풀리면 이어 찾는다).
+ * 인정 뒤 건 정지는 요청 칸을 지운 뒤라 걸리지 않는다. 시퀀스 이동은 따로(서 있다 출발, 이동 중 태그 무시) */
+static int16_t tape_req_ok(void)
 {
-    if ((led_total() >= TAPE_LED_MIN) && (++s_tape.hits > 1)) {
-        s_tape.hits = 0;
-        return 1;
-    }
-    return 0;
+    return D.flag_run && (D.control == RUN_DRIVE) && !D.flag_stopping && (D.turn_motion == 0);
 }
 
-static void tape_stop_here(void)
+static int16_t seeking(void)
 {
+    return (((D.tape_stop_kind != 0) || (D.tape_turn_dir != 0)) && tape_req_ok()) || (s_mt.on && s_mt.armed);
+}
+
+/* 교차선 일이 속도를 정하는 동안: 자동 속도 변경·START 고속이 덮지 않는다 */
+static int16_t tape_busy(void) { return (D.move_on != 0) || (D.tape_stop_kind != 0) || (D.tape_turn_dir != 0) || (s_gd.kind != 0); }
+
+/* 쪽 i(0 칸 1 쪽, 1 끝 칸 쪽): 바깥 끝 비트 from 부터 안쪽(step)으로 n 칸(주행 테이프 바로 앞까지) */
+static int16_t side_lit(uint32_t v, int16_t i, int16_t from, int16_t step, int16_t n, int16_t min)
+{
+    int16_t k = 0;
+    if (!((v >> from) & 1UL)) {
+        s_cr.end_on[i] = 0;
+        s_cr.fill[i] = 0;
+        return 0;
+    }
+    if (!s_cr.end_on[i]) {
+        s_cr.end_on[i] = 1;
+        s_cr.end_at[i] = D.travel_pulses;
+    }
+    while ((k < n) && ((v >> (from + k * step)) & 1UL)) { k++; }
+    if ((k < min) || (k < n)) { s_cr.fill[i] = 0; }
+    else if (s_cr.fill[i] == 0) {   /* 처음 찬 응답에서 정하고 찬 동안 그대로 */
+        s_cr.fill[i] = ((float)(int32_t)(D.travel_pulses - s_cr.end_at[i]) <= TAPE_FILL_MM * P.one_length_pulse) ? 1 : 2;
+    }
+    return s_cr.fill[i] == 1;
+}
+
+static void gd_end(void)
+{
+    s_gd.kind = 0;
+    s_gd.edge = 0;
+    D.steer_hold = 0;
+}
+
+/* 뒤 가장자리: 남은 정지 거리를 기본 반폭에서 잰 반폭으로 고친다(ISR 이 줄이는 중이라 막고) */
+static void gd_back(void)
+{
+    float d = 0.5f * (float)(int32_t)(s_gd.back - s_gd.front) - TAPE_HALF_MM * P.one_length_pulse;
+    uint16_t irq = hal_irq_save();
+    if (D.stop_pulses > 0) {
+        int32_t r = (int32_t)D.stop_pulses + (int32_t)((d >= 0.0f) ? (d + 0.5f) : (d - 0.5f));
+        D.stop_pulses = (int16_t)((r < 1L) ? 1L : ((r > 32767L) ? 32767L : r));
+    }
+    hal_irq_restore(irq);
+    s_gd.edge = 2;
+}
+
+/* guide_poll 이 'h' 응답마다 부른다. s·e = 추적기가 고른 덩어리(없으면 0) */
+void run_tape_rx(uint16_t s, uint16_t e)
+{
+    int16_t n = D.guide_wide ? GUIDE_LED_WIDE : GUIDE_LED_NARROW, min = D.guide_wide ? TAPE_SIDE_MIN : TAPE_SIDE_MIN_N;
+    int16_t ls = (int16_t)(s_cr.lane & 0xFFu), le = (int16_t)(s_cr.lane >> 8), w = (int16_t)guide_tape_width();
+    uint32_t v = D.guide_wide ? D.guide_led32 : (uint32_t)D.guide_led;
+
+    if (s_cr.lane == 0u) { ls = n / 2; le = (int16_t)(ls + 1); }
+    s_cr.sat = side_lit(v, 0, 0, 1, (int16_t)(ls - 1), min);
+    s_cr.sat |= side_lit(v, 1, (int16_t)(n - 1), -1, (int16_t)(n - le), min);    /* 두 쪽 다 본다(끝 칸 기록) */
+    s_cr.sat |= (v == (D.guide_wide ? 0xFFFFFFFFUL : 0xFFFFUL));
+    if (!s_cr.sat && (s != 0u) && ((w == 0) || ((int16_t)(e - s) < w + 2))) { s_cr.lane = (uint16_t)(s | (e << 8)); }
+    if (s_cr.sat && seeking()) {
+        if (s_cr.hits == 0) { s_cr.first = D.travel_pulses; }
+        if (s_cr.hits < 2) { s_cr.hits++; }
+    }
+    else { s_cr.hits = 0; }
+    if (s_cr.sat) { s_cr.clear = 0; }
+    else if (s_cr.clear < 2) { s_cr.clear++; }
+    if (s_gd.edge == 1) {
+        if (s_cr.sat) { s_gd.miss = 0; }
+        else if (++s_gd.miss == 1) { s_gd.back = D.travel_pulses; }
+        else { gd_back(); }
+    }
+}
+
+/* 인정한 틱. 정지 거리를 돌려준다(분류 3 은 0 = 본 자리에서 바로). 기록(run_tape_last)은 설 때 */
+static int16_t gd_begin(int16_t kind)
+{
+    float p;
+
+    s_gd.kind = kind;
+    s_gd.edge = (kind == 3) ? 0 : 1;
+    s_gd.miss = 0;
+    s_gd.ticks = 0;
+    s_gd.front = s_cr.first;
+    s_gd.start = D.travel_pulses;
+    if (kind == 3) { return 0; }
+    D.steer_hold = 1;
+    p = (P.guide_dist_mm + TAPE_HALF_MM - (float)D.vin_out * P.one_rpm_meter * (TAPE_LAG_MS / 60.0f)) * P.one_length_pulse
+      - (float)(int32_t)(D.travel_pulses - s_gd.front);
+    return (p < 1.0f) ? 1 : ((p > 32767.0f) ? 32767 : (int16_t)(p + 0.5f));
+}
+
+/* 인정 뒤 설 때까지 매 틱. 섰으면(회전은 회전 전 정지가 끝나면) 기록하고 끝낸다 */
+static void gd_tick(void)
+{
+    if (!D.flag_run) {
+        run_tape_last.kind = s_gd.kind;
+        run_tape_last.run_mm = (float)(int32_t)(D.travel_pulses - s_gd.start) * P.one_pulse_length;
+        run_tape_last.width_mm = (s_gd.edge == 2) ? (float)(int32_t)(s_gd.back - s_gd.front) * P.one_pulse_length : -1.0f;
+        run_tape_last.ticks = s_gd.ticks;
+        run_tape_last.n++;
+        gd_end();
+        return;
+    }
+    if (s_gd.ticks < 32767) { s_gd.ticks++; }
+    if (s_gd.kind == 3) { return; }
+    run_rail_cut_clear();
+    if ((s_gd.edge == 1) && ((float)(int32_t)(D.travel_pulses - s_gd.front) > TAPE_BACK_MM * P.one_length_pulse)) {
+        s_gd.back = D.travel_pulses;                /* 못 봤다: 교차선은 적어도 이만큼 넓다 */
+        gd_back();
+        s_gd.edge = 3;
+    }
+}
+
+/* 인정: 정지를 건다. 분류 3 은 정지 거리 0, 4 는 GD 구간 */
+static void tape_found(int16_t kind)
+{
+    int16_t p = gd_begin(kind);
     D.flag_stopping = 1;
-    D.stop_pulses = 0;
+    D.stop_pulses = p;
     stop_request_tag();
 }
 
-/* 교차 테이프를 찾는다. 정렬 회전 앞은 찾기 속도(run_seek_rpm), 교차선 정지는 tape_seek_speed. 1 찾음, -1 정지 거리 2배를 넘김, 0 계속 */
-static int16_t tape_seek(int16_t id)
+static int16_t seek_rpm(int16_t kind) { return (kind == 3) ? P.min_speed : run_seek_rpm(); }
+
+/* 교차선을 찾는다. 1 찾음, -1 정지 거리 2배를 넘김, 0 계속(보류 포함). 한계는 요청을 건 자리부터 실제로 간 거리 */
+static int16_t tape_seek(int16_t key, int16_t rpm)
 {
-    if (id != s_tape.prev_id) {
-        s_tape.prev_id = id;
+    if (key != s_tape.prev_id) {
+        s_tape.prev_id = key;
         s_tape.start_len = s_pulses[0];
     }
-    D.speed_cmd = (id == TAPE_ID_TURN) ? run_seek_rpm() : tape_seek_speed();
+    if (!tape_req_ok()) { return 0; }
+    D.speed_cmd = rpm;
     D.step = DRIVE_CHANGE_SPEED;
-    if (tape_hit()) { return 1; }
-    if ((led_total() < TAPE_LED_MIN) && ((int32_t)(s_pulses[0] - s_tape.start_len) > 2L * P.stop_len)) {
+    if (s_cr.hits >= 2) {
+        s_cr.hits = 0;
+        return 1;
+    }
+    if (!s_cr.sat && ((int32_t)(s_pulses[0] - s_tape.start_len) > 2L * P.stop_len)) {
         D.system_err = ERR_GUIDE_SENSOR;
         return -1;
     }
     return 0;
 }
 
-/* 시퀀스 AGV_MOVE( 한계, TAPE ): 서 있다 지금 방향으로 출발해 다음 교차선에서 선다. 출발 때 센서가 선 위면 한 번 벗어난 뒤부터 센다.
+/* 시퀀스 AGV_MOVE( 한계, TAPE… ): 서 있다 지금 방향으로 출발해 다음 교차선에서 선다. 출발 때 센서가 선 위면 한 번 벗어난 뒤부터 센다.
  * 한계 거리(D.move_pulses)를 넘기면 서고 오류(교차선 정지가 못 찾을 때와 같은 258). 시퀀스는 run_after_motor 가 끝낸다 */
 #define MOVE_TAPE_ARM_TICKS 5    /* 출발 뒤 새 가이드 응답이 올 때까지 선 위인지 판단하지 않는다(10 ms × 5) */
 
-void run_move_tape_start(void) { s_mt.on = 1; }
-int  run_move_tape_on(void)    { return s_mt.on; }
+void run_move_tape_start(int16_t kind) { s_mt.on = 1; s_mt.kind = kind; }
+int  run_move_tape_on(void)            { return s_mt.on || (s_gd.edge == 1); }   /* 'H' 를 받아야 한다(뒤 가장자리 포함) */
 
 static void move_tape_tick(void)
 {
-    int16_t v = tape_seek_speed();
+    int16_t v = seek_rpm(s_mt.kind);
 
     if (D.speed_cmd != v) {
         D.speed_cmd = v;
@@ -943,17 +1112,19 @@ static void move_tape_tick(void)
     }
     if (s_mt.ticks < MOVE_TAPE_ARM_TICKS) { s_mt.ticks++; }
     else if (!s_mt.armed) {
-        if (led_total() < TAPE_LED_MIN) {          /* 선 밖(또는 출발한 선을 벗어남)에서부터 센다 */
+        if (s_cr.clear >= 2) {                     /* 교차선 밖(또는 출발한 선을 벗어남): 아닌 응답 둘 뒤부터 센다 */
             s_mt.armed = 1;
-            s_tape.hits = 0;
+            s_cr.hits = 0;
         }
     }
-    else if (tape_hit()) {
+    else if (s_cr.hits >= 2) {
+        s_cr.hits = 0;
         s_mt.on = 0;
-        tape_stop_here();
+        D.move_on = MOVE_FOUND;                    /* 도착: 교차선 정지와 같은 태그 정지로 서면 finish 가 MOVE_DONE */
+        tape_found(s_mt.kind);
         return;
     }
-    if ((int32_t)(s_pulses[0] - s_mt.start) > (int32_t)D.move_pulses) {
+    if ((int32_t)(s_pulses[0] - s_mt.start) > D.move_pulses) {
         s_mt.on = 0;
         D.system_err = ERR_GUIDE_SENSOR;
     }
@@ -961,20 +1132,24 @@ static void move_tape_tick(void)
 
 static void tape_stop(void)
 {
-    int16_t id = D.tape_stop_id;
+    int16_t kind = D.tape_stop_kind;
 
-    if (id != 0) {
-        int16_t r = tape_seek(id);
+    if (s_gd.kind != 0) { gd_tick(); }
+    if ((D.move_on == 0) || (D.move_on >= MOVE_FOUND)) { s_mt.on = 0; }   /* 이동이 끝났다(어떤 원인이든) */
+    if ((kind == 0) && (P.turn_mode <= 0)) { D.tape_turn_dir = 0; }   /* 회전 모드 0: 교차선 회전 요청은 받지 않는다 */
+    if (kind != 0) {
+        int16_t r = tape_seek(kind, seek_rpm(kind));
         if (r == 1) {
-            tape_stop_here();
-            seq_request((uint16_t)id);
+            tape_found(kind);
+            if (D.tape_stop_id != 0) { seq_request((uint16_t)D.tape_stop_id); }   /* 서면 시작한다(auto_run) */
         }
-        if (r != 0) { D.tape_stop_id = 0; }
+        if (r != 0) { D.tape_stop_kind = D.tape_stop_id = 0; }
     }
     else if (D.tape_turn_dir != 0) {
-        int16_t r = tape_seek(TAPE_ID_TURN);
+        int16_t r = tape_seek(TAPE_ID_TURN, run_seek_rpm());
         if (r == 1) {
             tagact_turn_align_cross((turn_dir_t)D.tape_turn_dir, (uint16_t)D.tape_turn_deg, D.tape_turn_next);
+            if (D.tape_align && D.flag_stopping) { D.stop_pulses = gd_begin(TAPE_ID_TURN); }   /* tagact_turn 이 건 GD 정지를 고친다 */
         }
         if (r != 0) { D.tape_turn_dir = 0; }
     }
@@ -983,7 +1158,6 @@ static void tape_stop(void)
     }
     else {
         s_tape.prev_id = 0;
-        s_tape.hits = 0;
     }
 }
 

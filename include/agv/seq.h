@@ -73,7 +73,7 @@ typedef enum {
     SK_MOVE_MM,           /* arg0 = mm(1~32767). 그 자리에서 출발해 mm 지점에 위치 정지하고 설 때까지 대기(tagact_move_mm). ACT 금지 */
     SK_TURN_ALIGN,        /* SK_TURN 과 같은 칸. 선 자리에서 정렬 회전(tagact_turn_align_stopped), 정착·보정까지 끝나 서면 다음.
                            * 오류(system_err·stop_err)가 서 있으면 다음으로 가지 않는다(run_after_motor 가 시퀀스를 끝낸다). ACT 금지 */
-    SK_MOVE_TAPE,         /* arg0 = 한계 mm(1~32767). 그 자리에서 출발해 다음 교차선에서 서고 설 때까지 대기(tagact_move_tape).
+    SK_MOVE_TAPE,         /* arg0 = 한계 mm(1~32767), arg1 = 4 면 GD 더 가서(TAPE_GD). 그 자리에서 출발해 다음 교차선에서 서고 설 때까지 대기(tagact_move_tape).
                            * 한계 안에 못 찾으면 서고 오류 258(시퀀스 끝). ACT 금지 */
     SK_KIND_MAX
 } seq_kind_t;

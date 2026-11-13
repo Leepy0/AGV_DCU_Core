@@ -86,10 +86,12 @@ extern void (*tagact_trace)(uint16_t code, uint16_t next);   /* 호스트 시험
 #define TA_STOP_KIND_TAPE    3     /* D.tape_stop_kind: 교차선에서 바로 정지 */
 #define TA_STOP_KIND_TAPE_GD 4     /* D.tape_stop_kind: 교차선 뒤 GD 가서 정지 */
 
-/* 시퀀스 AGV_MOVE( mm ): 서 있을 때 mm 앞에 위치 정지하는 이동을 건다. 달리고 있거나 mm < 1 이면 무시(D.move_on 0 그대로) */
-void     tagact_move_mm(int16_t mm);
-/* 시퀀스 AGV_MOVE( 한계 mm, TAPE ): 서 있을 때 다음 교차선까지 가서 서는 이동을 건다. 한계를 넘기면 오류 258. 거부 조건은 tagact_move_mm 과 같다 */
-void     tagact_move_tape(int16_t lim_mm);
+/* 시퀀스 AGV_MOVE( mm ): 서 있을 때 mm 앞에 위치 정지하는 이동을 건다. 달리거나 회전·정지 중이면 0(D.move_on 0 그대로),
+ * mm < 1 이거나 펄스가 32767 을 넘으면 -1(줄이지 않는다) */
+int16_t  tagact_move_mm(int16_t mm);      /* 1 걸었다, 0 지금 못 건다(회전·정지 중 등), -1 거리 범위 밖 */
+/* 시퀀스 AGV_MOVE( 한계 mm, TAPE… ): 서 있을 때 다음 교차선까지 가서 서는 이동을 건다. kind 4 = TAPE_GD(GD 더 가서), 그 밖 = TAPE.
+ * 한계를 넘기면 오류 258. 거부 조건은 tagact_move_mm 과 같다 */
+int16_t  tagact_move_tape(int16_t lim_mm, int16_t kind);
 void     tagact_bind(const tag_rule_t *rules, uint16_t n, uint16_t profile);
 void     tagact_bind_packed(const tag_packed_t *t, uint16_t profile);   /* 압축 표 */
 uint16_t tagact_display_tag(void);

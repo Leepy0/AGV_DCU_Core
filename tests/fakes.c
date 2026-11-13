@@ -52,9 +52,10 @@ int link_send(const uint16_t *buf, uint16_t n)
 
 void tagact_speed(uint16_t level) { fake_speed_arg = level; }
 void tagact_forback(dir_t d)      { fake_forback_arg = d; }
-int16_t fake_move_mm;
-void tagact_move_mm(int16_t mm)   { fake_move_mm = mm; agv_drive.move_on = 3; }   /* 이동 중으로 둔다. 시험이 0 으로 끝낸다 */
-void tagact_move_tape(int16_t mm) { fake_move_mm = (int16_t)-mm; agv_drive.move_on = 3; }   /* 교차선까지: 음수로 남긴다 */
+int16_t fake_move_mm, fake_move_kind, fake_move_ret = 1;
+/* fake_move_ret 1 이면 이동 중으로 둔다(시험이 MOVE_DONE·MOVE_FAIL 로 끝낸다). 0·-1 은 못 건 것 */
+int16_t tagact_move_mm(int16_t mm)   { fake_move_mm = mm; if (fake_move_ret > 0) { agv_drive.move_on = 3; } return fake_move_ret; }
+int16_t tagact_move_tape(int16_t mm, int16_t kind) { fake_move_mm = (int16_t)-mm; fake_move_kind = kind; if (fake_move_ret > 0) { agv_drive.move_on = 3; } return fake_move_ret; }   /* 교차선까지: 음수로 남긴다 */
 void tagact_turn(turn_dir_t d, uint16_t deg, dir_t fb, uint16_t autostart, uint16_t obs)
 {
     (void)d; (void)deg; (void)fb; (void)autostart; (void)obs;

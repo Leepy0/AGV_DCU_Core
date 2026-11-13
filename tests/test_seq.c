@@ -412,16 +412,34 @@ int main(void)
     assert(seq_bind(&s_site_ok) == 0);
     assert(seq_profile() == 0);
 
-    /* AGV_MOVE: 앞 출력 → 이동 요청(100 mm) → 이동이 끝날(move_on 0) 때까지 대기 → 뒤 출력. ACT 에서는 금지 */
+    /* AGV_MOVE: 앞 출력 → 이동 요청(100 mm) → 도착해 설(MOVE_DONE) 때까지 대기 → 뒤 출력. ACT 에서는 금지 */
     start(S_MOVE);
     fake_move_mm = 0;
+    fake_move_ret = 0;                                           /* 회전 중 등: 못 건다. 통과하지 않고 다시 건다 */
+    seq_run(); seq_run();
+    assert(fake_out == BIT(OUT_EXT_1) && fake_move_mm == 100 && !D.move_on && seq_is_active());
+    fake_move_ret = 1;
     seq_run();
-    assert(fake_out == BIT(OUT_EXT_1) && fake_move_mm == 100 && D.move_on);
+    assert(D.move_on);
     seq_run(); seq_run();
     assert(seq_is_active() && fake_out == BIT(OUT_EXT_1));      /* 서기 전에는 B 를 켜지 않는다 */
-    D.move_on = 0;                                               /* 섰다(stop.c finish) */
+    D.move_on = MOVE_DONE;                                       /* 도착해 섰다(stop.c finish) */
     seq_run();
-    assert(fake_out == (BIT(OUT_EXT_1) | BIT(OUT_EXT_2)) && !seq_is_active());
+    assert(fake_out == (BIT(OUT_EXT_1) | BIT(OUT_EXT_2)) && !seq_is_active() && (D.move_on == 0));
+    start(S_MOVE);                                               /* 도착 전에 다른 원인으로 섰다: B 없이 오류 277 */
+    seq_run();
+    D.move_on = MOVE_FAIL;
+    seq_run(); seq_run();
+    assert((fake_out & BIT(OUT_EXT_2)) == 0 && (D.stop_err == ERR_STOP_APPROACH) && (D.move_on == 0));
+    D.stop_err = 0;
+    seq_abort_all();
+    fake_out = 0;
+    start(S_MOVE);                                               /* 거리 범위 밖: 줄이지 않고 시퀀스 오류 */
+    fake_move_ret = -1;
+    seq_run();
+    assert(!seq_is_active() && !D.move_on && ((fake_out & BIT(OUT_EXT_2)) == 0));
+    fake_move_ret = 1;
+    fake_out = 0;
     BAD(a_bad_move);
     assert(seq_bind(&s_site_ok) == 0);
 
@@ -474,14 +492,14 @@ int main(void)
     start(S_MOVE_TAPE);
     fake_move_mm = 0;
     seq_run();
-    assert(fake_out == BIT(OUT_EXT_1) && fake_move_mm == -1500 && D.move_on);
+    assert(fake_out == BIT(OUT_EXT_1) && fake_move_mm == -1500 && fake_move_kind == 0 && D.move_on);
     seq_run(); seq_run();
     assert(seq_is_active() && fake_out == BIT(OUT_EXT_1));
-    D.move_on = 0;
     D.system_err = 258;                                          /* 한계 안에 못 찾았다 */
     seq_run();
     assert(seq_is_active() && fake_out == BIT(OUT_EXT_1));
     D.system_err = 0;
+    D.move_on = MOVE_DONE;
     seq_run();                                                   /* 찾아 섰다 */
     assert(fake_out == (BIT(OUT_EXT_1) | BIT(OUT_EXT_2)) && !seq_is_active());
     BAD(a_bad_move_tape);

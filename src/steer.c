@@ -289,6 +289,13 @@ void steer_run(int16_t tuning_type)
         /* 같은 바퀴 차에 차체가 도는 속도는 휠 간격에 반비례한다. 간격이 넓으면 그만큼 크게 준다 */
         if (!param_quirk(QUIRK_NO_WB_GAIN)) { geom *= ((float)param_get(P_WHEEL_BASE_MM) * 10.0f) / STEER_WB_REF_MM; }
 
+        if (D.steer_hold) {     /* 교차선 뒤 GD 구간(run.c): 조향 보정 0, 적분 지움. 바퀴 보정(offset_kp)은 둔다 */
+            s_steer.i_out = 0.0f;
+            D.p_pi_out = 0.0f;
+            D.add_speed_l = D.offset_kp;
+            D.add_speed_r = (int16_t)-D.offset_kp;
+            return;
+        }
         D.p_err_1 = D.p_err;
         if (D.branch_start != 0) {        /* 분기 중에는 센서 대신 고정 편이 지령을 쓴다 */
             D.p_err = !D.backward ? D.p_cmd : (int16_t)(-D.p_cmd);

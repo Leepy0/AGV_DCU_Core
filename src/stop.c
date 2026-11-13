@@ -454,10 +454,13 @@ void stop_reset(void)
     s_pause_alarm = 0;
 }
 
+/* 시퀀스 이동 중(교차선 인정 전)이면 STOP_REASON_MOVE. 교차선 인정 뒤(MOVE_FOUND)는 교차선 정지와 같은 태그 정지 */
+static int16_t moving(void) { return (D.move_on != 0) && (D.move_on < MOVE_FOUND); }
+
 void stop_request_tag(void)
 {
     int16_t reason = ((D.turn_pulses > 0) && (D.turn_motion != 0) && (D.flag_turn == 0))
-                   ? STOP_REASON_BEFORE_TURN : (D.move_on ? STOP_REASON_MOVE : STOP_REASON_TAG_DOCKING);
+                   ? STOP_REASON_BEFORE_TURN : (moving() ? STOP_REASON_MOVE : STOP_REASON_TAG_DOCKING);
     if ((uint16_t)s_request < STOP_REASON_COMMAND) { s_request = reason; }
 }
 
@@ -546,7 +549,10 @@ static void finish(void)
     D.flag_stopping = 1;
     D.flag_ready = D.flag_run = D.flag_jog_on = D.flag_turn = 0;
     D.amp_run = 0;
-    D.move_on = 0;          /* 시퀀스 MOVE_MM 이 다음 스텝으로 간다 */
+    /* 시퀀스 이동: 도착(거리 정지·교차선 인정 뒤)이면 다음 스텝, 다른 원인으로 섰으면 시퀀스 오류. 회전 끝은 건드리지 않는다 */
+    if (D.move_on && (reason != STOP_REASON_TURN_ANGLE)) {
+        D.move_on = ((reason == STOP_REASON_MOVE) || (D.move_on == MOVE_FOUND)) ? MOVE_DONE : MOVE_FAIL;
+    }
     acs_cross_hold();       /* 교차로 대기 중 다른 정지로 섰다. 허가까지 다시 출발하지 않는다 */
 }
 
@@ -676,7 +682,7 @@ int16_t stop_run(void)
                 stop_begin_runtime(STOP_REASON_TURN_ANGLE);
             }
             else {
-                stop_begin_runtime((D.stop_pulses > 0) ? (D.move_on ? STOP_REASON_MOVE : STOP_REASON_TAG_POSITION) : STOP_REASON_COMMAND);
+                stop_begin_runtime((D.stop_pulses > 0) ? (moving() ? STOP_REASON_MOVE : STOP_REASON_TAG_POSITION) : STOP_REASON_COMMAND);
             }
         }
         else if (D.flag_turn && (D.control == RUN_TURN) && !D.tape_align) {

@@ -453,6 +453,7 @@ void guide_track(const guide_rx_t *rx, int16_t branch, int16_t backward, guide_o
 
     out->blobs = guide_blobs(lat, leds, blob);
     out->track = GUIDE_TRK_NORMAL;
+    out->s = out->e = 0;
     if (s_drive) {
         if (out->blobs >= 2u) { s_merge_age = 0; }
         else if ((s_trk_last == GUIDE_TRK_NORMAL) && (s_merge_age < GUIDE_MERGE_SCANS)) { s_merge_age++; }
@@ -478,6 +479,8 @@ void guide_track(const guide_rx_t *rx, int16_t branch, int16_t backward, guide_o
             if ((branch == 0) && s_drive) { out->track = edge_fix(&s, &e, leds, out->blobs, s_prev_valid); }
             if (out->track != GUIDE_TRK_NORMAL) { out->width = guide_tape_width(); }   /* 붙은 폭을 커브로 보지 않는다 */
             if (out->track != GUIDE_TRK_HOLD) {
+                out->s = (uint16_t)s;
+                out->e = (uint16_t)e;
                 s_prev = (int16_t)(s + e - (int16_t)(leds + 1));
                 s_prev_valid = 1;
                 s_ever = 1;

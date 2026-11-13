@@ -100,8 +100,10 @@ static int on_led(const guide_rx_t *rx, guide_out_t *out)
         v = (float)out->pos * guide_h_scale();
         D.guide_span = out->width;
         apply_status(out->status, (int16_t)((v >= 0.0f) ? (v + 0.5f) : (v - 0.5f)));
+        run_tape_rx(out->s, out->e);
         return 1;
     }
+    run_tape_rx(0u, 0u);
     /* 'a' 소스 중 분기·테이프 구간. 패턴이 전부 꺼짐·켜짐일 때만 위치 상태를 고친다 */
     {
         int16_t v = guide_h_position(rx, D.guide_pos);
@@ -172,7 +174,7 @@ static void on_rx(const guide_rx_t *rx)
 static void send_request(void)
 {
     uint16_t buf[4];
-    uint16_t tape = (uint16_t)((D.tape_stop_id != 0) || (D.tape_turn_dir != 0) || D.tape_align || run_move_tape_on());
+    uint16_t tape = (uint16_t)((D.tape_stop_kind != 0) || (D.tape_turn_dir != 0) || D.tape_align || run_move_tape_on());
     uint16_t branch = (uint16_t)((D.branch_start != 0) && (D.branch_step != 3));
     int h;
 

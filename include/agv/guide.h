@@ -88,6 +88,7 @@ typedef struct {
     uint16_t width;        /* 선택한 덩어리 폭. 조향의 커브 판정 span 입력으로 쓸 수 있다 */
     uint16_t blobs;        /* 필터 전 덩어리 수 */
     int16_t  track;        /* guide_track_t */
+    uint16_t s, e;         /* 위치를 잡은 덩어리(가장자리 고친 뒤) 칸 번호, 부호 반전 전. 정상·가장자리 고정일 때만, 아니면 0 */
 } guide_out_t;
 
 void     guide_reset(void);

@@ -22,6 +22,7 @@ typedef enum { UI_AUTO = 101, UI_JOG, UI_PARAM, UI_REMOTE,
 /* 앰프 방향 (motorMotionDirection, Turn_Direction 의 값) */
 enum { MOTION_FWD = 0, MOTION_BACK = 1, MOTION_CCW = 2, MOTION_CW = 3 };
 enum { TAPE_STEP_SETTLE = 3, TAPE_STEP_FIX = 4 };   /* 정렬 회전: 중앙에서 선 뒤 정착, 보정 회전 */
+enum { MOVE_FOUND = 4, MOVE_DONE, MOVE_FAIL };       /* move_on 의 뒤 값 */
 
 /* 오류 코드. ACS 로 전송되므로 값 고정 */
 #define ERR_AMP_L_OVERLOAD  200
@@ -103,10 +104,11 @@ typedef struct {
      * +1 은 튜닝(조향 상한만). 끝 = 정렬 확인 또는 선을 본 채 DRIVE_ALIGN_MAX_MM. 1~DRIVE_ALIGN_RAMP = 끝난 뒤 조향 상한을 ×2 로 푸는 틱.
      * 0 = 평소. AGV_START_ALIGN 0 이면 쓰지 않는다(늘 0, run.c·steer.c·motor.c 코드 없음) */
     int16_t start_align;
-    /* 시퀀스 거리 이동(MOVE_MM, tagact_move_mm). 0 없음, 1 요청(run.c 가 출발), 2 출발함(주행 첫 틱에 정지 거리를 건다),
-     * 3 이동 중(STOP_REASON_MOVE). 서면(stop.c finish)·시퀀스 중단(run_seq_init) 때 0 */
+    /* 시퀀스 이동(AGV_MOVE, tagact_move_mm·tagact_move_tape). 0 없음, 1 요청(run.c 가 출발), 2 출발함(주행 첫 틱에 정지 거리를 건다),
+     * 3 이동 중(거리 이동은 STOP_REASON_MOVE), MOVE_FOUND 교차선 인정 뒤 서는 중. 서면 stop.c finish 가 도착(거리 정지·교차선 인정 뒤)이면
+     * MOVE_DONE, 다른 원인이면 MOVE_FAIL 로 두고 시퀀스 스텝이 읽고 0 으로. 시퀀스 중단(run_seq_init) 때 0 */
     int16_t move_on;
-    int16_t move_pulses;             /* 목표 거리 펄스 */
+    int32_t move_pulses;             /* 거리 이동 목표 펄스(32767 이하), 교차선 이동 한계 펄스 */
     int16_t move_speed;              /* 최고 속도 rpm(SPN~LLOW) */
     int16_t immediate_stop;          /* DA_Rfid_Retry.ImmediateStop */
 
@@ -131,8 +133,8 @@ typedef struct {
     float   tape_end_cnt;            /* 라인 중앙 예상 펄스. 목표를 새 라인 위치로 고친 값. 감속 계획과 TN 표시 */
     float   tape_sum_mt, tape_sum_tt;   /* 슬립비 최소제곱 누적: 잰 펄스 × 돈 펄스, 돈 펄스² */
     int16_t tape_plan_min;           /* 이번 정렬 회전의 감속 계획 최솟값 rpm. 0 = 아직 없음. 계획을 다시 올리지 않는다 */
-    int16_t tape_stop_id;            /* DA_Guide_Stop_Action. 교차선 정지 뒤 시작할 시퀀스. 0 = 시퀀스 없음 */
-    int16_t tape_stop_kind;          /* 교차선 정지 분류: 0 없음, 3 교차선에서 바로, 4 교차선 뒤 GD(TA_STOP_KIND_*). 태그 해석기가 넣고 run.c 가 0 으로 돌린다 */
+    int16_t tape_stop_id;            /* DA_Guide_Stop_Action. 교차선에서 서고 난 뒤 시작할 시퀀스. 0 = 없음 */
+    int16_t tape_stop_kind;          /* 교차선 찾아 서기: 0 없음, 3 본 자리에서 바로, 4 GD 더 가서(TA_STOP_KIND_*). 태그 해석기가 넣고 run.c 가 처리한 뒤 둘 다 0 으로 */
     int16_t tape_turn_dir;           /* DA_Tape_Turn_Dir. 교차 테이프를 찾으면 회전한다 */
     int16_t tape_turn_deg;           /* DA_Tape_Turn_Degree */
     uint16_t tape_turn_next;         /* 회전 인자 둘째 칸: fb | auto<<4 | obs<<8 */
@@ -182,6 +184,7 @@ typedef struct {
 
     /* 조향 출력 */
     int16_t add_speed_l, add_speed_r;
+    int16_t steer_hold;              /* 1 = 조향 보정 0·적분 지움(교차선 뒤 GD 구간, run.c) */
     int16_t offset_kp;               /* offset_p_kp */
     int16_t p_err, p_err_1;
     float   p_kp, p_ki, p_pi_out;

@@ -16,8 +16,19 @@ void     run_after_motor(void);     /* 10 ms, site_manual 뒤. error_check 후�
 void     run_encoder(uint16_t wheel, uint32_t period);   /* eCAP ISR */
 
 int16_t  run_seek_rpm(void);              /* 정렬 회전 앞 교차 테이프 찾기 속도 rpm. SPN~min(LOS, 12 m/min) */
-void     run_move_tape_start(void);       /* 시퀀스 AGV_MOVE( 한계, TAPE ): tagact_move_tape 가 move_on 1 과 함께 부른다 */
-int      run_move_tape_on(void);          /* 1 = 교차선까지 이동 중(아직 못 찾음) */
+void     run_move_tape_start(int16_t kind);   /* 시퀀스 AGV_MOVE( 한계, TAPE… ): kind 3 바로 정지, 4 GD 정지. tagact_move_tape 가 부른다 */
+int      run_move_tape_on(void);          /* 1 = 교차선까지 이동 중(아직 못 찾음)이거나 교차선 뒤 가장자리를 기다린다 */
+void     run_tape_rx(uint16_t s, uint16_t e);     /* 'h' 응답마다(guide_poll): 교차선 인정. s·e = 추적기가 고른 덩어리 칸, 없으면 0 */
+
+/* 마지막 교차선 정지 기록(CCS: run_tape_last). 분류 3·4 정지·교차선 회전 앞 정지·AGV_MOVE( 한계, TAPE… ) */
+typedef struct {
+    int16_t  kind;              /* 3 바로 정지, 4 GD 정지, -1 교차선 회전 */
+    int16_t  ticks;             /* 인정한 틱부터 섰을 때까지 10 ms 틱 */
+    float    run_mm;            /* 인정한 자리부터 선 자리까지 간 거리(정지 거리를 세는 바퀴) */
+    float    width_mm;          /* 잰 교차선 폭(앞·뒤 가장자리 사이). -1 = 못 봄·분류 3 */
+    uint16_t n;                 /* 기록 수 */
+} run_tape_last_t;
+extern run_tape_last_t run_tape_last;
 uint32_t run_pulses(uint16_t wheel);       /* 좌 Total_length, 우 누적 펄스 */
 int      run_is_idle(void);                /* gFlag_AGV_None_Action */
 int      run_auto_started(void);           /* Flag_Auto_Start */
@@ -25,7 +36,8 @@ int16_t  run_wait_left(void);              /* 재출발 대기 남은 초. 대�
 int32_t  run_rail_cut(void);               /* 마지막 정상 응답 뒤 이동 펄스 */
 void     run_rail_cut_clear(void);
 
-void     run_seq_init(void);               /* Auto_Loading_Init */
+void     run_seq_init(void);               /* Auto_Loading_Init. 교차선 요청도 지운다(run_tape_req_clear) */
+void     run_tape_req_clear(void);         /* 교차선 요청·GD 구간을 지운다. 다시 출발은 지우지 않는다(수동 전환은 ui.c 가 부른다) */
 void     run_reset_request(void);          /* Flag_Reset_control */
 void     run_wait_start(void);             /* Flag_Wait_Start = ON */
 void     run_wait_cancel(void);            /* Flag_Wait_Start = OFF */

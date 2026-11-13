@@ -486,20 +486,28 @@ static uint16_t eval_step(seq_runner_t *r, const seq_step_t *s)
     case SK_TURN_NOWAIT:
     case SK_TURN_ALIGN:
         return eval_turn(r, s);
-    case SK_MOVE_MM:            /* 회전처럼 시퀀스를 살려 둔 채 run.c 가 이동하고, 서면(move_on 0) 다음 스텝. 거부되면 다음 스캔에 통과 */
+    case SK_MOVE_MM:            /* 회전처럼 시퀀스를 살려 둔 채 run.c 가 이동한다. 도착해 서야(MOVE_DONE) 다음 스텝.
+                                 * 지금 못 걸면(회전·정지 중) 다음 스캔에 다시 건다. 범위 밖 거리는 시퀀스 오류 */
+    case SK_MOVE_TAPE:          /* 교차선까지. 못 찾아 오류(258)로 서면 run_after_motor 가 끝낸다 */
         if (r->a == 0) {
-            tagact_move_mm((int16_t)s->arg0);
-            r->a = 1;
+            int16_t ok = (s->kind == SK_MOVE_MM) ? tagact_move_mm((int16_t)s->arg0) : tagact_move_tape((int16_t)s->arg0, (int16_t)s->arg1);
+            if (ok < 0) {
+                runner_fail(r, SEQ_ERR_TABLE);
+                return R_ENDED;
+            }
+            r->a = (uint16_t)ok;
             return R_WAIT;
         }
-        return D.move_on ? (uint16_t)R_WAIT : (uint16_t)R_NEXT;
-    case SK_MOVE_TAPE:          /* AGV_MOVE 와 같은 틀. 못 찾아 오류(258)로 서면 다음으로 가지 않는다(run_after_motor 가 끝낸다) */
-        if (r->a == 0) {
-            tagact_move_tape((int16_t)s->arg0);
-            r->a = 1;
-            return R_WAIT;
+        if (D.move_on == MOVE_DONE) {
+            D.move_on = 0;
+            return R_NEXT;
         }
-        return (D.move_on || (D.system_err != 0) || (D.stop_err != 0)) ? (uint16_t)R_WAIT : (uint16_t)R_NEXT;
+        /* 도착 전에 다른 원인(명령 정지 등)으로 섰다: 통과하지 않고 실패한 접근(277)으로 세운다. run_after_motor 가 시퀀스를 끝낸다 */
+        if (D.move_on == MOVE_FAIL) {
+            D.move_on = 0;
+            D.stop_err = ERR_STOP_APPROACH;
+        }
+        return R_WAIT;
     case SK_OBS:
         D.obs_use = (int16_t)s->arg0;
         return R_NEXT;
