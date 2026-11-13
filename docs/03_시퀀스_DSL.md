@@ -121,6 +121,8 @@ SEQ_END
 | 태그 `AGV_TURN( d, deg, fb, auto, 장애물[, 속도] )` | `AGV_TURN( d, deg, fb, auto[, 속도[, OBS]] )` |
 | 태그 `AGV_TURN_ALIGN( … )` / `AGV_TURN_TAPE( … )` | `AGV_TURN( …, 속도, ALIGN )` / `AGV_TURN( …, 속도, TAPE )` |
 | 태그 `AGV_TAPE_STOP( seq )` | `SEQ_START( TAPE, seq )`(이 동작만 옵션이 앞) |
+| 태그 `AGV_TAPE_STOP( 0 )`(시퀀스 없음) | `AGV_STOP( TAPE )` |
+| (없음) | `AGV_STOP( mm )`, `AGV_STOP( TAPE_GD )`, `SEQ_START( mm, x )`, `SEQ_START( TAPE_GD, x )`(5.2) |
 | 태그 `( TA_SPEED \| n )` | `AGV_SPEED_MMIN( n )` |
 
 > **옛 표를 옮길 때 `AGV_TURN` 의 다섯째 칸(장애물)을 빼거나 `, 0, OBS` 로 바꾼다.** 옛 5인자 `AGV_TURN( …, 자동 출발, 장애물 )` 은 새 형식에서 (…, 자동 출발, 속도)로 읽힌다. 장애물이 0 이면 같지만 1 이면 회전 속도 1 m/min(최저 속도로 묶임)이 되고 장애물 감지는 꺼진다. 컴파일러가 막지 못한다. 옛 6인자(…, 장애물, 속도)는 컴파일 오류다.
@@ -416,6 +418,8 @@ TAG_TABLE_BEGIN( site_tags )
     TAG( 21, ANY_PROFILE,  AGV_TURN( CW, 90, 0, 1 ) )
     TAG( 23, ANY_PROFILE,  AGV_TURN( CW, 90, 0, 1, 0, TAPE ) )       /* 교차 테이프를 찾은 뒤 정렬 회전 */
     TAG( 24, ANY_PROFILE,  SEQ_START( TAPE, LOAD ) )                 /* 교차 테이프에서 서고 시퀀스 */
+    TAG( 25, ANY_PROFILE,  AGV_STOP( 300 ) )                         /* 태그 자리에서 300 mm 가서 정지 */
+    TAG( 26, ANY_PROFILE,  AGV_STOP( TAPE_GD ), ACS_SEND( STANDBY, 3 ) )   /* 회전 중심을 교차선에 맞춰 서고 대기 보고 */
 
     /* 적재 태그 4: 프로파일별. 위에서 아래로 첫 번째로 맞는 규칙 하나만 실행 */
     TAG   ( 4, PF_MATERIAL,  AGV_STOP, SEQ_START( LOAD ) )
@@ -429,7 +433,7 @@ TAG_TABLE_END
 - `tagact_run(tag)`는 활성 프로파일과 번호가 맞는 첫 규칙을 찾아 액션을 순서대로 실행한다. 규칙이 없으면 아무것도 하지 않는다.
 - 액션은 규칙당 4칸이다. `AGV_TURN`은 2칸을 쓴다. 넘치면 `CALL( 인덱스 )`.
 - 회전 `AGV_TURN( 방향, 각도, 회전 뒤 방향, 자동 출발[, 속도[, 옵션…]] )`(3.2.2). 옵션 `ALIGN` 주행로 정렬, `TAPE` 교차 테이프를 찾은 뒤 정렬(둘 중 하나), `OBS` 회전 중 장애물 감지. 속도는 m/min 0\~31이고 0이나 생략은 자동(적재 `TNS`, 공차 `ETN`). 값이 있으면 적재·공차와 상관없이 그 회전 한 번만 그 속도다. 회전 최저 속도보다 낮으면 최저 속도, `TNS` 한계(25)보다 높으면 한계로 묶는다. 회전 끝 감속·정렬·회전 정지 계획도 그 값을 상한으로 쓰고, 회전이 끝나거나 STOP·오류로 끊기면 자동으로 돌아간다. 예: `AGV_TURN( CW, 90, 0, 1, 15 )` 15 m/min, `AGV_TURN( CW, 90, 0, 1, 0, ALIGN, OBS )`. 둘째 칸 = 회전 뒤 방향 b0\~3 | 자동 출발 b4\~7 | 장애물 b8 | 속도 b11\~15.
-- 교차 테이프 정지 `SEQ_START( TAPE, 시퀀스 )`(예전 `AGV_TAPE_STOP`. 이 동작만 옵션이 앞이다): 교차 테이프를 찾아 서고 시퀀스. 숫자 속도는 `AGV_SPEED_MMIN( m/min )`(4\~255).
+- 정지는 4분류다(5.2): `AGV_STOP`(`SL`), `AGV_STOP( mm )`, `AGV_STOP( TAPE )`, `AGV_STOP( TAPE_GD )`. 정지 뒤 시퀀스는 `SEQ_START( [정지 방식,] 시퀀스 )`(이 동작만 옵션이 앞이다. 예전 `AGV_TAPE_STOP` 은 `SEQ_START( TAPE, 시퀀스 )`). 숫자 속도는 `AGV_SPEED_MMIN( m/min )`(4\~255).
 - 보고·대기·스테이션은 태그 표 파일에서 `agv/tag_dsl.h`를 포함하고 시퀀스 표와 같은 이름으로 쓴다. `ACS_SEND( 종류, 번호 )`(0\~255, 2칸), 번호 자리에 `STATION(k)`(스테이션 큐[k], 레거시 `ACS_Station_Call_Num[k]`) 또는 `AGV_ID_MINUS(n)`(호기 번호 - n), `ACS( 종류, STATION0 )`(1칸, 정보 값이 8비트뿐이라 `STANDBY_RESET`은 컴파일 오류. 대기 리셋은 2칸 `ACS_SEND`), `STATION_RESET`. 대기 `ACS_SEND( STANDBY, n )`은 레거시 `DA_ACS_Standby( n, NONE )` + 자동 재전송 켬(정지, 번호 > 0 이면 자동 재전송 늘 켬. 번호 0 이하(호기 - n 이 0 이하 등)는 한 번만 보낸다), `ACS_SEND( STANDBY_RESET, n )`은 `DA_ACS_Standby( n, RESET )`(먼저 스테이션 큐를 지운다)이다. 예: `TAG( 30, PF_X, AGV_STOP, ACS_SEND( STANDBY, 1 ), STATION_RESET )`. 둘째 칸 = Info | `TA_ACS_STANDBY_RESET`(0x100) | `TA_ACS_AGV_MINUS`(0x200) | `TA_ACS_STATION`(0x400). 시퀀스 표의 `ACS_SEND( STANDBY, … )`는 보고만 한다. `STATION[k]`(대괄호)는 쓰지 않는다: 문자열 첨자 같은 우회는 C 정수 상수식이 아니라 컴파일 때 범위 검사(`sizeof` 배열)와 같이 못 쓰고 표준 밖 확장에 기댄다. 숫자 칸 `( TA_ACS | DSL_INFO_… )`, `( TA_ACS_NUM | n ), DSL_INFO_…`도 쓸 수 있다. 예전 `A_` 이름(`A_STOP` 등)은 v0.47.0 에서 뺐다(대응표는 CHANGELOG v0.47.0).
 - 조건은 `TAG_IF`의 셋째 인자 하나. 확장 조건 둘과 입력 조건 하나를 AND 한다.
 
@@ -469,6 +473,36 @@ PROFILE_TABLE_BEGIN( site_profiles )
     PROFILE( PF_LIFT,      100, 81, 93 )
 PROFILE_TABLE_END
 ```
+
+### 5.2 태그 정지 4분류 (v0.50.0)
+
+| 분류 | 정지 | 정지 뒤 시퀀스 | 서는 자리 | 쓰임 |
+|---|---|---|---|---|
+| 1 | `AGV_STOP` | `SEQ_START( x )` | 태그를 읽은 자리에서 `SL` 만큼 가서 | 대기·교통 정지. 지금 동작 |
+| 2 | `AGV_STOP( mm )` | `SEQ_START( mm, x )`(2칸) | 태그를 읽은 자리에서 mm 가서. 10 mm 단위 0\~2550, 0 = 바로 | 태그마다 거리를 달리할 때 |
+| 3 | `AGV_STOP( TAPE )` | `SEQ_START( TAPE, x )` | 교차선을 찾아 센서가 선 위인 자리에서 바로 | 적재·하역 자리처럼 정밀도가 필요한 정지 |
+| 4 | `AGV_STOP( TAPE_GD )` | `SEQ_START( TAPE_GD, x )` | 교차선을 찾아 `GD` 더 가서(회전 중심이 선 위) | 회전 자리. 교차선 회전 `AGV_TURN( …, TAPE )` 과 같은 루틴 |
+
+고르는 기준:
+
+- 태그 위치로 충분하면 1(모든 태그 같은 `SL`) 또는 2(태그마다 거리). 2 의 거리는 1 과 같은 기준점(태그를 읽은 자리)에서 재고, 정지 제어도 같다. 거리가 그 속도의 제동 거리보다 짧으면 `SL` 이 짧을 때와 같다.
+- 장비와 맞추는 정밀 위치는 바닥에 교차선을 붙이고 3. 그 자리에서 돌거나 회전 중심을 선에 맞춰야 하면 4.
+- 3·4 는 태그 뒤 `SL` 의 2배 안에 교차선이 있어야 한다. 없으면 서고 가이드 센서 오류(258). 찾는 속도는 3 이 최저 속도(`SPN`), 4 가 교차선 회전과 같은 계산값이다.
+- mm 는 숫자로 적는다(10 mm 단위가 아니거나 범위 밖, 정하지 않은 낱말은 컴파일 오류). 인코딩: 분류 2 `TA_STOP_MM`(인자 10 mm 단위), 3 `TA_TAPE_STOP`, 4 `TA_TAPE_STOP_GD`(인자 = 시퀀스, 0 = 없음). 분류 1·3·4(+시퀀스)는 1칸, 2 + 시퀀스는 2칸이다.
+
+같은 규칙 안의 겹침:
+
+- 규칙에 분류 2·3·4 가 있으면 규칙 안 순서와 무관하게 그 정지가 이긴다. 같은 규칙의 `AGV_STOP`·`SEQ_START( x )`·`AGV_AUTOSTART…`·`ACS_SEND( STANDBY… )` 는 태그 자리 `SL` 정지를 걸지 않는다. 자동 출발은 재출발 예약을 그대로 걸고(선 뒤 `AS` 초), 대기 보고는 태그를 읽은 때 보고·자동 재전송만 한다. 분류 3·4 규칙의 `SEQ_START( x )` 는 교차선 정지 뒤 시퀀스가 된다(교차선 칸에 시퀀스가 없을 때).
+- 분류가 둘 이상이면 3·4 가 2 를 이기고, 같은 급이면 뒤의 것이 이긴다.
+- 다른 정지가 진행 중일 때: 분류 2 는 진행 중인 정지 거리를 바꾸지 않는다(분류 1 과 같다). 분류 3·4 요청은 `AGV_STOP` 처럼 늘 받고, 주행 쪽이 다른 정지 중에는 찾기를 보류했다가 다시 달리면 잇는다.
+- 교차선 회전 요청(`AGV_TURN( …, TAPE )`)은 일반 회전을 걸지 않는 상황(회전 모드 0, 회전 중, 거리 정지 진행 중, 서 있음)에서만 걸지 않는다. 명령 정지(교통 정지 등) 감속 중에는 건다. 요청이 걸린 동안(찾는 중·보류 중) 새 태그는 회전 중처럼 ACK 없이 버리고, 교차로 IN·OUT 태그는 서고 오류(290)다.
+
+금지 조합(뜻이 모호하다. 압축 표 생성기가 규칙 번호·태그와 함께 오류로 잡는다. 손으로 쓰는 펼친 표는 검사하지 않는다):
+
+- 회전(일반·`ALIGN`·`TAPE`)과 분류 2·3·4 정지
+- 회전 둘(뒤 회전은 거부된다)
+- 분류 3·4 규칙에 시퀀스 둘(교차선 칸의 시퀀스 + `SEQ_START( y )`, 또는 시퀀스 있는 교차선 정지 둘. 하나는 버려진다)
+- 분류 3·4 와 `AGV_SPEED…`(찾는 동안 찾기 속도가 덮는다)
 
 ## 6. 도구
 
