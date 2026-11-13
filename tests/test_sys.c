@@ -117,6 +117,16 @@ static const tag_rule_t s_rules[] = {
     TAG( 34, 0, AGV_STOP, ACS_SEND( STANDBY, AGV_ID_MINUS(2) ), STATION_RESET )
     TAG( 35, 0, ACS_SEND( STANDBY_RESET, 14 ) )
     TAG( 36, 0, ACS_SEND( ARRIVE, STATION(1) ) )
+    /* 정지 4분류: 분류 2·3·4 가 같은 규칙의 SL 정지를 이긴다(순서와 무관) */
+    TAG( 37, 0, ACS_SEND( STANDBY, 7 ), SEQ_START( 300, LOAD ) )
+    TAG( 38, 0, AGV_STOP, AGV_STOP( 0 ) )
+    TAG( 39, 0, AGV_AUTOSTART( 5 ), AGV_STOP( TAPE ) )
+    TAG( 40, 0, SEQ_START( LOAD ), ACS_SEND( STANDBY, 7 ), AGV_STOP( TAPE_GD ) )
+    TAG( 41, 0, SEQ_START( TAPE_GD, LOAD ) )
+    TAG( 42, 0, AGV_STOP( 200 ), SEQ_START( TAPE, LOAD ), AGV_STOP )
+    TAG( 43, 0, AGV_TURN( CW, 90, 0, 1, 0, TAPE ) )
+    TAG( 44, 0, AGV_AUTOSTART( 1 ), SEQ_START( TAPE, LOAD ) )
+    TAG( 45, 0, AGV_STOP( TAPE ), ACS_SEND( STANDBY, 7 ), AGV_AUTOSTART( 1 ) )
 };
 
 /* 위 20~23 과 같은 규칙의 압축 표. 앞 줄은 다른 프로파일이라 건너뛴다 */
@@ -1674,6 +1684,135 @@ static void test_tag_standby(void)
     printf("  tag standby ok\n");
 }
 
+/* 달리는 중 태그 규칙 하나를 실행한다 */
+static void tag_stop_rule(uint16_t tag)
+{
+    boot();
+    drive_up();
+    run_scan(20);
+    (void)tagact_run(tag);
+}
+
+/* 태그 정지 4분류. 분류 3·4 의 찾기·정지는 run.c 몫이라 여기서는 태그 해석기가 넣는 값만 본다 */
+static void test_tag_stop_class(void)
+{
+    /* 분류 1 대기 보고는 급정지(위치 정지 아님) */
+    tag_stop_rule(34);
+    guide_reply(0);
+    tick();
+    assert(D.flag_stopping && !stop_is_position(stop_reason()));
+    run_standby_clear(0);
+
+    /* 분류 2: 태그 자리에서 300 mm(SL 과 같은 환산). 대기 보고는 보고만, 시퀀스는 바로 요청 */
+    tag_stop_rule(37);
+    assert(D.flag_stopping && (D.stop_pulses == (int16_t)(30.0f * P.one_length_pulse * 10.0f)));
+    assert((run_standby_num() == 7) && seq_request_flag[SEQ_LOAD] && (D.tape_stop_kind == 0));
+    guide_reply(0);
+    tick();
+    assert(stop_is_position(stop_reason()));
+    run_standby_clear(0);
+    run_seq_init();                              /* 요청한 시퀀스를 지운다(부팅은 남긴다) */
+
+    /* 분류 2, 0 mm = 바로 정지. 앞의 AGV_STOP(SL) 을 이긴다 */
+    tag_stop_rule(38);
+    assert(D.flag_stopping && (D.stop_pulses == 0));
+
+    /* 분류 3: 태그 자리에서 서지 않는다. 자동 출발은 걸어 둔다(선 뒤에 센다) */
+    tag_stop_rule(39);
+    assert(!D.flag_stopping && (D.tape_stop_kind == TA_STOP_KIND_TAPE) && (D.tape_stop_id == 0) && D.wait_start);
+
+    /* 분류 4: 같은 규칙의 SEQ_START( 시퀀스 ) 는 교차선 정지 뒤 시퀀스, 대기 보고는 정지 없이 */
+    tag_stop_rule(40);
+    assert(!D.flag_stopping && (D.tape_stop_kind == TA_STOP_KIND_TAPE_GD) && (D.tape_stop_id == SEQ_LOAD));
+    assert(!seq_request_flag[SEQ_LOAD] && (run_standby_num() == 7));
+    run_standby_clear(0);
+
+    tag_stop_rule(41);
+    assert(!D.flag_stopping && (D.tape_stop_kind == TA_STOP_KIND_TAPE_GD) && (D.tape_stop_id == SEQ_LOAD));
+
+    /* 분류 3 이 2 를 이긴다(앞뒤 순서와 무관), AGV_STOP 도 서지 않는다 */
+    tag_stop_rule(42);
+    assert(!D.flag_stopping && (D.tape_stop_kind == TA_STOP_KIND_TAPE) && (D.tape_stop_id == SEQ_LOAD));
+
+    /* 진행 중인 정지는 새 교차선 정지 요청이 깨지 않는다(AGV_STOP 이 정지 중에 다시 와도 거리가 그대로인 것과 같다) */
+    boot();
+    drive_up();
+    run_scan(20);
+    tag_frame(1, '1', 0);                        /* AGV_STOP */
+    run_scan(1);
+    assert(D.flag_stopping && (D.stop_pulses > 0));
+    (void)tagact_run(41);
+    assert((D.tape_stop_kind == 0) && (D.tape_stop_id == 0) && !seq_request_flag[SEQ_LOAD]);
+
+    /* 교차선 정지 + 자동 출발: 태그 자리에서 서지 않고(예전에는 자동 출발이 SL 정지를 걸고, 다시 떠날 때 run_seq_init 이
+     * 교차선 요청을 지워 시퀀스가 안 돌았다) 교차선에서 선다. 선 뒤에는 분류 1 의 SEQ_START( x ) + 자동 출발과 같다:
+     * 재출발 대기(AS 초)를 마치고 시퀀스가 돌며, 재출발은 시퀀스가 끝난 뒤다 */
+    tag_stop_rule(44);
+    assert(!D.flag_stopping && D.wait_start && (D.tape_stop_kind == TA_STOP_KIND_TAPE) && (D.tape_stop_id == SEQ_LOAD));
+    {
+        int i;
+        for (i = 0; (i < 10) && !D.flag_stopping; i++) { guide_led_reply(0x03FFu); tick(); }
+        assert(D.flag_stopping && (D.stop_pulses == 0) && seq_request_flag[SEQ_LOAD] && D.wait_start);
+        for (i = 0; (i < 400) && !D.run_restart && !(D.flag_run && !D.flag_stopping); i++) { guide_reply(0); tick(); }
+        assert((i < 400) && !D.flag_run && seq_request_flag[SEQ_LOAD]);
+        for (i = 0; (i < 50) && !seq_is_active(); i++) { guide_reply(0); tick(); }
+        assert(seq_is_active() && D.run_restart && !D.flag_run);   /* 시퀀스가 돌고, 재출발은 시퀀스 뒤로 미뤄진다 */
+        run_seq_init();
+    }
+
+    /* 교차선 정지 + 대기 보고 + 자동 출발: 보고는 태그 자리, 정지는 교차선 */
+    tag_stop_rule(45);
+    assert(!D.flag_stopping && D.wait_start && (run_standby_num() == 7) && (D.tape_stop_kind == TA_STOP_KIND_TAPE));
+    run_standby_clear(0);
+
+    D.tape_stop_kind = 0;
+    boot();
+    printf("  tag stop class ok\n");
+}
+
+/* 교차선 회전 요청: 일반 회전을 걸지 않는 상황(정지 중, 서 있음, 회전 모드 0)이면 아무 일도 없다.
+ * 요청이 걸려 교차선을 찾는 동안 읽은 태그는 회전 중과 같이 ACK 없이 버린다 */
+static void test_tape_turn_request(void)
+{
+    boot();
+    (void)param_set(P_TURN_FORBACK, 10);
+    drive_up();
+    run_scan(20);
+    D.flag_stopping = 1;                         /* 정지 중(거리 끝, 꼬리) */
+    (void)tagact_run(43);
+    assert(D.tape_turn_dir == 0);
+    D.stop_pulses = 100;
+    D.flag_stopping = 0;                         /* 정지 거리 진행 중 */
+    (void)tagact_run(43);
+    assert(D.tape_turn_dir == 0);
+
+    boot();                                      /* 서 있음 */
+    (void)param_set(P_TURN_FORBACK, 10);
+    (void)tagact_run(43);
+    assert(D.tape_turn_dir == 0);
+
+    boot();                                      /* 회전 모드 0 */
+    (void)param_set(P_TURN_FORBACK, 0);
+    drive_up();
+    run_scan(20);
+    (void)tagact_run(43);
+    assert(D.tape_turn_dir == 0);
+
+    /* 달리는 중이면 건다. 찾는 동안 정지 태그는 ACK 없이 버린다 */
+    boot();
+    (void)param_set(P_TURN_FORBACK, 10);
+    drive_up();
+    run_scan(20);
+    (void)tagact_run(43);
+    assert((D.tape_turn_dir == TURN_CW) && (D.tape_turn_deg == 90) && !D.flag_stopping);
+    host.sci[HAL_SCI_A].tx_len = 0;
+    tag_frame(1, '2', 0);
+    run_scan(1);
+    assert(!tx_has('A', 'E') && !D.flag_stopping && (D.tape_turn_dir == TURN_CW));
+    boot();
+    printf("  tape turn request ok\n");
+}
+
 /* 정렬 회전: 'h' 로 슬립을 재고, 목표각 근방에서 라인을 찾아 중앙에서 끝낸다 */
 static void test_align_turn(void)
 {
@@ -3107,6 +3246,8 @@ int main(void)
     test_turn_speed();
     test_seq_turn_speed();
     test_tag_standby();
+    test_tag_stop_class();
+    test_tape_turn_request();
     test_tune_entry();
     test_ee_probe();
     test_tune_menu();

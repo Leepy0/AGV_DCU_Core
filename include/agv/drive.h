@@ -131,7 +131,8 @@ typedef struct {
     float   tape_end_cnt;            /* 라인 중앙 예상 펄스. 목표를 새 라인 위치로 고친 값. 감속 계획과 TN 표시 */
     float   tape_sum_mt, tape_sum_tt;   /* 슬립비 최소제곱 누적: 잰 펄스 × 돈 펄스, 돈 펄스² */
     int16_t tape_plan_min;           /* 이번 정렬 회전의 감속 계획 최솟값 rpm. 0 = 아직 없음. 계획을 다시 올리지 않는다 */
-    int16_t tape_stop_id;            /* DA_Guide_Stop_Action. 0 = 없음 */
+    int16_t tape_stop_id;            /* DA_Guide_Stop_Action. 교차선 정지 뒤 시작할 시퀀스. 0 = 시퀀스 없음 */
+    int16_t tape_stop_kind;          /* 교차선 정지 분류: 0 없음, 3 교차선에서 바로, 4 교차선 뒤 GD(TA_STOP_KIND_*). 태그 해석기가 넣고 run.c 가 0 으로 돌린다 */
     int16_t tape_turn_dir;           /* DA_Tape_Turn_Dir. 교차 테이프를 찾으면 회전한다 */
     int16_t tape_turn_deg;           /* DA_Tape_Turn_Degree */
     uint16_t tape_turn_next;         /* 회전 인자 둘째 칸: fb | auto<<4 | obs<<8 */

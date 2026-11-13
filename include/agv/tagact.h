@@ -66,7 +66,7 @@ extern void (*tagact_trace)(uint16_t code, uint16_t next);   /* 호스트 시험
 #define TA_TURN_SPEED_SHIFT 11
 #define TA_BRANCH         0x0600   /* 인자: branch_dir_t */
 #define TA_SEQ            0x0700   /* 인자: seq_id_t (정지 + 시퀀스 요청) */
-#define TA_TAPE_STOP      0x0800   /* 인자: seq_id_t (테이프 탐색 정지 뒤 시퀀스) */
+#define TA_TAPE_STOP      0x0800   /* 인자: seq_id_t(0 = 시퀀스 없음). 교차선을 찾아 본 자리에서 정지 뒤 시퀀스 */
 #define TA_ACS            0x0900   /* 인자: DSL_INFO_* ; 번호는 스테이션 큐[0] */
 #define TA_ACS_NUM        0x0A00   /* 인자: 번호 상수 (다음 칸에 Info | TA_ACS_* 비트) */
 #define TA_ACS_STANDBY_RESET 0x0100   /* 다음 칸: Info 'B' 에서 먼저 스테이션 큐를 지운다 */
@@ -79,6 +79,12 @@ extern void (*tagact_trace)(uint16_t code, uint16_t next);   /* 호스트 시험
 #define TA_CALL           0x0D00   /* 인자: 사용자 함수 표 인덱스 */
 #define TA_TURN_ALIGN     0x1000   /* TA_TURN 과 같은 인자. 목표각 근방에서 주행로에 정렬 */
 #define TA_TURN_TAPE      0x1100   /* TA_TURN_ALIGN 과 같다. 교차 테이프를 찾은 뒤 시작 */
+/* 태그 정지 4분류: 1 TA_STOP(SL), 2 TA_STOP_MM(지정 거리), 3 TA_TAPE_STOP(교차선에서 바로), 4 TA_TAPE_STOP_GD(교차선 뒤 GD).
+ * 규칙에 분류 2·3·4 가 있으면 그 정지가 이긴다(같은 규칙의 TA_STOP·자동 출발·대기 보고가 태그 자리 SL 정지를 걸지 않는다) */
+#define TA_STOP_MM        0x1200   /* 인자: 정지 거리 10 mm 단위 0~255(0 = 바로 정지). 태그를 읽은 자리에서 잰다 */
+#define TA_TAPE_STOP_GD   0x1300   /* 인자: seq_id_t(0 = 시퀀스 없음). 교차선을 찾아 GD 더 가서 정지 뒤 시퀀스 */
+#define TA_STOP_KIND_TAPE    3     /* D.tape_stop_kind: 교차선에서 바로 정지 */
+#define TA_STOP_KIND_TAPE_GD 4     /* D.tape_stop_kind: 교차선 뒤 GD 가서 정지 */
 
 /* 시퀀스 AGV_MOVE( mm ): 서 있을 때 mm 앞에 위치 정지하는 이동을 건다. 달리고 있거나 mm < 1 이면 무시(D.move_on 0 그대로) */
 void     tagact_move_mm(int16_t mm);

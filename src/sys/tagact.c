@@ -169,12 +169,16 @@ static int16_t turn_90(void)
     return (q > 16383.0f) ? 16383 : (int16_t)q;
 }
 
+/* 회전을 걸지 않는 상황: 회전 모드 0, 회전 중, 정지 거리 진행 중, 서 있음(시퀀스·튜닝 아니면) */
+static int turn_refused(void)
+{
+    return (P.turn_mode <= 0) || (D.turn_pulses != 0) || (D.stop_pulses != 0)
+           || (!seq_is_active() && !s_turn_from_stop && (D.vin_out <= TURN_STOP_MIN_VIN));
+}
+
 void tagact_turn(turn_dir_t d, uint16_t deg, dir_t fb, uint16_t autostart, uint16_t obs)
 {
-    if ((P.turn_mode <= 0) || (D.turn_pulses != 0) || (D.stop_pulses != 0)
-        || (!seq_is_active() && !s_turn_from_stop && (D.vin_out <= TURN_STOP_MIN_VIN))) {
-        return;
-    }
+    if (turn_refused()) { return; }
     if (D.vin_out >= TURN_STOP_MIN_VIN) {
         D.flag_stopping = 1;
         D.stop_pulses = (s_turn_stop_len > 0) ? s_turn_stop_len : P.stop_len;
@@ -312,19 +316,48 @@ static uint16_t has_second_word(uint16_t code)
                       || (kind == TA_ACS_NUM) || (kind == TA_STATE));
 }
 
-static void autostart(uint16_t sec)
+/* 규칙의 정지 분류. 분류 2·3·4 가 있으면 그것(3·4 가 2 보다 앞, 같은 급이면 뒤의 것), 없으면 0.
+ * *arg: 분류 2 는 10 mm 단위 거리, 분류 3·4 는 정지 뒤 시퀀스(그 칸이 0 이면 같은 규칙 TA_SEQ 의 시퀀스) */
+static int16_t stop_class(const uint16_t *act, uint16_t *arg)
+{
+    int16_t cls = 0;
+    uint16_t i, seq = 0;
+
+    *arg = 0;
+    for (i = 0; (i < 4u) && (act[i] != 0u); i = (uint16_t)(i + 1u + has_second_word(act[i]))) {
+        uint16_t kind = (uint16_t)(TA_KIND(act[i]) << 8);
+        int16_t c = (kind == TA_STOP_MM) ? 2 : (kind == TA_TAPE_STOP) ? TA_STOP_KIND_TAPE
+                  : (kind == TA_TAPE_STOP_GD) ? TA_STOP_KIND_TAPE_GD : 0;
+        if (kind == TA_SEQ) { seq = TA_ARG(act[i]); }
+        if ((c != 0) && ((c >= 3) || (cls < 3))) {
+            cls = c;
+            *arg = TA_ARG(act[i]);
+        }
+    }
+    if ((cls >= 3) && (*arg == 0u)) { *arg = seq; }
+    return cls;
+}
+
+/* 분류 3·4 규칙에서는 태그 자리에서 서지 않는다(교차선에서 run.c 가 세운다) */
+static void rule_stop(int16_t cls)
+{
+    if (cls < 3) { D.flag_stopping = 1; }
+}
+
+static void autostart(uint16_t sec, int16_t cls)
 {
     uint16_t wait = (sec != 0u) ? sec : (uint16_t)param_get(P_AUTO_START_SEC);
-    D.flag_stopping = 1;
+    rule_stop(cls);
     if (wait != 0u) { run_request_restart(wait); }
 }
 
 /* 태그 보고. 대기('B')는 레거시 DA_ACS_Standby + 자동 재전송 켬 = ON: 정지, 번호 > 0 이면 자동 재전송 늘 켬,
- * TA_ACS_STANDBY_RESET 이면 먼저 스테이션 큐를 지운다 */
-static void tag_acs(uint16_t info, int16_t num)
+ * TA_ACS_STANDBY_RESET 이면 먼저 스테이션 큐를 지운다. 분류 2·3·4 규칙이면 정지는 그 분류가 건다 */
+static void tag_acs(uint16_t info, int16_t num, int16_t cls)
 {
     if ((info & 0xFFu) == 'B') {
-        run_standby(num, (int16_t)(RUN_STANDBY_AUTO | ((info & TA_ACS_STANDBY_RESET) ? RUN_STANDBY_RESET : 0)));
+        run_standby(num, (int16_t)(RUN_STANDBY_AUTO | ((info & TA_ACS_STANDBY_RESET) ? RUN_STANDBY_RESET : 0)
+                                   | ((cls != 0) ? RUN_STANDBY_NOSTOP : 0)));
     }
     else { acs_report(info & 0xFFu, num); }
 }
@@ -333,7 +366,7 @@ static void tag_acs(uint16_t info, int16_t num)
 void (*tagact_trace)(uint16_t code, uint16_t next);   /* 시험용: 실행하는 동작마다 알린다 */
 #endif
 
-static void act_exec(uint16_t code, uint16_t next)
+static void act_exec(uint16_t code, uint16_t next, int16_t cls)
 {
     uint16_t arg = TA_ARG(code);
 
@@ -342,8 +375,9 @@ static void act_exec(uint16_t code, uint16_t next)
 #endif
 
     switch ((uint16_t)(TA_KIND(code) << 8)) {
-    case TA_STOP:           tagact_stop(); break;
-    case TA_STOP_AUTOSTART: autostart(arg); break;
+    case TA_STOP:
+    case TA_STOP_MM:        rule_stop(cls); break;                /* 거리는 tagact_run 끝에서 */
+    case TA_STOP_AUTOSTART: autostart(arg, cls); break;
     case TA_SPEED:          tagact_speed(arg); break;
     case TA_FORBACK:        tagact_forback((dir_t)arg); break;
     case TA_TURN:
@@ -352,18 +386,24 @@ static void act_exec(uint16_t code, uint16_t next)
     case TA_TURN_ALIGN:
         tagact_turn_align((turn_dir_t)(arg & 3u), (uint16_t)((arg >> 2) * 90u), next);
         break;
-    case TA_TURN_TAPE:
-        D.tape_turn_dir = (int16_t)(arg & 3u);
-        D.tape_turn_deg = (int16_t)((arg >> 2) * 90u);
-        D.tape_turn_next = next;
+    case TA_TURN_TAPE:      /* 일반 회전을 걸지 않는 상황과 정지 중에는 요청하지 않는다(찾기 속도가 정지와 부딪힌다) */
+        if (!turn_refused() && !D.flag_stopping) {
+            D.tape_turn_dir = (int16_t)(arg & 3u);
+            D.tape_turn_deg = (int16_t)((arg >> 2) * 90u);
+            D.tape_turn_next = next;
+        }
         break;
     case TA_BRANCH:         tagact_branch((branch_dir_t)arg); break;
-    case TA_SEQ:            tagact_stop(); seq_request(arg); break;
-    case TA_TAPE_STOP:      D.tape_stop_id = (int16_t)arg; break;
-    case TA_ACS:            tag_acs(arg, acs_station_get(0)); break;
+    case TA_SEQ:                                       /* 분류 3·4 규칙이면 교차선 정지 뒤 시퀀스(tagact_run 이 넣는다) */
+        if (cls < 3) {
+            rule_stop(cls);
+            seq_request(arg);
+        }
+        break;
+    case TA_ACS:            tag_acs(arg, acs_station_get(0), cls); break;
     case TA_ACS_NUM:
         tag_acs(next, (next & TA_ACS_STATION) ? acs_station_get(arg)
-                      : (next & TA_ACS_AGV_MINUS) ? (int16_t)(param_get(P_AGV_ID) - (int16_t)arg) : (int16_t)arg);
+                      : (next & TA_ACS_AGV_MINUS) ? (int16_t)(param_get(P_AGV_ID) - (int16_t)arg) : (int16_t)arg, cls);
         break;
     case TA_OBS:            D.obs_use = (int16_t)arg; break;
     case TA_STATE:          seq_state_set(arg, next); break;
@@ -381,7 +421,8 @@ int tagact_run(uint16_t tag)
     int16_t was_stopping = D.flag_stopping;
     int16_t prev_len = D.stop_pulses;
     const tag_rule_t *r;
-    uint16_t i, irq;
+    uint16_t i, irq, carg = 0;
+    int16_t cls = 0;
     int started;
 
     if (tune_active()) { return 0; }         /* 튜닝 주행은 태그를 쓰지 않는다 */
@@ -389,16 +430,24 @@ int tagact_run(uint16_t tag)
     if (r != 0) {
         uint16_t act[4];                      /* 사용자 함수가 tagact_run 을 다시 불러도 s_hit 가 덮이지 않게 복사 */
         for (i = 0; i < 4u; i++) { act[i] = r->act[i]; }
+        cls = stop_class(act, &carg);         /* 분류 2·3·4 정지가 규칙 안 순서와 무관하게 이긴다 */
         for (i = 0; (i < 4u) && (act[i] != 0u); i++) {
             uint16_t second = has_second_word(act[i]);
-            act_exec(act[i], (uint16_t)((second && (i < 3u)) ? act[i + 1u] : 0u));
+            act_exec(act[i], (uint16_t)((second && (i < 3u)) ? act[i + 1u] : 0u), cls);
             i = (uint16_t)(i + second);
         }
     }
+    if ((cls >= 3) && !was_stopping) {        /* 분류 3·4: 찾고 서는 것은 run.c(tape_stop). 진행 중인 정지는 깨지 않는다 */
+        D.tape_stop_kind = cls;
+        D.tape_stop_id = (int16_t)carg;
+    }
     /* 이 태그로 시작된 정지만 거리를 건다. 레거시는 정지 중 태그마다 다시 걸어 정지 위치가 밀렸다.
+     * 분류 2 는 SL 과 같은 단위(10 mm)·같은 정지에 거리만 다르다.
      * shortcut: 방향별 정지 거리를 쓰는 타입을 옮길 때 사이트 선택으로 바꾼다 */
     started = (int)(D.flag_stopping && !was_stopping);
-    if (started) { D.stop_pulses = P.stop_len; }
+    if (started) {
+        D.stop_pulses = (cls == 2) ? (int16_t)((float)carg * P.one_length_pulse * 10.0f) : P.stop_len;
+    }
     s_display_tag = tag;
     irq = hal_irq_save();
     D.straight_cnt = 0;

@@ -4,7 +4,8 @@
  * 호스트: gcc -std=c99 -DAGV_HOST_BUILD -Iinclude tests/test_dsl.c -o build/test_dsl && build/test_dsl
  * 타깃:   cl2000 -v28 -ml -mt --c99 -Iinclude --compile_only tests/test_dsl.c
  * 컴파일 오류 시험: -DNEG_AMP_INPUT, -DNEG_NO_DIRECTION, -DNEG_PARAM_ZERO, -DNEG_MOD_ZERO, -DNEG_HIGH_ANY, -DNEG_TURN_SPEED,
- * -DNEG_ACS1_RESET, -DNEG_PIN_TWICE, -DNEG_PIN_ANY, -DNEG_PIN_ONE 과 표기 옵션(-DNEG_SEQ_*, -DNEG_TAG_*, -DNEG_MMIN, -DNEG_SEQSTART_OPT)
+ * -DNEG_ACS1_RESET, -DNEG_PIN_TWICE, -DNEG_PIN_ANY, -DNEG_PIN_ONE 과 표기 옵션(-DNEG_SEQ_*, -DNEG_TAG_*, -DNEG_MMIN, -DNEG_SEQSTART_*,
+ * -DNEG_STOP_*)
  * 각각 컴파일이 실패해야 한다(tests/run_host.ps1 이 하나씩 본다).
  */
 #include "agv/seq_dsl.h"
@@ -172,6 +173,20 @@ TAG_TABLE_BEGIN( site_tags )
     TAG( 38, 1, AGV_TURN( CCW, 180, DIR_TOGGLE, 1, 15, ALIGN, OBS ) )                             /* 17 회전 속도, 옵션 둘 */
     TAG( 46, 1, AGV_TURN( CW, 90, 0, 1, 31, OBS ) )                                               /* 18 속도 16 이상: b15 */
     TAG( 47, 1, AGV_TURN( CW, 90, 0, 1, 0, TAPE ), SEQ_START( TAPE, LOAD ), AGV_SPEED_MMIN( 20 ) )  /* 19 */
+    TAG( 48, 1, AGV_STOP( 2550 ), AGV_STOP( 0 ), AGV_STOP( TAPE ), AGV_STOP( TAPE_GD ) )         /* 20 정지 4분류 */
+    TAG( 49, 1, SEQ_START( 120, LOAD ), SEQ_START( TAPE_GD, UNLOAD ), AGV_STOP )                  /* 21 */
+#ifdef NEG_STOP_UNIT
+    TAG( 39, 1, AGV_STOP( 255 ) )                                  /* 10 mm 단위 */
+#endif
+#ifdef NEG_STOP_MAX
+    TAG( 39, 1, AGV_STOP( 2560 ) )
+#endif
+#ifdef NEG_STOP_WORD
+    TAG( 39, 1, AGV_STOP( ALIGN ) )                                /* 정하지 않은 방식 */
+#endif
+#ifdef NEG_SEQSTART_UNIT
+    TAG( 39, 1, SEQ_START( 15, LOAD ) )
+#endif
 #ifdef NEG_MOD_ZERO
     TAG_IF( 37, 1, IF_STATION_MOD(0, 0, 3), AGV_STOP )
 #endif
@@ -301,6 +316,10 @@ int main(void)
     assert(site_tags[18].act[0] == (TA_TURN | TURN_CW | (1 << 2)) && site_tags[18].act[1] == 0xF910u);   /* 31 << 11 | OBS 1 << 8 | 1 << 4 */
     assert(site_tags[19].act[0] == (TA_TURN_TAPE | TURN_CW | (1 << 2)) && site_tags[19].act[1] == (1 << 4)
            && site_tags[19].act[2] == (TA_TAPE_STOP | SEQ_LOAD) && site_tags[19].act[3] == (TA_SPEED | 20));
+    assert(site_tags[20].act[0] == (TA_STOP_MM | 255) && site_tags[20].act[1] == TA_STOP_MM
+           && site_tags[20].act[2] == TA_TAPE_STOP && site_tags[20].act[3] == TA_TAPE_STOP_GD);
+    assert(site_tags[21].act[0] == (TA_STOP_MM | 12) && site_tags[21].act[1] == (TA_SEQ | SEQ_LOAD)
+           && site_tags[21].act[2] == (TA_TAPE_STOP_GD | SEQ_UNLOAD) && site_tags[21].act[3] == TA_STOP);
     {   /* 시퀀스 회전 옵션: 셋째 칸 b8 = OBS, 차례 자유 */
         const seq_step_t *e = ext_steps;
         assert(e[21].kind == SK_TURN_NOWAIT && e[21].arg0 == TURN_CW && e[21].arg1 == 180 && e[21].timeout == (1 << 8));

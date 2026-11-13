@@ -242,8 +242,8 @@ static void on_event(const rx_item_t *it)
     uint16_t kind = b[6];
     int16_t num = (kind == 'T') ? digits3(b[2], b[8], b[9]) : digits3(b[7], b[8], b[9]);
 
-    if ((D.control == RUN_TURN) || (D.turn_pulses > 0)) {
-        s_rfid.valid = 0;                               /* 회전 중 태그는 ACK 없이 무시 */
+    if ((D.control == RUN_TURN) || (D.turn_pulses > 0) || (D.tape_turn_dir != 0)) {
+        s_rfid.valid = 0;                               /* 회전 중·교차선 회전 앞 찾는 중 태그는 ACK 없이 무시 */
         return;
     }
     (void)acs_send_tag_ack(b[3], b[1], kind, 'W');
