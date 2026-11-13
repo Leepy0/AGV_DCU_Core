@@ -373,6 +373,17 @@ static int16_t acs_number(const seq_step_t *s)
     }
 }
 
+/* 주행 스텝(회전·이동)의 실패: 지워지지 않는 오류(리셋까지 남는다)로 차를 세우고 표시·보고한다. 다음 스텝으로 가지 않고,
+ * 이 틱 뒤 run_after_motor 가 시퀀스를 끝낸다(run_seq_init: 출력 정리 포함). runner_fail 의 action_err 는 틱마다 지워지고
+ * 280 이상은 시퀀스 정리도 안 불러 출력이 켜진 채 조용히 끝났다 */
+static uint16_t drive_fail(seq_runner_t *r, uint16_t code)
+{
+    if (code == ERR_GUIDE_SENSOR) { D.system_err = (int16_t)code; }   /* 가이드 센서 오류는 다른 경로(못 찾음 258)와 같은 칸 */
+    else                          { D.stop_err = (int16_t)code; }
+    r->a = 1;
+    return R_WAIT;
+}
+
 static uint16_t eval_turn(seq_runner_t *r, const seq_step_t *s)
 {
     if (r->a == 0) {
@@ -381,10 +392,7 @@ static uint16_t eval_turn(seq_runner_t *r, const seq_step_t *s)
             int16_t busy = D.turn_pulses;
             tagact_turn_align_stopped((turn_dir_t)s->arg0, s->arg1, s->timeout);
             /* 정렬 회전이 거부되면(회전 모드 0, 회전·정지 진행 중 등) 다음 스텝으로 가지 않고 오류로 끝낸다 */
-            if ((busy != 0) || !D.tape_align) {
-                runner_fail(r, SEQ_ERR_TURN);
-                return R_ENDED;
-            }
+            if ((busy != 0) || !D.tape_align) { return drive_fail(r, SEQ_ERR_TURN); }
         }
         else { tagact_turn_next((turn_dir_t)s->arg0, s->arg1, s->timeout); }
         r->a = 1;
@@ -399,10 +407,7 @@ static uint16_t eval_turn(seq_runner_t *r, const seq_step_t *s)
     if ((D.turn_pulses > 0) || (D.turn_motion != 0) || D.flag_turn) { return R_WAIT; }
     /* 정렬이 실패로 끝났으면(tape_fix_end: 0 가운데에 섬. -1 선을 잡은 뒤 범위 초과, 1 보정 횟수 끝,
      * 2 보정 각 초과, 3 선 놓침, 4 다가온 쪽 모름) 다음 스텝으로 가지 않고 오류로 끝낸다 */
-    if ((s->kind == SK_TURN_ALIGN) && (D.tape_fix_end != 0)) {
-        runner_fail(r, ERR_GUIDE_SENSOR);
-        return R_ENDED;
-    }
+    if ((s->kind == SK_TURN_ALIGN) && (D.tape_fix_end != 0)) { return drive_fail(r, ERR_GUIDE_SENSOR); }
     return R_NEXT;
 }
 
@@ -491,10 +496,7 @@ static uint16_t eval_step(seq_runner_t *r, const seq_step_t *s)
     case SK_MOVE_TAPE:          /* 교차선까지. 못 찾아 오류(258)로 서면 run_after_motor 가 끝낸다 */
         if (r->a == 0) {
             int16_t ok = (s->kind == SK_MOVE_MM) ? tagact_move_mm((int16_t)s->arg0) : tagact_move_tape((int16_t)s->arg0, (int16_t)s->arg1);
-            if (ok < 0) {
-                runner_fail(r, SEQ_ERR_TABLE);
-                return R_ENDED;
-            }
+            if (ok < 0) { return drive_fail(r, SEQ_ERR_TABLE); }   /* 거리가 펄스 범위 밖 */
             r->a = (uint16_t)ok;
             return R_WAIT;
         }

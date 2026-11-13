@@ -434,10 +434,12 @@ int main(void)
     D.stop_err = 0;
     seq_abort_all();
     fake_out = 0;
-    start(S_MOVE);                                               /* 거리 범위 밖: 줄이지 않고 시퀀스 오류 */
+    start(S_MOVE);                                               /* 거리 범위 밖: 줄이지 않고 지워지지 않는 오류 290(시퀀스는 run_after_motor 가 끝낸다) */
     fake_move_ret = -1;
-    seq_run();
-    assert(!seq_is_active() && !D.move_on && ((fake_out & BIT(OUT_EXT_2)) == 0));
+    seq_run(); seq_run();
+    assert(!D.move_on && ((fake_out & BIT(OUT_EXT_2)) == 0) && (D.stop_err == SEQ_ERR_TABLE));
+    D.stop_err = 0;
+    seq_abort_all();
     fake_move_ret = 1;
     fake_out = 0;
     BAD(a_bad_move);
@@ -463,7 +465,7 @@ int main(void)
     seq_run();                                                   /* 오류 없이 끝났다 */
     assert(fake_out == BIT(OUT_EXT_2) && !seq_is_active());
     fake_out = 0;
-    /* 오류 없이 실패로 끝남(선을 잡은 뒤 범위 초과 -1, 보정 못 끝냄 1, 선 놓침 3): B 를 켜지 않고 258 로 끝난다 */
+    /* 오류 없이 실패로 끝남(선을 잡은 뒤 범위 초과 -1, 보정 못 끝냄 1, 선 놓침 3): B 를 켜지 않고 지워지지 않는 258(system_err) */
     {
         static const int16_t fails[] = { -1, 1, 2, 3, 4 };
         for (int k = 0; k < 5; k++) {
@@ -471,18 +473,20 @@ int main(void)
             seq_run();
             D.tape_align = 0;
             D.tape_fix_end = fails[k];
-            seq_run();
-            assert(fake_out == 0 && !seq_is_active() && D.action_err == ERR_GUIDE_SENSOR);
-            D.action_err = 0;
+            seq_run(); seq_run();
+            assert(fake_out == 0 && (D.system_err == ERR_GUIDE_SENSOR) && (seq_active_step() == 0));
+            D.system_err = 0;
+            seq_abort_all();
         }
     }
-    /* 거부(회전 모드 0 등): 다음 스텝으로 가지 않고 오류로 끝난다 */
+    /* 거부(회전 모드 0 등): 다음 스텝으로 가지 않고 지워지지 않는 290(stop_err) */
     fake_align_refuse = 1;
     start(S_ALIGN);
-    seq_run();
-    assert(fake_out == 0 && !seq_is_active() && D.action_err == SEQ_ERR_TURN);
+    seq_run(); seq_run();
+    assert(fake_out == 0 && (D.stop_err == SEQ_ERR_TURN) && (seq_active_step() == 0));
     fake_align_refuse = 0;
-    D.action_err = 0;
+    D.stop_err = 0;
+    seq_abort_all();
     D.tape_fix_end = 0;
     fake_turn_count = 0;                                         /* 뒤 시험은 처음부터 센다 */
     BAD(a_bad_align);
