@@ -23,6 +23,7 @@
 #include "agv/steer.h"
 #include "agv/stop.h"
 #include "agv/storage.h"
+#include "agv/tagact.h"
 #include "agv/tune.h"
 #include "agv/ui.h"
 
@@ -114,6 +115,7 @@ static void scan_10ms(void)
         if (tune_active()) { tune_run(); }
         motor_run();
         run_seq();
+        tagact_tick();             /* 센서 정지(AGV_STOP( …, FROM_SENSOR )). site_manual 의 사이트 센서 정지와 같은 자리 */
         site_manual();
         run_after_motor();
         curvelog_tick();

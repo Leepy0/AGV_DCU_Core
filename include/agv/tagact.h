@@ -90,6 +90,13 @@ extern void (*tagact_trace)(uint16_t code, uint16_t next);   /* 호스트 시험
  * 규칙에 분류 2·3·4 가 있으면 그 정지가 이긴다(같은 규칙의 TA_STOP·자동 출발·대기 보고가 태그 자리 SL 정지를 걸지 않는다) */
 #define TA_STOP_CM        0x1200   /* 인자: 정지 거리 cm 0~255(SL 과 같은 단위, 0 = 바로 정지). 태그를 읽은 자리에서 잰다 */
 #define TA_TAPE_STOP_GD   0x1300   /* 인자: seq_id_t(0 = 시퀀스 없음). 교차선을 찾아 GD 더 가서 정지 뒤 시퀀스 */
+/* 센서 정지 AGV_STOP( 거리, FROM_SENSOR( 입력, 유지틱 ) ). 인자: 거리 cm(FL 이면 0). 다음 칸: 입력 b0~5 | 유지틱 b6~14 | FL b15.
+ * 서지 않고 기다리다 입력이 유지틱(10 ms) 동안 켜지면 처음 켜진 자리 + 거리에서 선다. 규칙에서 이 동작 뒤 칸(최대 2칸)은 그때 실행한다.
+ * 교차선 요청(분류 3·4·교차선 회전)과 한 규칙에 쓰면 표 오류(SEQ_ERR_TABLE) */
+#define TA_STOP_SENSOR    0x1400
+#define TA_FS_TICKS_SHIFT 6
+#define TA_FS_FL          0x8000u
+#define ERR_SENSOR_STOP_MISS 270   /* stop_err: 센서 정지 요청 뒤 5 m 안에 감지가 시작되지 않음 */
 #define TA_WAIT           0x1500   /* 인자: 1 대기 시작(run_wait_start), 0 대기 풀기(run_wait_cancel). AGV_WAIT_START·AGV_WAIT_CANCEL */
 #define TA_STOP_KIND_TAPE    3     /* D.tape_stop_kind: 교차선에서 바로 정지 */
 #define TA_STOP_KIND_TAPE_GD 4     /* D.tape_stop_kind: 교차선 뒤 GD 가서 정지 */
@@ -104,6 +111,7 @@ void     tagact_bind(const tag_rule_t *rules, uint16_t n, uint16_t profile);
 void     tagact_bind_packed(const tag_packed_t *t, uint16_t profile);   /* 압축 표 */
 uint16_t tagact_display_tag(void);
 int      tagact_run(uint16_t tag);     /* DA_Tag_Selection 대체. 반환 1 = 이 태그로 새 정지가 시작됨 */
+void     tagact_tick(void);            /* 10 ms(site_manual 앞): 센서 정지 요청을 본다 */
 uint16_t tagact_dry_run(uint16_t tag, uint16_t *acts, uint16_t cap);  /* 실행하지 않고 액션 열거 (관리 TT/TR) */
 
 /* 개별 액션 (사용자 정의 코드용) */

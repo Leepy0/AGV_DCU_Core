@@ -10,6 +10,7 @@
  *   AGV_STOP( cm )                    2: 태그 자리에서 cm 가서 선다. 0~255, 0 = 바로. 숫자로 적는다(표의 거리는 모두 cm, SL 과 같다)
  *   AGV_STOP( TAPE )                  3: 교차선을 찾아 본 자리에서 바로 선다
  *   AGV_STOP( TAPE_GD )               4: 교차선을 찾아 GD 더 가서 선다(회전 중심이 교차선 위)
+ *   AGV_STOP( FL|cm, FROM_SENSOR( 입력, 유지틱 ) )   센서가 켜진 자리부터 거리만큼 가서 선다(아래). 교차선 요청과 한 규칙에 못 쓴다
  *   SEQ_START( 시퀀스 )                1 + 시퀀스(SEQ_ 뺀 이름: LOAD, UNLOAD, LOAD_1 …)
  *   SEQ_START( cm, 시퀀스 )            2 + 시퀀스 (2칸)
  *   SEQ_START( TAPE, 시퀀스 )          3 + 시퀀스
@@ -66,7 +67,17 @@ enum { AGV_STOP = TA_STOP };
 #define DSL_STOPW_TAPE           ~, TA_TAPE_STOP
 #define DSL_STOPW_TAPE_GD        ~, TA_TAPE_STOP_GD
 #define DSL_STOPW(x, dflt)       DSL_ARG2(DSL_STOPW_##x, dflt)
-#define AGV_STOP(x)              DSL_STOPW(x, DSL_STOPCM(x))
+#define AGV_STOP(...)            DSL_CAT(DSL_AGVSTOP, DSL_NARG(__VA_ARGS__))(__VA_ARGS__)
+#define DSL_AGVSTOP1(x)          DSL_STOPW(x, DSL_STOPCM(x))
+/* AGV_STOP( 거리, FROM_SENSOR( 입력, 유지틱 ) ): 서지 않고 기다리다 입력(io_map 이름, 켜짐 = 감지)이 유지틱(10 ms, 1~511) 동안
+ * 켜지면 처음 켜진 자리 + 거리에서 선다(이미 넘었으면 바로). 거리는 FL(정지 거리 파라미터) 또는 cm 0~255. 꺼짐이 5틱 이하면 이어
+ * 센다. 요청 뒤 5 m 안에 감지가 시작되지 않으면 서고 오류 270. 이 동작 뒤에 적은 동작(최대 2칸)은 확정 때 실행한다. 2칸 */
+#define DSL_FSD_FL               ~, 0
+#define DSL_FSF_FL               ~, TA_FS_FL
+#define DSL_AGVSTOP2(d, fs)      (TA_STOP_SENSOR | DSL_ARG2(DSL_FSD_##d, (uint16_t)((d) + DSL_STOPCM_OK(d)))), \
+                                 ((fs) | DSL_ARG2(DSL_FSF_##d, 0))
+#define DSL_FS_OK(in, t)         (0 * sizeof(char[(((in) >= 0) && ((in) < 64) && ((t) >= 1) && ((t) < 512)) ? 1 : -1]))
+#define FROM_SENSOR(in, t)       ((uint16_t)((in) | ((t) << TA_FS_TICKS_SHIFT)) + DSL_FS_OK(in, t))
 #define AGV_AUTOSTART(sec)     (TA_STOP_AUTOSTART | (sec))
 #define AGV_AUTOSTART_PARAM      TA_STOP_AUTOSTART
 #define DSL_TSPD_HIGH            0

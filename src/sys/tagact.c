@@ -345,7 +345,7 @@ static uint16_t has_second_word(uint16_t code)
 {
     uint16_t kind = (uint16_t)(TA_KIND(code) << 8);
     return (uint16_t)((kind == TA_TURN) || (kind == TA_TURN_ALIGN) || (kind == TA_TURN_TAPE)
-                      || (kind == TA_ACS_NUM) || (kind == TA_STATE));
+                      || (kind == TA_ACS_NUM) || (kind == TA_STATE) || (kind == TA_STOP_SENSOR));
 }
 
 /* 규칙의 정지 분류. 분류 2·3·4 가 있으면 그것(3·4 가 2 보다 앞, 같은 급이면 뒤의 것), 없으면 0.
@@ -473,6 +473,78 @@ static void act_exec(uint16_t code, uint16_t next, int16_t cls)
     }
 }
 
+/* 센서 정지 AGV_STOP( 거리, FROM_SENSOR( 입력, 유지틱 ) ). 태그 때 요청만 걸고(같은 요청을 다시 읽으면 처음부터) 달리는 동안
+ * 입력을 본다. 처음 켜진 자리가 기준, 기준 뒤 유지틱이 차면 기준 + 거리에서 선다(간 거리를 빼고, 넘었으면 1 mm). 꺼짐이 FS_OFF_TICKS
+ * 이하면 기준·틱을 그대로 두고 센다, 넘으면 처음부터. 요청 뒤 FS_SAFE_MM 안에 감지가 시작되지 않으면 서고 270.
+ * STOP·오류·자동 화면 밖이면 지운다. 거리는 정지 거리와 같은 바퀴(후진이면 반대 바퀴) */
+#define FS_OFF_TICKS 5
+#define FS_SAFE_MM   5000L
+static struct {
+    uint16_t w2, cm;         /* 둘째 칸(입력·유지틱·FL, 0 = 요청 없음), 거리 cm */
+    uint16_t rest[2];        /* 확정 때 실행할 뒤 칸 */
+    int16_t  ticks, off;     /* 기준 뒤 틱(-1 = 감지 전), 이어진 꺼짐 틱 */
+    uint32_t arm_p, on_p;    /* 요청·기준 자리 펄스 */
+} s_fs;
+
+static uint32_t fs_pulses(void) { return run_pulses(D.backward ? 1u : 0u); }
+static int32_t  fs_mm(uint32_t from) { return (int32_t)((float)(fs_pulses() - from) / P.one_length_pulse); }
+
+/* act[i] 가 센서 정지. 교차선 요청(분류 3·4, 교차선 회전)과 같이 쓰면 표 오류 */
+static void fs_arm(const uint16_t *act, uint16_t i, int16_t cls)
+{
+    uint16_t k;
+    for (k = 0; (k < 4u) && (act[k] != 0u); k = (uint16_t)(k + 1u + has_second_word(act[k]))) {
+        if ((uint16_t)(TA_KIND(act[k]) << 8) == TA_TURN_TAPE) { cls = 3; }
+    }
+    if ((cls >= 3) || (i > 2u)) {
+        D.stop_err = (int16_t)SEQ_ERR_TABLE;
+        return;
+    }
+    s_fs.cm = TA_ARG(act[i]);
+    s_fs.w2 = act[i + 1u];
+    s_fs.rest[0] = (i < 2u) ? act[i + 2u] : 0u;
+    s_fs.rest[1] = (i == 0u) ? act[3] : 0u;
+    s_fs.ticks = -1;
+    s_fs.off = 0;
+    s_fs.arm_p = fs_pulses();
+}
+
+void tagact_tick(void)
+{
+    uint16_t on, k;
+
+    if (s_fs.w2 == 0u) { return; }
+    if (D.stop_sw || D.system_err || D.stop_err || (D.ui_mode != UI_AUTO)) {
+        s_fs.w2 = 0;
+        return;
+    }
+    if (!D.flag_run || D.flag_stopping) { return; }     /* 서 있거나 서는 동안(일시정지 등)은 기다린다 */
+    on = io_in(s_fs.w2 & 0x3Fu);
+    if (on) { s_fs.off = 0; }
+    else if ((s_fs.ticks < 0) || (++s_fs.off > FS_OFF_TICKS)) { s_fs.ticks = -1; }
+    if (s_fs.ticks < 0) {
+        if (on) {
+            s_fs.ticks = 0;
+            s_fs.on_p = fs_pulses();
+        }
+        else if (fs_mm(s_fs.arm_p) > FS_SAFE_MM) {
+            s_fs.w2 = 0;
+            D.stop_err = ERR_SENSOR_STOP_MISS;
+        }
+        return;
+    }
+    if (++s_fs.ticks >= (int16_t)((s_fs.w2 >> TA_FS_TICKS_SHIFT) & 0x1FFu)) {
+        int32_t left = ((s_fs.w2 & TA_FS_FL) ? (int32_t)param_get(P_STOP_LEN_FWD_MM) : (int32_t)s_fs.cm) * 10L - fs_mm(s_fs.on_p);
+        s_fs.w2 = 0;
+        tagact_stop_after_mm((left > 0) ? left : 1L);
+        for (k = 0; (k < 2u) && (s_fs.rest[k] != 0u); k++) {   /* 뒤 동작: 시퀀스 요청·전후진 등(정지는 이미 걸었다) */
+            uint16_t second = has_second_word(s_fs.rest[k]);
+            act_exec(s_fs.rest[k], (second && (k == 0u)) ? s_fs.rest[1] : 0u, 0);
+            k = (uint16_t)(k + second);
+        }
+    }
+}
+
 /* 이번 태그 처리에서 정지 거리를 이미 정했다. 번호 변환 별칭(1xx·2xx)은 사용자 함수가 tagact_run 을 다시 부르므로, 안쪽 규칙이
  * 정한 정지 방식(분류 2 거리 등)을 바깥 호출이 SL 로 덮지 않게 한다 */
 static int16_t s_depth, s_len_set;
@@ -497,6 +569,10 @@ int tagact_run(uint16_t tag)
         if ((cls >= 3) && tape_req_allowed()) { D.tape_autostart = 0; }   /* 새 분류 3·4 요청: 이 규칙의 자동 출발만(낡은 값을 잇지 않게) */
         for (i = 0; (i < 4u) && (act[i] != 0u); i++) {
             uint16_t second = has_second_word(act[i]);
+            if ((uint16_t)(TA_KIND(act[i]) << 8) == TA_STOP_SENSOR) {   /* 뒤 칸은 확정 때(tagact_tick) */
+                fs_arm(act, i, cls);
+                break;
+            }
             act_exec(act[i], (uint16_t)((second && (i < 3u)) ? act[i + 1u] : 0u), cls);
             i = (uint16_t)(i + second);
         }

@@ -81,7 +81,40 @@ static const seq_def_t s_seqs[] = {
 static const seq_def_t s_acts[] = { { 0, ACT_HOLD, a_hold_steps, sizeof(a_hold_steps) / sizeof(a_hold_steps[0]) } };
 static int stop_len_call(seq_ctx_t *c) { (void)c; tagact_stop_length(); return 1; }
 static int alias_call(seq_ctx_t *c) { (void)c; (void)tagact_run(47); return 1; }   /* 번호 변환 별칭처럼 tagact_run 을 다시 부른다 */
-static const seq_call_fn s_calls[] = { stop_len_call, alias_call };
+/* 견줌용 참조: 사이트 C 로 쓰던 센서 정지(입력 EXT_4 가 1 s 이어 켜지면 처음 켜진 자리 + FL, 시퀀스 LOAD, 전후진 전환, 5 m 오류 270).
+ * site_manual 에서 돈다. AGV_STOP( FL, FROM_SENSOR( IN_EXT_4, 100 ) ) 가 노이즈 없는 입력에서 같은 틱·거리여야 한다 */
+static struct { uint16_t on, armed, seen, ticks; uint32_t arm_p, on_p; } s_ref;
+static uint32_t ref_pulses(void) { return run_pulses(D.backward ? 1u : 0u); }
+static int32_t  ref_mm(uint32_t from) { return (int32_t)((float)(ref_pulses() - from) / P.one_length_pulse); }
+static int ref_arm(seq_ctx_t *c)
+{
+    (void)c;
+    s_ref.armed = 1;
+    s_ref.seen = 0;
+    s_ref.ticks = 0;
+    s_ref.arm_p = ref_pulses();
+    return 1;
+}
+static void ref_tick(void)
+{
+    if (!s_ref.armed) { return; }
+    if (D.stop_sw || D.system_err || D.stop_err || (D.ui_mode != UI_AUTO)) { s_ref.armed = 0; return; }
+    if (!D.flag_run || D.flag_stopping) { return; }
+    if (io_in(IN_EXT_4)) {
+        if (!s_ref.seen) { s_ref.seen = 1; s_ref.ticks = 0; s_ref.on_p = ref_pulses(); }
+        else if (++s_ref.ticks >= 100u) {
+            int32_t left = (int32_t)param_get(P_STOP_LEN_FWD_MM) * 10L - ref_mm(s_ref.on_p);
+            s_ref.armed = 0;
+            tagact_stop_after_mm((left > 0) ? left : 1L);
+            seq_request(SEQ_LOAD);
+            tagact_forback(DIR_TOGGLE);
+        }
+        return;
+    }
+    s_ref.seen = 0;
+    if (ref_mm(s_ref.arm_p) > 5000L) { s_ref.armed = 0; D.stop_err = 270; }
+}
+static const seq_call_fn s_calls[] = { stop_len_call, alias_call, ref_arm };
 /* 호기 77 만 적재 센서가 있다(시험용) */
 PROFILE_TABLE_BEGIN( s_profiles )
     PROFILE_LOAD( 1, 0, 77, 77, LOAD_SENSORS(IN_EXT_1, IN_EXT_2) )
@@ -89,7 +122,7 @@ PROFILE_TABLE_END
 /* 현장 적재 판정 시험용. 음수 = 판정 없음(센서 묶음을 쓴다) */
 static int16_t s_load_site = -1;
 static int16_t site_load(void) { return s_load_site; }
-static const seq_site_t s_site = { s_seqs, sizeof(s_seqs) / sizeof(s_seqs[0]), s_acts, 1, s_calls, 2, s_profiles, 1, site_load };
+static const seq_site_t s_site = { s_seqs, sizeof(s_seqs) / sizeof(s_seqs[0]), s_acts, 1, s_calls, 3, s_profiles, 1, site_load };
 
 /* 태그 표 */
 static const tag_rule_t s_rules[] = {
@@ -141,6 +174,14 @@ static const tag_rule_t s_rules[] = {
     TAG( 130, 0, OBS_OFF )                                    /* 뒤 범위 규칙보다 먼저 */
     TAG_RANGE( 125, 135, 0, OBS_ON )
     TAG_IF( 140, 0, IF_TAG_NUM( 100 + MOD( STATION(1), 100 ) ), OBS_ON )
+    /* 센서 정지 + 범위 규칙: 뒤 동작은 확정 때(펼친 표·압축 표 같게) */
+    TAG_RANGE( 150, 155, 0, AGV_STOP( 30, FROM_SENSOR( IN_EXT_4, 10 ) ), SEQ_START( LOAD ), AGV_FORBACK( TOGGLE ) )
+    /* 센서 정지: 센서가 켜진 자리부터 거리만큼. 뒤 동작은 확정 때 */
+    TAG( 49, 0, AGV_STOP( FL, FROM_SENSOR( IN_EXT_4, 100 ) ), SEQ_START( LOAD ), AGV_FORBACK( TOGGLE ) )
+    TAG( 50, 0, AGV_STOP( 1, FROM_SENSOR( IN_EXT_4, 20 ) ) )             /* 10 mm: 확정 때 이미 넘었다 */
+    TAG( 51, 0, AGV_STOP( 30, FROM_SENSOR( IN_EXT_4, 10 ) ), AGV_STOP( TAPE ) )   /* 교차선 요청과 같이: 표 오류 */
+    TAG( 52, 0, CALL( 2 ) )                                   /* 견줌용 참조(ref_arm) */
+    TAG( 53, 0, OBS_OFF, AGV_STOP( 30, FROM_SENSOR( IN_EXT_4, 10 ) ), AGV_FORBACK( TOGGLE ) )   /* 앞 동작은 태그 때 */
 };
 
 /* 위 20~23 과 같은 규칙의 압축 표. 앞 줄은 다른 프로파일이라 건너뛴다 */
@@ -208,7 +249,7 @@ void site_register(void)
     (void)seq_bind(&s_site);
     tagact_bind(s_rules, sizeof(s_rules) / sizeof(s_rules[0]), 0);
 }
-void site_manual(void) { s_manual_count++; }
+void site_manual(void) { s_manual_count++; if (s_ref.on) { ref_tick(); } }
 
 /* ---- 도구 ---- */
 
@@ -3769,6 +3810,160 @@ static void test_tape_lane_range(void)
     printf("  tape lane range ok\n");
 }
 
+/* ---- 센서 정지 AGV_STOP( 거리, FROM_SENSOR( 입력, 유지틱 ) ) ---- */
+static int s_fs_fb;                 /* 실행한 AGV_FORBACK 수(tagact_trace) */
+static void fs_trace(uint16_t code, uint16_t next)
+{
+    (void)next;
+    if ((uint16_t)(TA_KIND(code) << 8) == TA_FORBACK) { s_fs_fb++; }
+}
+
+/* 확장 입력 보드로 부팅해 달린다. FL 30 cm, 전후진 전환 켬 */
+static void fs_up(int back)
+{
+    s_ext_board = 1;
+    boot();
+    (void)param_set(P_TURN_FORBACK, 10);
+    assert(param_set_ram(P_STOP_LEN_FWD_MM, 30) == 0);
+    run_seq_init();                             /* 앞 판의 시퀀스 요청이 START 를 가로채지 않게 */
+    if (back) { run_relay(1, 0); }
+    drive_up();
+    run_scan(20);
+    s_ref.on = s_ref.armed = 0;
+    s_fs_fb = 0;
+}
+
+/* 선 뒤 다시 출발(START) */
+static void fs_restart(void)
+{
+    int i;
+    for (i = 0; (i < 400) && (D.flag_run || D.flag_stopping); i++) { run_scan(1); }
+    for (i = 0; i < 5; i++) { guide_reply(0); tick(); }
+    press_start();
+    for (i = 0; (i < 20) && !D.flag_run; i++) { guide_reply(0); tick(); }
+    assert(D.flag_run);
+}
+
+typedef struct { int t, seq; int16_t sp; } fs_res_t;
+/* n 틱 달린다(틱마다 두 바퀴 1 펄스). 입력 EXT_4 는 on_at 틱부터 켜짐, gap_at 부터 gap 틱 꺼짐. 처음 정지가 걸린 틱·정지 펄스·시퀀스 */
+static void fs_run(int n, int on_at, int gap_at, int gap, fs_res_t *r)
+{
+    int t;
+    r->t = -1;
+    for (t = 0; t < n; t++) {
+        ext_in(0x08u, (t >= on_at) && !((t >= gap_at) && (t < gap_at + gap)));
+        run_scan(1);
+        if ((r->t < 0) && D.flag_stopping) {
+            r->t = t;
+            r->sp = D.stop_pulses;
+            r->seq = seq_request_flag[SEQ_LOAD];
+        }
+    }
+    ext_in(0x08u, 0);
+}
+
+static void test_from_sensor(void)
+{
+    fs_res_t a, b;
+    int i;
+
+    tagact_trace = fs_trace;
+    /* 노이즈 없는 입력: 사이트 C 참조와 같은 틱·같은 정지 거리. 처음 켜진 틱 10 + 유지 100 = 110. 뒤 동작은 확정 때 */
+    for (i = 0; i < 2; i++) {                   /* 전진·후진 */
+        fs_up(i);
+        s_ref.on = 1;
+        (void)tagact_run(52);
+        fs_run(200, 10, 999, 0, &a);
+        fs_up(i);
+        (void)tagact_run(49);
+        assert(!seq_request_flag[SEQ_LOAD] && (s_fs_fb == 0));   /* 태그 때는 서지도, 뒤 동작도 않는다 */
+        fs_run(200, 10, 999, 0, &b);
+        assert((a.t == 110) && (b.t == a.t) && (b.sp == a.sp) && a.seq && b.seq && (s_fs_fb == 1) && !D.stop_err);
+        run_seq_init();
+    }
+    /* 꺼짐 3틱은 무시(기준·틱 그대로), 6틱은 처음부터(다시 켜진 틱이 새 기준) */
+    fs_up(0);
+    (void)tagact_run(49);
+    fs_run(200, 10, 40, 3, &b);
+    assert((b.t == 110) && (b.sp == a.sp));
+    run_seq_init();
+    fs_up(0);
+    (void)tagact_run(49);
+    fs_run(250, 10, 40, 6, &b);
+    assert((b.t == 146) && (b.sp == a.sp));
+    run_seq_init();
+    /* 확정 때 이미 거리(10 mm)를 넘었다: 바로(1 mm) */
+    fs_up(0);
+    (void)tagact_run(50);
+    fs_run(100, 5, 999, 0, &b);
+    assert((b.t == 25) && (b.sp == (int16_t)(1.0f * P.one_length_pulse)));
+    /* 다시 읽으면 처음부터 */
+    fs_up(0);
+    (void)tagact_run(49);
+    fs_run(50, 0, 999, 0, &b);
+    (void)tagact_run(49);
+    fs_run(200, 0, 999, 0, &b);
+    assert(b.t == 100);
+    run_seq_init();
+    /* 앞 동작은 태그 때, 뒤 동작은 확정 때 */
+    fs_up(0);
+    D.obs_use = 1;
+    (void)tagact_run(53);
+    assert((D.obs_use == 0) && (s_fs_fb == 0));
+    fs_run(30, 0, 999, 0, &b);
+    assert((b.t == 10) && (s_fs_fb == 1));
+    /* 서 있거나 서는 동안은 기다린다: 다시 달린 첫 틱이 기준 */
+    fs_up(0);
+    (void)tagact_run(49);
+    stop_request_rapid(STOP_REASON_COMMAND);
+    D.flag_stopping = 1;
+    ext_in(0x08u, 1);
+    for (i = 0; (i < 400) && D.flag_run; i++) { run_scan(1); }
+    for (i = 0; i < 150; i++) { guide_reply(0); tick(); }
+    assert(!D.flag_run && !seq_request_flag[SEQ_LOAD]);    /* 선 채 켜진 150 틱은 세지 않았다 */
+    ext_in(0x08u, 0);
+    run_wait_start();
+    for (i = 0; (i < 20) && !D.flag_run; i++) { guide_reply(0); tick(); }
+    assert(D.flag_run && !D.flag_stopping);
+    fs_run(200, 0, 999, 0, &b);
+    assert((b.t == 100) && b.seq);
+    run_seq_init();
+    /* STOP·오류에서 지운다 */
+    fs_up(0);
+    (void)tagact_run(49);
+    raw_a(RAW_STOP, 0);
+    ticks(3);
+    assert(D.stop_sw);
+    raw_a(0, RAW_STOP);
+    ticks(3);
+    fs_restart();
+    fs_run(200, 0, 999, 0, &b);
+    assert(!seq_request_flag[SEQ_LOAD] && (s_fs_fb == 0));   /* 확정(뒤 동작)이 없다 */
+    fs_up(0);
+    (void)tagact_run(49);
+    D.system_err = ERR_GUIDE_SENSOR;
+    ticks(2);
+    D.system_err = 0;
+    fs_restart();
+    fs_run(200, 0, 999, 0, &b);
+    assert(!seq_request_flag[SEQ_LOAD] && (s_fs_fb == 0));
+    /* 5 m 안에 감지가 시작되지 않으면 서고 270(전진·후진) */
+    for (i = 0; i < 2; i++) {
+        int t, lim = (int)(5000.0f * P.one_length_pulse);
+        fs_up(i);
+        (void)tagact_run(49);
+        for (t = 0; (t < 9000) && !D.stop_err; t++) { run_scan(1); }
+        assert((D.stop_err == ERR_SENSOR_STOP_MISS) && (t >= lim) && (t <= lim + 3));
+    }
+    /* 교차선 요청과 한 규칙: 표 오류 */
+    fs_up(0);
+    (void)tagact_run(51);
+    assert(D.stop_err == (int16_t)SEQ_ERR_TABLE);
+    s_ext_board = 0;
+    tagact_trace = 0;
+    printf("  from sensor ok\n");
+}
+
 /* 전원을 켤 때 MODE + UP: 입력 번호 표시, 출력 번호 선택, SET 켬, RESET 끔 */
 static void test_io_test(void)
 {
@@ -4017,6 +4212,7 @@ int main(void)
     test_gd_stop_switch();
     test_gd_resume_overrun();
     test_tape_lane_range();
+    test_from_sensor();
     test_io_test();
     test_acs_off();
     test_keep_results();
