@@ -252,9 +252,12 @@ static void on_event(const rx_item_t *it)
     (void)acs_send_tag_ack(b[3], b[1], kind, 'W');
     if (D.move_on || seek) {
         /* 시퀀스 이동·교차선 회전 앞 찾기 중 태그는 동작·정지·속도 모두 무시한다. ACK 는 보낸다: 안 보내면 재전송이 이동 뒤에
-         * 늦게 처리될 수 있다. 교차로 IN·OUT 은 버리면 허가 없이 들어가거나 OUT 보고가 빠지므로 서고 오류로 끝낸다
-         * (시퀀스 이동·교차선 찾기는 교차로를 건너는 용도가 아니다) */
+         * 늦게 처리될 수 있다. 교차로 IN·OUT 은 서고 오류로 끝낸다(시퀀스 이동·교차선 찾기는 교차로를 건너는 용도가 아니다).
+         * 보고는 한다: IN 을 버리면 허가 없이 들어가고, OUT 을 버리면 ACS 쪽 구역이 잡힌 채 남는다 */
         if (cross) {
+            acs_set_pan(b[2]);
+            if (kind == 'I') { acs_cross_in_keep(num); }   /* 리셋 뒤 START 하면 교차로 대기 거리에서 허가를 기다린다 */
+            else             { acs_cross_out(num); }
             D.stop_err = SEQ_ERR_CROSS;
             D.tape_turn_dir = 0;
         }

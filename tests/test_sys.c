@@ -1889,7 +1889,17 @@ static void test_move_cross_tag(void)
         send_frame(b, 0);
         run_scan(1);
         assert((D.stop_err == SEQ_ERR_CROSS) && D.flag_stopping && (D.stop_pulses == 0));
-        assert(!D.cross_in_flag && (acs_cross_out_count() == 0) && (D.tape_turn_dir == 0) && tx_has('A', 'E'));
+        assert((D.tape_turn_dir == 0) && tx_has('A', 'E'));
+        /* 보고는 한다: IN 은 ACS 로 나가고, OUT 은 ACK 까지 큐에 남는다 */
+        if (k == 1) { assert(acs_cross_out_count() == 1); }
+        else {
+            int i, sent = 0;
+            for (i = 0; (i < 5) && !sent; i++) { sent = tx_has('E', 'I'); guide_reply(0); tick(); }
+            assert(sent && D.cross_in_flag);
+            run_reset_request();                       /* 리셋 키: 오류를 풀어도 허가 대기는 남아 START 뒤 교차로 대기 거리에서 선다 */
+            for (i = 0; i < 3; i++) { guide_reply(0); tick(); }
+            assert((D.stop_err == 0) && D.cross_in_flag);
+        }
         D.move_on = 0;
     }
     boot();

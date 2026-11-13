@@ -341,11 +341,14 @@ static void cross_begin(acs_cross_t *c, int16_t id)
     c->msgid_old = c->msgid;
 }
 
+static int16_t s_in_keep;   /* 오류로 선 자리의 IN: 오류가 서 있는 동안 acs_cross_clear 가 지우지 않는다 */
+
 void acs_cross_release(uint16_t which)
 {
     if (which == ACS_CROSS_IN) {
         cross_clear(&s_cross[ACS_CROSS_IN]);
         D.cross_in_flag = D.cross_in_on = 0;
+        s_in_keep = 0;
     }
     else {
         D.cross_out_flag = D.cross_out_on = 0;     /* 보고 큐는 ACK 까지 남는다. 2 m 를 넘었으면 stop.c 가 다시 건다 */
@@ -354,7 +357,7 @@ void acs_cross_release(uint16_t which)
 
 void acs_cross_clear(void)
 {
-    acs_cross_release(ACS_CROSS_IN);
+    if (!s_in_keep || ((D.stop_err == 0) && (D.system_err == 0))) { acs_cross_release(ACS_CROSS_IN); }
     acs_cross_release(ACS_CROSS_OUT);
 }
 
@@ -383,6 +386,14 @@ void acs_cross_in(int16_t id)
         D.cross_out_flag = D.cross_in_flag;
         D.cross_out_on = D.cross_in_on;
     }
+}
+
+/* 시퀀스 이동·교차선 찾기 중 IN 태그(서고 오류로 끝난다): IN 보고·허가 대기를 오류 동안 남긴다. 리셋 키로 오류를 풀고 START 하면
+ * 교차로 대기 거리에서 허가를 기다린다. 사람의 STOP·ACS 취소처럼 오류가 없는 때의 정리는 지금처럼 지운다 */
+void acs_cross_in_keep(int16_t id)
+{
+    acs_cross_in(id);
+    s_in_keep = (int16_t)(s_cross[ACS_CROSS_IN].num != 0);
 }
 
 /* ---- OUT 큐 ---- */

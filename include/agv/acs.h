@@ -55,7 +55,8 @@ void     acs_set_pan(uint16_t pan);            /* 수신 [2] 문자 */
 
 /* 교차로 */
 void     acs_cross_in(int16_t id);
-void     acs_cross_out(int16_t id);            /* OUT 보고를 큐에 넣는다. 서지 않는다. 같은 구역이 있으면 넣지 않는다 */
+void     acs_cross_in_keep(int16_t id);        /* acs_cross_in + 오류가 서 있는 동안 acs_cross_clear 가 지우지 않는다 */
+void     acs_cross_out(int16_t id);           /* OUT 보고를 큐에 넣는다. 서지 않는다. 같은 구역이 있으면 넣지 않는다 */
 int16_t  acs_cross_num(uint16_t which);        /* OUT 은 큐 맨 앞 */
 uint16_t acs_cross_acked(uint16_t which);
 uint16_t acs_cross_retry(uint16_t which);
