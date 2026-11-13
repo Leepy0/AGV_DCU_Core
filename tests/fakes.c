@@ -61,6 +61,8 @@ void tagact_turn(turn_dir_t d, uint16_t deg, dir_t fb, uint16_t autostart, uint1
 }
 uint16_t fake_turn_next;
 void tagact_turn_next(turn_dir_t d, uint16_t deg, uint16_t next) { fake_turn_next = next; tagact_turn(d, deg, (dir_t)(next & 0xFu), 0, 0); }
+/* 정렬 회전을 건 것으로 둔다(tape_align 1). 시험이 0 으로 끝낸다 */
+void tagact_turn_align_stopped(turn_dir_t d, uint16_t deg, uint16_t next) { tagact_turn_next(d, deg, next); agv_drive.tape_align = 1; }
 
 static uint16_t ee_read(uint16_t a) { return fake_ee[a]; }
 static void ee_write(uint16_t a, uint16_t v)

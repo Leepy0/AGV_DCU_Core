@@ -63,8 +63,16 @@ static seq_step_t s_mv_steps[] = {
     OUT_ON( OUT_EXT_3 )
     END_STOP
 };
-static const seq_def_t s_mv_seqs[] = { { 0, SEQ_SITE_BASE, s_mv_steps, sizeof(s_mv_steps) / sizeof(s_mv_steps[0]) } };
-static const seq_site_t s_mv_site = { s_mv_seqs, 1, 0, 0, 0, 0, 0, 0, 0 };
+/* 시퀀스 정렬 회전 모의(salign 표): 출력 A → AGV_TURN( CW, 90, 0, 0, 0, ALIGN ) → 출력 B */
+static const seq_step_t s_al_steps[] = {
+    OUT_ON( OUT_EXT_1 )
+    AGV_TURN( CW, 90, 0, 0, 0, ALIGN )
+    OUT_ON( OUT_EXT_3 )
+    END_STOP
+};
+static const seq_def_t s_mv_seqs[] = { { 0, SEQ_SITE_BASE, s_mv_steps, sizeof(s_mv_steps) / sizeof(s_mv_steps[0]) },
+                                       { 0, SEQ_SITE_BASE + 1, s_al_steps, sizeof(s_al_steps) / sizeof(s_al_steps[0]) } };
+static const seq_site_t s_mv_site = { s_mv_seqs, 2, 0, 0, 0, 0, 0, 0, 0 };
 void site_register(void) { param_default_type(0); (void)seq_bind(&s_mv_site); }
 void site_manual(void)   { }
 
@@ -1619,6 +1627,99 @@ static int move_table(void)
     return bad;
 }
 
+/* ---- 시퀀스 정렬 회전 모의(v0.50.0): 회전 중심을 90도 교차선 위에 세워 둔 채 CW 90도 정렬 회전.
+ * via_seq 0 = 태그·튜닝과 같은 tagact_turn_align_stopped 를 바로, 1 = 시퀀스 A → AGV_TURN( …, ALIGN ) → B.
+ * no_cross 1 이면 교차선이 없어 정렬이 오류(258)로 끝나야 하고 B 가 켜지면 안 된다 */
+typedef struct { float err_deg, line_deg, ctr_mm, t_s; int fix, done, err, b_on, b_early, seq_on; } sa2_res_t;
+
+static void salign_flow(int via_seq, int no_cross, float slip, sa2_res_t *r)
+{
+    static case_t c;
+    const case_t c0 = { 32, 0.0f, 0.0f, 1, 20, 20, 30, 0.1f, 0, 0 };
+    int t, started = 0, after = 0;
+
+    c = c0;
+    memset(r, 0, sizeof(*r));
+    memset(&s_v, 0, sizeof(s_v));
+    s_c = &c;
+    s_gd = 250.0f;
+    s_cross_w = 0.0f;
+    s_x30 = 4000.0f; s_xa = 90.0f; s_x30w = no_cross ? 0.0f : 20.0f;
+    host_reset();
+    memset(&D, 0, sizeof(D));
+    memset(seq_request_flag, 0, sizeof(seq_request_flag));
+    sys_boot();
+    host.adc = 300u << 4;
+    for (t = 0; t < 60; t++) { scan(); }
+    assert(sys_power_on());
+    assert(param_set_ram(P_SPEED_MIN, 4) == 0);
+    assert(param_set_ram(P_GEAR_RATIO, 60) == 0);
+    assert(param_set_ram(P_GUIDE_DIST_MM, 250) == 0);
+    assert(param_set_ram(P_SPEED_HIGH, 30) == 0);
+    assert(param_set_ram(P_SPEED_LOW, 25) == 0);
+    assert(param_set_ram(P_TURN_FORBACK, 10) == 0);
+    assert(param_set_ram(P_SPEED_TURN, 13) == 0);
+    assert(param_set_ram(P_DCC, 40) == 0);
+    assert(param_set_ram(P_WHEEL_BASE_MM, (int16_t)(WB_MM / 10.0f)) == 0);
+    tune_turn_scale_set((int16_t)(TURN_SCALE * 1000.0f + 0.5f));
+    s_v.x = s_x30;                    /* 회전 중심이 교차선 위, 주행선 방향 */
+    s_v.s = s_x30 + GD_MM;
+    for (t = 0; t < 30; t++) { wt_tick(1); }
+    if (via_seq) { seq_request(SEQ_SITE_BASE + 1); }
+    else         { tagact_turn_align_stopped(TURN_CW, 90u, 0u); }
+    for (t = 0; t < 8000; t++) {
+        float u = 0.0f, slant = 1.0f;
+        int seen = cross(&u, &slant);
+        s_m.wbx = (D.control == RUN_TURN) ? slip : 1.0f;
+        sensor_reply(u, slant, seen);
+        plant();
+        scan();
+        if (D.tape_align) { started = 1; }
+        if ((io_out_mask() & (1UL << OUT_EXT_3)) && !r->b_on) {
+            r->b_on = 1;
+            r->b_early = D.tape_align || D.flag_turn || (D.turn_motion != 0) || (fabsf(s_v.rpm[0]) > 20.0f) || (fabsf(s_v.rpm[1]) > 20.0f);
+        }
+        if (started && !r->done && !D.tape_align && !D.flag_turn && (D.turn_motion == 0)
+            && (fabsf(s_v.rpm[0]) < 20.0f) && (fabsf(s_v.rpm[1]) < 20.0f)) {
+            r->done = 1;
+            r->t_s = (float)t * 0.01f;
+        }
+        if ((D.system_err || D.stop_err) && (++after > 200)) { break; }   /* 오류 뒤 2 s 더 본다(B 가 안 켜지는지) */
+        if (r->done && (!via_seq || r->b_on || (++after > 200))) { break; }
+    }
+    r->err_deg = 90.0f + s_v.th * 180.0f / PI_F;
+    {
+        float sxp = s_v.x + GD_MM * cosf(s_v.th);
+        r->line_deg = atanf((sxp - s_x30) / GD_MM) * 180.0f / PI_F;
+        r->ctr_mm = s_v.x - s_x30;
+    }
+    r->fix = D.tape_fix_cnt;
+    r->err = D.system_err ? D.system_err : D.stop_err;
+    r->seq_on = seq_is_active();
+    s_x30w = 0.0f; s_xa = 30.0f; s_m.wbx = 1.0f;
+}
+
+static int salign_table(void)
+{
+    static const float sl[3] = { 0.8f, 1.0f, 1.25f };
+    sa2_res_t a, b;
+    int k, bad = 0;
+
+    printf("  시퀀스 정렬 회전 | 슬립 | 선 기준 각 도(태그/시퀀스) | 실제 각 오차 도 | 보정 | 시간 s | B 켜짐(이름)\n");
+    for (k = 0; k < 3; k++) {
+        salign_flow(0, 0, sl[k], &a);
+        salign_flow(1, 0, sl[k], &b);
+        printf("  %16s | %4.2f | %6.2f / %6.2f | %6.2f / %6.2f | %d / %d | %4.2f / %4.2f | %d(%d)\n", "", sl[k],
+               a.line_deg, b.line_deg, a.err_deg, b.err_deg, a.fix, b.fix, a.t_s, b.t_s, b.b_on, b.b_early);
+        if (!a.done || !b.done || a.err || b.err || !b.b_on || b.b_early || b.seq_on
+            || (fabsf(a.line_deg - b.line_deg) > 0.05f) || (a.fix != b.fix) || (fabsf(a.line_deg) > 1.5f)) { bad++; }
+    }
+    salign_flow(1, 1, 1.0f, &b);
+    printf("  교차선 없음(시퀀스): 오류 %d, 시퀀스 %d, B 켜짐 %d, 실제 각 %.1f 도\n", b.err, b.seq_on, b.b_on, b.err_deg);
+    if ((b.err != ERR_GUIDE_SENSOR) || b.seq_on || b.b_on) { bad++; }
+    return bad;
+}
+
 /* ---- t3.9 WT 전 과정 모의: 튜닝 메뉴 → START → LOS 정속 → 짝 펄스 → 복귀 → 정지. 직선 테이프, 10 ms 마다 센서 응답·차 모형·스캔.
  * 차 모형 바퀴는 지령을 1차 지연 tau 로 따라간다(순수 지연 없음, 가감속 한계 ACC_LIM). 엔코더는 12펄스/회전 그대로 */
 typedef struct { float dev_max, dev_end, run_mm, t_s; } wt_res_t;
@@ -2031,7 +2132,8 @@ int main(int argc, char **argv)
         printf("  흔들림 %.1f%% 바뀜 %.1f/s 넘침 %.1f 끝 RMS %.2f 중심 %.1f\n", r.wob, r.wflip, r.eover, r.tail_rms, r.cerr);
         return 0;
     }
-    if ((argc > 1) && (strcmp(argv[1], "move") == 0)) { return move_table() ? 1 : 0; }   /* 시퀀스 MOVE_MM 표 */
+    if ((argc > 1) && (strcmp(argv[1], "move") == 0)) { return move_table() ? 1 : 0; }   /* 시퀀스 AGV_MOVE 표 */
+    if ((argc > 1) && (strcmp(argv[1], "salign") == 0)) { return salign_table() ? 1 : 0; }   /* 시퀀스 정렬 회전 */
     if ((argc > 1) && (strcmp(argv[1], "kp") == 0)) {   /* kp: 기본(K_P 60 끝 처리 2) 대 TST 2(예전) 경사·고정 K_P 50·45·35, 곡선 C 25 m/min wide, 지연 100·200·300 ms */
         static const int kps[5] = { 0, -1, 50, 45, 35 };    /* 0 TST 2 경사, -1 기본 */
         int k, d;
@@ -2222,7 +2324,8 @@ int main(int argc, char **argv)
     }
 #endif
 #if AGV_DEV_TESTS
-    assert(move_table() == 0);          /* 시퀀스 MOVE_MM: 거리 표, 후진, 장애물 멈춤·이어 감, 선 잃음 오류·시퀀스 중단 */
+    assert(move_table() == 0);          /* 시퀀스 AGV_MOVE: 거리 표, 후진, 장애물 멈춤·이어 감, 선 잃음 오류·시퀀스 중단 */
+    assert(salign_table() == 0);        /* 시퀀스 정렬 회전: 태그 경로와 같은 결과, 끝난 뒤 B, 교차선 없음 오류·시퀀스 중단 */
 #endif
     {   /* 출발 정렬 단계(start 표, ACC 58·DCC 60·LOS 25, 지연 0.1~0.3 s): 예전(정렬 단계 없음)이 통과한 곳에서 선을 잃지 않는다.
          * v0.40 의 조향 상한 × 0.5 는 wide R450·500·551 곡선 위 출발에서 선을 잃었다(9조건). 선 없는 곳은 SPN 으로 가다 오류로 선다.

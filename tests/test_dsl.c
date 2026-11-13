@@ -108,6 +108,10 @@ SEQ_BEGIN( ext )
     AGV_TURN( CW, 90, 0, 1, 32 )                                             /* 속도 32 이상 */
 #endif
     AGV_TURN( CCW, 90, DIR_TOGGLE, 1, 31, OBS )                              /* 25 속도 16 이상: b15 */
+    AGV_TURN( CW, 180, 0, 0, 0, OBS, ALIGN )                                 /* 26 정렬 회전 */
+#ifdef NEG_SEQ_KIND2
+    AGV_TURN( CW, 90, 0, 1, 0, NOWAIT, ALIGN )                               /* 종류 옵션 둘 */
+#endif
 #ifdef NEG_MMIN
     AGV_SPEED_MMIN( 3 )                                                      /* 0~3 은 단계 번호 */
 #endif
@@ -296,6 +300,7 @@ int main(void)
         assert(e[22].kind == SK_SPEED && e[22].arg0 == SEQ_SPD_LOW && e[23].kind == SK_SPEED && e[23].arg0 == 20);
         assert(e[24].kind == SK_MOVE_MM && e[24].arg0 == 100);
         assert(e[25].kind == SK_TURN && e[25].arg0 == TURN_CCW && e[25].timeout == (DIR_TOGGLE | (1 << 4) | (1 << 8) | (31u << 11)));
+        assert(e[26].kind == SK_TURN_ALIGN && e[26].arg0 == TURN_CW && e[26].arg1 == 180 && e[26].timeout == (1 << 8));
         assert(demo_steps[17].kind == SK_TURN);
     }
 

@@ -60,7 +60,7 @@ static const seq_def_t *find_def(const seq_def_t *list, uint16_t n, uint16_t id)
 static int16_t forbidden_in_act(uint16_t kind)
 {
     return (kind == SK_SPEED) || (kind == SK_FORBACK) || (kind == SK_TURN) || (kind == SK_TURN_NOWAIT)
-        || (kind == SK_ERROR_HOLD) || (kind == SK_END_RESTART) || (kind == SK_MOVE_MM);
+        || (kind == SK_ERROR_HOLD) || (kind == SK_END_RESTART) || (kind == SK_MOVE_MM) || (kind == SK_TURN_ALIGN);
 }
 
 void seq_pick_profile(void)
@@ -376,11 +376,14 @@ static uint16_t eval_turn(seq_runner_t *r, const seq_step_t *s)
 {
     if (r->a == 0) {
         /* 셋째 칸은 태그 회전 둘째 칸과 같은 배치(장애물 b8~10, 속도 b11~15) */
-        tagact_turn_next((turn_dir_t)s->arg0, s->arg1, s->timeout);
+        if (s->kind == SK_TURN_ALIGN) { tagact_turn_align_stopped((turn_dir_t)s->arg0, s->arg1, s->timeout); }
+        else                          { tagact_turn_next((turn_dir_t)s->arg0, s->arg1, s->timeout); }
         r->a = 1;
         return R_WAIT;
     }
     if (s->kind == SK_TURN_NOWAIT) { return R_NEXT; }
+    /* 정렬 회전은 정착·보정까지 끝나야 하고, 오류로 끝났으면 다음 스텝(출력)으로 가지 않는다. 이 틱 뒤 run_after_motor 가 끝낸다 */
+    if ((s->kind == SK_TURN_ALIGN) && (D.tape_align || (D.system_err != 0) || (D.stop_err != 0))) { return R_WAIT; }
     /* 거부된 회전은 다음 스캔에 바로 통과한다 */
     return ((D.turn_pulses <= 0) && (D.turn_motion == 0) && !D.flag_turn) ? (uint16_t)R_NEXT : (uint16_t)R_WAIT;
 }
@@ -463,6 +466,7 @@ static uint16_t eval_step(seq_runner_t *r, const seq_step_t *s)
         return R_NEXT;
     case SK_TURN:
     case SK_TURN_NOWAIT:
+    case SK_TURN_ALIGN:
         return eval_turn(r, s);
     case SK_MOVE_MM:            /* 회전처럼 시퀀스를 살려 둔 채 run.c 가 이동하고, 서면(move_on 0) 다음 스텝. 거부되면 다음 스캔에 통과 */
         if (r->a == 0) {

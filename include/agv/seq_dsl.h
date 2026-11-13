@@ -256,16 +256,20 @@ typedef unsigned long long dsl_cond_t;
 #define AGV_FORBACK(dir)       DSL_STEP(SK_FORBACK, SEQ_NO_LABEL, DIR_##dir, 0, 0, 0, 0, 0)
 /* AGV_TURN( 방향, 각도, 회전 뒤 방향, 자동 출발[, 속도[, 옵션…]] ). 옵션을 쓰려면 속도 칸(0 = 자동)을 적는다.
  *   옵션 없음: 회전하고 끝날 때까지 기다린다. NOWAIT: 회전을 걸고 다음 스캔에 다음 스텝(회전 중에 뒤 스텝이 돈다).
+ *   ALIGN: 선 자리에서 정렬 회전(목표각 근처에서 주행로를 찾아 맞춤)을 하고 정착·보정까지 끝나 서면 다음 스텝.
+ *     정렬이 오류(못 찾음 258 등)로 끝나면 다음 스텝으로 가지 않고 시퀀스가 오류 규칙대로 끝난다. NOWAIT 와 함께 못 쓴다.
  *   OBS: 회전 중 장애물 감지(셋째 칸 b8 = 1. 주행 중 장애물 센서 사용 OBS_ON/OBS_OFF 와 다른 것). NOWAIT 와 함께 쓸 수 있다.
  *   TAPE 는 시퀀스에서 컴파일 오류(시퀀스 중 교차선 회전은 하지 않는다).
  * 속도 m/min 0~31, 0 이나 생략 = 자동(TNS·ETN). 지정하면 적재·공차와 상관없이 그 회전 한 번만 그 속도(회전 최저 속도~TNS 한계로
  * 묶는다. 태그 회전과 같다, tagact_turn_next).
  * 셋째 칸: 회전 뒤 방향 b0~3 | 자동 출발 b4~7 | 장애물 b8 | 속도 b11~15(태그 둘째 칸과 같은 배치) */
 #define DSL_SOPT_K_NOWAIT      1
+#define DSL_SOPT_K_ALIGN       2
 #define DSL_SOPT_K_OBS         0
 #define DSL_SOPT_O_NOWAIT      0
+#define DSL_SOPT_O_ALIGN       0
 #define DSL_SOPT_O_OBS         1
-#define DSL_SKIND(k)           (((k) == 0) ? SK_TURN : SK_TURN_NOWAIT)
+#define DSL_SKIND(k)           (((k) == 0) ? SK_TURN : (((k) == 1) ? SK_TURN_NOWAIT : SK_TURN_ALIGN))
 #define DSL_STURN_OK(v, k1, k2, o)  (0 * sizeof(char[(((v) >= 0) && ((v) < 32) && (((k1) == 0) || ((k2) == 0)) && ((o) <= 1)) ? 1 : -1]))
 #define DSL_STURN_W(d, deg, fb, au, v, k1, k2, o) \
     DSL_STEP(DSL_SKIND((k1) + (k2)), SEQ_NO_LABEL, d, deg, \

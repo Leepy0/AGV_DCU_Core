@@ -288,10 +288,20 @@ SEQ_BEGIN( s_move )
     END_STOP
 SEQ_END
 
+/* 정렬 회전: 회전 → 정착·보정이 끝나야 출력 B. 오류로 끝나면 B 를 켜지 않는다 */
+SEQ_BEGIN( s_align )
+    AGV_TURN( CW, 90, 0, 0, 12, ALIGN, OBS )
+    OUT_ON( OUT_EXT_2 )
+    END_STOP
+SEQ_END
+ACT_BEGIN( a_bad_align )
+    AGV_TURN( CW, 90, 0, 0, 0, ALIGN )
+ACT_END
+
 enum {
     S_BRANCH = SEQ_SITE_BASE, S_UNMATCHED, S_TIMING, S_ACS, S_DRIVE, S_BUDGET, S_OUTS, S_FLICKER,
     S_ANY, S_HANDSHAKE, S_WAIT_OUT, S_CALL, S_BAD_LABEL, S_ACT_START, S_PROF, S_NO_TABLE,
-    S_XWHEN, S_XWAIT, S_ANY2, S_DPARAM, S_TPARAM, S_NOWAIT, S_MOVE
+    S_XWHEN, S_XWAIT, S_ANY2, S_DPARAM, S_TPARAM, S_NOWAIT, S_MOVE, S_ALIGN
 };
 
 SEQ_MAP_BEGIN( site_seqs )
@@ -319,6 +329,7 @@ SEQ_MAP_BEGIN( site_seqs )
     SEQ_MAP( 0, S_TPARAM, s_tparam )
     SEQ_MAP( 0, S_NOWAIT, s_nowait )
     SEQ_MAP( 0, S_MOVE, s_move )
+    SEQ_MAP( 0, S_ALIGN, s_align )
 SEQ_MAP_END
 
 ACT_MAP_BEGIN( site_acts )
@@ -400,6 +411,28 @@ int main(void)
     seq_run();
     assert(fake_out == (BIT(OUT_EXT_1) | BIT(OUT_EXT_2)) && !seq_is_active());
     BAD(a_bad_move);
+    assert(seq_bind(&s_site_ok) == 0);
+
+    /* 정렬 회전(ALIGN): 정렬이 끝나야(tape_align 0, 회전 끝) 다음 스텝. 오류가 서 있으면 다음으로 가지 않는다 */
+    start(S_ALIGN);
+    fake_turn_count = 0;
+    seq_run();
+    assert(fake_turn_count == 1 && fake_turn_next == ((1u << 8) | (12u << 11)) && D.tape_align == 1);
+    seq_run(); seq_run();
+    assert(seq_is_active() && fake_out == 0);                   /* 정렬 중 */
+    D.tape_align = 0;
+    D.system_err = 258;                                          /* 못 찾고 끝났다: 회전은 끝났어도 B 는 켜지 않는다 */
+    seq_run(); seq_run();
+    assert(seq_is_active() && fake_out == 0 && seq_active_step() == 0);
+    D.system_err = 0;
+    D.stop_err = 277;
+    seq_run();
+    assert(fake_out == 0);
+    D.stop_err = 0;
+    seq_run();                                                   /* 오류 없이 끝났다 */
+    assert(fake_out == BIT(OUT_EXT_2) && !seq_is_active());
+    fake_turn_count = 0;                                         /* 뒤 시험은 처음부터 센다 */
+    BAD(a_bad_align);
     assert(seq_bind(&s_site_ok) == 0);
 
     /* WHEN: 대기 → 첫 참의 가지 → 안정 초과 → 재출발 */
