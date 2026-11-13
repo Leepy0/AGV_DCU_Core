@@ -1734,15 +1734,20 @@ static void test_tag_stop_class(void)
     tag_stop_rule(42);
     assert(!D.flag_stopping && (D.tape_stop_kind == TA_STOP_KIND_TAPE) && (D.tape_stop_id == SEQ_LOAD));
 
-    /* 진행 중인 정지는 새 교차선 정지 요청이 깨지 않는다(AGV_STOP 이 정지 중에 다시 와도 거리가 그대로인 것과 같다) */
+    /* 진행 중인 정지가 있어도 교차선 정지 요청은 AGV_STOP 처럼 받는다(정지 거리는 그대로. 보류는 run.c) */
     boot();
     drive_up();
     run_scan(20);
     tag_frame(1, '1', 0);                        /* AGV_STOP */
     run_scan(1);
     assert(D.flag_stopping && (D.stop_pulses > 0));
-    (void)tagact_run(41);
-    assert((D.tape_stop_kind == 0) && (D.tape_stop_id == 0) && !seq_request_flag[SEQ_LOAD]);
+    {
+        int16_t len = D.stop_pulses;
+        (void)tagact_run(41);
+        assert((D.tape_stop_kind == TA_STOP_KIND_TAPE_GD) && (D.tape_stop_id == SEQ_LOAD) && (D.stop_pulses == len));
+    }
+    D.tape_stop_kind = 0;
+    D.tape_stop_id = 0;
 
     /* 교차선 정지 + 자동 출발: 태그 자리에서 서지 않고(예전에는 자동 출발이 SL 정지를 걸고, 다시 떠날 때 run_seq_init 이
      * 교차선 요청을 지워 시퀀스가 안 돌았다) 교차선에서 선다. 선 뒤에는 분류 1 의 SEQ_START( x ) + 자동 출발과 같다:
@@ -1770,21 +1775,22 @@ static void test_tag_stop_class(void)
     printf("  tag stop class ok\n");
 }
 
-/* 교차선 회전 요청: 일반 회전을 걸지 않는 상황(정지 중, 서 있음, 회전 모드 0)이면 아무 일도 없다.
- * 요청이 걸려 교차선을 찾는 동안 읽은 태그는 회전 중과 같이 ACK 없이 버린다 */
+/* 교차선 회전 요청: 일반 회전을 걸지 않는 상황(거리 정지 진행 중, 서 있음, 회전 모드 0)이면 아무 일도 없다.
+ * 거리 없는 감속(명령 정지) 중에는 건다. 요청이 걸려 교차선을 찾는 동안 읽은 태그는 회전 중과 같이 ACK 없이 버린다 */
 static void test_tape_turn_request(void)
 {
     boot();
     (void)param_set(P_TURN_FORBACK, 10);
     drive_up();
     run_scan(20);
-    D.flag_stopping = 1;                         /* 정지 중(거리 끝, 꼬리) */
-    (void)tagact_run(43);
-    assert(D.tape_turn_dir == 0);
     D.stop_pulses = 100;
-    D.flag_stopping = 0;                         /* 정지 거리 진행 중 */
+    D.flag_stopping = 1;                         /* 거리 정지 진행 중 */
     (void)tagact_run(43);
     assert(D.tape_turn_dir == 0);
+    D.stop_pulses = 0;                           /* 거리 없는 감속(명령 정지) 중: 건다(레거시는 SL 정지 뒤 회전) */
+    (void)tagact_run(43);
+    assert((D.tape_turn_dir == TURN_CW) && (D.stop_pulses == 0));
+    D.tape_turn_dir = 0;
 
     boot();                                      /* 서 있음 */
     (void)param_set(P_TURN_FORBACK, 10);
