@@ -549,9 +549,9 @@ static void finish(void)
     D.flag_stopping = 1;
     D.flag_ready = D.flag_run = D.flag_jog_on = D.flag_turn = 0;
     D.amp_run = 0;
-    /* 시퀀스 이동: 도착(거리 정지·교차선 인정 뒤)이면 다음 스텝, 다른 원인으로 섰으면 시퀀스 오류. 회전 끝은 건드리지 않는다 */
+    /* 시퀀스 이동: 도착(거리 정지, 교차선 인정 뒤 위치 정지)이면 다음 스텝, 다른 원인으로 섰으면 시퀀스 오류. 회전 끝은 건드리지 않는다 */
     if (D.move_on && (reason != STOP_REASON_TURN_ANGLE)) {
-        D.move_on = ((reason == STOP_REASON_MOVE) || (D.move_on == MOVE_FOUND)) ? MOVE_DONE : MOVE_FAIL;
+        D.move_on = ((reason == STOP_REASON_MOVE) || ((D.move_on == MOVE_FOUND) && stop_is_position(reason))) ? MOVE_DONE : MOVE_FAIL;
     }
     acs_cross_hold();       /* 교차로 대기 중 다른 정지로 섰다. 허가까지 다시 출발하지 않는다 */
 }

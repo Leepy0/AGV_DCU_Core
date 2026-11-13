@@ -1791,7 +1791,6 @@ static void test_tag_stop_class(void)
     tag_stop_rule(44);
     assert(!D.flag_stopping && !D.wait_start && (D.tape_autostart == 2u));
     assert((D.tape_stop_kind == TA_STOP_KIND_TAPE) && (D.tape_stop_id == SEQ_LOAD));
-#ifdef TAPE_AUTOSTART_ARMED   /* 주행 쪽 2차 패치가 정지를 건 때 예약을 걸면 켠다 */
     {
         int i;
         for (i = 0; (i < 10) && !D.flag_stopping; i++) { guide_led_reply(0x03FFu); tick(); }
@@ -1802,7 +1801,20 @@ static void test_tag_stop_class(void)
         assert(seq_is_active() && D.run_restart && !D.flag_run);   /* 시퀀스가 돌고, 재출발은 시퀀스 뒤로 미뤄진다 */
         run_seq_init();
     }
-#endif
+
+    /* 분류 3 + 자동 출발(시퀀스 없음): 교차선에서 서고 AS(5 초) 뒤 실제로 다시 떠난다 */
+    tag_stop_rule(39);
+    {
+        int i, stopped = 0;
+        for (i = 0; (i < 10) && !D.flag_stopping; i++) { guide_led_reply(0x03FFu); tick(); }
+        assert(D.flag_stopping && D.wait_start && !D.tape_autostart);
+        for (i = 0; (i < 1000) && !(stopped && D.flag_run); i++) {
+            guide_reply(0);
+            tick();
+            stopped |= !D.flag_run;
+        }
+        assert(stopped && (i > 400) && (i < 1000));
+    }
 
     /* 교차선 정지 + 대기 보고 + 자동 출발: 보고는 태그 자리, 정지는 교차선, 자동 출발은 보관 */
     tag_stop_rule(45);
@@ -3257,6 +3269,183 @@ static void test_tape_guard(void)
     printf("  tape guard ok\n");
 }
 
+/* 'h' 응답 n 개, 응답마다 엔코더 펄스 p 개(두 바퀴) */
+static void led_run(uint16_t leds, int n, int p)
+{
+    while (n-- > 0) {
+        host_sci_t *b = &host.sci[HAL_SCI_B];
+        int k;
+        if (b->rx_pos == b->rx_len) { b->rx_len = b->rx_pos = 0; }
+        guide_led_reply(leds);
+        for (k = 0; k < p; k++) { run_encoder(0, 20000); run_encoder(1, 20000); }
+        tick();
+    }
+}
+
+/* 'h' 소스로 주행 상태까지, 주행 테이프 칸 8·9 */
+static void h_drive_up(int turn)
+{
+    boot();
+    (void)param_set_ram(P_LEGACY_QUIRKS, 0);
+    if (turn) { (void)param_set(P_TURN_FORBACK, 10); }
+    drive_up();
+    led_run(0x0180u, 40, 1);
+}
+
+/* 인정 기준(2차): 그 쪽이 마지막으로 2/3 넘게 비어 있던 때부터 20 mm 안에 차야 한다. 끝 칸이 한 응답 꺼져도 기준이 새로 잡히지
+ * 않는다(합류선을 인정하던 결함). 옆에 오래 켜진 선이 있어도 교차선은 인정한다. 빈 칸은 허용하지 않는다(모의에서 합류선 오인정) */
+static void test_tape_rule2(void)
+{
+    h_drive_up(0);
+    D.tape_stop_kind = 3;
+    led_run(0x0181u, 10, 4);                    /* 합류선: 끝 칸부터 천천히 찬다(응답마다 4 펄스) */
+    led_run(0x0183u, 10, 4);
+    led_run(0x018Fu, 10, 4);
+    led_run(0x01FFu, 6, 4);
+    assert((D.tape_stop_kind == 3) && !D.flag_stopping);
+    led_run(0x01FEu, 1, 4);                     /* 끝 칸 한 응답 꺼짐 */
+    led_run(0x01FFu, 3, 4);
+    assert((D.tape_stop_kind == 3) && !D.flag_stopping && !D.system_err);
+
+    h_drive_up(0);
+    led_run(0x0183u, 60, 1);                    /* 옆(칸 1·2)에 오래 켜진 선 */
+    D.tape_stop_kind = 3;
+    led_run(0x0183u, 5, 1);
+    led_run(0x01FFu, 2, 1);                     /* 교차선 */
+    assert((D.tape_stop_kind == 0) && D.flag_stopping);
+
+    h_drive_up(0);
+    D.tape_stop_kind = 3;
+    led_run(0x01FBu, 2, 1);                     /* 칸 3 이 빈 응답은 교차선이 아니다 */
+    assert((D.tape_stop_kind == 3) && !D.flag_stopping);
+    printf("  tape rule 2 ok\n");
+}
+
+/* 교차선 회전: 찾는 중 일시정지로 교차선 위에 서서 인정하면 회전이 거부된다(속도 0). 맡은 요청은 남고 다시 움직이면 그 교차선에서 돈다 */
+static void test_tape_turn_paused(void)
+{
+    int i;
+    h_drive_up(1);
+    D.tape_turn_dir = TURN_CW; D.tape_turn_deg = 90; D.tape_turn_next = 0x10;
+    led_run(0x0180u, 5, 1);
+    D.pause_stop = 1;
+    for (i = 0; (i < 300) && (D.vin_out != 0); i++) { led_run(0x0180u, 1, 1); }
+    led_run(0x0180u, 30, 0);
+    led_run(0x01FFu, 3, 0);                     /* 서 있는 자리가 교차선 위 */
+    assert(!D.tape_align && !D.flag_stopping && !D.system_err);
+    D.pause_stop = 0;
+    for (i = 0; (i < 400) && !D.tape_align; i++) { led_run(0x01FFu, 1, 1); }
+    assert(D.tape_align && (D.turn_pulses > 0) && D.flag_stopping && D.steer_hold && (D.tape_turn_dir == 0) && !D.system_err);
+    printf("  tape turn paused ok\n");
+}
+
+/* GD 구간 중 명령 정지(ACS 교통 정지): 회전·분류 4 를 버리지 않고 다시 출발하면 남은 거리를 가서 서고 돈다.
+ * 분류 4 + 시퀀스는 GD 에 선 뒤에 시퀀스 */
+static void gd_cmd_stop(int turn)
+{
+    int i;
+    h_drive_up(turn);
+    if (turn) { D.tape_turn_dir = TURN_CW; D.tape_turn_deg = 90; D.tape_turn_next = 0x10; }
+    else      { D.tape_stop_kind = 4; D.tape_stop_id = SEQ_LOAD; }
+    led_run(0x0180u, 5, 1);
+    led_run(0x01FFu, 3, 1);                     /* 인정: GD 정지 */
+    assert(D.steer_hold && D.flag_stopping && (D.stop_pulses > 0));
+    led_run(0x0180u, 5, 1);
+    stop_request_rapid(STOP_REASON_COMMAND);    /* 'W' 'C' '0' */
+    D.flag_stopping = 1;
+    for (i = 0; (i < 400) && D.flag_run; i++) { led_run(0x0180u, 1, (D.vin_out > 0) ? 1 : 0); }
+    led_run(0x0180u, 5, 0);
+    assert(!D.flag_run && !D.steer_hold && !D.flag_turn && !seq_request_flag[SEQ_LOAD] && !D.system_err);
+    run_wait_start();                           /* 'W' 'C' '1' 과 같은 다시 출발 */
+    for (i = 0; i < 20; i++) { guide_led_reply(0x0180u); tick(); }
+    for (i = 0; (i < 3000) && (D.flag_run || D.flag_ready); i++) { led_run(0x0180u, 1, (D.vin_out > 0) ? 1 : 0); }
+    for (i = 0; i < 5; i++) { guide_reply(0); tick(); }
+    if (turn) { assert(D.flag_turn || D.turn_motion); }
+    else      { assert(seq_request_flag[SEQ_LOAD] || seq_is_active()); }
+    assert(!D.system_err && (run_tape_last.kind == (turn ? -1 : 4)));
+    run_seq_init();
+}
+
+static void test_tape_gd_cmd_stop(void)
+{
+    gd_cmd_stop(1);
+    gd_cmd_stop(0);
+    printf("  tape gd cmd stop ok\n");
+}
+
+/* AGV_MOVE( 한계, TAPE_GD ): GD 구간 중 명령 정지는 도착이 아니다(MOVE_FAIL). 찾는 중 명령 정지 감속에 교차선을 봐도 GD 정지로
+ * 바꾸지 않는다 */
+static void move_gd_cmd(int early)
+{
+    int i;
+    boot();
+    (void)param_set_ram(P_LEGACY_QUIRKS, 0);
+    assert(tagact_move_tape(3000, 4) == 1);
+    ticks(3);
+    guide_led_reply(0x0180u);
+    tick();
+    led_run(0x0180u, 60, 1);
+    if (early) {
+        stop_request_rapid(STOP_REASON_COMMAND);
+        D.flag_stopping = 1;
+        led_run(0x0180u, 2, 1);
+    }
+    led_run(0x01FFu, 2, 1);
+    if (early) { assert((stop_reason() == STOP_REASON_COMMAND) && !D.steer_hold); }
+    else       { assert((D.move_on == MOVE_FOUND) && D.steer_hold); }
+    led_run(0x0180u, 3, 1);
+    if (!early) {
+        stop_request_rapid(STOP_REASON_COMMAND);
+        D.flag_stopping = 1;
+    }
+    for (i = 0; (i < 400) && D.flag_run; i++) { led_run(0x0180u, 1, (D.vin_out > 0) ? 1 : 0); }
+    assert(D.move_on == MOVE_FAIL);
+}
+
+static void test_move_gd_cmd(void)
+{
+    move_gd_cmd(0);
+    move_gd_cmd(1);
+    printf("  move gd cmd ok\n");
+}
+
+/* GD 구간 중 ACS 작업 취소('W' 'C' '2'): 요청은 지워지고 조향 0·선 없음 막기는 설 때까지 둔다 */
+static void test_gd_traffic_reset(void)
+{
+    int i;
+    h_drive_up(0);
+    D.tape_stop_kind = 4;
+    led_run(0x0180u, 5, 1);
+    led_run(0x01FFu, 3, 1);
+    assert(D.steer_hold && D.flag_stopping);
+    run_seq_init();                             /* traffic_reset 이 부른다 */
+    led_run(0x0000u, 1, 1);
+    assert(D.steer_hold && D.flag_stopping);
+    for (i = 0; (i < 600) && D.flag_run; i++) { led_run(0x0000u, 1, (D.vin_out > 0) ? 1 : 0); }
+    led_run(0x0000u, 2, 0);
+    assert(!D.flag_run && !D.steer_hold && !D.system_err && !D.stop_err);
+    printf("  gd traffic reset ok\n");
+}
+
+/* 찾기 한계는 찾는 동안 간 거리만 센다: 보류된 사이 바퀴가 돈 펄스(제자리 회전·조그)는 넣지 않는다 */
+static void test_tape_seek_len(void)
+{
+    int i;
+    h_drive_up(0);
+    D.tape_stop_kind = 4;
+    led_run(0x0180u, 5, 1);
+    stop_request_rapid(STOP_REASON_COMMAND);
+    D.flag_stopping = 1;
+    for (i = 0; (i < 400) && D.flag_run; i++) { led_run(0x0180u, 1, (D.vin_out > 0) ? 1 : 0); }
+    for (i = 0; i < 4 * P.stop_len; i++) { run_encoder(0, 20000); }   /* 서 있는 동안 바퀴만 돈다 */
+    tick();
+    run_wait_start();
+    for (i = 0; i < 20; i++) { guide_led_reply(0x0180u); tick(); }
+    led_run(0x0180u, 10, 1);
+    assert(!D.system_err && (D.tape_stop_kind == 4));
+    printf("  tape seek len ok\n");
+}
+
 /* 전원을 켤 때 MODE + UP: 입력 번호 표시, 출력 번호 선택, SET 켬, RESET 끔 */
 static void test_io_test(void)
 {
@@ -3491,6 +3680,12 @@ int main(void)
     test_tape_turn();
     test_tape_rule();
     test_tape_guard();
+    test_tape_rule2();
+    test_tape_turn_paused();
+    test_tape_gd_cmd_stop();
+    test_move_gd_cmd();
+    test_gd_traffic_reset();
+    test_tape_seek_len();
     test_io_test();
     test_acs_off();
     test_keep_results();
