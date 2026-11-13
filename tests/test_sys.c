@@ -1813,6 +1813,35 @@ static void test_tape_turn_request(void)
     printf("  tape turn request ok\n");
 }
 
+/* 시퀀스 이동·교차선 회전 앞 찾기 중 교차로 IN·OUT 태그: 버리지 않고 서고 오류 290. 다른 태그는 버린다 */
+static void test_move_cross_tag(void)
+{
+    char b[32];
+    int k;
+
+    for (k = 0; k < 3; k++) {
+        boot();
+        (void)param_set(P_TURN_FORBACK, 10);
+        drive_up();
+        run_scan(20);
+        if (k < 2) { D.move_on = 3; }                 /* 시퀀스 이동 중 */
+        else       { (void)tagact_run(43); assert(D.tape_turn_dir != 0); }   /* 교차선 회전 앞 찾는 중 */
+        host.sci[HAL_SCI_A].tx_len = 0;
+        tag_frame(2, '1', 0);                          /* 속도 태그는 버린다 */
+        run_scan(1);
+        assert((D.stop_err == 0) && !D.flag_stopping && !D.cross_in_flag);
+        assert((k < 2) == (tx_has('A', 'E') != 0));   /* 이동 중은 ACK, 찾는 중은 회전 중처럼 ACK 없음 */
+        sprintf(b, (k == 1) ? "E1B%02dO00700000000" : "E1B%02dI01200000000", AGV_ID);
+        send_frame(b, 0);
+        run_scan(1);
+        assert((D.stop_err == SEQ_ERR_CROSS) && D.flag_stopping && (D.stop_pulses == 0));
+        assert(!D.cross_in_flag && (acs_cross_out_count() == 0) && (D.tape_turn_dir == 0) && tx_has('A', 'E'));
+        D.move_on = 0;
+    }
+    boot();
+    printf("  move cross tag ok\n");
+}
+
 /* 정렬 회전: 'h' 로 슬립을 재고, 목표각 근방에서 라인을 찾아 중앙에서 끝낸다 */
 static void test_align_turn(void)
 {
@@ -3248,6 +3277,7 @@ int main(void)
     test_tag_standby();
     test_tag_stop_class();
     test_tape_turn_request();
+    test_move_cross_tag();
     test_tune_entry();
     test_ee_probe();
     test_tune_menu();

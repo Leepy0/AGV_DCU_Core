@@ -242,13 +242,22 @@ static void on_event(const rx_item_t *it)
     uint16_t kind = b[6];
     int16_t num = (kind == 'T') ? digits3(b[2], b[8], b[9]) : digits3(b[7], b[8], b[9]);
 
-    if ((D.control == RUN_TURN) || (D.turn_pulses > 0) || (D.tape_turn_dir != 0)) {
+    int16_t seek = (int16_t)(D.tape_turn_dir != 0);
+    int16_t cross = (int16_t)((kind == 'I') || (kind == 'O'));
+
+    if ((D.control == RUN_TURN) || (D.turn_pulses > 0) || (seek && !cross)) {
         s_rfid.valid = 0;                               /* 회전 중·교차선 회전 앞 찾는 중 태그는 ACK 없이 무시 */
         return;
     }
     (void)acs_send_tag_ack(b[3], b[1], kind, 'W');
-    if (D.move_on) {
-        /* 시퀀스 MOVE_MM 중 태그는 동작·정지·속도 모두 무시한다. ACK 는 보낸다: 안 보내면 재전송이 이동 뒤에 늦게 처리될 수 있다 */
+    if (D.move_on || seek) {
+        /* 시퀀스 이동·교차선 회전 앞 찾기 중 태그는 동작·정지·속도 모두 무시한다. ACK 는 보낸다: 안 보내면 재전송이 이동 뒤에
+         * 늦게 처리될 수 있다. 교차로 IN·OUT 은 버리면 허가 없이 들어가거나 OUT 보고가 빠지므로 서고 오류로 끝낸다
+         * (시퀀스 이동·교차선 찾기는 교차로를 건너는 용도가 아니다) */
+        if (cross) {
+            D.stop_err = SEQ_ERR_CROSS;
+            D.tape_turn_dir = 0;
+        }
         s_rfid.valid = 0;
         return;
     }

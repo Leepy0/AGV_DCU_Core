@@ -116,6 +116,7 @@ enum { SEQ_SPD_HIGH = 0xFFF0, SEQ_SPD_LOW = 0xFFF1, SEQ_SPD_LLOW = 0xFFF2, SEQ_S
 #define SEQ_ERR_CALL     290u     /* 사용자 정의 함수가 실패(2)를 돌려준 경우 */
 #define SEQ_ERR_TABLE    290u     /* 없는 라벨·함수 인덱스 */
 #define SEQ_ERR_TURN     290u     /* 시퀀스 정렬 회전을 걸 수 없음(회전 모드 0, 회전·정지 진행 중 등) */
+#define SEQ_ERR_CROSS    290      /* 시퀀스 이동·교차선 회전 앞 찾기 중 교차로 IN·OUT 태그(stop_err: 서고 오류) */
 #define SEQ_STATE_COUNT  16       /* 사이트 상태 변수 칸 수 */
 
 typedef struct {
