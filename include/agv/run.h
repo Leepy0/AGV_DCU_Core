@@ -18,6 +18,7 @@ void     run_encoder(uint16_t wheel, uint32_t period);   /* eCAP ISR */
 int16_t  run_seek_rpm(void);              /* 정렬 회전 앞 교차 테이프 찾기 속도 rpm. SPN~min(LOS, 12 m/min) */
 void     run_move_tape_start(int16_t kind);   /* 시퀀스 AGV_MOVE( 한계, TAPE… ): kind 3 바로 정지, 4 GD 정지. tagact_move_tape 가 부른다 */
 int      run_move_tape_on(void);          /* 1 = 교차선까지 이동 중(아직 못 찾음)이거나 교차선 뒤 가장자리를 기다린다 */
+int      run_tape_turn_held(void);        /* 1 = 인정한 교차선의 회전을 맡고 있다(회전이 거부됐거나 GD 정지가 끊겨 다시 걸 때까지) */
 void     run_tape_rx(uint16_t s, uint16_t e);     /* 'h' 응답마다(guide_poll): 교차선 인정. s·e = 추적기가 고른 덩어리 칸, 없으면 0 */
 
 /* 마지막 교차선 정지 기록(CCS: run_tape_last). 분류 3·4 정지·교차선 회전 앞 정지·AGV_MOVE( 한계, TAPE… ) */
@@ -27,6 +28,7 @@ typedef struct {
     float    run_mm;            /* 인정한 자리부터 선 자리까지 간 거리(정지 거리를 세는 바퀴) */
     float    width_mm;          /* 잰 교차선 폭(앞·뒤 가장자리 사이). -1 = 못 봄·분류 3 */
     uint16_t n;                 /* 기록 수 */
+    float    over_mm;           /* 지나침: 4·회전은 목표 뒤 거리(TAPE_BACK_MM 60 넘으면 258 로 섰다), 3 은 정지를 건 뒤 간 거리 */
 } run_tape_last_t;
 extern run_tape_last_t run_tape_last;
 uint32_t run_pulses(uint16_t wheel);       /* 좌 Total_length, 우 누적 펄스 */

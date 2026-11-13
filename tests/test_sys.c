@@ -1743,7 +1743,10 @@ static void test_tag_stop_class(void)
         uint16_t n0 = run_tape_last.n;
         for (i = 0; (i < 20) && (D.tape_stop_kind != 0); i++) { guide_led_reply(0x03FFu); run_encoder(0, 20000); tick(); }
         assert((D.tape_stop_kind == 0) && D.flag_stopping && (D.stop_pulses > 0) && !D.system_err);
-        for (i = 0; (i < 20000) && D.flag_run; i++) { run_scan(1); }
+        for (i = 0; (i < 20000) && D.flag_run; i++) {   /* 지령이 0 이면 바퀴도 선다(지나침 60 mm 넘으면 258) */
+            if (D.vin_out > 0) { run_scan(1); }
+            else { guide_reply(0); tick(); }
+        }
         for (i = 0; (i < 50) && !seq_is_active(); i++) { guide_reply(0); tick(); }
         assert(!D.flag_run && seq_is_active() && (run_tape_last.n == (uint16_t)(n0 + 1u)) && (run_tape_last.kind == 4));
         run_seq_init();
@@ -3446,6 +3449,135 @@ static void test_tape_seek_len(void)
     printf("  tape seek len ok\n");
 }
 
+/* 교차선 회전(turn) 또는 분류 4(+ 자동 출발 as) 요청을 걸고 인정한 뒤 GD 구간 중 명령 정지로 선다 */
+static void gd_to_cmd_stop(int turn, uint16_t as)
+{
+    int i;
+    h_drive_up(turn);
+    if (turn) { D.tape_turn_dir = TURN_CW; D.tape_turn_deg = 90; D.tape_turn_next = 0x10; }
+    else      { D.tape_stop_kind = 4; D.tape_autostart = as; }
+    led_run(0x0180u, 5, 1);
+    led_run(0x01FFu, 3, 1);
+    led_run(0x0180u, 5, 1);
+    stop_request_rapid(STOP_REASON_COMMAND);    /* 'W' 'C' '0' */
+    D.flag_stopping = 1;
+    for (i = 0; (i < 400) && D.flag_run; i++) { led_run(0x0180u, 1, (D.vin_out > 0) ? 1 : 0); }
+    led_run(0x0180u, 5, 0);
+}
+
+/* 다시 출발('W' 'C' '1')해 설 때까지 */
+static void restart_to_stop(void)
+{
+    int i;
+    run_wait_start();
+    for (i = 0; i < 20; i++) { guide_led_reply(0x0180u); tick(); }
+    for (i = 0; (i < 3000) && (D.flag_run || D.flag_ready); i++) { led_run(0x0180u, 1, (D.vin_out > 0) ? 1 : 0); }
+    for (i = 0; i < 5; i++) { guide_reply(0); tick(); }
+}
+
+/* 처음 GD 정지에서 목표를 60 mm 넘게 지나치면(서지 못하는 차) 돌지 않고 258, 지나침을 기록. 분류 3 은 기록만 */
+static void test_gd_overrun(void)
+{
+    int i, coast = 0;
+    h_drive_up(1);
+    D.tape_turn_dir = TURN_CW; D.tape_turn_deg = 90; D.tape_turn_next = 0x10;
+    led_run(0x0180u, 5, 1);
+    led_run(0x01FFu, 2, 1);
+    assert(D.steer_hold && D.tape_align);
+    for (i = 0; (i < 900) && D.flag_run; i++) {   /* 지령이 0 이 된 뒤에도 80 틱 굴러간다 */
+        led_run(0x0180u, 1, ((D.vin_out > 0) || (coast++ < 80)) ? 2 : 0);
+    }
+    led_run(0x0180u, 20, 0);
+    assert((D.system_err == ERR_GUIDE_SENSOR) && !D.flag_turn && !D.tape_align && (D.turn_pulses == 0) && (D.control != RUN_TURN));
+    assert((run_tape_last.kind == -1) && (run_tape_last.over_mm > 60.0f));
+
+    h_drive_up(0);
+    D.tape_stop_kind = 3;
+    led_run(0x0180u, 5, 1);
+    coast = 0;
+    for (i = 0; (i < 900) && (D.flag_run || (i < 3)); i++) { led_run(0x01FFu, 1, ((D.vin_out > 0) || (coast++ < 40)) ? 2 : 0); }
+    led_run(0x0180u, 5, 0);
+    assert(!D.system_err && (run_tape_last.kind == 3) && (run_tape_last.over_mm > 20.0f));
+    printf("  gd overrun ok\n");
+}
+
+/* 분류 4 + 자동 출발: GD 중 명령 정지로 서 있는 동안 스스로 떠나지 않는다(예약을 거두어 되돌림). 다시 출발해 목표에 서면 건다 */
+static void test_gd_autostart(void)
+{
+    int i;
+    gd_to_cmd_stop(0, 3u);                      /* AS 2 초 */
+    assert(!D.flag_run && !D.wait_start && (D.tape_autostart == 3u) && !D.system_err);
+    for (i = 0; (i < 400) && !D.flag_run && !D.flag_ready; i++) { guide_led_reply(0x0180u); tick(); }
+    assert(i == 400);                           /* 교통 정지를 어기지 않는다 */
+    restart_to_stop();
+    assert(!D.system_err && (run_tape_last.kind == 4) && D.wait_start && !D.tape_autostart);
+    assert((run_tape_last.over_mm > -5.0f) && (run_tape_last.over_mm < 30.0f));   /* 이 흉내는 펄스가 속도와 무관해 20 mm 쯤 */
+    for (i = 0; (i < 400) && !D.flag_run && !D.flag_ready; i++) { guide_led_reply(0x0180u); tick(); }
+    assert((i > 150) && (i < 400));             /* 목표에 선 뒤 AS 쯤에 스스로 떠난다 */
+    printf("  gd autostart ok\n");
+}
+
+/* 맡은 채 서 있는 동안 바퀴가 돌면(밀림) 다시 걸지 않고 258. 떨림(몇 펄스)은 둔다 */
+static void test_gd_pushed(void)
+{
+    int i;
+    gd_to_cmd_stop(1, 0u);
+    assert(!D.system_err && run_tape_turn_held());
+    for (i = 0; i < 3; i++) { run_encoder(0, 20000); run_encoder(1, 20000); }
+    ticks(2);
+    assert(!D.system_err && run_tape_turn_held());
+    for (i = 0; i < 60; i++) { run_encoder(0, 20000); run_encoder(1, 20000); }
+    ticks(2);
+    assert((D.system_err == ERR_GUIDE_SENSOR) && !run_tape_turn_held());
+    printf("  gd pushed ok\n");
+}
+
+/* 맡은 채 다른 회전·시퀀스가 시작되면 오류 없이 놓는다(그 뒤 다시 출발해도 헛 258 이 없다) */
+static void test_gd_release(void)
+{
+    int i;
+    gd_to_cmd_stop(1, 0u);
+    D.turn_motion = MOTION_CW;                  /* 서 있는 자리에서 도는 회전(시퀀스 회전 등) */
+    D.turn_pulses = 200;
+    ticks(2);
+    assert(!run_tape_turn_held() && !D.system_err);
+    for (i = 0; i < 300; i++) { run_encoder(0, 20000); run_encoder(1, 20000); }
+    ticks(2);
+    assert(!D.system_err);
+
+    gd_to_cmd_stop(1, 0u);
+    seq_request(SEQ_LOAD);
+    for (i = 0; (i < 20) && !seq_is_active(); i++) { guide_reply(0); tick(); }
+    ticks(1);
+    assert(seq_is_active() && !run_tape_turn_held() && !D.system_err);
+    run_seq_init();
+    printf("  gd release ok\n");
+}
+
+/* 맡은 교차선 회전이 있는 동안(회전 거부·GD 끊김)에도 새 태그는 ACK 없이 버린다 */
+static void test_gd_held_tag(void)
+{
+    gd_to_cmd_stop(1, 0u);
+    assert(run_tape_turn_held());
+    host.sci[HAL_SCI_A].tx_len = 0;
+    tag_frame(1, '2', 0);
+    run_scan(1);
+    assert(!tx_has('A', 'E') && run_tape_turn_held());
+    printf("  gd held tag ok\n");
+}
+
+/* 추적기 덩어리 칸이 범위 밖(시작 칸 음수 → 0xFFFF)이어도 덩어리 기억이 망가지지 않는다: 한쪽(T) 교차선을 인정 */
+static void test_tape_lane_range(void)
+{
+    h_drive_up(0);
+    D.tape_stop_kind = 3;
+    led_run(0x0180u, 3, 1);
+    run_tape_rx(0xFFFFu, 1u);
+    led_run(0x01FFu, 3, 1);                     /* 왼쪽(칸 1~7)만 찬 T */
+    assert((D.tape_stop_kind == 0) && D.flag_stopping);
+    printf("  tape lane range ok\n");
+}
+
 /* 전원을 켤 때 MODE + UP: 입력 번호 표시, 출력 번호 선택, SET 켬, RESET 끔 */
 static void test_io_test(void)
 {
@@ -3686,6 +3818,12 @@ int main(void)
     test_move_gd_cmd();
     test_gd_traffic_reset();
     test_tape_seek_len();
+    test_gd_overrun();
+    test_gd_autostart();
+    test_gd_pushed();
+    test_gd_release();
+    test_gd_held_tag();
+    test_tape_lane_range();
     test_io_test();
     test_acs_off();
     test_keep_results();

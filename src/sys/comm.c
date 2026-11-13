@@ -242,7 +242,7 @@ static void on_event(const rx_item_t *it)
     uint16_t kind = b[6];
     int16_t num = (kind == 'T') ? digits3(b[2], b[8], b[9]) : digits3(b[7], b[8], b[9]);
 
-    int16_t seek = (int16_t)(D.tape_turn_dir != 0);
+    int16_t seek = (int16_t)((D.tape_turn_dir != 0) || run_tape_turn_held());   /* 찾는 중·맡은 회전(거부·끊김) */
     int16_t cross = (int16_t)((kind == 'I') || (kind == 'O'));
 
     if ((D.control == RUN_TURN) || (D.turn_pulses > 0) || (seek && !cross)) {
