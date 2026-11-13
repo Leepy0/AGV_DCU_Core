@@ -198,7 +198,8 @@ WAIT_ANY2( IN( ANY_ON( SEN_1, SEN_2 ), OFF( SEN_5 ) ),  ANY2_ON( SEN_3, SEN_4 ) 
 | `X_FORBACK_MODE` / `X_LOW_BATTERY` | 방향 전환 모드 > 0 / 저전압 | |
 | `X_STATION( k, lo, hi )` / `X_STATION_RUNNING( k, lo, hi )` | lo <= 큐[k] <= hi (/ + 정지 전) | `ACS_Station_Call_Num[k] == N` |
 | `X_STATION_MOD( k, n, m )` / `X_STATION_DIV( k, n, m )` | 큐[k] `%` n == m / 큐[k] `/` n == m. n = 0 은 컴파일 오류 | `ACS_Station_Call_Num[k] % N == M` |
-| `X_TAG_MINUS_EQ_STATION( k, n )` / `X_TAG_EQ_STATION( k )` | 태그 - n == 큐[k] / 태그 == 큐[k]. **태그 표 전용** | `Tag_Num - N == ACS_Station_Call_Num[k]` |
+| `X_TAG_NUM( 식 )` | 지금 태그 번호 == 식(v0.53.0). 식 `STATION(k)`, `STATION(k) ± n`, `MOD( STATION(k), m )`, `n + MOD( STATION(k), m )`(덧셈 순서 자유). **태그 표 전용** | `ACS_Station_Call_Num[k] == Tag_Num - N` 은 `X_TAG_NUM( STATION(k) + N )` |
+| `X_PARAM( 이름, v )` | 파라미터 == v. 이름은 FND 이름(`DRS`·`AS`·`TFB` …). 자릿수 파라미터의 한 자리는 `이름_자리`(`TFB_1` 전후진 모드, `TFB_10` 회전 모드)(v0.53.0) | `ForBack_Mode == 2` 는 `X_PARAM( TFB_1, 2 )` |
 | `X_NOT( x )` | 부정 | `== OFF` |
 
 ```c
@@ -457,7 +458,7 @@ TAG_TABLE_END
 - 액션은 규칙당 4칸이다. `AGV_TURN`은 2칸을 쓴다. 넘치면 `CALL( 인덱스 )`.
 - 회전 `AGV_TURN( 방향, 각도, 회전 뒤 방향, 자동 출발[, 속도[, 옵션…]] )`(3.2.2). 옵션 `ALIGN` 주행로 정렬, `TAPE` 교차 테이프를 찾은 뒤 정렬(둘 중 하나), `OBS` 회전 중 장애물 감지. 속도는 m/min 0\~31이고 0이나 생략은 자동(적재 `TNS`, 공차 `ETN`). 값이 있으면 적재·공차와 상관없이 그 회전 한 번만 그 속도다. 회전 최저 속도보다 낮으면 최저 속도, `TNS` 한계(25)보다 높으면 한계로 묶는다. 회전 끝 감속·정렬·회전 정지 계획도 그 값을 상한으로 쓰고, 회전이 끝나거나 STOP·오류로 끊기면 자동으로 돌아간다. 예: `AGV_TURN( CW, 90, 0, 1, 15 )` 15 m/min, `AGV_TURN( CW, 90, 0, 1, 0, ALIGN, OBS )`. 둘째 칸 = 회전 뒤 방향 b0\~3 | 자동 출발 b4\~7 | 장애물 b8 | 속도 b11\~15.
 - 정지는 4분류다(5.2): `AGV_STOP`(`SL`), `AGV_STOP( cm )`, `AGV_STOP( TAPE )`, `AGV_STOP( TAPE_GD )`. 정지 뒤 시퀀스는 `SEQ_START( [정지 방식,] 시퀀스 )`(이 동작만 옵션이 앞이다. 예전 `AGV_TAPE_STOP` 은 `SEQ_START( TAPE, 시퀀스 )`). 숫자 속도는 `AGV_SPEED_MMIN( m/min )`(4\~255).
-- 보고·대기·스테이션은 태그 표 파일에서 `agv/tag_dsl.h`를 포함하고 시퀀스 표와 같은 이름으로 쓴다. `ACS_SEND( 종류, 번호 )`(0\~255, 2칸), 번호 자리에 `STATION(k)`(스테이션 큐[k], 레거시 `ACS_Station_Call_Num[k]`) 또는 `AGV_ID_MINUS(n)`(호기 번호 - n), `ACS( 종류, STATION0 )`(1칸, 정보 값이 8비트뿐이라 `STANDBY_RESET`은 컴파일 오류. 대기 리셋은 2칸 `ACS_SEND`), `STATION_RESET`. 대기 `ACS_SEND( STANDBY, n )`은 레거시 `DA_ACS_Standby( n, NONE )` + 자동 재전송 켬(정지, 번호 > 0 이면 자동 재전송 늘 켬. 번호 0 이하(호기 - n 이 0 이하 등)는 한 번만 보낸다), `ACS_SEND( STANDBY_RESET, n )`은 `DA_ACS_Standby( n, RESET )`(먼저 스테이션 큐를 지운다)이다. 예: `TAG( 30, PF_X, AGV_STOP, ACS_SEND( STANDBY, 1 ), STATION_RESET )`. 둘째 칸 = Info | `TA_ACS_STANDBY_RESET`(0x100) | `TA_ACS_AGV_MINUS`(0x200) | `TA_ACS_STATION`(0x400). 시퀀스 표의 `ACS_SEND( STANDBY, … )`는 보고만 한다. `STATION[k]`(대괄호)는 쓰지 않는다: 문자열 첨자 같은 우회는 C 정수 상수식이 아니라 컴파일 때 범위 검사(`sizeof` 배열)와 같이 못 쓰고 표준 밖 확장에 기댄다. 숫자 칸 `( TA_ACS | DSL_INFO_… )`, `( TA_ACS_NUM | n ), DSL_INFO_…`도 쓸 수 있다. 예전 `A_` 이름(`A_STOP` 등)은 v0.47.0 에서 뺐다(대응표는 CHANGELOG v0.47.0).
+- 보고·대기·스테이션은 태그 표 파일에서 `agv/tag_dsl.h`를 포함하고 시퀀스 표와 같은 이름으로 쓴다. `ACS_SEND( 종류, 번호 )`(0\~255, 2칸), 번호 자리에 `STATION(k)`(스테이션 큐[k], 레거시 `ACS_Station_Call_Num[k]`) 또는 `AGV_ID_MINUS(n)`(호기 번호 - n), `ACS( 종류, STATION0 )`(1칸, 정보 값이 8비트뿐이라 `STANDBY_RESET`은 컴파일 오류. 대기 리셋은 2칸 `ACS_SEND`), `STATION_RESET`. 대기 `ACS_SEND( STANDBY, n )`은 레거시 `DA_ACS_Standby( n, NONE )` + 자동 재전송 켬(정지, 번호 > 0 이면 자동 재전송 늘 켬. 번호 0 이하(호기 - n 이 0 이하 등)는 한 번만 보낸다), `ACS_SEND( STANDBY_RESET, n )`은 `DA_ACS_Standby( n, RESET )`(먼저 스테이션 큐를 지운다)이다. 예: `TAG( 30, PF_X, AGV_STOP, ACS_SEND( STANDBY, 1 ), STATION_RESET )`. 둘째 칸 = Info | `TA_ACS_STANDBY_RESET`(0x100) | 번호 출처(b9\~10: 0 상수, `TA_ACS_AGV_MINUS` 0x200, `TA_ACS_STATION` 0x400, `TA_ACS_TAG_NUM` 0x600) | 스테이션 칸 k(b11\~15). v0.53.0 부터 번호 자리에 식을 쓴다: `STATION(k) ± n`(큐[k] ± n), `TAG_NUM ± n`(지금 태그 번호 ± n). 이 둘의 n 은 첫 칸 인자(부호 8비트, -128\~127)이고 범위 밖은 컴파일 오류다. 예: 레거시 `DA_ACS_Arrive( ACS_Station_Call_Num[0] + 100 )` 은 `ACS_SEND( ARRIVE, STATION(0) + 100 )`. 출발 대기 `AGV_WAIT_START`·`AGV_WAIT_CANCEL`(`run_wait_start`·`run_wait_cancel`, 레거시 `Flag_Wait_Start = ON·OFF`). 시퀀스 표의 `ACS_SEND( STANDBY, … )`는 보고만 한다. `STATION[k]`(대괄호)는 쓰지 않는다: 문자열 첨자 같은 우회는 C 정수 상수식이 아니라 컴파일 때 범위 검사(`sizeof` 배열)와 같이 못 쓰고 표준 밖 확장에 기댄다. 숫자 칸 `( TA_ACS | DSL_INFO_… )`, `( TA_ACS_NUM | n ), DSL_INFO_…`도 쓸 수 있다. 예전 `A_` 이름(`A_STOP` 등)은 v0.47.0 에서 뺐다(대응표는 CHANGELOG v0.47.0).
 - 조건은 `TAG_IF`의 셋째 인자 하나. 확장 조건 둘과 입력 조건 하나를 AND 한다.
 
 | 매크로 | 뜻 |
@@ -469,21 +470,31 @@ TAG_TABLE_END
 | `IF_STATION( 칸, 하한, 상한 )`, `IF_STATION_RUNNING( … )` | 큐 범위 (/ + 정지 전) |
 | `IF_ID( lo, hi )` | 프로파일 안 일부 호기 |
 | `IF_STATION_MOD( k, n, m )`, `IF_STATION_DIV( k, n, m )` | 큐[k] % n == m, 큐[k] / n == m |
-| `IF_TAG_MINUS_EQ_STATION( k, n )`, `IF_TAG_EQ_STATION( k )` | 태그 - n == 큐[k], 태그 == 큐[k] |
+| `IF_TAG_NUM( 식 )` | 지금 태그 번호 == 식(`X_TAG_NUM`, v0.53.0) |
+| `IF_PARAM( 이름, 값 )` | 파라미터(FND 이름) == 값(`X_PARAM`, v0.53.0) |
 
 ```c
 TAG_IF( 6,  PF_TUB,  IF_IN( ON(IN_EXT_4) ),   SEQ_START( UNLOAD ), AGV_FORBACK( TOGGLE ) )   /* 입력 켜짐일 때만 */
 TAG   ( 6,  PF_TUB,  AGV_STOP )                                                   /* 이 줄이 없으면 뒤 공통 규칙 */
 TAG_IF( 51, PF_LIFT, IF_X2( X_ID(85, 85), X_STATION(1, 42, 42) ),  AGV_TURN( CCW, 90, 0, 1, 0 ) )
 TAG_IF( 52, PF_LIFT, IF_X_IN( X_ID(81, 84), IN( OFF(SEN_1) ) ),    AGV_STOP )
-TAG_IF( 45, PF_LIFT, IF_TAG_MINUS_EQ_STATION( 1, 40 ),             AGV_STOP )       /* 큐[1] == 5 */
+TAG_IF( 45, PF_LIFT, IF_TAG_NUM( STATION(1) + 40 ),                AGV_STOP )       /* 큐[1] == 5 */
+TAG_IF( 7,  PF_TUB,  IF_PARAM( TFB_1, 2 ),  AGV_STOP, AGV_WAIT_START )             /* 전후진 모드 2 */
 ```
 
 - 조건이 거짓이면 다음 규칙을 본다. "조건이 아니면 아무것도 안 함"이면 뒤에 액션 없는 규칙 `TAG( n, PF, 0 )`을 둔다.
-- 태그 번호 조건은 규칙의 `tag`를 쓴다. 맞은 규칙의 `tag`가 곧 지금 태그다. 1xx·2xx 별칭을 `tagact_run( 번호 % 100 )`으로 다시 찾는 사이트는 변환된 번호로 평가된다(레거시 `Tag_Num = j`와 같음). 별칭 규칙 자체에 쓰면 1xx·2xx 번호다.
+- 태그 번호 조건은 읽은 태그 번호로 평가한다(범위 규칙이면 lo 가 아니라 읽은 번호).
 - `X_KEY`·`X_CROSS_*`도 쓸 수 있다. 표로 안 되는 동작은 `CALL`.
-- 규칙 1개는 16워드다(예전 9워드). 새 칸은 `act` 뒤에 있어 `{ tag, profile, cond, a, b, { act } }` 직접 초기화와 `TAG(...)`는 그대로 된다.
-- 압축 표(생성기용, v0.33.0): 규칙이 많아 플래시가 모자라면 확장 조건·입력 조건·동작을 중복 없는 표(`TAG_X`·`TAG_IN`·`TAG_ACTS`)로 빼고 규칙은 표 번호 3워드(`TAGP(태그, 프로파일, 확장 조건 1, 확장 조건 2, 입력, 동작)`)로 둔다. 번호 0 = 없음, 표 번호 0\~255, 태그 0\~1023, 프로파일 0\~63. `TAG_PACKED`로 묶어 `tagact_bind_packed`로 넘긴다. 맞춰 보는 규칙은 16워드 규칙으로 펼쳐 같은 길로 돈다. 손으로 쓰는 표는 16워드 그대로 쓴다.
+- 스테이션 큐 식의 값: 표식 2^29 + k << 16 + m << 21 + n(C 연산 그대로). n 은 -2048\~2047(넘으면 비트 12\~15 가 서서 컴파일 오류), m 1\~255, `MOD` 안은 `STATION(k)` 하나만. 시퀀스 `ACS_SEND` 는 `STATION(k)` 만 받는다(± n, `MOD` 는 컴파일 오류). 코어 조건 하나: 태그 == (m ? 큐[k] % m : 큐[k]) + n(`XC_TAG_NUM`). 예전 `IF_TAG_MINUS_EQ_STATION( k, n )`·`IF_TAG_EQ_STATION( k )` 는 v0.53.0 에서 뺐다(`IF_TAG_NUM( STATION(k) + n )`·`IF_TAG_NUM( STATION(k) )`).
+- 범위 규칙(v0.53.0): `TAG_RANGE( lo, hi, 프로파일, 동작… )`, `TAG_RANGE_IF( lo, hi, 프로파일, 조건, 동작… )`. 한 규칙이 태그 lo\~hi(lo <= hi <= 1023)를 받는다. 고르는 순서는 다른 규칙과 같다(표에 적힌 순서, 먼저 맞는 하나). 예(레거시의 "큐[0] == 태그 - 100 이면 서고 도착 보고, 아니면 보고만" 꼴):
+
+```c
+TAG_RANGE_IF( 101, 120, PF_X, IF_TAG_NUM( STATION(0) + 100 ), ACS_SEND( ARRIVE, STATION(0) + 100 ), AGV_STOP, AGV_AUTOSTART_PARAM )
+TAG_RANGE   ( 101, 120, PF_X, ACS_SEND( ARRIVE, STATION(0) + 100 ) )
+```
+
+- 규칙 1개는 18워드다(v0.53.0 끝 칸 `tag_hi`, 0 = 태그 하나. 예전 16·9워드). 새 칸은 `act` 뒤에 있어 `{ tag, profile, cond, a, b, { act } }` 직접 초기화와 `TAG(...)`는 그대로 된다.
+- 압축 표(생성기용, v0.33.0): 규칙이 많아 플래시가 모자라면 확장 조건·입력 조건·동작을 중복 없는 표(`TAG_X`·`TAG_IN`·`TAG_ACTS`)로 빼고 규칙은 표 번호 3워드(`TAGP(태그, 프로파일, 확장 조건 1, 확장 조건 2, 입력, 동작)`)로 둔다. 번호 0 = 없음, 표 번호 0\~255, 태그 0\~1023, 프로파일 0\~63. `TAG_PACKED`로 묶어 `tagact_bind_packed`로 넘긴다. 맞춰 보는 규칙은 18워드 규칙으로 펼쳐 같은 길로 돈다. 범위 규칙이 있으면 범위 칸(`TAG_RANGES_BEGIN`·`TAG_RANGE_P( 규칙 번호, hi )`, 규칙 번호 오름차순)을 더하고 `TAG_PACKED_R`로 묶는다. 그 규칙의 `TAGP` 태그가 lo 다. 손으로 쓰는 표는 18워드 그대로 쓴다.
 
 ### 5.1 프로파일
 
@@ -519,7 +530,7 @@ PROFILE_TABLE_END
 - 자동 출발: 분류 2 규칙은 태그 때 재출발 예약을 건다(분류 1 과 같다). 분류 3·4 규칙은 태그 때 걸지 않고 보관했다가(`D.tape_autostart`) 교차선 정지를 실제로 건 때 건다. 교차선 전에 다른 원인(교통 정지 등)으로 섰을 때 스스로 다시 떠나 그 정지를 어기지 않게 한다. v0.51.1: `GD` 정지가 위치 정지가 아닌 것(교통 정지 등)으로 끊기면 건 예약을 거두고, 다시 정지를 걸 때 다시 건다. 목표에 서야 예약한 시간 뒤에 떠난다. v0.51.2: 교차선 요청이 지워지면(STOP, ACS 작업 취소 등) 보관한 예약도 지운다. 새 분류 3·4 규칙은 그 규칙의 자동 출발만 남긴다(앞 규칙의 낡은 값을 잇지 않는다). ACS('W' 'C' '1', 'N')나 사람의 다시 출발이 대기를 걸면 끊긴 정지가 예약을 되돌려 그 대기를 거두지 않는다. 그때는 목표에 선 뒤 자동 출발 없이 ACS 출발을 기다린다.
 - 분류 2 와 3·4 가 같이 있으면 3·4 가 이긴다. 교차선 정지 둘은 금지(아래).
 - 다른 정지가 진행 중일 때: 분류 2 는 진행 중인 정지 거리를 바꾸지 않는다(분류 1 과 같다). 분류 3·4 요청은 받고, 주행 쪽이 다른 정지 중에는 찾기를 보류했다가 다시 달리면 잇는다(5.3).
-- 번호 변환 별칭(사용자 함수가 `tagact_run` 을 다시 부름)에서는 안쪽 규칙이 정한 정지 방식이 남는다(바깥 호출이 `SL` 로 덮지 않는다).
+- 사용자 함수가 `tagact_run` 을 다시 부르면(예전 번호 변환 별칭 등) 안쪽 규칙이 정한 정지 방식이 남는다(바깥 호출이 `SL` 로 덮지 않는다). `TAG_NUM` 은 각 호출의 태그 번호다.
 
 금지 조합(뜻이 모호하다. 압축 표 생성기가 규칙 번호·태그와 함께 오류로 잡는다. 손으로 쓰는 펼친 표는 검사하지 않는다):
 
