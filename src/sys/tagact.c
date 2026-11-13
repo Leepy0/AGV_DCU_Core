@@ -365,11 +365,22 @@ static void rule_stop(int16_t cls)
     if (cls < 3) { D.flag_stopping = 1; }
 }
 
+void tagact_autostart_arm(uint16_t arg)
+{
+    uint16_t wait = (arg != 0u) ? arg : (uint16_t)param_get(P_AUTO_START_SEC);
+    if (wait != 0u) { run_request_restart(wait); }
+}
+
+/* 분류 3·4 규칙의 자동 출발은 태그 때 걸지 않고 보관한다: 교차선 전에 다른 원인(교통 정지 등)으로 서면 스스로 다시 떠나 그 정지를
+ * 어기게 된다. 교차선 정지를 실제로 건 때 run.c 가 건다(D.tape_autostart) */
 static void autostart(uint16_t sec, int16_t cls)
 {
-    uint16_t wait = (sec != 0u) ? sec : (uint16_t)param_get(P_AUTO_START_SEC);
+    if (cls >= 3) {
+        if (tape_req_allowed()) { D.tape_autostart = (uint16_t)(sec + 1u); }
+        return;
+    }
     rule_stop(cls);
-    if (wait != 0u) { run_request_restart(wait); }
+    tagact_autostart_arm(sec);
 }
 
 /* 태그 보고. 대기('B')는 레거시 DA_ACS_Standby + 자동 재전송 켬 = ON: 정지, 번호 > 0 이면 자동 재전송 늘 켬,

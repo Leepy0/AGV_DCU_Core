@@ -135,6 +135,8 @@ typedef struct {
     int16_t tape_plan_min;           /* 이번 정렬 회전의 감속 계획 최솟값 rpm. 0 = 아직 없음. 계획을 다시 올리지 않는다 */
     int16_t tape_stop_id;            /* DA_Guide_Stop_Action. 교차선에서 서고 난 뒤 시작할 시퀀스. 0 = 없음 */
     int16_t tape_stop_kind;          /* 교차선 찾아 서기: 0 없음, 3 본 자리에서 바로, 4 GD 더 가서(TA_STOP_KIND_*). 태그 해석기가 넣고 run.c 가 처리한 뒤 둘 다 0 으로 */
+    uint16_t tape_autostart;         /* 분류 3·4 규칙의 자동 출발 보관: 0 없음, 아니면 예약 인자(초, 0 = AS) + 1. 교차선 정지를 건 때
+                                      * run.c 가 tagact_autostart_arm 으로 건다. 요청을 지울 때 0 */
     int16_t tape_turn_dir;           /* DA_Tape_Turn_Dir. 교차 테이프를 찾으면 회전한다 */
     int16_t tape_turn_deg;           /* DA_Tape_Turn_Degree */
     uint16_t tape_turn_next;         /* 회전 인자 둘째 칸: fb | auto<<4 | obs<<8 */

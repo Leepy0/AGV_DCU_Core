@@ -99,6 +99,7 @@ int      tagact_run(uint16_t tag);     /* DA_Tag_Selection 대체. 반환 1 = �
 uint16_t tagact_dry_run(uint16_t tag, uint16_t *acts, uint16_t cap);  /* 실행하지 않고 액션 열거 (관리 TT/TR) */
 
 /* 개별 액션 (사용자 정의 코드용) */
+void tagact_autostart_arm(uint16_t arg);   /* 자동 출발의 재출발 예약(arg 초, 0 = AS). 서는 것은 걸지 않는다. 분류 3·4 는 run.c 가 정지를 건 때 부른다 */
 void tagact_stop(void);          /* 정지 거리 없이 멈춘다. AGV_STOP */
 void tagact_stop_length(void);   /* 방향별 정지 거리 뒤 멈춘다 */
 void tagact_stop_after_mm(int32_t mm);   /* 지금 자리에서 mm 만큼 더 가서 멈춘다. 현장 센서 정지용(레거시 FL_check: 센서가 켜지면 FL 만큼 가서 정지) */

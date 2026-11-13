@@ -1725,9 +1725,10 @@ static void test_tag_stop_class(void)
     tag_stop_rule(38);
     assert(D.flag_stopping && (D.stop_pulses == 0));
 
-    /* 분류 3: 태그 자리에서 서지 않는다. 자동 출발은 걸어 둔다(선 뒤에 센다) */
+    /* 분류 3: 태그 자리에서 서지 않는다. 자동 출발은 태그 때 걸지 않고 보관한다(5 초 + 1. 교차선 정지를 건 때 run.c 가 건다) */
     tag_stop_rule(39);
-    assert(!D.flag_stopping && (D.tape_stop_kind == TA_STOP_KIND_TAPE) && (D.tape_stop_id == 0) && D.wait_start);
+    assert(!D.flag_stopping && (D.tape_stop_kind == TA_STOP_KIND_TAPE) && (D.tape_stop_id == 0) && !D.wait_start);
+    assert(D.tape_autostart == 6u);
 
     /* 분류 4: 같은 규칙의 SEQ_START( 시퀀스 ) 는 교차선 정지 뒤 시퀀스, 대기 보고는 정지 없이 */
     tag_stop_rule(40);
@@ -1785,25 +1786,27 @@ static void test_tag_stop_class(void)
     D.tape_stop_kind = 0;
     D.tape_stop_id = 0;
 
-    /* 교차선 정지 + 자동 출발: 태그 자리에서 서지 않고(예전에는 자동 출발이 SL 정지를 걸고, 다시 떠날 때 run_seq_init 이
-     * 교차선 요청을 지워 시퀀스가 안 돌았다) 교차선에서 선다. 선 뒤에는 분류 1 의 SEQ_START( x ) + 자동 출발과 같다:
-     * 재출발 대기(AS 초)를 마치고 시퀀스가 돌며, 재출발은 시퀀스가 끝난 뒤다 */
+    /* 교차선 정지 + 자동 출발: 태그 자리에서 서지 않고 교차선에서 선다. 자동 출발은 보관(1 초 + 1)했다가 교차선 정지를 건 때
+     * 건다(주행 쪽 2차 패치). 선 뒤에는 분류 1 의 SEQ_START( x ) + 자동 출발과 같다(재출발 대기 뒤 시퀀스, 재출발은 시퀀스 뒤) */
     tag_stop_rule(44);
-    assert(!D.flag_stopping && D.wait_start && (D.tape_stop_kind == TA_STOP_KIND_TAPE) && (D.tape_stop_id == SEQ_LOAD));
+    assert(!D.flag_stopping && !D.wait_start && (D.tape_autostart == 2u));
+    assert((D.tape_stop_kind == TA_STOP_KIND_TAPE) && (D.tape_stop_id == SEQ_LOAD));
+#ifdef TAPE_AUTOSTART_ARMED   /* 주행 쪽 2차 패치가 정지를 건 때 예약을 걸면 켠다 */
     {
         int i;
         for (i = 0; (i < 10) && !D.flag_stopping; i++) { guide_led_reply(0x03FFu); tick(); }
-        assert(D.flag_stopping && (D.stop_pulses == 0) && seq_request_flag[SEQ_LOAD] && D.wait_start);
+        assert(D.flag_stopping && (D.stop_pulses == 0) && seq_request_flag[SEQ_LOAD] && D.wait_start && !D.tape_autostart);
         for (i = 0; (i < 400) && !D.run_restart && !(D.flag_run && !D.flag_stopping); i++) { guide_reply(0); tick(); }
         assert((i < 400) && !D.flag_run && seq_request_flag[SEQ_LOAD]);
         for (i = 0; (i < 50) && !seq_is_active(); i++) { guide_reply(0); tick(); }
         assert(seq_is_active() && D.run_restart && !D.flag_run);   /* 시퀀스가 돌고, 재출발은 시퀀스 뒤로 미뤄진다 */
         run_seq_init();
     }
+#endif
 
-    /* 교차선 정지 + 대기 보고 + 자동 출발: 보고는 태그 자리, 정지는 교차선 */
+    /* 교차선 정지 + 대기 보고 + 자동 출발: 보고는 태그 자리, 정지는 교차선, 자동 출발은 보관 */
     tag_stop_rule(45);
-    assert(!D.flag_stopping && D.wait_start && (run_standby_num() == 7) && (D.tape_stop_kind == TA_STOP_KIND_TAPE));
+    assert(!D.flag_stopping && !D.wait_start && (D.tape_autostart == 2u) && (run_standby_num() == 7) && (D.tape_stop_kind == TA_STOP_KIND_TAPE));
     run_standby_clear(0);
 
     D.tape_stop_kind = 0;
