@@ -2299,8 +2299,8 @@ static int   s_xs_did;             /* 시험이 실제로 일어났다: 1 명령
  * 6 찾는 중(교차선 300 mm 앞) 사람의 STOP → START: 요청이 지워져 교차선을 지나 직진한다(레거시와 같다) */
 static int   s_xs_mode;
 /* 태그 장면(xtin): s_xs_tv > 0 이면 그 진입 속도(m/min)로 달리다 태그를 처리하는 순간 센서가 교차선 가운데에서 s_xs_tpos mm
- * (음수 = 앞) 자리에 요청을 건다. method 1 은 일반 회전(태그 뒤 SL 정지, 견줌용). s_xs_prev > 0: 그만큼 뒤에 다른 교차선 */
-static float s_xs_tv, s_xs_tpos, s_xs_prev;
+ * (음수 = 앞) 자리에 요청을 건다. method 1 은 일반 회전(태그 뒤 SL 정지, 견줌용) */
+static float s_xs_tv, s_xs_tpos;
 #define XS_PASS_MM 15.0f                   /* want 7: 센서가 교차선 가운데 이만큼 앞에서 명령 정지 → 감속하며 교차선을 지나친다 */
 #ifndef XS_OLD
 static const tag_rule_t s_xs_tags[] = {          /* 900 + method */
@@ -2368,14 +2368,11 @@ static void xs_sensor(void)
             int lit = 0;
             /* 주행선. 끝나는 모양은 교차선 먼 가장자리까지 */
             if ((cover(c0 + u0 / PITCH_MM, bw / PITCH_MM, i) > 0.35f) && !(((q->shape == 3) || (q->shape == 4)) && (px > xs_line_x(py) + hw))) { lit = 1; }
-            /* 교차선(뒤에 다른 교차선 s_xs_prev 도) */
+            /* 교차선 */
             if ((q->shape != 5) && ((q->shape == 0) || (q->shape == 3) || (((q->shape == 1) || (q->shape == 4)) ? (py >= -q->pw * 0.5f) : (py <= q->pw * 0.5f)))) {
-                int j;
-                for (j = 0; j < ((s_xs_prev > 0.0f) ? 2 : 1); j++) {
-                    float xc = xs_line_x(py) - (j ? s_xs_prev : 0.0f), lo = px - PITCH_MM * 0.5f, hi = px + PITCH_MM * 0.5f;
-                    float a = (lo > xc - hw) ? lo : xc - hw, b = (hi < xc + hw) ? hi : xc + hw;
-                    if (b - a > 0.35f * PITCH_MM) { lit = 1; }
-                }
+                float xc = xs_line_x(py), lo = px - PITCH_MM * 0.5f, hi = px + PITCH_MM * 0.5f;
+                float a = (lo > xc - hw) ? lo : xc - hw, b = (hi < xc + hw) ? hi : xc + hw;
+                if (b - a > 0.35f * PITCH_MM) { lit = 1; }
             }
             /* 분기·합류선: 점 (br_x, 0) 에서 갈라지면 앞으로, 합쳐지면 뒤에서 오는 반직선 */
             if (q->br_deg != 0.0f) {
@@ -2460,7 +2457,7 @@ static void xs_sim(const xs_case_t *q, xs_res_t *r)
     s_xs.X = GD_MM + 650.0f + d_tag - 500.0f + q->phase * vmm * 0.01f;    /* 센서 출발 자리에서 tag 거리 + 위상 */
     if (s_xs_tv > 0.0f) {                       /* 태그 장면: 진입 속도에 닿고 정속 1 m 뒤에 태그 */
         d_tag = -s_xs_tpos;
-        s_xs.X = GD_MM + 2500.0f + s_xs_prev + q->phase * s_xs_tv * (1000.0f / 60.0f) * 0.01f;
+        s_xs.X = GD_MM + 2500.0f + q->phase * s_xs_tv * (1000.0f / 60.0f) * 0.01f;
         assert(param_set_ram(P_STOP_LEN_MM, (int16_t)((q->method == 1) ? q->v_mpm : 100)) == 0);   /* method 1: SL(cm). 그 밖: 찾는 창 2 m */
         assert(param_set_ram(P_SPEED_MIN, 4) == 0);
         assert(param_set_ram(P_GEAR_RATIO, 45) == 0);    /* 70.9 rpm 당 1 m/min: 토크 모형 상한(2560 rpm)에서 35 m/min 이 나오게 */
@@ -2605,7 +2602,7 @@ static void xs_line(const char *tag, const xs_case_t *q, const xs_res_t *r)
 }
 
 /* xsin: 표준 입력 한 줄 = method leds shape v phase scan hd lat J coast dcc noise dia slip cw pw br_deg br_x br_merge seed 꼬리표
- * xtin: 태그 장면 한 줄 = method v_entry tpos prev sl_cm leds shape hd coast dcc cw pw phase scan J seed 꼬리표 */
+ * xtin: 태그 장면 한 줄 = method v_entry tpos sl_cm leds shape hd coast dcc cw pw phase scan J seed 꼬리표 */
 static int xs_main(int argc, char **argv)
 {
     xs_case_t q;
@@ -2614,8 +2611,8 @@ static int xs_main(int argc, char **argv)
     unsigned sd;
     if ((argc > 1) && (strcmp(argv[1], "xtin") == 0)) {
         static const xs_case_t c0 = { 4, 32, 0, 0, 60, 0, 0.0f, 0.3f, 0.0f, 0.0f, 1.0f, 1.0f, 0.0f, 0.0f, 0.0f, 25.0f, 25.0f, 0.0f, 0.0f, 1u };
-        while (q = c0, scanf("%d %f %f %f %d %d %d %f %f %d %f %f %f %f %f %u %63s", &q.method, &s_xs_tv, &s_xs_tpos, &s_xs_prev, &q.v_mpm, &q.leds, &q.shape,
-                             &q.head_deg, &q.coast, &q.dcc, &q.cw, &q.pw, &q.phase, &q.scan_ph, &q.J, &sd, tag) == 17) {
+        while (q = c0, scanf("%d %f %f %d %d %d %f %f %d %f %f %f %f %f %u %63s", &q.method, &s_xs_tv, &s_xs_tpos, &q.v_mpm, &q.leds, &q.shape,
+                             &q.head_deg, &q.coast, &q.dcc, &q.cw, &q.pw, &q.phase, &q.scan_ph, &q.J, &sd, tag) == 16) {
             q.seed = sd;
             xs_sim(&q, &r);
             xs_line(tag, &q, &r);
@@ -2680,10 +2677,7 @@ static int xs_check(void)
         s_xs_mode = 0;
         if (!k[i].want) { ok = (r.err == ERR_GUIDE_SENSOR); }           /* 인정하지 않고 찾는 창 끝에서 258 */
         else if (k[i].want == 6) { ok = r.passed; }
-        else if ((k[i].want == 7) && (q.method == 3)) { ok = !r.found && (r.err == ERR_GUIDE_SENSOR) && (s_xs_did == 1); }
-        else if (k[i].want == 7) {   /* 분류 4·회전: 요청 뒤 보류된 사이 지나친 교차선, 회전 중심이 아직 앞이라 다시 출발해 그 선에 선다 */
-            ok = r.found && !r.err && (s_xs_did == 1) && (fabsf(r.ctr) < 6.0f);
-        }
+        else if (k[i].want == 7) { ok = !r.found && (r.err == ERR_GUIDE_SENSOR) && (s_xs_did == 1); }
         else if (q.method == 3) { ok = r.found && !r.err && (fabsf(r.sens + q.cw * 0.5f) < 12.0f); }   /* 앞 가장자리 근처에서 바로 */
         else {
             ok = r.found && !r.err && (fabsf(r.ctr) < ((q.lat_mm != 0.0f) ? 10.0f : 6.0f)) && (fabsf(r.th_stop - r.th_found) < 0.6f);
