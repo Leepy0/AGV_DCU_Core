@@ -821,7 +821,7 @@ static void run_reset_branch(void)
     D.speed_cmd = P.low_speed;
     D.drive_start_cnt = 0;
     D.restart_cnt = 100;
-    if (!param_quirk(QUIRK_RISK_FLAG)) { D.risk_stop = 0; }
+    D.risk_stop = 0;
     if (D.stop_err != ERR_STOP_APPROACH) { D.stop_pulses = 0; }
     D.sound_on = 0;
 }

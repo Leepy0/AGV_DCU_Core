@@ -810,18 +810,15 @@ int main(int argc, char **argv)
       assert(peak_on > STOP_MIN_RPM + 100);
       (void)param_set(P_OPT_FLAGS, 0); }
 
-    /* 위험 감속 표시는 일시정지 완료·정지 완료에서 내려간다 */
-    setup(1500);
-    D.risk_stop = 1;
-    D.pause_stop = 1;
-    for (int t = 0; t < 3000 && stop_phase() != STOP_PHASE_COMPLETE; t++) { tick(0); }
-    assert(D.risk_stop == 0);
-    setup(1500);
-    (void)param_set(P_LEGACY_QUIRKS, QUIRK_RISK_FLAG);
-    D.risk_stop = 1;
-    D.pause_stop = 1;
-    for (int t = 0; t < 3000 && stop_phase() != STOP_PHASE_COMPLETE; t++) { tick(0); }
-    assert(D.risk_stop == 1);
+    /* 위험 감속 표시는 일시정지 완료·정지 완료에서 내려간다. LG 1 에 남은 b0 은 무시한다 */
+    for (int q = 0; q < 2; q++) {
+        setup(1500);
+        (void)param_set(P_LEGACY_QUIRKS, (int16_t)q);
+        D.risk_stop = 1;
+        D.pause_stop = 1;
+        for (int t = 0; t < 3000 && stop_phase() != STOP_PHASE_COMPLETE; t++) { tick(0); }
+        assert(D.risk_stop == 0);
+    }
     (void)param_set(P_LEGACY_QUIRKS, 0);
 
     /* 회전 각 제어 */

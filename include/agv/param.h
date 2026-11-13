@@ -53,7 +53,7 @@ enum {
 #define P_SAVED_LAST 45   /* 이 번호까지 EEPROM 에 저장한다 */
 
 /* P_LEGACY_QUIRKS 비트 (docs/07_주행_조향_성능.md 4절) */
-#define QUIRK_RISK_FLAG    0x01u   /* b0 정지 완료 때 nGuide_Risk_Stop_Flag 를 내리지 않는다 */
+/* b0(1) 안 씀. 정지 완료 때 위험 감속 표시를 내리지 않던 예전 결함 재현은 버렸다(v0.49.0). 값이 남아 있어도 무시한다 */
 #define QUIRK_H_POSITION   0x02u   /* b1 'h' 응답이 위치값을 자리표 10 으로 덮는다 */
 #define QUIRK_CURVE_NOW    0x04u   /* b2 위험 감속 중 curve_now 를 켠다 */
 #define QUIRK_TURN_START   0x08u   /* b3 회전을 0 rpm 부터 시작한다 */

@@ -565,7 +565,7 @@ void seq_abort_all(void)
     for (id = 0; id < SEQ_MAX; id++) { seq_request_flag[id] = 0; }
     s_seq.active = 0;
     /* 위험 감속 표시도 시퀀스 초기화와 함께 내린다 */
-    if (!param_quirk(QUIRK_RISK_FLAG)) { D.risk_stop = 0; }
+    D.risk_stop = 0;
     io_seq_outputs_off();
 }
 

@@ -756,8 +756,9 @@ int main(void)
     for (int i = 0; i < 300; i++) { (void)motor_turn_adjust(); }
     assert((D.tape_step == 2) && (D.vin_out < P.turn_min) && (D.vin_out >= stop_min_rpm()));
 
-    /* motor_run: 플래그가 없으면 리셋 분기. 위험 표시 해제, 비트를 켜면 남는다 */
+    /* motor_run: 플래그가 없으면 리셋 분기. 위험 표시 해제(LG 1 에 남은 b0 은 무시한다) */
     setup();
+    (void)param_set(P_LEGACY_QUIRKS, 1);
     D.flag_run = 0;
     D.risk_stop = 1;
     D.stop_pulses = 100;
@@ -765,12 +766,6 @@ int main(void)
     motor_run();
     assert(D.risk_stop == 0 && D.stop_pulses == 0 && D.tq_cmd[0] == 0 && D.speed_cmd == P.low_speed);
     assert(D.step == DRIVE_CHANGE_SPEED);
-    setup();
-    (void)param_set(P_LEGACY_QUIRKS, QUIRK_RISK_FLAG);
-    D.flag_run = 0;
-    D.risk_stop = 1;
-    motor_run();
-    assert(D.risk_stop == 1);
     (void)param_set(P_LEGACY_QUIRKS, 0);
 
     /* 시스템 오류면 비상 정지로 들어간다 */

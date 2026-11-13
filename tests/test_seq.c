@@ -694,14 +694,15 @@ int main(void)
     assert(act_is_busy(ACT_PULSE));
     act_abort_all();
 
-    /* seq_abort_all 은 위험 감속 표시도 내린다. 비트를 켜면 남는다 */
+    /* seq_abort_all 은 위험 감속 표시도 내린다. LG 1 에 남은 b0 은 무시한다 */
     D.risk_stop = 1;
     seq_abort_all();
     assert(D.risk_stop == 0);
-    (void)param_set(P_LEGACY_QUIRKS, QUIRK_RISK_FLAG);
+    (void)param_set(P_LEGACY_QUIRKS, 1);
     D.risk_stop = 1;
     seq_abort_all();
-    assert(D.risk_stop == 1);
+    assert(D.risk_stop == 0);
+    (void)param_set(P_LEGACY_QUIRKS, 0);
 
     /* ---- 확장 조건 ---- */
     D.backward = 0;

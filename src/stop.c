@@ -759,7 +759,7 @@ int16_t stop_run(void)
     }
     else if (s_ctrl.phase == STOP_PHASE_COMPLETE) {
         /* 정지가 끝나면 위험 감속 표시도 끝이다. 남으면 다음 주행 내내 적분 0·커브 모드가 된다 */
-        if (!param_quirk(QUIRK_RISK_FLAG)) { D.risk_stop = 0; }
+        D.risk_stop = 0;
         if (!stop_is_pause(s_ctrl.reason)) { finish(); }
     }
     return 1;

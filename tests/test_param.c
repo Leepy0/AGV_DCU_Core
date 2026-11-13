@@ -179,7 +179,7 @@ int main(void)
     assert(param_set(P_LEGACY_QUIRKS, 5) == 0);
     assert(param_boot(&fake_store, 1) == 0);
     assert(param_get(P_LEGACY_QUIRKS) == 5);
-    assert(param_quirk(QUIRK_RISK_FLAG) == 1 && param_quirk(QUIRK_H_POSITION) == 0);
+    assert(param_quirk(QUIRK_CURVE_NOW) == 1 && param_quirk(QUIRK_H_POSITION) == 0);
     /* 레거시 비트 b0~b11 까지 4095(b11 은 안 쓰지만 저장값이 한계 위반이 되지 않게 둔다). 4096 은 넘는다 */
     assert(param_set(P_LEGACY_QUIRKS, 4096) == -1 && param_set(P_LEGACY_QUIRKS, 4095) == 0 && param_quirk(QUIRK_SRC_A) && param_quirk(QUIRK_LOW_ACC)
            && param_quirk(0x800u));
