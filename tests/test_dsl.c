@@ -159,7 +159,7 @@ TAG_TABLE_BEGIN( site_tags )
     TAG( 42, 1, ACS_SEND( ARRIVE, 115 ), ACS_SEND( ARRIVE, STATION(1) ) )                         /* 16 */
     TAG( 38, 1, AGV_TURN( CCW, 180, DIR_TOGGLE, 1, 15, ALIGN, OBS ) )                             /* 17 회전 속도, 옵션 둘 */
     TAG( 46, 1, AGV_TURN( CW, 90, 0, 1, 31, OBS ) )                                               /* 18 속도 16 이상: b15 */
-    TAG( 47, 1, AGV_TURN( CW, 90, 0, 1, 0, TAPE ), SEQ_START( LOAD, TAPE ), AGV_SPEED_MMIN( 20 ) )  /* 19 */
+    TAG( 47, 1, AGV_TURN( CW, 90, 0, 1, 0, TAPE ), SEQ_START( TAPE, LOAD ), AGV_SPEED_MMIN( 20 ) )  /* 19 */
 #ifdef NEG_MOD_ZERO
     TAG_IF( 37, 1, IF_STATION_MOD(0, 0, 3), AGV_STOP )
 #endif
@@ -182,7 +182,10 @@ TAG_TABLE_BEGIN( site_tags )
     TAG( 39, 1, AGV_TURN( CW, 90, 0, 1, 0, 0 ) )                  /* 예전 6인자(장애물, 속도) */
 #endif
 #ifdef NEG_SEQSTART_OPT
-    TAG( 39, 1, SEQ_START( LOAD, ALIGN ) )
+    TAG( 39, 1, SEQ_START( ALIGN, LOAD ) )
+#endif
+#ifdef NEG_SEQSTART_ORDER
+    TAG( 39, 1, SEQ_START( LOAD, TAPE ) )                          /* 옵션은 앞 */
 #endif
 #ifdef NEG_ACS1_RESET
     TAG( 44, 1, ACS( STANDBY_RESET, STATION0 ) )                   /* 1칸에 대기 리셋 비트가 들어갈 자리가 없다 */

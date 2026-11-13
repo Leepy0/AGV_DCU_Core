@@ -13,7 +13,7 @@
  *                                     TAPE 교차 테이프를 찾은 뒤 정렬(둘 중 하나까지), OBS 회전 중 장애물 감지
  *   AGV_BRANCH( LEFT | RIGHT )                  분기
  *   SEQ_START( 시퀀스 )                          서고 시퀀스 시작(SEQ_ 뺀 이름: LOAD, UNLOAD, LOAD_1 …)
- *   SEQ_START( 시퀀스, TAPE )                    교차 테이프에서 서고 시퀀스
+ *   SEQ_START( TAPE, 시퀀스 )                    교차 테이프에서 서고 시퀀스(이 동작만 옵션이 앞)
  *   ACT_START( ACT ID )                          주행을 멈추지 않고 병렬 동작
  *   OBS_ON / OBS_OFF                             장애물 센서 사용
  *   CALL( 인덱스 )                               사용자 함수
@@ -80,9 +80,10 @@
 /* 방향은 이 매크로에서 바로 붙인다(사이트 legacy_const.h 의 CW·CCW 매크로가 펼쳐지지 않게) */
 #define AGV_TURN(dir, ...)       DSL_CAT(DSL_TURN, DSL_NARG(__VA_ARGS__))(TURN_##dir, __VA_ARGS__)
 #define AGV_BRANCH(dir)          (TA_BRANCH | BRANCH_##dir)
-/* SEQ_START( 시퀀스 ): 서고 시퀀스. SEQ_START( 시퀀스, TAPE ): 교차선을 찾아 서고 시퀀스(정지 거리 2배 안에 없으면 오류) */
+/* SEQ_START( 시퀀스 ): 서고 시퀀스. SEQ_START( TAPE, 시퀀스 ): 교차선을 찾아 서고 시퀀스(정지 거리 2배 안에 없으면 오류).
+ * 이 동작만 옵션이 앞이다(사용자 결정) */
 #define DSL_SEQSTART1(seq)       (TA_SEQ | SEQ_##seq)
-#define DSL_SEQSTART2(seq, opt)  DSL_SEQSTART_##opt(seq)
+#define DSL_SEQSTART2(opt, seq)  DSL_SEQSTART_##opt(seq)
 #define DSL_SEQSTART_TAPE(seq)   (TA_TAPE_STOP | SEQ_##seq)
 #define SEQ_START(...)           DSL_CAT(DSL_SEQSTART, DSL_NARG(__VA_ARGS__))(__VA_ARGS__)
 #define ACT_START(id)            (TA_ACT | (id))
