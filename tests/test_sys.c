@@ -1729,6 +1729,34 @@ static void test_tag_stop_class(void)
 
     tag_stop_rule(41);
     assert(!D.flag_stopping && (D.tape_stop_kind == TA_STOP_KIND_TAPE_GD) && (D.tape_stop_id == SEQ_LOAD));
+    {   /* 끝에서 끝까지: 교차선을 보면 GD 정지, 서면 시퀀스, 기록 run_tape_last(분류 4) */
+        int i;
+        uint16_t n0 = run_tape_last.n;
+        for (i = 0; (i < 20) && (D.tape_stop_kind != 0); i++) { guide_led_reply(0x03FFu); run_encoder(0, 20000); tick(); }
+        assert((D.tape_stop_kind == 0) && D.flag_stopping && (D.stop_pulses > 0) && !D.system_err);
+        for (i = 0; (i < 20000) && D.flag_run; i++) { run_scan(1); }
+        for (i = 0; (i < 50) && !seq_is_active(); i++) { guide_reply(0); tick(); }
+        assert(!D.flag_run && seq_is_active() && (run_tape_last.n == (uint16_t)(n0 + 1u)) && (run_tape_last.kind == 4));
+        run_seq_init();
+    }
+
+    /* 끝에서 끝까지: SEQ_START( 300, LOAD ) 는 태그 자리에서 300 mm 가서 서고 시퀀스 */
+    tag_stop_rule(37);
+    {
+        int i;
+        uint32_t p0 = run_pulses(0);
+        int32_t want = (int32_t)(30.0f * P.one_length_pulse * 10.0f);
+        for (i = 0; (i < 2000) && (D.stop_pulses > 0); i++) { run_scan(1); }   /* 정지 거리를 다 갈 때까지(스캔당 1 펄스) */
+        {
+            int32_t d = (int32_t)(run_pulses(0) - p0) - want;
+            assert((d >= -3) && (d <= 3));
+        }
+        for (i = 0; (i < 2000) && D.flag_run; i++) { guide_reply(0); tick(); }   /* 바퀴가 서고 정지가 끝난다 */
+        for (i = 0; (i < 50) && !seq_is_active(); i++) { guide_reply(0); tick(); }
+        assert(!D.flag_run && seq_is_active());
+        run_standby_clear(0);
+        run_seq_init();
+    }
 
     /* 분류 3 이 2 를 이긴다(앞뒤 순서와 무관), AGV_STOP 도 서지 않는다 */
     tag_stop_rule(42);
