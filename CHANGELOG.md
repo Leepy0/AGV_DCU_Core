@@ -1,10 +1,18 @@
 # 변경 이력
 
-## 다음 버전 (수동 조작 표 `MAN`·`MAN_ELSE`, 프로파일 적재 조건 `PROFILE_LOAD_IF`)
+## v0.53.0 (2026-11-14, 사이트 C 를 표로: 태그 표 문법·센서 정지·수동 조작 표·적재 조건)
 
-- 수동 조작 표(`agv/seq_dsl.h` `MANUAL_BEGIN`·`MAN`·`MAN_ELSE`·`MAN_FB_SW`·`MAN_OBS_B`, 엔진 `src/sys/manual.c`): `DA_Manual_Act` 의 호기별 `if / else if / else` 사슬을 한 줄 한 가지로 쓴다. 첫 맞는 줄의 출력만 쓰고, 없으면 `MAN_ELSE`, 쓰지 않은 출력은 그대로. 모드 `IDLE`·`JOG`, 조건 `IN`·`KEY( UP )`·`NO_IN`, 출력 `ON`·`OFF`·`BELT( n, CW | CCW | OFF )`. 줄 하나 10워드. docs/03 5.4절.
+- 태그 범위 규칙 `TAG_RANGE( lo, hi, 프로파일, 동작… )`·`TAG_RANGE_IF( lo, hi, 프로파일, 조건, 동작… )`: 한 규칙이 태그 lo\~hi 를 받는다. 고르는 순서는 표 순서 그대로. `tag_rule_t` 끝 칸 `tag_hi`(C28x 16 → 18워드). 압축 표는 범위 칸(`TAG_RANGES_BEGIN`·`TAG_RANGE_P`·`TAG_PACKED_R`).
+- `IF_TAG_NUM( 식 )`: 태그 == 스테이션 큐 식(`STATION(k)`, `STATION(k) ± n`, `MOD( STATION(k), m )`, `n + MOD( … )`). `STATION(k)` 값을 2^29 + k << 16 으로 바꿨다. 코어 조건 `XC_TAG_NUM` 하나(예전 `XC_TAG_MINUS_EQ_ST`·`XC_TAG_EQ_ST`, `IF_TAG_MINUS_EQ_STATION`·`IF_TAG_EQ_STATION` 은 뺐다). 태그 조건은 읽은 태그로 본다.
+- 태그 `ACS_SEND` 번호 식: `STATION(k) ± n`, `TAG_NUM ± n`(n -128\~127). 둘째 칸 출처 2비트 + 스테이션 칸 b11\~15. 시퀀스 `ACS_SEND` 는 `STATION(k)` 만.
+- `IF_PARAM( FND 이름, 값 )`(`X_PARAM`, 자릿수 한 자리는 `TFB_1`·`TFB_10` 처럼). 동작 `AGV_WAIT_START`·`AGV_WAIT_CANCEL`(`TA_WAIT` 0x1500).
+- 센서 정지 `AGV_STOP( FL|cm, FROM_SENSOR( 입력, 유지틱 ) )`(`TA_STOP_SENSOR` 0x1400, 2칸): 서지 않고 기다리다 입력이 유지틱 동안 켜지면 처음 켜진 지점 + 거리에서 선다. 꺼짐 5틱 이하는 이어 센다. 앞 동작은 태그 때, 뒤 동작(최대 2칸)은 확정 때(확정 때 `TAG_NUM` 은 요청한 태그). 5 m 안에 감지가 없으면 270(`ERR_SENSOR_STOP_MISS`). STOP·오류·자동 화면 밖·표를 묶을 때 지운다. 교차선 요청과 한 규칙이거나 넷째 칸이면 표 오류. `tagact_tick`(`run_seq` 와 `site_manual` 사이). docs/03 5.2절.
+- 수동 조작 표(`MANUAL_BEGIN`·`MAN`·`MAN_ELSE`·`MAN_FB_SW`·`MAN_OBS_B`, 엔진 `src/sys/manual.c`): `DA_Manual_Act` 의 호기별 `if / else if / else` 사슬을 한 줄 한 가지로 쓴다. 첫 맞는 줄의 출력만 쓰고, 없으면 `MAN_ELSE`, 쓰지 않은 출력은 그대로. 모드 `IDLE`·`JOG`, 조건 `IN`·`KEY( UP )`·`NO_IN`, 출력 `ON`·`OFF`·`BELT( n, CW | CCW | OFF )`. 줄 하나 10워드. docs/03 5.4절.
 - `profile_row_t` 끝에 `load_if`(적재 조건 둘, 하나라도 참이면 적재). `PROFILE_LOAD_IF( …, IN( … )[, IN( … )] )`, `seq_site_t.load_fn = manual_load`. 행이 6 → 8워드.
-- `tests/test_manual.c`(사슬·else·출력 유지·BELT 값·적재 조건)와 컴파일 오류 시험 넷(켜면서 끔, 없는 벨트 방향, 호기 범위 거꾸로, 빈 적재 조건).
+- 시험: test_dsl(칸 배치, 컴파일 오류 21), test_seq(`XC_TAG_NUM`, 자리 파라미터), test_sys(펼친 표·압축 표 범위 규칙과 센서 정지 같은 답, 보고 번호·대기, 센서 정지 틱·거리·꺼짐·5 m·표 오류), test_manual(사슬·else·출력 유지·BELT 값·적재 조건, 컴파일 오류 넷).
+- 비트 확인: 조향 해시 `0aa33808`·`bf0ff2d4`, 곡선 해시 `97564846`·`bbbaafc2` 그대로.
+- 플래시(타입 143 남은 워드, 개발·현장): 0x775·0x20B6 → 0x620·0x1F61. RAML1 남은 워드 0xC8·0x168 → 0xBB·0x15E. CCS 주소(`_agv_drive`·`_stop_last`·`_run_tape_last`·`_agv_steerlog`·`_agv_wt`·`_agv_curvelog`)는 v0.52.0 과 같다.
+- 태그 `v0.53.0` 은 이 변경 이력 앞 커밋(e31c630)에 붙었다(이 항목은 그 커밋에서 "다음 버전" 으로 일부만 적혀 있다). 코드는 같다.
 
 ## v0.52.0 (2026-11-13, 시퀀스 벨트 정지 조건: `BELT_ON( n, 방향, UNTIL( 조건 ) )`·`WAIT_BELTS`)
 
