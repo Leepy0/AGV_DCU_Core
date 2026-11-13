@@ -284,16 +284,18 @@ typedef unsigned long long dsl_cond_t;
                                                            DSL_SOPT_O_##a + DSL_SOPT_O_##b)
 /* 방향은 이 매크로에서 바로 붙인다(사이트 legacy_const.h 의 CW·CCW 매크로가 펼쳐지지 않게) */
 #define AGV_TURN(dir, ...)     DSL_CAT(DSL_STURN, DSL_NARG(__VA_ARGS__))(TURN_##dir, __VA_ARGS__)
-/* AGV_MOVE( mm ): 그 자리에서 출발해 mm 앞(지금 전후진 방향)에 위치 정지하고, 설 때까지 기다린 뒤 다음 스텝. mm 1~32767(밖이면 컴파일 오류).
+/* 표의 거리는 모두 cm 다(태그 AGV_STOP( cm )·SEQ_START( cm, x ), 파라미터 SL 과 같다). 스텝에는 mm 로 넣는다(× 10).
+ * AGV_MOVE( cm ): 그 자리에서 출발해 cm 앞(지금 전후진 방향)에 위치 정지하고, 설 때까지 기다린 뒤 다음 스텝. 1~3276 cm(밖이면 컴파일 오류).
  * 속도는 거리에 맞춰 SPN~LLOW 안에서 자동(tagact_move_mm). 이동 중 태그는 무시, 장애물은 일시정지 뒤 이어 감.
- * AGV_MOVE( 한계 mm, TAPE ): 그 자리에서 출발해 다음 교차선에서 서고(태그 교차선 정지와 같은 인정·서는 방식·찾는 속도),
- * 설 때까지 기다린 뒤 다음 스텝. 출발 때 선 위면 그 선은 건너뛴다. 한계 1~32767 안에 못 찾으면 서고 오류 258, 시퀀스 끝.
- * AGV_MOVE( 한계 mm, TAPE_GD ): 같고, 교차선을 본 뒤 GD 더 가서 회전 중심이 교차선 위에 서게 한다(교차선 회전 앞 정지와 같은 루틴) */
-#define DSL_MM_OK(mm)          (0 * sizeof(char[(((mm) >= 1) && ((mm) <= 32767)) ? 1 : -1]))
-#define DSL_MOVE1(mm)          DSL_STEP(SK_MOVE_MM, SEQ_NO_LABEL, (mm) + DSL_MM_OK(mm), 0, 0, 0, 0, 0)
-#define DSL_MOVE2(mm, opt)     DSL_MOVE_##opt(mm)
-#define DSL_MOVE_TAPE(mm)      DSL_STEP(SK_MOVE_TAPE, SEQ_NO_LABEL, (mm) + DSL_MM_OK(mm), 0, 0, 0, 0, 0)
-#define DSL_MOVE_TAPE_GD(mm)   DSL_STEP(SK_MOVE_TAPE, SEQ_NO_LABEL, (mm) + DSL_MM_OK(mm), 4, 0, 0, 0, 0)
+ * AGV_MOVE( 한계 cm, TAPE ): 그 자리에서 출발해 다음 교차선에서 서고(태그 교차선 정지와 같은 인정·서는 방식·찾는 속도),
+ * 설 때까지 기다린 뒤 다음 스텝. 출발 때 선 위면 그 선은 건너뛴다. 한계 1~3276 cm 안에 못 찾으면 서고 오류 258, 시퀀스 끝.
+ * AGV_MOVE( 한계 cm, TAPE_GD ): 같고, 교차선을 본 뒤 GD 더 가서 회전 중심이 교차선 위에 서게 한다(교차선 회전 앞 정지와 같은 루틴) */
+#define DSL_CM_OK(cm)          (0 * sizeof(char[(((cm) >= 1) && ((cm) <= 3276)) ? 1 : -1]))
+#define DSL_CM2MM(cm)          ((cm) * 10 + DSL_CM_OK(cm))
+#define DSL_MOVE1(cm)          DSL_STEP(SK_MOVE_MM, SEQ_NO_LABEL, DSL_CM2MM(cm), 0, 0, 0, 0, 0)
+#define DSL_MOVE2(cm, opt)     DSL_MOVE_##opt(cm)
+#define DSL_MOVE_TAPE(cm)      DSL_STEP(SK_MOVE_TAPE, SEQ_NO_LABEL, DSL_CM2MM(cm), 0, 0, 0, 0, 0)
+#define DSL_MOVE_TAPE_GD(cm)   DSL_STEP(SK_MOVE_TAPE, SEQ_NO_LABEL, DSL_CM2MM(cm), 4, 0, 0, 0, 0)
 #define AGV_MOVE(...)          DSL_CAT(DSL_MOVE, DSL_NARG(__VA_ARGS__))(__VA_ARGS__)
 #define ERROR_HOLD(code, c, label)  DSL_STEP_C(SK_ERROR_HOLD, label, code, 0, 0, c, 0)
 #define END_RESTART            DSL_STEP(SK_END_RESTART, SEQ_NO_LABEL, 0, 0, 0, 0, 0, 0)

@@ -95,7 +95,7 @@ SEQ_BEGIN( ext )
     AGV_TURN( CW, 180, 0, 0, 0, OBS, NOWAIT )                                /* 21 옵션 둘, 차례 자유 */
     AGV_SPEED( LOW )                                                         /* 22 */
     AGV_SPEED_MMIN( 20 )                                                     /* 23 */
-    AGV_MOVE( 100 )                                                          /* 24 */
+    AGV_MOVE( 10 )                                                           /* 24 */
 #ifdef NEG_SEQ_TAPE
     AGV_TURN( CW, 90, 0, 1, 0, TAPE )                                        /* 시퀀스에서 TAPE 는 오류 */
 #endif
@@ -110,13 +110,16 @@ SEQ_BEGIN( ext )
 #endif
     AGV_TURN( CCW, 90, DIR_TOGGLE, 1, 31, OBS )                              /* 25 속도 16 이상: b15 */
     AGV_TURN( CW, 180, 0, 0, 0, OBS, ALIGN )                                 /* 26 정렬 회전 */
-    AGV_MOVE( 1500, TAPE )                                                   /* 27 교차선까지 */
-    AGV_MOVE( 800, TAPE_GD )                                                 /* 28 교차선 뒤 GD */
+    AGV_MOVE( 150, TAPE )                                                    /* 27 교차선까지 */
+    AGV_MOVE( 80, TAPE_GD )                                                  /* 28 교차선 뒤 GD */
 #ifdef NEG_MOVE_LIMIT
-    AGV_MOVE( 0, TAPE )                                                      /* 한계 1~32767 */
+    AGV_MOVE( 0, TAPE )                                                      /* 한계 1~3276 cm */
 #endif
 #ifdef NEG_MOVE_OPT
-    AGV_MOVE( 100, ALIGN )                                                   /* 정하지 않은 옵션 */
+    AGV_MOVE( 10, ALIGN )                                                    /* 정하지 않은 옵션 */
+#endif
+#ifdef NEG_MOVE_MAX
+    AGV_MOVE( 3277 )                                                         /* 1~3276 cm(스텝에 mm 로 32767 까지) */
 #endif
 #ifdef NEG_SEQ_KIND2
     AGV_TURN( CW, 90, 0, 1, 0, NOWAIT, ALIGN )                               /* 종류 옵션 둘 */

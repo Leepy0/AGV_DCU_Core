@@ -277,13 +277,13 @@ ACT_BEGIN( a_bad_nowait )
     AGV_TURN( CW, 90, 0, 0, 0, NOWAIT )
 ACT_END
 ACT_BEGIN( a_bad_move )
-    AGV_MOVE( 100 )
+    AGV_MOVE( 10 )
 ACT_END
 
-/* 거리 이동: 출력 A 켬 → AGV_MOVE(100) → 출력 B 켬 */
+/* 거리 이동: 출력 A 켬 → AGV_MOVE(10) → 출력 B 켬 */
 SEQ_BEGIN( s_move )
     OUT_ON( OUT_EXT_1 )
-    AGV_MOVE( 100 )
+    AGV_MOVE( 10 )
     OUT_ON( OUT_EXT_2 )
     END_STOP
 SEQ_END
@@ -301,12 +301,12 @@ ACT_END
 /* 교차선까지 이동: 서기 전에는 B 를 켜지 않고, 못 찾아 오류(258)로 끝나면 B 를 켜지 않는다 */
 SEQ_BEGIN( s_move_tape )
     OUT_ON( OUT_EXT_1 )
-    AGV_MOVE( 1500, TAPE )
+    AGV_MOVE( 150, TAPE )
     OUT_ON( OUT_EXT_2 )
     END_STOP
 SEQ_END
 ACT_BEGIN( a_bad_move_tape )
-    AGV_MOVE( 100, TAPE )
+    AGV_MOVE( 10, TAPE )
 ACT_END
 
 enum {
@@ -492,7 +492,7 @@ int main(void)
     BAD(a_bad_align);
     assert(seq_bind(&s_site_ok) == 0);
 
-    /* 교차선까지 이동(AGV_MOVE( 1500, TAPE )): 설 때까지 대기, 섰는데 오류가 서 있으면 B 를 켜지 않는다 */
+    /* 교차선까지 이동(AGV_MOVE( 150, TAPE )): 설 때까지 대기, 섰는데 오류가 서 있으면 B 를 켜지 않는다 */
     start(S_MOVE_TAPE);
     fake_move_mm = 0;
     seq_run();

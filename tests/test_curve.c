@@ -55,11 +55,11 @@
 #define PI_F        3.14159265f
 #define STEER_SLEW_TEST 50.5f   /* steer.c STEER_SLEW_RPM + 반올림 */
 
-/* 시퀀스 AGV_MOVE 모의(move 표): 출력 A 켬 → AGV_MOVE(mm) → 출력 B 켬. 거리는 시험이 arg0 를 바꾼다 */
+/* 시퀀스 AGV_MOVE 모의(move 표): 출력 A 켬 → AGV_MOVE(cm) → 출력 B 켬. 거리는 시험이 arg0 를 바꾼다 */
 #include "agv/seq_dsl.h"
 static seq_step_t s_mv_steps[] = {
     OUT_ON( OUT_EXT_1 )
-    AGV_MOVE( 100 )
+    AGV_MOVE( 10 )
     OUT_ON( OUT_EXT_3 )
     END_STOP
 };
@@ -73,7 +73,7 @@ static const seq_step_t s_al_steps[] = {
 /* 시퀀스 교차선까지 이동 모의(mtape 표): 출력 A → AGV_MOVE( 한계, TAPE ) → 출력 B. 한계는 시험이 arg0 를 바꾼다 */
 static seq_step_t s_mt_steps[] = {
     OUT_ON( OUT_EXT_1 )
-    AGV_MOVE( 1000, TAPE )
+    AGV_MOVE( 100, TAPE )
     OUT_ON( OUT_EXT_3 )
     END_STOP
 };
@@ -81,11 +81,11 @@ static seq_step_t s_mt_steps[] = {
 #define DSL_MOVE_TAPE_GD DSL_MOVE_TAPE   /* 바꾸기 전 코드와 견줄 때 */
 #endif
 /* 시퀀스 이동 결함 시나리오(rv 표): 회전 NOWAIT 뒤 교차선 이동, 이동 둘 잇기(교차선·거리), 교차선 이동 둘, 교차선 뒤 GD 이동 */
-static const seq_step_t s_rv1_steps[] = { OUT_ON( OUT_EXT_1 ) AGV_TURN( CW, 90, 0, 0, 0, NOWAIT ) AGV_MOVE( 1000, TAPE ) OUT_ON( OUT_EXT_3 ) END_STOP };
-static seq_step_t s_rv2_steps[] = { OUT_ON( OUT_EXT_1 ) AGV_MOVE( 3000, TAPE ) OUT_ON( OUT_EXT_3 ) AGV_MOVE( 300 ) OUT_ON( OUT_EXT_5 ) END_STOP };
-static const seq_step_t s_rv3_steps[] = { OUT_ON( OUT_EXT_1 ) AGV_MOVE( 3000, TAPE ) OUT_ON( OUT_EXT_3 ) AGV_MOVE( 3000, TAPE ) OUT_ON( OUT_EXT_5 ) END_STOP };
-static const seq_step_t s_rv4_steps[] = { OUT_ON( OUT_EXT_1 ) AGV_MOVE( 3000, TAPE_GD ) OUT_ON( OUT_EXT_3 ) END_STOP };
-static const seq_step_t s_rv5_steps[] = { OUT_ON( OUT_EXT_1 ) AGV_MOVE( 2000 ) OUT_ON( OUT_EXT_3 ) END_STOP };
+static const seq_step_t s_rv1_steps[] = { OUT_ON( OUT_EXT_1 ) AGV_TURN( CW, 90, 0, 0, 0, NOWAIT ) AGV_MOVE( 100, TAPE ) OUT_ON( OUT_EXT_3 ) END_STOP };
+static seq_step_t s_rv2_steps[] = { OUT_ON( OUT_EXT_1 ) AGV_MOVE( 300, TAPE ) OUT_ON( OUT_EXT_3 ) AGV_MOVE( 30 ) OUT_ON( OUT_EXT_5 ) END_STOP };
+static const seq_step_t s_rv3_steps[] = { OUT_ON( OUT_EXT_1 ) AGV_MOVE( 300, TAPE ) OUT_ON( OUT_EXT_3 ) AGV_MOVE( 300, TAPE ) OUT_ON( OUT_EXT_5 ) END_STOP };
+static const seq_step_t s_rv4_steps[] = { OUT_ON( OUT_EXT_1 ) AGV_MOVE( 300, TAPE_GD ) OUT_ON( OUT_EXT_3 ) END_STOP };
+static const seq_step_t s_rv5_steps[] = { OUT_ON( OUT_EXT_1 ) AGV_MOVE( 200 ) OUT_ON( OUT_EXT_3 ) END_STOP };
 #define SEQ_N(t) (sizeof(t) / sizeof(t[0]))
 static const seq_def_t s_mv_seqs[] = { { 0, SEQ_SITE_BASE, s_mv_steps, sizeof(s_mv_steps) / sizeof(s_mv_steps[0]) },
                                        { 0, SEQ_SITE_BASE + 1, s_al_steps, sizeof(s_al_steps) / sizeof(s_al_steps[0]) },
@@ -2042,24 +2042,24 @@ static int rv_table(void)
     s_mt_steps[1].arg0 = 6000;      /* 1. 자동 주행을 켜도 교차선 이동은 찾는 속도(SPN)로 간다 */
     rv_flow(2, 4000.0f, 0.0f, 1, 0, &r);
     RV(r.b && !r.err && (r.vmax_mpm < (float)P.min_speed / P.one_meter_rpm + 0.5f) && (fabsf(r.over_mm) < 40.0f),
-       "  rv1 자동 주행 + AGV_MOVE( 6000, TAPE ), 선 4000: 최고 %.1f m/min, 지나침 %.1f mm, B %d, 오류 %d", r.vmax_mpm, r.over_mm, r.b, r.err);
+       "  rv1 자동 주행 + AGV_MOVE( 600, TAPE ), 선 4000: 최고 %.1f m/min, 지나침 %.1f mm, B %d, 오류 %d", r.vmax_mpm, r.over_mm, r.b, r.err);
     s_mt_steps[1].arg0 = 1000;
     rv_flow(4, 2000.0f, 500.0f, 0, 0, &r);   /* 2. 도착 전 명령 정지: 통과하지 않고 277, 표시가 남지 않는다 */
     RV(!r.b && !r.c && (r.err == ERR_STOP_APPROACH) && !r.tape_on && !r.seq_on && !r.move_on,
-       "  rv2 AGV_MOVE( 3000, TAPE ) 중 명령 정지(500 mm): B %d, 오류 %d, 교차선 이동 표시 %d, 시퀀스 %d, 간 거리 %.0f mm", r.b, r.err, r.tape_on, r.seq_on, r.run_mm);
+       "  rv2 AGV_MOVE( 300, TAPE ) 중 명령 정지(500 mm): B %d, 오류 %d, 교차선 이동 표시 %d, 시퀀스 %d, 간 거리 %.0f mm", r.b, r.err, r.tape_on, r.seq_on, r.run_mm);
     rv_flow(7, 0.0f, 500.0f, 0, 0, &r);
     RV(!r.b && (r.err == ERR_STOP_APPROACH) && !r.seq_on && !r.move_on,
-       "  rv2 AGV_MOVE( 2000 ) 중 명령 정지(500 mm): B %d, 오류 %d, 시퀀스 %d, 간 거리 %.0f mm", r.b, r.err, r.seq_on, r.run_mm);
+       "  rv2 AGV_MOVE( 200 ) 중 명령 정지(500 mm): B %d, 오류 %d, 시퀀스 %d, 간 거리 %.0f mm", r.b, r.err, r.seq_on, r.run_mm);
     rv_flow(4, 600.0f, 0.0f, 0, 0, &r);      /* 도착하면 다음 거리 이동은 거리 이동이다(교차선 찾기로 바뀌지 않는다) */
     RV(r.b && r.c && !r.err && !r.tape_on && (r.run_mm > 600.0f + 250.0f) && (r.run_mm < 600.0f + 330.0f),
-       "  rv2 교차선(600) 뒤 AGV_MOVE( 300 ): B %d, C %d, 오류 %d, 간 거리 %.0f mm", r.b, r.c, r.err, r.run_mm);
+       "  rv2 교차선(600) 뒤 AGV_MOVE( 30 ): B %d, C %d, 오류 %d, 간 거리 %.0f mm", r.b, r.c, r.err, r.run_mm);
     rv_flow(3, 600.0f, 0.0f, 0, 1, &r);      /* 3. 회전 NOWAIT 뒤 이동은 회전이 끝난 뒤 걸린다(모형은 돈 뒤 선이 없어 출발 뒤 오류로 선다) */
-    RV(r.turned && r.move_after && !r.b && r.err, "  rv3 AGV_TURN( NOWAIT ) 뒤 AGV_MOVE( 1000, TAPE ): 회전 뒤 이동 %d, B %d, 오류 %d", r.move_after, r.b, r.err);
+    RV(r.turned && r.move_after && !r.b && r.err, "  rv3 AGV_TURN( NOWAIT ) 뒤 AGV_MOVE( 100, TAPE ): 회전 뒤 이동 %d, B %d, 오류 %d", r.move_after, r.b, r.err);
     rv_flow(5, 500.0f, 0.0f, 0, 0, &r);      /* 4. 교차선 위에서 다시 출발한 이동은 벗어난 뒤부터 센다: 다음 선이 없으면 한계 오류 */
     RV(r.b && !r.c && (r.err == ERR_GUIDE_SENSOR) && (r.run_mm > 500.0f + 2900.0f),
        "  rv4 교차선 이동 둘(선 하나 500): B %d, C %d, 오류 %d, 간 거리 %.0f mm", r.b, r.c, r.err, r.run_mm);
     rv_flow(6, 600.0f, 0.0f, 0, 0, &r);      /* AGV_MOVE( 한계, TAPE_GD ): 회전 중심이 교차선 위 */
-    RV(r.b && !r.err && (fabsf(r.ctr_mm) < 8.0f), "  rv AGV_MOVE( 3000, TAPE_GD ), 선 600: 회전 중심 %.1f mm, B %d, 오류 %d", r.ctr_mm, r.b, r.err);
+    RV(r.b && !r.err && (fabsf(r.ctr_mm) < 8.0f), "  rv AGV_MOVE( 300, TAPE_GD ), 선 600: 회전 중심 %.1f mm, B %d, 오류 %d", r.ctr_mm, r.b, r.err);
 #undef RV
     return bad;
 }
