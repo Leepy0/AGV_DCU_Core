@@ -128,29 +128,26 @@ stopt_result_t agv_stopt;
 build_result_t agv_build;
 uint16_t       test_keep_mark;
 
-/* 예전 OPT 값 o(b0 10 ms, b1 감쇠 부호, b3 칼만 위치, b4 휠 간격)와 같은 조향 칸. 위치 소스는 'h'(표준).
- * b3 은 v0.46.0 부터 안 쓴다(조향이 무시한다). 목록은 그대로 두어 b3 칸은 b3 없는 칸과 같다 */
-#define OLD_OPT(o) { (int16_t)((o) & 8), \
-                     (int16_t)((((o) & 1) ? 0 : QUIRK_STEER_20MS) | (((o) & 2) ? 0 : QUIRK_DAMP_SIGN_OLD) \
+/* 예전 OPT 값 o(b0 10 ms, b1 감쇠 부호, b4 휠 간격)와 같은 조향 칸(LG). 위치 소스는 'h'(표준) */
+#define OLD_OPT(o) { (int16_t)((((o) & 1) ? 0 : QUIRK_STEER_20MS) | (((o) & 2) ? 0 : QUIRK_DAMP_SIGN_OLD) \
                                | (((o) & 16) ? 0 : QUIRK_NO_WB_GAIN)) }
 #if AGV_DEV_TESTS
-static const sweep_cand_t s_sweep_def[SWEEP_MAX] = {
-    OLD_OPT(0), OLD_OPT(1), OLD_OPT(2), OLD_OPT(3), OLD_OPT(8), OLD_OPT(9), OLD_OPT(10), OLD_OPT(11),
-    OLD_OPT(16), OLD_OPT(17), OLD_OPT(18), OLD_OPT(19), OLD_OPT(24), OLD_OPT(25), OLD_OPT(26), OLD_OPT(27)
+#define SWEEP_DEF_N 8u
+static const sweep_cand_t s_sweep_def[SWEEP_DEF_N] = {
+    OLD_OPT(0), OLD_OPT(1), OLD_OPT(2), OLD_OPT(3), OLD_OPT(16), OLD_OPT(17), OLD_OPT(18), OLD_OPT(19)
 };
 static sweep_cand_t s_sweep[SWEEP_MAX];
 static uint16_t s_sweep_n = 0xFFFFu;   /* 0xFFFF = 기본 목록 */
 static const sweep_cand_t s_temp_def[8] = {
-    OLD_OPT(0), OLD_OPT(3), OLD_OPT(19), OLD_OPT(26), OLD_OPT(0), OLD_OPT(3), OLD_OPT(19), OLD_OPT(26)
+    OLD_OPT(0), OLD_OPT(3), OLD_OPT(19), OLD_OPT(18), OLD_OPT(0), OLD_OPT(3), OLD_OPT(19), OLD_OPT(18)
 };
 static sweep_cand_t s_temp_l[SWEEP_MAX];
 static uint16_t s_temp_n = 0xFFFFu;
-/* 고속 스윕 후보 {OPT, LG}. 줄을 바꾸면 후보가 바뀐다(HS_CANDS 줄) */
+/* 고속 스윕 후보 LG. 줄을 바꾸면 후보가 바뀐다(HS_CANDS 줄) */
 static const sweep_cand_t s_hs_cand[HS_CANDS] = {
-    { 0,               0 },                                  /* 1 새 조향, 'h' (기준) */
-    { 8,               0 },                                  /* 2 예전 칼만 위치(v0.46.0 부터 안 씀: 1 과 같다), 'h' */
-    { 0,               QUIRK_STEER_LEGACY },                 /* 3 예전 조향, 'h' */
-    { 0,               QUIRK_STEER_LEGACY | QUIRK_SRC_A }    /* 4 예전 조향, 'a' (예전 현장 동작) */
+    { 0 },                                     /* 1 새 조향, 'h' (기준) */
+    { QUIRK_STEER_LEGACY },                    /* 2 예전 조향, 'h' */
+    { QUIRK_STEER_LEGACY | QUIRK_SRC_A }       /* 3 예전 조향, 'a' (예전 현장 동작) */
 };
 #endif
 
@@ -241,7 +238,7 @@ static struct {
 
 #define PASS ((uint16_t)*s_r.pass)
 
-/* 통합 시험 단계 2 (OPT 스윕) 중. 연속 시험은 단계 6 */
+/* 통합 시험 단계 2 (조향 스윕) 중. 연속 시험은 단계 6 */
 static int sweep(void) { return s_all && (agv_all.stage == (s_build ? 6 : 2)); }
 
 /* 지정 시험 단계 4 (정지 정확도) 중. 연속 시험은 단계 4 (가감속 찾기)·5 (정지 정확도) */
@@ -425,7 +422,6 @@ void ident_start(void)
     agv_ident.cfg_high = param_get(P_SPEED_HIGH);
     agv_ident.cfg_kp = param_get(P_STEER_KP);
     agv_ident.cfg_ki = param_get(P_STEER_KI);
-    agv_ident.cfg_opt = param_get(P_OPT_FLAGS);
     agv_ident.cfg_ff = param_get(P_SPEED_FF);
     start_common();
 }
@@ -474,13 +470,12 @@ int ident_rpm_mode(void) { return s_rpm; }
 static void list_set(sweep_cand_t *dst, uint16_t *dn, const sweep_cand_t *c, uint16_t n)
 {
     uint16_t i;
-    int16_t olo, oup, qlo, qup;
+    int16_t qlo, qup;
 
-    param_limit(P_OPT_FLAGS, &olo, &oup);
     param_limit(P_LEGACY_QUIRKS, &qlo, &qup);
     *dn = 0;
     for (i = 0; (i < n) && (*dn < SWEEP_MAX); i++) {
-        if ((c[i].opt >= olo) && (c[i].opt <= oup) && (c[i].quirk >= qlo) && (c[i].quirk <= qup)) { dst[(*dn)++] = c[i]; }
+        if ((c[i].quirk >= qlo) && (c[i].quirk <= qup)) { dst[(*dn)++] = c[i]; }
     }
 }
 
@@ -488,10 +483,9 @@ void ident_sweep_set(const sweep_cand_t *c, uint16_t n) { list_set(s_sweep, &s_s
 void ident_temp_set(const sweep_cand_t *c, uint16_t n)  { list_set(s_temp_l, &s_temp_n, c, n); }
 #endif
 
-/* 시험 전 OPT·LG 로 돌린다 */
-static void opt_restore(void)
+/* 시험 전 LG 로 돌린다 */
+static void quirk_restore(void)
 {
-    (void)param_set_ram(P_OPT_FLAGS, agv_all.opt_saved);
     (void)param_set_ram(P_LEGACY_QUIRKS, agv_all.quirk_saved);
 }
 
@@ -508,13 +502,9 @@ static void all_begin(const sweep_cand_t *list, uint16_t n)
 #endif
     agv_all.state = 1;
     agv_all.stage = 1;
-    agv_all.opt_saved = param_get(P_OPT_FLAGS);
     agv_all.quirk_saved = param_get(P_LEGACY_QUIRKS);
     agv_all.sweep_n = (int16_t)n;
-    for (k = 0; k < n; k++) {
-        agv_all.sw[k].opt = list[k].opt;
-        agv_all.sw[k].quirk = list[k].quirk;
-    }
+    for (k = 0; k < n; k++) { agv_all.sw[k].quirk = list[k].quirk; }
     ident_start();
     s_all = 1;
     s_id.ticks = 0;
@@ -523,7 +513,7 @@ static void all_begin(const sweep_cand_t *list, uint16_t n)
 #if AGV_DEV_TESTS
 void ident_start_all(void)
 {
-    if (s_sweep_n == 0xFFFFu) { all_begin(s_sweep_def, SWEEP_MAX); }
+    if (s_sweep_n == 0xFFFFu) { all_begin(s_sweep_def, SWEEP_DEF_N); }
     else                      { all_begin(s_sweep, s_sweep_n); }
 }
 
@@ -552,8 +542,8 @@ static void all_next(void)
         point(&agv_all.state, &agv_all.fail, &agv_all.pass, &agv_all.phase, &agv_all.track_mm);
         if ((agv_all.sweep_n > 0) || s_temp) { return; }
     }
-    /* 최고 속도 시험은 사용자 51·39번으로 한다. 0회 없이 단계 1 의 L 로 1회부터 */
-    opt_restore();
+    /* 최고 속도 시험은 사용자 39번으로 한다. 0회 없이 단계 1 의 L 로 1회부터 */
+    quirk_restore();
     steer_reset();
     agv_all.stage = 3;
     point_top();
@@ -561,11 +551,11 @@ static void all_next(void)
     agv_top.state = 1;
 }
 
-/* 지정 시험 단계 2 끝(단계 3 은 건너뛴다). 정지 정확도는 사용자 51·39번으로 한다. 차는 선 위에 서 있다 */
+/* 지정 시험 단계 2 끝(단계 3 은 건너뛴다). 정지 정확도는 사용자 39번으로 한다. 차는 선 위에 서 있다 */
 static void stopt_next(void)
 {
     s_id.retry = 0;
-    opt_restore();
+    quirk_restore();
     steer_reset();
     agv_all.stage = 4;
     point(&agv_stopt.state, &agv_stopt.fail, &agv_stopt.pass, &agv_stopt.phase, &agv_all.track_mm);
@@ -610,7 +600,7 @@ void ident_abort(void)
     if (all_run) {
         agv_all.fail = (int16_t)(agv_all.stage * 1000 + code);
         agv_all.state = 3;
-        opt_restore();
+        quirk_restore();
         if (stopt()) { acs_cross_release(ACS_CROSS_IN); }   /* 단계 4 가 건 대기 */
     }
     if (s_build && (agv_build.state == 1)) {
@@ -780,7 +770,7 @@ float ident_decel_mm(int16_t from) { return decel_mm(from); }
 static int sl_pass(void) { return ((PASS & 1u) == 0u) && !sweep(); }
 
 /* 출발 자리의 앞 거리로 셈한다. SL 정지나 감속은 늦어도 budget 에서 시작해야 센서가 앞 선 앞에 선다.
- * 스윕은 칸이 바뀔 때 51·39번을 RAM 에 넣고, 회마다 조향 상태를 지운다 */
+ * 스윕은 칸이 바뀔 때 39번을 RAM 에 넣고, 회마다 조향 상태를 지운다 */
 static void pass_begin(void)
 {
     if (s_id.retry) {
@@ -792,7 +782,6 @@ static void pass_begin(void)
         (*s_r.pass)++;
         if (sweep() && (((PASS - 1u) % SWEEP_PASSES) == 0u)) {
             agv_all.sweep_k = (int16_t)((PASS - 1u) / SWEEP_PASSES);
-            (void)param_set_ram(P_OPT_FLAGS, agv_all.sw[agv_all.sweep_k].opt);
             (void)param_set_ram(P_LEGACY_QUIRKS, agv_all.sw[agv_all.sweep_k].quirk);   /* QUIRK_SRC_A 가 바뀌면 다음 요청부터 'A'/'H' 가 바뀐다 */
         }
     }
@@ -1436,11 +1425,11 @@ static int rpm_line(void)
     return cross_at(travel());
 }
 
-/* 통합(지정) 시험 끝. 51·39번을 되돌리고 그 자리에서 기다린다 */
+/* 통합(지정) 시험 끝. 39번을 되돌리고 그 자리에서 기다린다 */
 static int all_end(void)
 {
     agv_all.state = 2;
-    opt_restore();
+    quirk_restore();
     if (s_build) { build_restore(2); }
     return 1;
 }
@@ -1535,7 +1524,6 @@ void ident_start_build(uint16_t mask, int16_t track_in_mm, int16_t cap_mpm)
 {
     sweep_cand_t now;                 /* 편차 단계는 지금 설정 그대로 */
 
-    now.opt = param_get(P_OPT_FLAGS);
     now.quirk = param_get(P_LEGACY_QUIRKS);
     all_begin(&now, (mask & BLD_STEER) ? 1u : 0u);
     memset(&agv_coast, 0, sizeof(agv_coast));

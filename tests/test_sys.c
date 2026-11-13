@@ -927,14 +927,14 @@ static void test_menu5(void)
         P_EMPTY_ACC, P_EMPTY_DCC, P_SPEED_MIN,
         P_STOP_LEN_MM, P_CROSS_IN_CM, P_AUTO_START_SEC, P_OBS_USE, P_BUMPER_USE, P_STOP_LEN_FWD_MM, P_LOAD_DETECT,
         P_GUIDE_DIST_MM, P_TURN_FORBACK, P_BRANCH_OFFSET, P_ENC_STALL_TICKS, P_GUIDE_TIMEOUT,
-        P_AGV_ID, P_WHEEL_DIA_MM, P_WHEEL_BASE_MM, P_GEAR_RATIO, P_AGV_TYPE, P_OPT_FLAGS,
+        P_AGV_ID, P_WHEEL_DIA_MM, P_WHEEL_BASE_MM, P_GEAR_RATIO, P_AGV_TYPE,
         P_STEER_KP, P_STEER_KI, P_SPEED_FF,
         P_ACS_RETRY_LEGACY, P_CROSS_RETRY_100MS, P_ACS_STANDBY, P_ACS_RETRY_SEC, P_COMM_LINK, P_INTERFACE_MODE,
         P_ACS_VERSION, P_ERR_REPORT_MIN, P_SOUND, P_DISPLAY_MODE, P_BAT_OFFSET_DV, P_LAMP_EXT_USE, UI_PARA_LAMP_FIRST, UI_PARA_LAMP_FIRST + 1, UI_PARA_LAMP_LAST,
         P_BAT_DV, P_BAT_PERCENT, P_VERSION, P_PARA_INIT,
         P_AUTO_DRIVE_MODE, P_STEER_RPM_OFFSET, P_LEGACY_QUIRKS
     };
-    static const int ends[5] = { 11 + TM, 23 + TM, 32 + TM, 47 + TM, 54 + TM };
+    static const int ends[5] = { 11 + TM, 23 + TM, 31 + TM, 46 + TM, 53 + TM };
     static const struct { uint16_t idx; char c[4]; } names[] = {
         { P_SPEED_MIN, "SPN" }, { P_GUIDE_TIMEOUT, "GTO" }, { P_COMM_LINK, "CML" }, { P_STEER_RPM_OFFSET, "SR " },
         { P_GUIDE_CURVE_DETECT, "GSR" }, { P_LEGACY_QUIRKS, "L  " }, { P_EMPTY_SPEED, "EDS" }, { P_EMPTY_TURN, "ETN" },
@@ -944,11 +944,11 @@ static void test_menu5(void)
     char l[3];
     int g, i, k = 0, n;
 
-    assert(sizeof(want) / sizeof(want[0]) == 54u + TM);
-    assert(ends[2] - ends[1] == 9);     /* P3CAR 9 항목 */
-    for (i = 0; i < 54 + TM; i++) {     /* 빠진 일곱. TAG·GSR·BRM 은 미사용 */
+    assert(sizeof(want) / sizeof(want[0]) == 53u + TM);
+    assert(ends[2] - ends[1] == 8);     /* P3CAR 8 항목 */
+    for (i = 0; i < 53 + TM; i++) {     /* 빠진 여덟. TAG·GSR·BRM·OPT 는 미사용 */
         assert(want[i] != P_STATION_NO && want[i] != P_SWITCH_START_NUM && want[i] != P_TAG_TYPE && want[i] != P_CROSS_MODE);
-        assert(want[i] != P_TAG_DIGITS && want[i] != P_GUIDE_CURVE_DETECT && want[i] != P_BRANCH_MODE);
+        assert(want[i] != P_TAG_DIGITS && want[i] != P_GUIDE_CURVE_DETECT && want[i] != P_BRANCH_MODE && want[i] != P_OPT_FLAGS);
     }
     for (i = 0; i < (int)(sizeof(names) / sizeof(names[0])); i++) {
         (void)ui_param_label(names[i].idx, l);
