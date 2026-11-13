@@ -95,11 +95,11 @@ SEQ_BEGIN( s_acs )
 SEQ_END
 
 SEQ_BEGIN( s_drive )
-    SPEED( LOW )
-    SPEED_MMIN( 20 )
-    FORBACK( BACK )
+    AGV_SPEED( LOW )
+    AGV_SPEED_MMIN( 20 )
+    AGV_FORBACK( BACK )
     OBS_OFF
-    TURN( CW, 90, 1, 1, 0 )
+    AGV_TURN( CW, 90, 1, 1, 0 )
     OBS_ON
     SET_STATE( ST_0, 7 )
     WAIT_STATE( ST_1, 3 )
@@ -207,7 +207,7 @@ SEQ_BEGIN( s_tparam )
 SEQ_END
 
 SEQ_BEGIN( s_nowait )
-    TURN_NOWAIT( CCW, 90, 0, 1, 0 )
+    AGV_TURN( CCW, 90, 0, 1, 0, NOWAIT )
     OUT_ON( O_A )
     ACS( LOADING, STATION(2) )
     END_STOP
@@ -259,31 +259,31 @@ ACT_BEGIN( a_fail )
     END_ERROR( 290 )
 ACT_END
 ACT_BEGIN( a_bad_turn )
-    TURN( CW, 90, 0, 0, 0 )
+    AGV_TURN( CW, 90, 0, 0 )
 ACT_END
 ACT_BEGIN( a_bad_restart )
     END_RESTART
 ACT_END
 ACT_BEGIN( a_bad_speed )
-    SPEED( LOW )
+    AGV_SPEED( LOW )
 ACT_END
 ACT_BEGIN( a_bad_forback )
-    FORBACK( FWD )
+    AGV_FORBACK( FWD )
 ACT_END
 ACT_BEGIN( a_bad_hold )
     ERROR_HOLD( 290, IN( ON(SEN_A) ), L_OK )
 ACT_END
 ACT_BEGIN( a_bad_nowait )
-    TURN_NOWAIT( CW, 90, 0, 0, 0 )
+    AGV_TURN( CW, 90, 0, 0, 0, NOWAIT )
 ACT_END
 ACT_BEGIN( a_bad_move )
-    MOVE_MM( 100 )
+    AGV_MOVE( 100 )
 ACT_END
 
-/* 거리 이동: 출력 A 켬 → MOVE_MM(100) → 출력 B 켬 */
+/* 거리 이동: 출력 A 켬 → AGV_MOVE(100) → 출력 B 켬 */
 SEQ_BEGIN( s_move )
     OUT_ON( OUT_EXT_1 )
-    MOVE_MM( 100 )
+    AGV_MOVE( 100 )
     OUT_ON( OUT_EXT_2 )
     END_STOP
 SEQ_END
@@ -389,7 +389,7 @@ int main(void)
     assert(seq_bind(&s_site_ok) == 0);
     assert(seq_profile() == 0);
 
-    /* MOVE_MM: 앞 출력 → 이동 요청(100 mm) → 이동이 끝날(move_on 0) 때까지 대기 → 뒤 출력. ACT 에서는 금지 */
+    /* AGV_MOVE: 앞 출력 → 이동 요청(100 mm) → 이동이 끝날(move_on 0) 때까지 대기 → 뒤 출력. ACT 에서는 금지 */
     start(S_MOVE);
     fake_move_mm = 0;
     seq_run();

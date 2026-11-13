@@ -56,31 +56,31 @@
 | ACS | `ACS_SEND( LOADING, 87 )` / `ACS_SEND( NEXT, STATION(1) )` / `ACS( LOADING, AGV_ID )` | 보고. `ACS_SEND` 번호는 상수 0\~65535 또는 `STATION(k)`(스테이션 큐[k], `ACS( 종류, STATION(k) )` 와 같은 스텝). 종류는 레거시 함수 이름 그대로 `LOADING` `UNLOADING` `NEXT` `ARRIVE` `FINISH` `PROCESSING` `STANDBY` `CALL`(태그 표는 `DSL_INFO_<이름>`). 번호 출처 `STATION0`, `STATION0_PLUS1`, `STATION(k)`(큐[k]), `AGV_ID` 또는 상수 | `DA_ACS_Loading(…)` |
 | | `ACS_WAIT_ACK( 제한, 라벨 )` | ACK 대기 | `Scia_Send_AGV2PC_Message == ACK_NONE_MSG` |
 | | `ACS_STATION( 칸, 값, 길이 )` / `STATION_RESET` | 스테이션 큐 | `ACS_Station_Call_Num[1] = 0;` |
-| 주행 | `SPEED( HIGH·LOW·LLOW·MIN )` / `SPEED_MMIN( v )` | 재출발 속도 | `gDriving_speed = …` |
-| | `FORBACK( FWD·BACK·TOGGLE )` | 방향 전환 예약 | `AGV_ForBack_Action(FB)` |
-| | `TURN( CW, 90, fb, auto, obs )` | 회전 요청 + 완료 대기 | `AGV_Turn_Action(…)` |
-| | `TURN_NOWAIT( CW, 90, fb, auto, obs )` | 회전 요청, 다음 스캔에 다음 스텝. 회전 중 뒤 스텝이 돈다 | `AGV_Turn_Action(…); step++;` |
-| | `MOVE_MM( mm )` | 그 자리에서 mm 앞에 위치 정지하고 설 때까지 대기(3.2.1) | 없음(v0.41.0) |
+| 주행 | `AGV_SPEED( HIGH·LOW·LLOW·MIN )` / `AGV_SPEED_MMIN( v )` | 재출발 속도. v 는 m/min 4\~255 | `gDriving_speed = …` |
+| | `AGV_FORBACK( FWD·BACK·TOGGLE )` | 방향 전환 예약 | `AGV_ForBack_Action(FB)` |
+| | `AGV_TURN( CW, 90, fb, auto[, 속도[, 옵션…]] )` | 회전 요청 + 완료 대기(3.2.2) | `AGV_Turn_Action(…)` |
+| | `AGV_TURN( CW, 90, fb, auto, 0, NOWAIT )` | 회전 요청, 다음 스캔에 다음 스텝. 회전 중 뒤 스텝이 돈다 | `AGV_Turn_Action(…); step++;` |
+| | `AGV_MOVE( mm )` | 그 자리에서 mm 앞에 위치 정지하고 설 때까지 대기(3.2.1) | 없음(v0.41.0) |
 | | `OBS_ON` / `OBS_OFF` | 장애물 센서 사용 | `Flag_OBS_Sen_Use` |
 | 상태 | `SET_STATE( id, 값 )` / `WAIT_STATE( id, 값 )` | 사이트 상태 변수 | `Gate1_Out`, `FL_check` 류 |
 | 병렬 | `ACT_START( id )` / `WAIT_ACT( id )` | 4절 | |
 | 확장 | `CALL( 인덱스 )` | 사용자 정의 함수 | 표로 안 되는 블록 |
 | 종료 | `END_RESTART` / `END_STOP` / `END_ERROR( 코드 )` | 재출발 예약 / 그냥 종료 / 오류 종료 | `case 11` / 플래그 OFF / `action_err = n` |
 
-#### 3.2.1 MOVE_MM (v0.41.0)
+#### 3.2.1 AGV_MOVE( mm ) (v0.41.0, v0.49.0 까지 이름 `MOVE_MM`)
 
-서 있는 자리에서 출발해 mm(1\~32767, 밖이면 컴파일 오류) 앞에 위치 정지하고, 설 때까지 시퀀스가 기다린 뒤 다음 스텝으로 간다. 회전(`TURN`)처럼 시퀀스를 살려 둔 채 주행한다.
+서 있는 자리에서 출발해 mm(1\~32767, 밖이면 컴파일 오류) 앞에 위치 정지하고, 설 때까지 시퀀스가 기다린 뒤 다음 스텝으로 간다. 회전(`AGV_TURN`)처럼 시퀀스를 살려 둔 채 주행한다.
 
 ```c
 SEQ_BEGIN( shift_unload )
     CALL( CALL_LEFT_UNLOAD )      /* 왼쪽 컨베이어 언로딩 */
-    MOVE_MM( 100 )                /* 100 mm 앞으로 */
+    AGV_MOVE( 100 )               /* 100 mm 앞으로 */
     CALL( CALL_RIGHT_UNLOAD )     /* 오른쪽 컨베이어 언로딩 */
     END_RESTART
 SEQ_END
 ```
 
-- 방향: 지금 전후진 그대로. 앞에 `FORBACK( BACK )` 을 두면 후진이다.
+- 방향: 지금 전후진 그대로. 앞에 `AGV_FORBACK( BACK )` 을 두면 후진이다.
 - 속도: 거리에 맞춰 자동. 0 → v → 0 이 거리 안에 드는 가장 빠른 v 를 `SPN`\~`LLOW` 로 묶는다(`tagact_move_mm` 주석에 식). 제동점은 위치 정지 제어가 정한다(`STOP_REASON_MOVE`, 제동점까지 순항). 정지 허용 오차는 다른 위치 정지와 같다.
 - 이동 중 태그: 동작·정지·속도 모두 무시한다. ACK 는 보낸다(안 보내면 재전송이 이동 뒤 늦게 처리될 수 있다).
 - 장애물·일시정지: 서고, 풀리면 남은 거리를 이어 간다(목표 지점 그대로).
@@ -89,6 +89,41 @@ SEQ_END
 - 짧은 거리: 따로 최소 거리를 두지 않는다. 끝 꼬리(바닥 150 rpm 에서 0, 약 2 펄스)보다 짧으면 `SPN` 으로 출발해 꼬리만큼 간다(모의 5 mm → 7.7 mm).
 - 모의(`test_curve move`, 바퀴 지연 0.1 s, `LOS` 25): 5·20·50·100·300·1000 mm 에서 지나침 2.7·3.1·3.6·4.0·5.6·6.3 mm, 최고 1.6\~12.5 m/min, 0.7\~6.2 s. 지나침은 속도에 비례한다(바퀴 지연 몫).
 - ACT 에서는 금지(`seq_bind` 거부).
+
+#### 3.2.2 AGV_TURN 과 옵션 표기 (v0.50.0)
+
+방식 옵션은 인자 맨 뒤에 적는다. 안 적으면 일반 동작이다. 같은 뜻이면 태그 표와 시퀀스 표에서 같은 이름이다. 정해 두지 않은 옵션·조합·같은 옵션 두 번은 컴파일 오류다.
+
+`AGV_TURN( 방향, 각도, 회전 뒤 방향, 자동 출발[, 속도[, 옵션…]] )`. 인자 수는 4(속도 생략 = 0), 5(속도), 6·7(속도 + 옵션 1·2개). 옵션을 쓰려면 속도 칸(0 = 자동)을 적는다.
+
+| 옵션 | 시퀀스 표 | 태그 표 | 인코딩 |
+|---|---|---|---|
+| (없음) | 회전하고 끝날 때까지 기다림 (`SK_TURN`) | 회전 (`TA_TURN`) | |
+| `NOWAIT` | 회전을 걸고 다음 스캔에 다음 스텝 (`SK_TURN_NOWAIT`) | 컴파일 오류 | 스텝 종류 |
+| `ALIGN` | (3단계) | 주행로 정렬 회전 (`TA_TURN_ALIGN`) | 종류 |
+| `TAPE` | 컴파일 오류(시퀀스 중 교차선 회전은 하지 않는다) | 교차 테이프를 찾은 뒤 정렬 회전 (`TA_TURN_TAPE`) | 종류 |
+| `OBS` | 회전 중 장애물 감지 | 같다 | 셋째(태그는 둘째) 칸 b8 = 1 |
+
+- 종류 옵션(`NOWAIT`·`ALIGN`·`TAPE`)은 하나까지, `OBS` 는 함께 쓸 수 있다. 차례는 자유다(`…, 0, ALIGN, OBS` = `…, 0, OBS, ALIGN`).
+- `OBS` 는 회전 중 장애물 감지(`D.turn_obs_use`, 값 1 만 본다)다. 주행 중 장애물 센서 사용 `OBS_ON`/`OBS_OFF` 와 다른 것이다. v0.49.0 까지는 다섯째 위치 인자(장애물 0\~7)였다.
+- 회전 뒤 방향 b0\~3 | 자동 출발 b4\~7 | 장애물 b8(b9\~10 은 0) | 속도 b11\~15. 태그 둘째 칸과 시퀀스 셋째 칸이 같은 배치다.
+- 방향(`CW`·`CCW`)은 `AGV_TURN` 이 바로 붙인다(사이트 `legacy_const.h` 의 `CW`·`CCW` 매크로가 펼쳐지지 않는다).
+
+옛 이름 → 새 이름(v0.50.0, 데이터는 같다):
+
+| 옛 이름 | 새 이름 |
+|---|---|
+| 시퀀스 `SPEED( level )` / `SPEED_MMIN( v )` | `AGV_SPEED( level )` / `AGV_SPEED_MMIN( v )` |
+| 시퀀스 `FORBACK( dir )` | `AGV_FORBACK( dir )` |
+| 시퀀스 `TURN( d, deg, fb, auto, 장애물 )` | `AGV_TURN( d, deg, fb, auto, 0 )` (장애물 1 이면 `…, 0, OBS`) |
+| 시퀀스 `TURN_NOWAIT( d, deg, fb, auto, 장애물 )` | `AGV_TURN( d, deg, fb, auto, 0, NOWAIT )` |
+| 시퀀스 `MOVE_MM( mm )` | `AGV_MOVE( mm )` |
+| 태그 `AGV_TURN( d, deg, fb, auto, 장애물[, 속도] )` | `AGV_TURN( d, deg, fb, auto[, 속도[, OBS]] )` |
+| 태그 `AGV_TURN_ALIGN( … )` / `AGV_TURN_TAPE( … )` | `AGV_TURN( …, 속도, ALIGN )` / `AGV_TURN( …, 속도, TAPE )` |
+| 태그 `AGV_TAPE_STOP( seq )` | `SEQ_START( seq, TAPE )` |
+| 태그 `( TA_SPEED \| n )` | `AGV_SPEED_MMIN( n )` |
+
+주의: 옛 태그 5인자 `AGV_TURN( …, 자동 출발, 장애물 )` 은 새 형식에서 (…, 자동 출발, 속도)로 읽힌다. 장애물이 0 이면 같고 0 이 아니면 속도가 된다. 옛 6인자(…, 장애물, 속도)는 컴파일 오류다.
 
 ### 3.3 조건
 
@@ -242,7 +277,7 @@ seq_run():                                  run 모듈이 디스패치 조건 �
         END_*                               요청 해제, 재출발 예약(END_RESTART), 비활성
 ```
 
-- `Auto_Run_Process`의 디스패치 조건은 `run` 모듈이 맡는다. 회전 중에도 호출되는 현행 동작은 유지해 `TURN` 스텝이 동작한다.
+- `Auto_Run_Process`의 디스패치 조건은 `run` 모듈이 맡는다. 회전 중에도 호출되는 현행 동작은 유지해 `AGV_TURN` 스텝이 동작한다.
 - 시퀀스 중단(STOP, E-STOP, `W` 리셋)은 `seq_abort_all()`이다.
 - 표 파일은 짧은 이름(`ON`, `IN`, `L`)을 쓰므로 `legacy_compat.h`와 함께 포함하지 않는다.
 
@@ -334,7 +369,7 @@ TAG_IF( 36, PF_LIFT, IF_STATION( 1, 101, 116 ), ACT_START( ACT_LIFT_SIGNAL ) )
 | 장애물·교차로 일시정지 | 계속 돈다. 시간도 계속 흐른다 |
 | STOP, E-STOP, `W` 리셋, `system_err`, `stop_err` | 즉시 중단하고 **그 ACT가 켠 출력만** 끈다 |
 | 실패 | `END_ERROR(code)`는 `stop_err = code`로 주행을 멈춘다. 시퀀스의 `END_ERROR`는 `action_err`다 |
-| 금지 스텝 | `SPEED`, `SPEED_MMIN`, `FORBACK`, `TURN`, `TURN_NOWAIT`, `MOVE_MM`, `ERROR_HOLD`, `END_RESTART`. 주행 상태를 건드리므로 `seq_bind()`가 부팅 때 거부한다 |
+| 금지 스텝 | `AGV_SPEED`, `AGV_SPEED_MMIN`, `AGV_FORBACK`, `AGV_TURN`(옵션 모두), `AGV_MOVE`, `ERROR_HOLD`, `END_RESTART`. 주행 상태를 건드리므로 `seq_bind()`가 부팅 때 거부한다 |
 | 시퀀스와 같은 출력 | 금지. 겹치면 같은 스캔에서 나중에 실행되는 ACT가 이긴다. 정지 태그로 시퀀스에 들어갈 때 ACT가 남아 있을 수 있으면 첫 스텝에 `WAIT_ACT( id )` |
 | 정지 태그와 같이 사용 | `TAG( n, PF, AGV_STOP, ACT_START(id) )`. 정지와 동시에 시작하며 서로 기다리지 않는다 |
 
@@ -356,7 +391,9 @@ TAG_TABLE_BEGIN( site_tags )
     TAG( 2,  ANY_PROFILE,  AGV_SPEED( LLOW ) )
     TAG( 3,  ANY_PROFILE,  AGV_SPEED( LOW ) )
     TAG( 5,  ANY_PROFILE,  AGV_SPEED( HIGH ) )
-    TAG( 21, ANY_PROFILE,  AGV_TURN( CW, 90, 0, 1, 0 ) )
+    TAG( 21, ANY_PROFILE,  AGV_TURN( CW, 90, 0, 1 ) )
+    TAG( 23, ANY_PROFILE,  AGV_TURN( CW, 90, 0, 1, 0, TAPE ) )       /* 교차 테이프를 찾은 뒤 정렬 회전 */
+    TAG( 24, ANY_PROFILE,  SEQ_START( LOAD, TAPE ) )                 /* 교차 테이프에서 서고 시퀀스 */
 
     /* 적재 태그 4: 프로파일별. 위에서 아래로 첫 번째로 맞는 규칙 하나만 실행 */
     TAG   ( 4, PF_MATERIAL,  AGV_STOP, SEQ_START( LOAD ) )
@@ -369,7 +406,8 @@ TAG_TABLE_END
 
 - `tagact_run(tag)`는 활성 프로파일과 번호가 맞는 첫 규칙을 찾아 액션을 순서대로 실행한다. 규칙이 없으면 아무것도 하지 않는다.
 - 액션은 규칙당 4칸이다. `AGV_TURN`은 2칸을 쓴다. 넘치면 `CALL( 인덱스 )`.
-- 회전 `AGV_TURN`·`AGV_TURN_ALIGN`·`AGV_TURN_TAPE( 방향, 각도, 회전 뒤 방향, 자동 출발, 장애물, 속도 )`. 속도는 m/min 0\~31이고 0이나 생략은 자동(적재 `TNS`, 공차 `ETN`). 값이 있으면 적재·공차와 상관없이 그 회전 한 번만 그 속도다. 회전 최저 속도보다 낮으면 최저 속도, `TNS` 한계(25)보다 높으면 한계로 묶는다. 회전 끝 감속·정렬·회전 정지 계획도 그 값을 상한으로 쓰고, 회전이 끝나거나 STOP·오류로 끊기면 자동으로 돌아간다. 예: `AGV_TURN( CW, 90, 0, 1, 0, 15 )` 15 m/min. 둘째 칸 = 회전 뒤 방향 b0\~3 | 자동 출발 b4\~7 | 장애물 b8\~10(0\~7) | 속도 b11\~15. 시퀀스 `TURN`은 속도를 받지 않는다(자동).
+- 회전 `AGV_TURN( 방향, 각도, 회전 뒤 방향, 자동 출발[, 속도[, 옵션…]] )`(3.2.2). 옵션 `ALIGN` 주행로 정렬, `TAPE` 교차 테이프를 찾은 뒤 정렬(둘 중 하나), `OBS` 회전 중 장애물 감지. 속도는 m/min 0\~31이고 0이나 생략은 자동(적재 `TNS`, 공차 `ETN`). 값이 있으면 적재·공차와 상관없이 그 회전 한 번만 그 속도다. 회전 최저 속도보다 낮으면 최저 속도, `TNS` 한계(25)보다 높으면 한계로 묶는다. 회전 끝 감속·정렬·회전 정지 계획도 그 값을 상한으로 쓰고, 회전이 끝나거나 STOP·오류로 끊기면 자동으로 돌아간다. 예: `AGV_TURN( CW, 90, 0, 1, 15 )` 15 m/min, `AGV_TURN( CW, 90, 0, 1, 0, ALIGN, OBS )`. 둘째 칸 = 회전 뒤 방향 b0\~3 | 자동 출발 b4\~7 | 장애물 b8 | 속도 b11\~15.
+- 교차 테이프 정지 `SEQ_START( 시퀀스, TAPE )`(예전 `AGV_TAPE_STOP`): 교차 테이프를 찾아 서고 시퀀스. 숫자 속도는 `AGV_SPEED_MMIN( m/min )`(4\~255).
 - 보고·대기·스테이션은 태그 표 파일에서 `agv/tag_dsl.h`를 포함하고 시퀀스 표와 같은 이름으로 쓴다. `ACS_SEND( 종류, 번호 )`(0\~255, 2칸), 번호 자리에 `STATION(k)`(스테이션 큐[k], 레거시 `ACS_Station_Call_Num[k]`) 또는 `AGV_ID_MINUS(n)`(호기 번호 - n), `ACS( 종류, STATION0 )`(1칸, 정보 값이 8비트뿐이라 `STANDBY_RESET`은 컴파일 오류. 대기 리셋은 2칸 `ACS_SEND`), `STATION_RESET`. 대기 `ACS_SEND( STANDBY, n )`은 레거시 `DA_ACS_Standby( n, NONE )` + 자동 재전송 켬(정지, 번호 > 0 이면 자동 재전송 늘 켬. 번호 0 이하(호기 - n 이 0 이하 등)는 한 번만 보낸다), `ACS_SEND( STANDBY_RESET, n )`은 `DA_ACS_Standby( n, RESET )`(먼저 스테이션 큐를 지운다)이다. 예: `TAG( 30, PF_X, AGV_STOP, ACS_SEND( STANDBY, 1 ), STATION_RESET )`. 둘째 칸 = Info | `TA_ACS_STANDBY_RESET`(0x100) | `TA_ACS_AGV_MINUS`(0x200) | `TA_ACS_STATION`(0x400). 시퀀스 표의 `ACS_SEND( STANDBY, … )`는 보고만 한다. `STATION[k]`(대괄호)는 쓰지 않는다: 문자열 첨자 같은 우회는 C 정수 상수식이 아니라 컴파일 때 범위 검사(`sizeof` 배열)와 같이 못 쓰고 표준 밖 확장에 기댄다. 숫자 칸 `( TA_ACS | DSL_INFO_… )`, `( TA_ACS_NUM | n ), DSL_INFO_…`도 쓸 수 있다. 예전 `A_` 이름(`A_STOP` 등)은 v0.47.0 에서 뺐다(대응표는 CHANGELOG v0.47.0).
 - 조건은 `TAG_IF`의 셋째 인자 하나. 확장 조건 둘과 입력 조건 하나를 AND 한다.
 

@@ -55,11 +55,11 @@
 #define PI_F        3.14159265f
 #define STEER_SLEW_TEST 50.5f   /* steer.c STEER_SLEW_RPM + 반올림 */
 
-/* 시퀀스 MOVE_MM 모의(move 표): 출력 A 켬 → MOVE_MM(mm) → 출력 B 켬. 거리는 시험이 arg0 를 바꾼다 */
+/* 시퀀스 AGV_MOVE 모의(move 표): 출력 A 켬 → AGV_MOVE(mm) → 출력 B 켬. 거리는 시험이 arg0 를 바꾼다 */
 #include "agv/seq_dsl.h"
 static seq_step_t s_mv_steps[] = {
     OUT_ON( OUT_EXT_1 )
-    MOVE_MM( 100 )
+    AGV_MOVE( 100 )
     OUT_ON( OUT_EXT_3 )
     END_STOP
 };

@@ -4,7 +4,8 @@
  * 호스트: gcc -std=c99 -DAGV_HOST_BUILD -Iinclude tests/test_dsl.c -o build/test_dsl && build/test_dsl
  * 타깃:   cl2000 -v28 -ml -mt --c99 -Iinclude --compile_only tests/test_dsl.c
  * 컴파일 오류 시험: -DNEG_AMP_INPUT, -DNEG_NO_DIRECTION, -DNEG_PARAM_ZERO, -DNEG_MOD_ZERO, -DNEG_HIGH_ANY, -DNEG_TURN_SPEED,
- * -DNEG_ACS1_RESET, -DNEG_PIN_TWICE, -DNEG_PIN_ANY, -DNEG_PIN_ONE 각각 컴파일이 실패해야 한다(tests/run_host.ps1 이 하나씩 본다).
+ * -DNEG_ACS1_RESET, -DNEG_PIN_TWICE, -DNEG_PIN_ANY, -DNEG_PIN_ONE 과 표기 옵션(-DNEG_SEQ_*, -DNEG_TAG_*, -DNEG_MMIN, -DNEG_SEQSTART_OPT)
+ * 각각 컴파일이 실패해야 한다(tests/run_host.ps1 이 하나씩 본다).
  */
 #include "agv/seq_dsl.h"
 
@@ -48,8 +49,8 @@ SEQ_BEGIN( demo )
     OUT_FLICKER_UNTIL_IN( OUT_EXT_8, 50, IN( ON(SEN_C) ) )
     L( ERR )
     ERROR_HOLD( 290, IN( ON(IN_START_SW) ), SECOND )
-    FORBACK( BACK )
-    TURN( CW, 90, 1, 1, 0 )
+    AGV_FORBACK( BACK )
+    AGV_TURN( CW, 90, 1, 1 )
     END_RESTART
     WAIT( ANY_ON(SEN_A, SEN_B) )
     WAIT( IN( ANY_ON(SEN_A, SEN_B), OFF(IN_EXT_4) ) )
@@ -78,7 +79,7 @@ SEQ_BEGIN( ext )
     WAIT_ANY2_TO( IN( ANY_ON(SEN_A, SEN_B), OFF(SEN_C) ), ANY2_ON(IN_EXT_5, IN_EXT_6), 50, ERR )  /* 7 */
     DELAY_PARAM( P_AUTO_START_SEC, MIN )                                     /* 8 */
     WAIT_TO_PARAM( IN( ON(SEN_B) ), P_STATION_NO, DSEC, ERR )                /* 9 */
-    TURN_NOWAIT( CCW, 90, 0, 1, 0 )                                          /* 10 */
+    AGV_TURN( CCW, 90, 0, 1, 0, NOWAIT )                                     /* 10 */
     ACS( LOADING, STATION(3) )                                               /* 11 */
     ACS( NEXT, STATION0 )                                                    /* 12 */
     WAIT( IN( ON(IN_EXT_1), ON(IN_EXT_2), ON(IN_EXT_3), OFF(IN_EXT_4), OFF(IN_EXT_5), ANY_ON(IN_EXT_6, IN_EXT_7) ) )  /* 13 */
@@ -90,6 +91,25 @@ SEQ_BEGIN( ext )
     ACS_SEND( NEXT, STATION(2) )                                             /* 18 = ACS( NEXT, STATION(2) ) */
     ACS_SEND( LOADING, 599 )                                                 /* 19 */
     WAIT( IN( OFF(SEN_H), ON(IN_EXT_4), ON(SEN_A, SEN_A) ) )                 /* 20 같은 핀 같은 뜻 겹침은 된다 */
+    AGV_TURN( CW, 180, 0, 0, 0, OBS, NOWAIT )                                /* 21 옵션 둘, 차례 자유 */
+    AGV_SPEED( LOW )                                                         /* 22 */
+    AGV_SPEED_MMIN( 20 )                                                     /* 23 */
+    AGV_MOVE( 100 )                                                          /* 24 */
+#ifdef NEG_SEQ_TAPE
+    AGV_TURN( CW, 90, 0, 1, 0, TAPE )                                        /* 시퀀스에서 TAPE 는 오류 */
+#endif
+#ifdef NEG_SEQ_OPT
+    AGV_TURN( CW, 90, 0, 1, 0, NOWAIT, NOWAIT )                              /* 같은 옵션 둘 */
+#endif
+#ifdef NEG_SEQ_OLD5
+    AGV_TURN( CW, 90, 0, 1, 0, 0 )                                           /* 예전 6인자(장애물, 속도) */
+#endif
+#ifdef NEG_SEQ_SPEED
+    AGV_TURN( CW, 90, 0, 1, 15 )                                             /* 시퀀스 회전 속도는 아직 0 만 */
+#endif
+#ifdef NEG_MMIN
+    AGV_SPEED_MMIN( 3 )                                                      /* 0~3 은 단계 번호 */
+#endif
 #ifdef NEG_HIGH_ANY
     WAIT( ANY_ON(SEN_H) )
 #endif
@@ -121,7 +141,7 @@ ACT_MAP_END
 
 TAG_TABLE_BEGIN( site_tags )
     TAG( 4, 1, AGV_STOP, SEQ_START( LOAD ) )
-    TAG( 21, ANY_PROFILE, AGV_TURN(CW, 90, 0, 1, 0) )
+    TAG( 21, ANY_PROFILE, AGV_TURN(CW, 90, 0, 1) )
     TAG_IF( 36, 1, IF_STATION(1, 101, 116), ACT_START(ACT_DEMO) )
     TAG_IF( 6,  1, IF_IN( ON(SEN_C) ), SEQ_START( UNLOAD ), AGV_FORBACK(TOGGLE) )                     /* 3 */
     TAG_IF( 10, 1, IF_IN( ANY_ON(SEN_A, SEN_B) ), SEQ_START( LOAD ) )                               /* 4 */
@@ -137,13 +157,32 @@ TAG_TABLE_BEGIN( site_tags )
     TAG( 40, 1, AGV_STOP, ACS_SEND( STANDBY, AGV_ID_MINUS(10) ), STATION_RESET )                  /* 14 */
     TAG( 41, 1, ACS_SEND( STANDBY_RESET, 14 ), ACS( ARRIVE, STATION0 ), AGV_STOP )                /* 15 */
     TAG( 42, 1, ACS_SEND( ARRIVE, 115 ), ACS_SEND( ARRIVE, STATION(1) ) )                         /* 16 */
-    TAG( 38, 1, AGV_TURN_ALIGN( CCW, 180, DIR_TOGGLE, 1, 1, 15 ) )                                /* 17 회전 속도 */
-    TAG( 46, 1, AGV_TURN( CW, 90, 0, 1, 7, 31 ) )                                                 /* 18 속도 16 이상: b15 */
+    TAG( 38, 1, AGV_TURN( CCW, 180, DIR_TOGGLE, 1, 15, ALIGN, OBS ) )                             /* 17 회전 속도, 옵션 둘 */
+    TAG( 46, 1, AGV_TURN( CW, 90, 0, 1, 31, OBS ) )                                               /* 18 속도 16 이상: b15 */
+    TAG( 47, 1, AGV_TURN( CW, 90, 0, 1, 0, TAPE ), SEQ_START( LOAD, TAPE ), AGV_SPEED_MMIN( 20 ) )  /* 19 */
 #ifdef NEG_MOD_ZERO
     TAG_IF( 37, 1, IF_STATION_MOD(0, 0, 3), AGV_STOP )
 #endif
 #ifdef NEG_TURN_SPEED
-    TAG( 39, 1, AGV_TURN( CW, 90, 0, 1, 0, 32 ) )
+    TAG( 39, 1, AGV_TURN( CW, 90, 0, 1, 32 ) )
+#endif
+#ifdef NEG_TAG_NOWAIT
+    TAG( 39, 1, AGV_TURN( CW, 90, 0, 1, 0, NOWAIT ) )             /* 태그에서 NOWAIT 는 오류 */
+#endif
+#ifdef NEG_TAG_KIND2
+    TAG( 39, 1, AGV_TURN( CW, 90, 0, 1, 0, ALIGN, TAPE ) )        /* 종류 옵션 둘 */
+#endif
+#ifdef NEG_TAG_OBS2
+    TAG( 39, 1, AGV_TURN( CW, 90, 0, 1, 0, OBS, OBS ) )           /* 같은 옵션 둘 */
+#endif
+#ifdef NEG_TAG_WORD
+    TAG( 39, 1, AGV_TURN( CW, 90, 0, 1, 0, FAST ) )               /* 정하지 않은 옵션 */
+#endif
+#ifdef NEG_TAG_OLD6
+    TAG( 39, 1, AGV_TURN( CW, 90, 0, 1, 0, 0 ) )                  /* 예전 6인자(장애물, 속도) */
+#endif
+#ifdef NEG_SEQSTART_OPT
+    TAG( 39, 1, SEQ_START( LOAD, ALIGN ) )
 #endif
 #ifdef NEG_ACS1_RESET
     TAG( 44, 1, ACS( STANDBY_RESET, STATION0 ) )                   /* 1칸에 대기 리셋 비트가 들어갈 자리가 없다 */
@@ -244,7 +283,16 @@ int main(void)
            && site_tags[16].act[2] == (TA_ACS_NUM | 1) && site_tags[16].act[3] == ('A' | TA_ACS_STATION));
     assert(site_tags[17].act[0] == (TA_TURN_ALIGN | TURN_CCW | (2 << 2))
            && site_tags[17].act[1] == (DIR_TOGGLE | (1 << 4) | (1 << 8) | (15 << TA_TURN_SPEED_SHIFT)));
-    assert(site_tags[18].act[1] == 0xFF10u);                             /* 31 << 11 | 7 << 8 | 1 << 4 */
+    assert(site_tags[18].act[0] == (TA_TURN | TURN_CW | (1 << 2)) && site_tags[18].act[1] == 0xF910u);   /* 31 << 11 | OBS 1 << 8 | 1 << 4 */
+    assert(site_tags[19].act[0] == (TA_TURN_TAPE | TURN_CW | (1 << 2)) && site_tags[19].act[1] == (1 << 4)
+           && site_tags[19].act[2] == (TA_TAPE_STOP | SEQ_LOAD) && site_tags[19].act[3] == (TA_SPEED | 20));
+    {   /* 시퀀스 회전 옵션: 셋째 칸 b8 = OBS, 차례 자유 */
+        const seq_step_t *e = ext_steps;
+        assert(e[21].kind == SK_TURN_NOWAIT && e[21].arg0 == TURN_CW && e[21].arg1 == 180 && e[21].timeout == (1 << 8));
+        assert(e[22].kind == SK_SPEED && e[22].arg0 == SEQ_SPD_LOW && e[23].kind == SK_SPEED && e[23].arg0 == 20);
+        assert(e[24].kind == SK_MOVE_MM && e[24].arg0 == 100);
+        assert(demo_steps[17].kind == SK_TURN);
+    }
 
     puts("test_dsl ok");
     return 0;

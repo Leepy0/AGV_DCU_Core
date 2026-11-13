@@ -246,19 +246,39 @@ typedef unsigned long long dsl_cond_t;
 #define ACS_STATION(idx, val, cnt)  DSL_STEP(SK_ACS_STATION, SEQ_NO_LABEL, idx, val, cnt, 0, 0, 0)
 #define STATION_RESET          DSL_STEP(SK_STATION_RESET, SEQ_NO_LABEL, 0, 0, 0, 0, 0, 0)
 
-/* ---- 주행 관련 (ACT 에서 금지, seq_bind 가 부팅 때 거부) ---- */
-#define SPEED(level)           DSL_STEP(SK_SPEED, SEQ_NO_LABEL, SEQ_SPD_##level, 0, 0, 0, 0, 0)
-#define SPEED_MMIN(v)          DSL_STEP(SK_SPEED, SEQ_NO_LABEL, v, 0, 0, 0, 0, 0)
-#define FORBACK(dir)           DSL_STEP(SK_FORBACK, SEQ_NO_LABEL, DIR_##dir, 0, 0, 0, 0, 0)
-#define TURN(dir, deg, fb, autostart, obs) \
-    DSL_STEP(SK_TURN, SEQ_NO_LABEL, TURN_##dir, deg, (fb) | ((autostart) << 4) | ((obs) << 8), 0, 0, 0)
-/* 회전을 걸고 다음 스캔에 다음 스텝. 회전 중에 뒤 스텝이 돈다 */
-#define TURN_NOWAIT(dir, deg, fb, autostart, obs) \
-    DSL_STEP(SK_TURN_NOWAIT, SEQ_NO_LABEL, TURN_##dir, deg, (fb) | ((autostart) << 4) | ((obs) << 8), 0, 0, 0)
-/* 그 자리에서 출발해 mm 앞(지금 전후진 방향)에 위치 정지하고, 설 때까지 기다린 뒤 다음 스텝. mm 1~32767(밖이면 컴파일 오류).
+/* ---- 주행 관련 (ACT 에서 금지, seq_bind 가 부팅 때 거부) ----
+ * 방식 옵션은 인자 맨 뒤에 적는다. 안 적으면 일반 동작이다. 정해 두지 않은 옵션·조합은 컴파일 오류다.
+ * 태그 표(tag_dsl.h)와 뜻이 같은 동작은 같은 이름이다(AGV_SPEED·AGV_SPEED_MMIN·AGV_FORBACK·AGV_TURN) */
+#define AGV_SPEED(level)       DSL_STEP(SK_SPEED, SEQ_NO_LABEL, SEQ_SPD_##level, 0, 0, 0, 0, 0)
+/* m/min 4~255. 0~3 은 단계 번호와 겹쳐 받지 않는다(단계는 AGV_SPEED) */
+#define DSL_MMIN_OK(v)         (0 * sizeof(char[(((v) >= 4) && ((v) <= 255)) ? 1 : -1]))
+#define AGV_SPEED_MMIN(v)      DSL_STEP(SK_SPEED, SEQ_NO_LABEL, (v) + DSL_MMIN_OK(v), 0, 0, 0, 0, 0)
+#define AGV_FORBACK(dir)       DSL_STEP(SK_FORBACK, SEQ_NO_LABEL, DIR_##dir, 0, 0, 0, 0, 0)
+/* AGV_TURN( 방향, 각도, 회전 뒤 방향, 자동 출발[, 속도[, 옵션…]] ). 옵션을 쓰려면 속도 칸(0 = 자동)을 적는다.
+ *   옵션 없음: 회전하고 끝날 때까지 기다린다. NOWAIT: 회전을 걸고 다음 스캔에 다음 스텝(회전 중에 뒤 스텝이 돈다).
+ *   OBS: 회전 중 장애물 감지(셋째 칸 b8 = 1. 주행 중 장애물 센서 사용 OBS_ON/OBS_OFF 와 다른 것). NOWAIT 와 함께 쓸 수 있다.
+ *   TAPE 는 시퀀스에서 컴파일 오류(시퀀스 중 교차선 회전은 하지 않는다).
+ * 셋째 칸: 회전 뒤 방향 b0~3 | 자동 출발 b4~7 | 장애물 b8 | 속도 b11~15(태그 둘째 칸과 같은 배치). 속도는 0 만 받는다 */
+#define DSL_SOPT_K_NOWAIT      1
+#define DSL_SOPT_K_OBS         0
+#define DSL_SOPT_O_NOWAIT      0
+#define DSL_SOPT_O_OBS         1
+#define DSL_SKIND(k)           (((k) == 0) ? SK_TURN : SK_TURN_NOWAIT)
+#define DSL_STURN_OK(v, k1, k2, o)  (0 * sizeof(char[(((v) == 0) && (((k1) == 0) || ((k2) == 0)) && ((o) <= 1)) ? 1 : -1]))
+#define DSL_STURN_W(d, deg, fb, au, v, k1, k2, o) \
+    DSL_STEP(DSL_SKIND((k1) + (k2)), SEQ_NO_LABEL, d, deg, \
+             ((fb) | ((au) << 4) | ((o) << 8) | ((uint16_t)(v) << 11)) + DSL_STURN_OK(v, k1, k2, o), 0, 0, 0)
+#define DSL_STURN3(d, deg, fb, au)             DSL_STURN_W(d, deg, fb, au, 0, 0, 0, 0)
+#define DSL_STURN4(d, deg, fb, au, v)          DSL_STURN_W(d, deg, fb, au, v, 0, 0, 0)
+#define DSL_STURN5(d, deg, fb, au, v, a)       DSL_STURN_W(d, deg, fb, au, v, DSL_SOPT_K_##a, 0, DSL_SOPT_O_##a)
+#define DSL_STURN6(d, deg, fb, au, v, a, b)    DSL_STURN_W(d, deg, fb, au, v, DSL_SOPT_K_##a, DSL_SOPT_K_##b, \
+                                                           DSL_SOPT_O_##a + DSL_SOPT_O_##b)
+/* 방향은 이 매크로에서 바로 붙인다(사이트 legacy_const.h 의 CW·CCW 매크로가 펼쳐지지 않게) */
+#define AGV_TURN(dir, ...)     DSL_CAT(DSL_STURN, DSL_NARG(__VA_ARGS__))(TURN_##dir, __VA_ARGS__)
+/* AGV_MOVE( mm ): 그 자리에서 출발해 mm 앞(지금 전후진 방향)에 위치 정지하고, 설 때까지 기다린 뒤 다음 스텝. mm 1~32767(밖이면 컴파일 오류).
  * 속도는 거리에 맞춰 SPN~LLOW 안에서 자동(tagact_move_mm). 이동 중 태그는 무시, 장애물은 일시정지 뒤 이어 감 */
 #define DSL_MM_OK(mm)          (0 * sizeof(char[(((mm) >= 1) && ((mm) <= 32767)) ? 1 : -1]))
-#define MOVE_MM(mm)            DSL_STEP(SK_MOVE_MM, SEQ_NO_LABEL, (mm) + DSL_MM_OK(mm), 0, 0, 0, 0, 0)
+#define AGV_MOVE(mm)           DSL_STEP(SK_MOVE_MM, SEQ_NO_LABEL, (mm) + DSL_MM_OK(mm), 0, 0, 0, 0, 0)
 #define ERROR_HOLD(code, c, label)  DSL_STEP_C(SK_ERROR_HOLD, label, code, 0, 0, c, 0)
 #define END_RESTART            DSL_STEP(SK_END_RESTART, SEQ_NO_LABEL, 0, 0, 0, 0, 0, 0)
 

@@ -94,10 +94,10 @@ static const tag_rule_t s_rules[] = {
     TAG_IF( 23, 0, IF_IN( ANY_ON(IN_EXT_16, IN_START_SW) ), OBS_ON )
     TAG_IF( 23, 0, IF_X( X_NOT(X_CROSS_IN) ), OBS_OFF )
     /* 회전 속도 지정(m/min): 15, 최저 아래 1, 한계 위 31, 생략(자동) */
-    TAG( 30, 0, AGV_TURN( CW, 90, 0, 0, 0, 15 ) )
-    TAG( 31, 0, AGV_TURN( CW, 90, 0, 0, 0, 1 ) )
-    TAG( 32, 0, AGV_TURN( CW, 90, 0, 0, 0, 31 ) )
-    TAG( 33, 0, AGV_TURN( CW, 90, 0, 0, 0 ) )
+    TAG( 30, 0, AGV_TURN( CW, 90, 0, 0, 15 ) )
+    TAG( 31, 0, AGV_TURN( CW, 90, 0, 0, 1 ) )
+    TAG( 32, 0, AGV_TURN( CW, 90, 0, 0, 31 ) )
+    TAG( 33, 0, AGV_TURN( CW, 90, 0, 0 ) )
     /* 대기·도착 보고 (tag_dsl.h) */
     TAG( 34, 0, AGV_STOP, ACS_SEND( STANDBY, AGV_ID_MINUS(2) ), STATION_RESET )
     TAG( 35, 0, ACS_SEND( STANDBY_RESET, 14 ) )
@@ -1080,7 +1080,7 @@ static void test_tst(void)
     printf("  TST ok\n");
 }
 
-/* 시퀀스 MOVE_MM 이동 중 태그: ACK 는 보내고 동작(정지·속도)은 하지 않는다. 거리·정지 위치는 test_curve move 표(바퀴 모형) */
+/* 시퀀스 AGV_MOVE 이동 중 태그: ACK 는 보내고 동작(정지·속도)은 하지 않는다. 거리·정지 위치는 test_curve move 표(바퀴 모형) */
 static void test_move_tag_ignore(void)
 {
     int16_t cmd;
