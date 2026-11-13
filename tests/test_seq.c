@@ -298,10 +298,21 @@ ACT_BEGIN( a_bad_align )
     AGV_TURN( CW, 90, 0, 0, 0, ALIGN )
 ACT_END
 
+/* 교차선까지 이동: 서기 전에는 B 를 켜지 않고, 못 찾아 오류(258)로 끝나면 B 를 켜지 않는다 */
+SEQ_BEGIN( s_move_tape )
+    OUT_ON( OUT_EXT_1 )
+    AGV_MOVE( 1500, TAPE )
+    OUT_ON( OUT_EXT_2 )
+    END_STOP
+SEQ_END
+ACT_BEGIN( a_bad_move_tape )
+    AGV_MOVE( 100, TAPE )
+ACT_END
+
 enum {
     S_BRANCH = SEQ_SITE_BASE, S_UNMATCHED, S_TIMING, S_ACS, S_DRIVE, S_BUDGET, S_OUTS, S_FLICKER,
     S_ANY, S_HANDSHAKE, S_WAIT_OUT, S_CALL, S_BAD_LABEL, S_ACT_START, S_PROF, S_NO_TABLE,
-    S_XWHEN, S_XWAIT, S_ANY2, S_DPARAM, S_TPARAM, S_NOWAIT, S_MOVE, S_ALIGN
+    S_XWHEN, S_XWAIT, S_ANY2, S_DPARAM, S_TPARAM, S_NOWAIT, S_MOVE, S_ALIGN, S_MOVE_TAPE
 };
 
 SEQ_MAP_BEGIN( site_seqs )
@@ -330,6 +341,7 @@ SEQ_MAP_BEGIN( site_seqs )
     SEQ_MAP( 0, S_NOWAIT, s_nowait )
     SEQ_MAP( 0, S_MOVE, s_move )
     SEQ_MAP( 0, S_ALIGN, s_align )
+    SEQ_MAP( 0, S_MOVE_TAPE, s_move_tape )
 SEQ_MAP_END
 
 ACT_MAP_BEGIN( site_acts )
@@ -433,6 +445,23 @@ int main(void)
     assert(fake_out == BIT(OUT_EXT_2) && !seq_is_active());
     fake_turn_count = 0;                                         /* 뒤 시험은 처음부터 센다 */
     BAD(a_bad_align);
+    assert(seq_bind(&s_site_ok) == 0);
+
+    /* 교차선까지 이동(AGV_MOVE( 1500, TAPE )): 설 때까지 대기, 섰는데 오류가 서 있으면 B 를 켜지 않는다 */
+    start(S_MOVE_TAPE);
+    fake_move_mm = 0;
+    seq_run();
+    assert(fake_out == BIT(OUT_EXT_1) && fake_move_mm == -1500 && D.move_on);
+    seq_run(); seq_run();
+    assert(seq_is_active() && fake_out == BIT(OUT_EXT_1));
+    D.move_on = 0;
+    D.system_err = 258;                                          /* 한계 안에 못 찾았다 */
+    seq_run();
+    assert(seq_is_active() && fake_out == BIT(OUT_EXT_1));
+    D.system_err = 0;
+    seq_run();                                                   /* 찾아 섰다 */
+    assert(fake_out == (BIT(OUT_EXT_1) | BIT(OUT_EXT_2)) && !seq_is_active());
+    BAD(a_bad_move_tape);
     assert(seq_bind(&s_site_ok) == 0);
 
     /* WHEN: 대기 → 첫 참의 가지 → 안정 초과 → 재출발 */

@@ -60,7 +60,8 @@ static const seq_def_t *find_def(const seq_def_t *list, uint16_t n, uint16_t id)
 static int16_t forbidden_in_act(uint16_t kind)
 {
     return (kind == SK_SPEED) || (kind == SK_FORBACK) || (kind == SK_TURN) || (kind == SK_TURN_NOWAIT)
-        || (kind == SK_ERROR_HOLD) || (kind == SK_END_RESTART) || (kind == SK_MOVE_MM) || (kind == SK_TURN_ALIGN);
+        || (kind == SK_ERROR_HOLD) || (kind == SK_END_RESTART) || (kind == SK_MOVE_MM) || (kind == SK_TURN_ALIGN)
+        || (kind == SK_MOVE_TAPE);
 }
 
 void seq_pick_profile(void)
@@ -475,6 +476,13 @@ static uint16_t eval_step(seq_runner_t *r, const seq_step_t *s)
             return R_WAIT;
         }
         return D.move_on ? (uint16_t)R_WAIT : (uint16_t)R_NEXT;
+    case SK_MOVE_TAPE:          /* AGV_MOVE 와 같은 틀. 못 찾아 오류(258)로 서면 다음으로 가지 않는다(run_after_motor 가 끝낸다) */
+        if (r->a == 0) {
+            tagact_move_tape((int16_t)s->arg0);
+            r->a = 1;
+            return R_WAIT;
+        }
+        return (D.move_on || (D.system_err != 0) || (D.stop_err != 0)) ? (uint16_t)R_WAIT : (uint16_t)R_NEXT;
     case SK_OBS:
         D.obs_use = (int16_t)s->arg0;
         return R_NEXT;

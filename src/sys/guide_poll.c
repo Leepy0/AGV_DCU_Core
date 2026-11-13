@@ -172,7 +172,7 @@ static void on_rx(const guide_rx_t *rx)
 static void send_request(void)
 {
     uint16_t buf[4];
-    uint16_t tape = (uint16_t)((D.tape_stop_id != 0) || (D.tape_turn_dir != 0) || D.tape_align);
+    uint16_t tape = (uint16_t)((D.tape_stop_id != 0) || (D.tape_turn_dir != 0) || D.tape_align || run_move_tape_on());
     uint16_t branch = (uint16_t)((D.branch_start != 0) && (D.branch_step != 3));
     int h;
 

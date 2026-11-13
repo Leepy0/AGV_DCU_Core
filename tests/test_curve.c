@@ -70,9 +70,17 @@ static const seq_step_t s_al_steps[] = {
     OUT_ON( OUT_EXT_3 )
     END_STOP
 };
+/* 시퀀스 교차선까지 이동 모의(mtape 표): 출력 A → AGV_MOVE( 한계, TAPE ) → 출력 B. 한계는 시험이 arg0 를 바꾼다 */
+static seq_step_t s_mt_steps[] = {
+    OUT_ON( OUT_EXT_1 )
+    AGV_MOVE( 1000, TAPE )
+    OUT_ON( OUT_EXT_3 )
+    END_STOP
+};
 static const seq_def_t s_mv_seqs[] = { { 0, SEQ_SITE_BASE, s_mv_steps, sizeof(s_mv_steps) / sizeof(s_mv_steps[0]) },
-                                       { 0, SEQ_SITE_BASE + 1, s_al_steps, sizeof(s_al_steps) / sizeof(s_al_steps[0]) } };
-static const seq_site_t s_mv_site = { s_mv_seqs, 2, 0, 0, 0, 0, 0, 0, 0 };
+                                       { 0, SEQ_SITE_BASE + 1, s_al_steps, sizeof(s_al_steps) / sizeof(s_al_steps[0]) },
+                                       { 0, SEQ_SITE_BASE + 2, s_mt_steps, sizeof(s_mt_steps) / sizeof(s_mt_steps[0]) } };
+static const seq_site_t s_mv_site = { s_mv_seqs, 3, 0, 0, 0, 0, 0, 0, 0 };
 void site_register(void) { param_default_type(0); (void)seq_bind(&s_mv_site); }
 void site_manual(void)   { }
 
@@ -1720,6 +1728,114 @@ static int salign_table(void)
     return bad;
 }
 
+/* ---- 시퀀스 교차선까지 이동 모의(v0.50.0): 서 있다 A → AGV_MOVE( lim, TAPE ) → B. 직선 주행선 + 90도 교차선(폭 20 mm) 하나.
+ * d: 센서 가운데에서 교차선 가운데까지 mm(진행 방향, 0 = 출발 때 센서가 선 위). back 1 = 후진 릴레이(D.backward 1)로 출발.
+ * 모형 차는 방향과 상관없이 +x 로 가고 센서도 앞 하나라 후진은 코드 경로(방향 전환·펄스 셈)만 본다.
+ * obs_at > 0: 그 mm 를 지날 때 장애물 1 s. stop_at > 0: 그 틱에 STOP 명령 */
+typedef struct { float over_mm, run_mm, t_s, vmax_mpm; int b_on, b_early, err, seq_on, paused, done; } mt_res_t;
+
+static void mt_flow(float d, int lim, int back, int obs_at, int stop_at, mt_res_t *r)
+{
+    static case_t c;
+    const case_t c0 = { 32, 0.0f, 0.0f, 1, 25, 25, 30, 0.1f, 0, 0 };
+    float x0, sx;
+    int t, obs_t = 0, moving = 0;
+
+    c = c0;
+    memset(r, 0, sizeof(*r));
+    memset(&s_v, 0, sizeof(s_v));
+    s_c = &c;
+    s_gd = 250.0f;
+    s_cross_w = 0.0f;
+    s_v.s = GD_MM;
+    s_xa = 90.0f; s_x30w = 20.0f;
+    s_x30 = GD_MM + d;
+    host_reset();
+    memset(&D, 0, sizeof(D));
+    memset(seq_request_flag, 0, sizeof(seq_request_flag));
+    sys_boot();
+    host.adc = 300u << 4;
+    for (t = 0; t < 60; t++) { scan(); }
+    assert(sys_power_on());
+    assert(param_set_ram(P_GEAR_RATIO, 60) == 0);
+    assert(param_set_ram(P_WHEEL_BASE_MM, (int16_t)(WB_MM / 10.0f)) == 0);
+    assert(param_set_ram(P_GUIDE_DIST_MM, 250) == 0);
+    assert(param_set_ram(P_SPEED_HIGH, 30) == 0);
+    assert(param_set_ram(P_SPEED_LOW, 25) == 0);
+    for (t = 0; t < 30; t++) { wt_tick(1); }
+    if (back) { run_relay(1, 0); }
+    s_mt_steps[1].arg0 = (uint16_t)lim;
+    seq_request(SEQ_SITE_BASE + 2);
+    x0 = s_v.x;
+    for (t = 0; (t < 9000) && !r->done; t++) {
+        float u = 0.0f, slant = 1.0f, run = fabsf(s_v.x - x0);
+        int seen = cross(&u, &slant);
+        if (seen && (fabsf(u) > (float)s_c->leds * PITCH_MM / 2.0f + TAPE_MM)) { seen = 0; }
+        if (obs_at && (run > (float)obs_at) && (obs_t < 100)) { host.bus_in[BUS_IN_B] &= (uint16_t)~0x02u; obs_t++; r->paused |= (D.action_err == ERR_OBSTACLE); }
+        else { host.bus_in[BUS_IN_B] |= 0x02u; }
+        if (stop_at && (t == stop_at)) { run_command_stop(); }
+        sensor_reply(u, slant, seen);
+        plant();
+        scan();
+        if (D.move_on) { moving = 1; }
+        if (moving) {
+            float v = (float)((D.vin_out >= 0) ? D.vin_out : -D.vin_out) / P.one_meter_rpm;
+            if (v > r->vmax_mpm) { r->vmax_mpm = v; }
+            r->t_s += 0.01f;
+        }
+        if ((io_out_mask() & (1UL << OUT_EXT_3)) && !r->b_on) {
+            r->b_on = 1;
+            r->b_early = (fabsf(s_v.rpm[0]) > 20.0f) || (fabsf(s_v.rpm[1]) > 20.0f) || D.flag_run;
+        }
+        if (r->b_on || D.system_err || D.stop_err || (stop_at && (t > stop_at + 300))) { r->done = 1; }
+    }
+    if (getenv("MT_DBG")) {
+        printf("    dbg move_on %d tape_on %d run %d stop %d seq %d step %d err %d/%d/%d back %d x %.0f pulses %lu/%lu\n", D.move_on, run_move_tape_on(),
+               D.flag_run, D.flag_stopping, seq_is_active(), seq_active_step(), D.system_err, D.stop_err, D.action_err, D.backward, s_v.x,
+               (unsigned long)run_pulses(0), (unsigned long)run_pulses(1));
+    }
+    for (t = 0; t < 100; t++) { wt_tick(1); }
+    sx = s_v.x + GD_MM;
+    r->over_mm = sx - s_x30;
+    if (back) { r->paused |= (D.backward == 1) ? 0 : 2; }   /* 후진으로 갔는지(2 = 아님) */
+    r->run_mm = fabsf(s_v.x - x0);
+    r->err = D.system_err ? D.system_err : D.stop_err;
+    r->seq_on = seq_is_active();
+    if (io_out_mask() & (1UL << OUT_EXT_3)) { r->b_on = 1; }
+    s_x30w = 0.0f; s_xa = 30.0f;
+}
+
+static int mtape_table(void)
+{
+    static const float dist[5] = { 100.0f, 300.0f, 600.0f, 1000.0f, 2000.0f };
+    mt_res_t r;
+    int i, bad = 0;
+
+    printf("  AGV_MOVE( 한계, TAPE ) 교차선까지 mm | 센서 지나침 mm(+ 지나감) | 간 거리 mm | 최고 m/min | 시간 s\n");
+    for (i = 0; i < 5; i++) {
+        mt_flow(dist[i], 3000, 0, 0, 0, &r);
+        printf("  %8.0f | %6.1f | %6.0f | %4.1f | %5.2f%s\n", dist[i], r.over_mm, r.run_mm, r.vmax_mpm, r.t_s,
+               (!r.b_on || r.b_early || r.err || r.seq_on || (fabsf(r.over_mm) > 40.0f)) ? "  <-- 벗어남" : "");
+        if (!r.b_on || r.b_early || r.err || r.seq_on || (fabsf(r.over_mm) > 40.0f)) { bad++; }
+    }
+    mt_flow(300.0f, 3000, 1, 0, 0, &r);
+    printf("  후진 300(코드 경로): 지나침 %.1f mm, %.2f s, B %d, 후진 %d\n", r.over_mm, r.t_s, r.b_on, !(r.paused & 2));
+    if (!r.b_on || r.b_early || r.err || (r.paused & 2) || (fabsf(r.over_mm) > 40.0f)) { bad++; }
+    mt_flow(0.0f, 1500, 0, 0, 0, &r);          /* 출발 때 선 위: 그 선은 건너뛰고, 다음 선이 없어 한계 오류 */
+    printf("  출발 때 선 위(한계 1500): 오류 %d, 시퀀스 %d, B %d, 간 거리 %.0f mm\n", r.err, r.seq_on, r.b_on, r.run_mm);
+    if ((r.err != ERR_GUIDE_SENSOR) || r.seq_on || r.b_on || (r.run_mm < 1500.0f)) { bad++; }
+    mt_flow(2000.0f, 1000, 0, 0, 0, &r);       /* 한계 안에 없음 */
+    printf("  한계 1000·교차선 2000: 오류 %d, 시퀀스 %d, B %d, 간 거리 %.0f mm\n", r.err, r.seq_on, r.b_on, r.run_mm);
+    if ((r.err != ERR_GUIDE_SENSOR) || r.seq_on || r.b_on || (r.run_mm > 1100.0f)) { bad++; }
+    mt_flow(1000.0f, 3000, 0, 300, 0, &r);     /* 300 mm 에서 장애물 1 s: 서고 이어 가 찾는다 */
+    printf("  장애물(300 mm 에서 1 s) 1000: 멈춤 %d, 지나침 %.1f mm, B %d, %.2f s\n", r.paused, r.over_mm, r.b_on, r.t_s);
+    if (!r.paused || !r.b_on || r.b_early || r.err || (fabsf(r.over_mm) > 40.0f)) { bad++; }
+    mt_flow(1000.0f, 3000, 0, 0, 200, &r);     /* 이동 중 STOP */
+    printf("  이동 중 STOP: 시퀀스 %d, B %d, 간 거리 %.0f mm\n", r.seq_on, r.b_on, r.run_mm);
+    if (r.seq_on || r.b_on || (r.run_mm > 900.0f)) { bad++; }
+    return bad;
+}
+
 /* ---- t3.9 WT 전 과정 모의: 튜닝 메뉴 → START → LOS 정속 → 짝 펄스 → 복귀 → 정지. 직선 테이프, 10 ms 마다 센서 응답·차 모형·스캔.
  * 차 모형 바퀴는 지령을 1차 지연 tau 로 따라간다(순수 지연 없음, 가감속 한계 ACC_LIM). 엔코더는 12펄스/회전 그대로 */
 typedef struct { float dev_max, dev_end, run_mm, t_s; } wt_res_t;
@@ -2134,6 +2250,7 @@ int main(int argc, char **argv)
     }
     if ((argc > 1) && (strcmp(argv[1], "move") == 0)) { return move_table() ? 1 : 0; }   /* 시퀀스 AGV_MOVE 표 */
     if ((argc > 1) && (strcmp(argv[1], "salign") == 0)) { return salign_table() ? 1 : 0; }   /* 시퀀스 정렬 회전 */
+    if ((argc > 1) && (strcmp(argv[1], "mtape") == 0))  { return mtape_table() ? 1 : 0; }    /* 시퀀스 교차선까지 이동 */
     if ((argc > 1) && (strcmp(argv[1], "kp") == 0)) {   /* kp: 기본(K_P 60 끝 처리 2) 대 TST 2(예전) 경사·고정 K_P 50·45·35, 곡선 C 25 m/min wide, 지연 100·200·300 ms */
         static const int kps[5] = { 0, -1, 50, 45, 35 };    /* 0 TST 2 경사, -1 기본 */
         int k, d;
@@ -2326,6 +2443,7 @@ int main(int argc, char **argv)
 #if AGV_DEV_TESTS
     assert(move_table() == 0);          /* 시퀀스 AGV_MOVE: 거리 표, 후진, 장애물 멈춤·이어 감, 선 잃음 오류·시퀀스 중단 */
     assert(salign_table() == 0);        /* 시퀀스 정렬 회전: 태그 경로와 같은 결과, 끝난 뒤 B, 교차선 없음 오류·시퀀스 중단 */
+    assert(mtape_table() == 0);         /* 시퀀스 교차선까지 이동: 찾아 섬, 후진, 출발 때 선 위, 한계 오류, 장애물, STOP */
 #endif
     {   /* 출발 정렬 단계(start 표, ACC 58·DCC 60·LOS 25, 지연 0.1~0.3 s): 예전(정렬 단계 없음)이 통과한 곳에서 선을 잃지 않는다.
          * v0.40 의 조향 상한 × 0.5 는 wide R450·500·551 곡선 위 출발에서 선을 잃었다(9조건). 선 없는 곳은 SPN 으로 가다 오류로 선다.

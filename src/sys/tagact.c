@@ -113,6 +113,19 @@ void tagact_move_mm(int16_t mm)
     D.move_on = 1;
 }
 
+/* 시퀀스 AGV_MOVE( 한계 mm, TAPE ). 서 있을 때만 건다. run.c 가 출발시키고 찾는 속도로 가다 다음 교차선에서 선다(run.c move_tape_tick).
+ * 한계 거리는 D.move_pulses, 넘기면 오류 258 */
+void tagact_move_tape(int16_t lim_mm)
+{
+    float pulses = (float)lim_mm * P.one_length_pulse;
+
+    if ((lim_mm < 1) || D.flag_run || D.flag_ready || D.flag_stopping || (D.move_on != 0)) { return; }
+    if (pulses > 32767.0f) { pulses = 32767.0f; }
+    D.move_pulses = (int16_t)(pulses + 0.5f);
+    D.move_on = 1;
+    run_move_tape_start();
+}
+
 void tagact_speed(uint16_t level)
 {
     switch (level) {

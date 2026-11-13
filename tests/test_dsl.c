@@ -109,6 +109,13 @@ SEQ_BEGIN( ext )
 #endif
     AGV_TURN( CCW, 90, DIR_TOGGLE, 1, 31, OBS )                              /* 25 속도 16 이상: b15 */
     AGV_TURN( CW, 180, 0, 0, 0, OBS, ALIGN )                                 /* 26 정렬 회전 */
+    AGV_MOVE( 1500, TAPE )                                                   /* 27 교차선까지 */
+#ifdef NEG_MOVE_LIMIT
+    AGV_MOVE( 0, TAPE )                                                      /* 한계 1~32767 */
+#endif
+#ifdef NEG_MOVE_OPT
+    AGV_MOVE( 100, ALIGN )                                                   /* 정하지 않은 옵션 */
+#endif
 #ifdef NEG_SEQ_KIND2
     AGV_TURN( CW, 90, 0, 1, 0, NOWAIT, ALIGN )                               /* 종류 옵션 둘 */
 #endif
@@ -301,6 +308,7 @@ int main(void)
         assert(e[24].kind == SK_MOVE_MM && e[24].arg0 == 100);
         assert(e[25].kind == SK_TURN && e[25].arg0 == TURN_CCW && e[25].timeout == (DIR_TOGGLE | (1 << 4) | (1 << 8) | (31u << 11)));
         assert(e[26].kind == SK_TURN_ALIGN && e[26].arg0 == TURN_CW && e[26].arg1 == 180 && e[26].timeout == (1 << 8));
+        assert(e[27].kind == SK_MOVE_TAPE && e[27].arg0 == 1500);
         assert(demo_steps[17].kind == SK_TURN);
     }
 
