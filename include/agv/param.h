@@ -67,7 +67,8 @@ enum {
 /* b11(2048) 안 씀. 예전 저속(정지 바닥 350, 멈춤 판단 10틱, SPN 4 미만 6, 회전 끝·회전 감속 DCC/4, 예전 저크·정지 끝 계단)은
  * 버렸다(v0.40.0·v0.46.0). 값이 남아 있어도 무시한다. 한계 4095 는 그대로(저장값이 한계 위반이 되지 않게) */
 #define QUIRK_STEER_LEGACY  (QUIRK_STEER_20MS | QUIRK_DAMP_SIGN_OLD | QUIRK_NO_WB_GAIN | QUIRK_STEER_STEP)
-#define QUIRK_PAUSE_FULL_STOP 0x80u /* b7 일시정지(장애물·PAUSE) 감속 중 원인이 풀려도 0 까지 서고 다시 출발한다(예전 동작) */
+/* b7(128) 안 씀. 일시정지(장애물·PAUSE) 감속 중 원인이 풀려도 0 까지 서고 다시 출발하던 예전 동작은 버렸다(v0.49.0).
+ * 값이 남아 있어도 무시한다 */
 
 /* 주소 50 표시. 31·38·39·44 의 1회 초기화가 끝나면 쓴다 */
 #define PARAM_MIGRATE_ADDR 50
@@ -82,7 +83,7 @@ enum {
  * b0·b1·b4 는 기본 동작이 되어 비었다(값이 남아 있어도 무시한다). 예전 동작은 QUIRK_STEER_LEGACY.
  * b3(8, 칼만 위치를 조향 입력으로)은 버렸다(v0.46.0). 값이 남아 있어도 무시한다 */
 #define OPT_RESUME_CRUISE  0x04u   /* 일시정지 재개 때 남은 거리가 길면 최대 속도까지 가속한다 */
-#define OPT_PAUSE_RESUME_SMOOTH 0x20u /* 비었다(v0.26 기본 동작). 예전 동작은 QUIRK_PAUSE_FULL_STOP */
+#define OPT_PAUSE_RESUME_SMOOTH 0x20u /* 비었다(v0.26 기본 동작). 예전 동작(LG b7)은 버렸다(v0.49.0) */
 
 /* 저장 계층. 부팅 경로의 write 는 끝난 뒤 돌아와야 한다.
  * 운전 중에는 저장 큐에 넣는 구현으로 바꿔 끼워도 된다 */
