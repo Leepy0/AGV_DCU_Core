@@ -7,11 +7,12 @@
  * 태그 정지 4분류(정지 뒤 시퀀스도 같다). 한 규칙에 분류 2·3·4 가 있으면 그 정지가 이긴다(순서와 무관):
  * 같은 규칙의 AGV_STOP·SEQ_START( 시퀀스 )·AGV_AUTOSTART·ACS_SEND( STANDBY… ) 는 태그 자리 SL 정지를 걸지 않는다.
  *   AGV_STOP                          1: 태그 자리에서 SL 만큼 가서 선다
- *   AGV_STOP( mm )                    2: 태그 자리에서 mm 가서 선다. 10 mm 단위 0~2550, 0 = 바로. 숫자로 적는다
+ *   AGV_STOP( cm )                    2: 태그 자리에서 cm 가서 선다. SL 과 같은 cm, 0~255, 0 = 바로. 숫자로 적는다
+ *                                     (시퀀스 표 AGV_MOVE 는 mm 다. 단위가 다르다)
  *   AGV_STOP( TAPE )                  3: 교차선을 찾아 본 자리에서 바로 선다
  *   AGV_STOP( TAPE_GD )               4: 교차선을 찾아 GD 더 가서 선다(회전 중심이 교차선 위)
  *   SEQ_START( 시퀀스 )                1 + 시퀀스(SEQ_ 뺀 이름: LOAD, UNLOAD, LOAD_1 …)
- *   SEQ_START( mm, 시퀀스 )            2 + 시퀀스 (2칸)
+ *   SEQ_START( cm, 시퀀스 )            2 + 시퀀스 (2칸)
  *   SEQ_START( TAPE, 시퀀스 )          3 + 시퀀스
  *   SEQ_START( TAPE_GD, 시퀀스 )       4 + 시퀀스. 분류 3·4 규칙의 SEQ_START( 시퀀스 ) 도 교차선 정지 뒤 시작한다
  *   AGV_AUTOSTART( 초 ) / AGV_AUTOSTART_PARAM   서고 그 초(또는 AS) 뒤 다시 출발
@@ -58,12 +59,12 @@ enum { AGV_STOP = TA_STOP };
 /* 낱말 가리기: x 가 TAPE·TAPE_GD 면 DSL_xxx_TAPE… 가 "~, 값" 으로 펼쳐져 둘째 값이 뽑히고, 숫자면 dflt 가 뽑힌다 */
 #define DSL_ARG2_(a, b, ...)     b
 #define DSL_ARG2(...)            DSL_ARG2_(__VA_ARGS__, ~)
-#define DSL_STOPMM_OK(mm)        (0 * sizeof(char[(((mm) >= 0) && ((mm) <= 2550) && (((mm) % 10) == 0)) ? 1 : -1]))
-#define DSL_STOPMM(mm)           (TA_STOP_MM | (uint16_t)(((mm) / 10) + DSL_STOPMM_OK(mm)))
+#define DSL_STOPCM_OK(cm)        (0 * sizeof(char[(((cm) >= 0) && ((cm) <= 255)) ? 1 : -1]))
+#define DSL_STOPCM(cm)           (TA_STOP_CM | (uint16_t)((cm) + DSL_STOPCM_OK(cm)))
 #define DSL_STOPW_TAPE           ~, TA_TAPE_STOP
 #define DSL_STOPW_TAPE_GD        ~, TA_TAPE_STOP_GD
 #define DSL_STOPW(x, dflt)       DSL_ARG2(DSL_STOPW_##x, dflt)
-#define AGV_STOP(x)              DSL_STOPW(x, DSL_STOPMM(x))
+#define AGV_STOP(x)              DSL_STOPW(x, DSL_STOPCM(x))
 #define AGV_AUTOSTART(sec)     (TA_STOP_AUTOSTART | (sec))
 #define AGV_AUTOSTART_PARAM      TA_STOP_AUTOSTART
 #define DSL_TSPD_HIGH            0
@@ -101,13 +102,13 @@ enum { AGV_STOP = TA_STOP };
 /* 방향은 이 매크로에서 바로 붙인다(사이트 legacy_const.h 의 CW·CCW 매크로가 펼쳐지지 않게) */
 #define AGV_TURN(dir, ...)       DSL_CAT(DSL_TURN, DSL_NARG(__VA_ARGS__))(TURN_##dir, __VA_ARGS__)
 #define AGV_BRANCH(dir)          (TA_BRANCH | BRANCH_##dir)
-/* SEQ_START( [정지 방식,] 시퀀스 ): 서고 시퀀스. 정지 방식은 AGV_STOP 의 괄호 안과 같다(mm·TAPE·TAPE_GD).
+/* SEQ_START( [정지 방식,] 시퀀스 ): 서고 시퀀스. 정지 방식은 AGV_STOP 의 괄호 안과 같다(cm·TAPE·TAPE_GD).
  * 분류 3·4 는 정지 거리 2배 안에 교차선이 없으면 오류. 이 동작만 옵션이 앞이다(사용자 결정) */
 #define DSL_SEQSTART1(seq)       (TA_SEQ | SEQ_##seq)
-#define DSL_SEQSTART2(opt, seq)  DSL_ARG2(DSL_SSW_##opt, DSL_SEQSTART_MM)(opt, seq)
+#define DSL_SEQSTART2(opt, seq)  DSL_ARG2(DSL_SSW_##opt, DSL_SEQSTART_CM)(opt, seq)
 #define DSL_SSW_TAPE             ~, DSL_SEQSTART_TAPE
 #define DSL_SSW_TAPE_GD          ~, DSL_SEQSTART_TAPE_GD
-#define DSL_SEQSTART_MM(mm, seq)       DSL_STOPMM(mm), (TA_SEQ | SEQ_##seq)
+#define DSL_SEQSTART_CM(cm, seq)       DSL_STOPCM(cm), (TA_SEQ | SEQ_##seq)
 #define DSL_SEQSTART_TAPE(opt, seq)    (TA_TAPE_STOP | SEQ_##seq)
 #define DSL_SEQSTART_TAPE_GD(opt, seq) (TA_TAPE_STOP_GD | SEQ_##seq)
 #define SEQ_START(...)           DSL_CAT(DSL_SEQSTART, DSL_NARG(__VA_ARGS__))(__VA_ARGS__)

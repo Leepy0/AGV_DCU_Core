@@ -324,7 +324,7 @@ static uint16_t has_second_word(uint16_t code)
 }
 
 /* 규칙의 정지 분류. 분류 2·3·4 가 있으면 그것(3·4 가 2 보다 앞, 같은 급이면 뒤의 것), 없으면 0.
- * *arg: 분류 2 는 10 mm 단위 거리, 분류 3·4 는 정지 뒤 시퀀스(그 칸이 0 이면 같은 규칙 TA_SEQ 의 시퀀스) */
+ * *arg: 분류 2 는 거리 cm, 분류 3·4 는 정지 뒤 시퀀스(그 칸이 0 이면 같은 규칙 TA_SEQ 의 시퀀스) */
 static int16_t stop_class(const uint16_t *act, uint16_t *arg)
 {
     int16_t cls = 0;
@@ -333,7 +333,7 @@ static int16_t stop_class(const uint16_t *act, uint16_t *arg)
     *arg = 0;
     for (i = 0; (i < 4u) && (act[i] != 0u); i = (uint16_t)(i + 1u + has_second_word(act[i]))) {
         uint16_t kind = (uint16_t)(TA_KIND(act[i]) << 8);
-        int16_t c = (kind == TA_STOP_MM) ? 2 : (kind == TA_TAPE_STOP) ? TA_STOP_KIND_TAPE
+        int16_t c = (kind == TA_STOP_CM) ? 2 : (kind == TA_TAPE_STOP) ? TA_STOP_KIND_TAPE
                   : (kind == TA_TAPE_STOP_GD) ? TA_STOP_KIND_TAPE_GD : 0;
         if (kind == TA_SEQ) { seq = TA_ARG(act[i]); }
         if ((c != 0) && ((c >= 3) || (cls < 3))) {
@@ -383,7 +383,7 @@ static void act_exec(uint16_t code, uint16_t next, int16_t cls)
 
     switch ((uint16_t)(TA_KIND(code) << 8)) {
     case TA_STOP:
-    case TA_STOP_MM:        rule_stop(cls); break;                /* 거리는 tagact_run 끝에서 */
+    case TA_STOP_CM:        rule_stop(cls); break;                /* 거리는 tagact_run 끝에서 */
     case TA_STOP_AUTOSTART: autostart(arg, cls); break;
     case TA_SPEED:          tagact_speed(arg); break;
     case TA_FORBACK:        tagact_forback((dir_t)arg); break;
@@ -450,7 +450,7 @@ int tagact_run(uint16_t tag)
         D.tape_stop_id = (int16_t)carg;
     }
     /* 이 태그로 시작된 정지만 거리를 건다. 레거시는 정지 중 태그마다 다시 걸어 정지 위치가 밀렸다.
-     * 분류 2 는 SL 과 같은 단위(10 mm)·같은 정지에 거리만 다르다.
+     * 분류 2 는 SL 과 같은 cm(× 10 mm × 펄스/mm)·같은 정지에 거리만 다르다.
      * shortcut: 방향별 정지 거리를 쓰는 타입을 옮길 때 사이트 선택으로 바꾼다 */
     started = (int)(D.flag_stopping && !was_stopping);
     if (started) {

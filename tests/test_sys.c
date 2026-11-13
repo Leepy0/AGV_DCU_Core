@@ -118,12 +118,12 @@ static const tag_rule_t s_rules[] = {
     TAG( 35, 0, ACS_SEND( STANDBY_RESET, 14 ) )
     TAG( 36, 0, ACS_SEND( ARRIVE, STATION(1) ) )
     /* 정지 4분류: 분류 2·3·4 가 같은 규칙의 SL 정지를 이긴다(순서와 무관) */
-    TAG( 37, 0, ACS_SEND( STANDBY, 7 ), SEQ_START( 300, LOAD ) )
+    TAG( 37, 0, ACS_SEND( STANDBY, 7 ), SEQ_START( 30, LOAD ) )      /* 30 cm */
     TAG( 38, 0, AGV_STOP, AGV_STOP( 0 ) )
     TAG( 39, 0, AGV_AUTOSTART( 5 ), AGV_STOP( TAPE ) )
     TAG( 40, 0, SEQ_START( LOAD ), ACS_SEND( STANDBY, 7 ), AGV_STOP( TAPE_GD ) )
     TAG( 41, 0, SEQ_START( TAPE_GD, LOAD ) )
-    TAG( 42, 0, AGV_STOP( 200 ), SEQ_START( TAPE, LOAD ), AGV_STOP )
+    TAG( 42, 0, AGV_STOP( 20 ), SEQ_START( TAPE, LOAD ), AGV_STOP )
     TAG( 43, 0, AGV_TURN( CW, 90, 0, 1, 0, TAPE ) )
     TAG( 44, 0, AGV_AUTOSTART( 1 ), SEQ_START( TAPE, LOAD ) )
     TAG( 45, 0, AGV_STOP( TAPE ), ACS_SEND( STANDBY, 7 ), AGV_AUTOSTART( 1 ) )
@@ -1703,7 +1703,7 @@ static void test_tag_stop_class(void)
     assert(D.flag_stopping && !stop_is_position(stop_reason()));
     run_standby_clear(0);
 
-    /* 분류 2: 태그 자리에서 300 mm(SL 과 같은 환산). 대기 보고는 보고만, 시퀀스는 바로 요청 */
+    /* 분류 2: 태그 자리에서 30 cm(SL 과 같은 cm × 10 mm 환산). 대기 보고는 보고만, 시퀀스는 바로 요청 */
     tag_stop_rule(37);
     assert(D.flag_stopping && (D.stop_pulses == (int16_t)(30.0f * P.one_length_pulse * 10.0f)));
     assert((run_standby_num() == 7) && seq_request_flag[SEQ_LOAD] && (D.tape_stop_kind == 0));
@@ -1713,7 +1713,7 @@ static void test_tag_stop_class(void)
     run_standby_clear(0);
     run_seq_init();                              /* 요청한 시퀀스를 지운다(부팅은 남긴다) */
 
-    /* 분류 2, 0 mm = 바로 정지. 앞의 AGV_STOP(SL) 을 이긴다 */
+    /* 분류 2, 0 cm = 바로 정지. 앞의 AGV_STOP(SL) 을 이긴다 */
     tag_stop_rule(38);
     assert(D.flag_stopping && (D.stop_pulses == 0));
 
@@ -1740,7 +1740,7 @@ static void test_tag_stop_class(void)
         run_seq_init();
     }
 
-    /* 끝에서 끝까지: SEQ_START( 300, LOAD ) 는 태그 자리에서 300 mm 가서 서고 시퀀스 */
+    /* 끝에서 끝까지: SEQ_START( 30, LOAD ) 는 태그 자리에서 30 cm 가서 서고 시퀀스 */
     tag_stop_rule(37);
     {
         int i;
