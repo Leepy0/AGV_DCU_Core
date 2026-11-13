@@ -3569,7 +3569,79 @@ static void test_gd_release(void)
     ticks(1);
     assert(seq_is_active() && !run_tape_turn_held() && !D.system_err);
     run_seq_init();
+
+    gd_to_cmd_stop(0, 3u);                      /* 분류 4 + 자동 출발: 끊겨 예약을 되돌려 둔 채 시퀀스가 시작 */
+    assert(D.tape_autostart == 3u);
+    seq_request(SEQ_LOAD);
+    for (i = 0; (i < 20) && !seq_is_active(); i++) { guide_reply(0); tick(); }
+    ticks(1);
+    assert(seq_is_active() && (D.tape_autostart == 0) && !D.system_err);
+    run_seq_init();
     printf("  gd release ok\n");
+}
+
+/* GD 중 사람 STOP(서기 전에 뗌): 요청과 함께 자동 출발 보관도 지워져, 뒤의 자동 출발 없는 분류 3 정지에서 스스로 떠나지 않는다.
+ * 새 분류 3·4 규칙은 그 규칙의 자동 출발만 남긴다(없으면 0) */
+static void test_gd_stop_switch(void)
+{
+    int i;
+    h_drive_up(0);
+    D.tape_stop_kind = 4;
+    D.tape_autostart = 3;
+    led_run(0x0180u, 5, 1);
+    led_run(0x01FFu, 2, 1);
+    led_run(0x0180u, 5, 1);
+    assert(D.steer_hold && D.wait_start);
+    raw_a(RAW_STOP, 0);
+    for (i = 0; (i < 400) && D.flag_run; i++) { led_run(0x0180u, 1, (D.vin_out > 0) ? 1 : 0); }
+    raw_a(0, RAW_STOP);
+    led_run(0x0180u, 10, 0);
+    assert(!D.flag_run && !D.wait_start && (D.tape_autostart == 0));
+    press_start();
+    for (i = 0; (i < 20) && !D.flag_run; i++) { guide_led_reply(0x0180u); tick(); }
+    led_run(0x0180u, 80, 1);
+    D.tape_stop_kind = 3;                       /* 뒤 태그: 자동 출발 없는 AGV_STOP( TAPE ) */
+    led_run(0x0180u, 5, 1);
+    led_run(0x01FFu, 2, 1);
+    for (i = 0; (i < 400) && D.flag_run; i++) { led_run(0x01FFu, 1, (D.vin_out > 0) ? 1 : 0); }
+    led_run(0x01FFu, 5, 0);
+    assert(!D.flag_run && !D.system_err && (run_tape_last.kind == 3));
+    for (i = 0; (i < 600) && !D.flag_run && !D.flag_ready; i++) { guide_led_reply(0x0180u); tick(); }
+    assert(i == 600);
+
+    boot();
+    drive_up();
+    run_scan(20);
+    D.tape_autostart = 9;                       /* 다른 길로 남은 낡은 값 */
+    (void)tagact_run(41);                       /* SEQ_START( TAPE_GD, LOAD ): 자동 출발 없음 */
+    assert((D.tape_stop_kind == TA_STOP_KIND_TAPE_GD) && (D.tape_autostart == 0));
+    (void)tagact_run(39);                       /* AGV_AUTOSTART( 5 ), AGV_STOP( TAPE ) */
+    assert((D.tape_stop_kind == TA_STOP_KIND_TAPE) && (D.tape_autostart == 6u));
+    printf("  gd stop switch ok\n");
+}
+
+/* 맡은 채 다시 걸 때 목표를 60 mm 넘게 지났으면(끊긴 정지가 목표 뒤에 섰다) 달리는 중에는 오류 없이 제어 정지, 선 뒤 258, 회전 없음 */
+static void test_gd_resume_overrun(void)
+{
+    int i, ran = 0;
+    h_drive_up(1);
+    D.tape_turn_dir = TURN_CW; D.tape_turn_deg = 90; D.tape_turn_next = 0x10;
+    led_run(0x0180u, 5, 1);
+    led_run(0x01FFu, 3, 1);
+    stop_request_rapid(STOP_REASON_COMMAND);
+    D.flag_stopping = 1;
+    for (i = 0; (i < 900) && D.flag_run; i++) { led_run(0x0180u, 1, (D.vin_out > 0) ? 20 : 0); }   /* 감속 중 크게 밀려 목표 뒤에 선다 */
+    led_run(0x0180u, 5, 0);
+    assert(!D.system_err && run_tape_turn_held());
+    run_wait_start();
+    for (i = 0; (i < 900) && (D.flag_run || D.flag_ready || (i < 20)); i++) {
+        led_run(0x0180u, 1, (D.vin_out > 0) ? 1 : 0);
+        if (D.flag_run && !D.system_err) { ran = 1; }   /* 오류 없이 달렸다가 제어 정지로 선다 */
+    }
+    led_run(0x0180u, 5, 0);
+    assert(ran && (D.system_err == ERR_GUIDE_SENSOR) && !D.flag_turn && (D.control != RUN_TURN));
+    assert((run_tape_last.kind == -1) && (run_tape_last.over_mm > 60.0f));
+    printf("  gd resume overrun ok\n");
 }
 
 /* 맡은 교차선 회전이 있는 동안(회전 거부·GD 끊김)에도 새 태그는 ACK 없이 버린다 */
@@ -3841,6 +3913,8 @@ int main(void)
     test_gd_pushed();
     test_gd_release();
     test_gd_held_tag();
+    test_gd_stop_switch();
+    test_gd_resume_overrun();
     test_tape_lane_range();
     test_io_test();
     test_acs_off();

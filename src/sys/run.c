@@ -113,7 +113,7 @@ int      run_auto_started(void)     { return s_run.auto_start; }
 int32_t  run_rail_cut(void)         { return s_rail_cut; }
 void     run_rail_cut_clear(void)   { s_rail_cut = 0; }
 void     run_reset_request(void)    { s_run.reset_req = 1; }
-void     run_wait_start(void)       { D.wait_start = 1; }
+void     run_wait_start(void)       { D.wait_start = 1; s_gd.as = 0; }   /* 다른 출처의 대기: GD 끊김 때 거두지 않는다 */
 void     run_wait_cancel(void)      { D.wait_start = 0; }
 void     run_forback_input(uint16_t id)
 {
@@ -224,6 +224,7 @@ static int16_t tape_busy(void);
 void run_tape_req_clear(void)
 {
     s_gd.kind = 0;          /* 맡은 요청을 놓는다. 서는 중이면 조향 0·선 없음 막기는 설 때까지 둔다(gd_tick) */
+    s_gd.as = 0;            /* 끊긴 정지가 예약을 되돌리지 않게 */
     D.tape_autostart = 0;
     D.tape_stop_id = 0;
     D.tape_stop_kind = 0;
@@ -1123,6 +1124,7 @@ static void gd_overrun_fail(void)
     }
     s_gd.kind = 0;
     s_gd.as = 0;
+    D.tape_autostart = 0;
 }
 
 /* GD 구간 매 틱. 섰을 때: 위치 정지로 섰으면(분류 3 은 어떻게 섰든) 요청을 끝낸다(정지 뒤 시퀀스 시작, 기록). 다른 정지로 끊긴
@@ -1130,7 +1132,9 @@ static void gd_overrun_fail(void)
 static void gd_tick(void)
 {
     if (s_gd.kind && !s_gd.run && (D.flag_turn || (D.turn_motion != 0) || seq_is_active())) {
-        s_gd.kind = 0;                  /* 맡은 채 다른 회전·시퀀스: 놓는다 */
+        s_gd.kind = 0;                  /* 맡은 채 다른 회전·시퀀스: 놓는다(되돌려 둔 자동 출발도) */
+        s_gd.as = 0;
+        D.tape_autostart = 0;
         return;
     }
     if (!D.flag_run) {
@@ -1142,7 +1146,7 @@ static void gd_tick(void)
             gd_overrun_fail();
             return;
         }
-        if (s_gd.run && !done && s_gd.as) {     /* 끊긴 정지의 자동 출발은 거둔다(교통 정지를 어기지 않게). 다시 걸 때 다시 */
+        if (s_gd.run && !done && s_gd.as && s_gd.kind) {   /* 끊긴 정지의 자동 출발은 거둔다(교통 정지를 어기지 않게). 다시 걸 때 다시 */
             D.wait_start = 0;
             s_run.wait_sec = 0;                 /* 다음 다시 출발('W' 'C' '1' 등)이 남은 초를 기다리지 않게 */
             D.tape_autostart = s_gd.as;
@@ -1201,12 +1205,16 @@ static int16_t tape_seek(int16_t rpm)
 }
 
 /* 맡은 태그 요청에 정지를 건다(인정한 틱, 회전이 거부된 뒤, 다른 정지로 끊긴 뒤 다시 달릴 때). 1 걸었다,
- * 0 아직(회전이 거부됐다: 맡은 채 다음 틱에 다시), -1 목표를 TAPE_BACK_MM 넘게 지났다(오류) */
+ * 0 아직(회전이 거부됐다: 맡은 채 다음 틱에 다시). 목표를 TAPE_BACK_MM 넘게 지났으면 회전·자동 출발 없이 바로 제어 정지를 걸고
+ * 선 뒤에 258(gd_tick) */
 static int16_t gd_try(void)
 {
-    if ((int32_t)(D.travel_pulses - s_gd.target) > (int32_t)(TAPE_BACK_MM * P.one_length_pulse)) {
-        D.system_err = ERR_GUIDE_SENSOR;
-        return -1;
+    if (gd_overrun()) {
+        s_gd.run = 1;
+        D.flag_stopping = 1;
+        D.stop_pulses = 0;
+        stop_request_tag();
+        return 1;
     }
     if (s_gd.kind != TAPE_ID_TURN) {
         tape_found(s_gd.kind, 0);
