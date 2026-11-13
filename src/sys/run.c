@@ -1157,7 +1157,7 @@ static int16_t gd_try(void)
 #define MOVE_TAPE_ARM_TICKS 5    /* 출발 뒤 새 가이드 응답이 올 때까지 선 위인지 판단하지 않는다(10 ms × 5) */
 
 void run_move_tape_start(int16_t kind) { s_mt.on = 1; s_mt.kind = kind; }
-int  run_move_tape_on(void)            { return s_mt.on || s_gd.run; }   /* 'H' 를 받아야 한다(뒤 가장자리 포함) */
+int  run_move_tape_on(void)            { return s_mt.on || s_gd.run || s_gd.kind; }   /* 'H' 를 받아야 한다(맡은 교차선의 뒤 가장자리 포함) */
 
 static void move_tape_tick(void)
 {
