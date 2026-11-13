@@ -183,6 +183,13 @@ static int turn_refused(void)
            || (!seq_is_active() && !s_turn_from_stop && (D.vin_out <= TURN_STOP_MIN_VIN));
 }
 
+/* 교차선 요청(교차선 회전, 분류 3·4 정지)은 자동 주행 중(RUN_DRIVE 로 달리는 중, 정지 감속 포함)에만 받는다.
+ * 조그·수동, 서 있는 차가 (같은 자리 태그를 다시) 읽은 태그는 요청으로 남지 않는다(출발이 요청을 지우지 않으므로) */
+static int tape_req_allowed(void)
+{
+    return (D.control == RUN_DRIVE) && D.flag_run;
+}
+
 void tagact_turn(turn_dir_t d, uint16_t deg, dir_t fb, uint16_t autostart, uint16_t obs)
 {
     if (turn_refused()) { return; }
@@ -395,7 +402,7 @@ static void act_exec(uint16_t code, uint16_t next, int16_t cls)
         break;
     case TA_TURN_TAPE:      /* 일반 회전을 걸지 않는 상황(거리 정지 진행 중 포함)에만 요청하지 않는다. 명령 정지 감속 중에는
                              * 건다(레거시는 SL 정지를 다시 걸고 돈다). 다른 정지 중의 보류는 run.c(tape_stop) */
-        if (!turn_refused()) {
+        if (!turn_refused() && tape_req_allowed()) {
             D.tape_turn_dir = (int16_t)(arg & 3u);
             D.tape_turn_deg = (int16_t)((arg >> 2) * 90u);
             D.tape_turn_next = next;
@@ -445,7 +452,7 @@ int tagact_run(uint16_t tag)
             i = (uint16_t)(i + second);
         }
     }
-    if (cls >= 3) {                           /* 분류 3·4: AGV_STOP 처럼 늘 받는다. 찾기·서기·다른 정지 중 보류는 run.c(tape_stop) */
+    if ((cls >= 3) && tape_req_allowed()) {   /* 분류 3·4: 자동 주행 중이면 늘 받는다. 찾기·서기·다른 정지 중 보류는 run.c(tape_stop) */
         D.tape_stop_kind = cls;
         D.tape_stop_id = (int16_t)carg;
     }

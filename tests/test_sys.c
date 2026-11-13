@@ -1863,6 +1863,24 @@ static void test_tape_turn_request(void)
         for (i = 0; (i < 400) && !D.flag_ready && !D.flag_run; i++) { guide_reply(0); tick(); }
         assert((D.flag_ready || D.flag_run) && (D.tape_turn_dir == TURN_CW));
     }
+
+    /* 조그로 움직이며 읽은 교차선 태그(회전·분류 4)와 서 있는 자동 차가 다시 읽은 태그는 요청이 되지 않는다 */
+    boot();
+    (void)param_set(P_TURN_FORBACK, 10);
+    D.control = RUN_JOG;
+    D.flag_run = 1;
+    D.vin_out = 50;
+    (void)tagact_run(43);
+    (void)tagact_run(41);
+    assert((D.tape_turn_dir == 0) && (D.tape_stop_kind == 0) && (D.tape_stop_id == 0));
+    boot();
+    drive_up();
+    run_scan(20);
+    D.flag_run = 0;                                  /* 섰다 */
+    D.vin_out = 0;
+    (void)tagact_run(41);
+    (void)tagact_run(39);
+    assert((D.tape_stop_kind == 0) && (D.tape_stop_id == 0));
     boot();
     printf("  tape turn request ok\n");
 }
