@@ -59,6 +59,8 @@ void tagact_turn(turn_dir_t d, uint16_t deg, dir_t fb, uint16_t autostart, uint1
     (void)d; (void)deg; (void)fb; (void)autostart; (void)obs;
     fake_turn_count++;
 }
+uint16_t fake_turn_next;
+void tagact_turn_next(turn_dir_t d, uint16_t deg, uint16_t next) { fake_turn_next = next; tagact_turn(d, deg, (dir_t)(next & 0xFu), 0, 0); }
 
 static uint16_t ee_read(uint16_t a) { return fake_ee[a]; }
 static void ee_write(uint16_t a, uint16_t v)

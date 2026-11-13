@@ -187,14 +187,19 @@ void tagact_turn(turn_dir_t d, uint16_t deg, dir_t fb, uint16_t autostart, uint1
     if (D.flag_stopping) { stop_request_tag(); }
 }
 
+void tagact_turn_next(turn_dir_t d, uint16_t deg, uint16_t next)
+{
+    s_turn_rpm = turn_rpm(next);
+    tagact_turn(d, deg, (dir_t)(next & 0xFu), (uint16_t)((next >> 4) & 0xFu), (uint16_t)((next >> 8) & 0x7u));
+    s_turn_rpm = 0;
+}
+
 void tagact_turn_align(turn_dir_t d, uint16_t deg, uint16_t next)
 {
     int16_t before = D.turn_pulses;
     uint16_t fb = next & 0xFu;
 
-    s_turn_rpm = turn_rpm(next);
-    tagact_turn(d, deg, (dir_t)fb, (uint16_t)((next >> 4) & 0xFu), (uint16_t)((next >> 8) & 0x7u));
-    s_turn_rpm = 0;
+    tagact_turn_next(d, deg, next);
     if ((before != 0) || (D.turn_pulses <= 0)) { return; }
     D.tape_total_pulse = D.turn_pulses;
     D.tape_target_cnt = D.tape_end_cnt = (float)D.turn_pulses;
@@ -329,10 +334,7 @@ static void act_exec(uint16_t code, uint16_t next)
     case TA_SPEED:          tagact_speed(arg); break;
     case TA_FORBACK:        tagact_forback((dir_t)arg); break;
     case TA_TURN:
-        s_turn_rpm = turn_rpm(next);
-        tagact_turn((turn_dir_t)(arg & 3u), (uint16_t)((arg >> 2) * 90u), (dir_t)(next & 0xFu),
-                    (uint16_t)((next >> 4) & 0xFu), (uint16_t)((next >> 8) & 0x7u));
-        s_turn_rpm = 0;
+        tagact_turn_next((turn_dir_t)(arg & 3u), (uint16_t)((arg >> 2) * 90u), next);
         break;
     case TA_TURN_ALIGN:
         tagact_turn_align((turn_dir_t)(arg & 3u), (uint16_t)((arg >> 2) * 90u), next);

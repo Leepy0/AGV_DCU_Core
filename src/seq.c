@@ -375,8 +375,8 @@ static int16_t acs_number(const seq_step_t *s)
 static uint16_t eval_turn(seq_runner_t *r, const seq_step_t *s)
 {
     if (r->a == 0) {
-        tagact_turn((turn_dir_t)s->arg0, s->arg1, (dir_t)(s->timeout & 0xF),
-                    (uint16_t)((s->timeout >> 4) & 0xF), (uint16_t)((s->timeout >> 8) & 0xF));
+        /* 셋째 칸은 태그 회전 둘째 칸과 같은 배치(장애물 b8~10, 속도 b11~15) */
+        tagact_turn_next((turn_dir_t)s->arg0, s->arg1, s->timeout);
         r->a = 1;
         return R_WAIT;
     }

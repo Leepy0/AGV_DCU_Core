@@ -95,6 +95,8 @@ void tagact_stop_after_mm(int32_t mm);   /* 지금 자리에서 mm 만큼 더 �
 void tagact_speed(uint16_t level);
 void tagact_forback(dir_t d);
 void tagact_turn(turn_dir_t d, uint16_t deg, dir_t fb, uint16_t autostart, uint16_t obs);   /* 회전 속도 자동 */
+/* next: TA_TURN 둘째 칸(fb b0~3 | 자동 출발 b4~7 | 장애물 b8~10 | 속도 b11~15, 0 = 자동). 태그 TA_TURN 과 시퀀스 회전 스텝이 같이 쓴다 */
+void tagact_turn_next(turn_dir_t d, uint16_t deg, uint16_t next);
 void tagact_turn_align(turn_dir_t d, uint16_t deg, uint16_t next);   /* next: TA_TURN 둘째 칸(속도 포함) */
 void tagact_turn_align_stopped(turn_dir_t d, uint16_t deg, uint16_t next);   /* 멈춘 자리에서 바로 */
 void tagact_turn_align_cross(turn_dir_t d, uint16_t deg, uint16_t next);     /* 교차선 기준: GD 뒤 정지 */

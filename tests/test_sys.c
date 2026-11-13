@@ -62,7 +62,22 @@ SEQ_BEGIN( a_hold )
     END_STOP
 SEQ_END
 
-static const seq_def_t s_seqs[] = { { 0, SEQ_LOAD, s_load_steps, sizeof(s_load_steps) / sizeof(s_load_steps[0]) } };
+/* 시퀀스 회전 속도: 15 m/min 지정, 생략(자동). 이 파일은 tag_dsl.h 를 먼저 포함해 AGV_TURN 이 태그 동작이라
+ * 시퀀스 AGV_TURN( CW, 90, 0, 0, 15 )·AGV_TURN( CW, 90, 0, 0 ) 이 펼쳐지는 내부 매크로로 쓴다 */
+SEQ_BEGIN( s_turn15 )
+    DSL_STURN4( TURN_CW, 90, 0, 0, 15 )
+    END_STOP
+SEQ_END
+SEQ_BEGIN( s_turn0 )
+    DSL_STURN3( TURN_CW, 90, 0, 0 )
+    END_STOP
+SEQ_END
+
+static const seq_def_t s_seqs[] = {
+    { 0, SEQ_LOAD, s_load_steps, sizeof(s_load_steps) / sizeof(s_load_steps[0]) },
+    { 0, SEQ_UNLOAD, s_turn15_steps, sizeof(s_turn15_steps) / sizeof(s_turn15_steps[0]) },
+    { 0, SEQ_BOX_LOAD, s_turn0_steps, sizeof(s_turn0_steps) / sizeof(s_turn0_steps[0]) }
+};
 static const seq_def_t s_acts[] = { { 0, ACT_HOLD, a_hold_steps, sizeof(a_hold_steps) / sizeof(a_hold_steps[0]) } };
 static int stop_len_call(seq_ctx_t *c) { (void)c; tagact_stop_length(); return 1; }
 static const seq_call_fn s_calls[] = { stop_len_call };
@@ -73,7 +88,7 @@ PROFILE_TABLE_END
 /* 현장 적재 판정 시험용. 음수 = 판정 없음(센서 묶음을 쓴다) */
 static int16_t s_load_site = -1;
 static int16_t site_load(void) { return s_load_site; }
-static const seq_site_t s_site = { s_seqs, 1, s_acts, 1, s_calls, 1, s_profiles, 1, site_load };
+static const seq_site_t s_site = { s_seqs, sizeof(s_seqs) / sizeof(s_seqs[0]), s_acts, 1, s_calls, 1, s_profiles, 1, site_load };
 
 /* 태그 표 */
 static const tag_rule_t s_rules[] = {
@@ -1581,6 +1596,44 @@ static void test_turn_speed(void)
     printf("  turn speed ok\n");
 }
 
+/* 시퀀스 회전을 걸고 회전 상태로 넘긴다(서 있다 시퀀스가 회전을 건다) */
+static void seq_turn_start(uint16_t id)
+{
+    int i;
+    D.vin_out = 0;
+    D.flag_run = 0;
+    seq_request(id);
+    for (i = 0; (i < 5) && (D.turn_pulses <= 0); i++) { seq_run(); }
+    assert(D.turn_pulses > 0 && seq_is_active());
+    D.flag_turn = 1;
+    D.control = RUN_TURN;
+}
+
+/* 시퀀스 회전 속도(v0.50.0): 태그와 같은 사양. 지정 15 → 상한 15 m/min, 생략 → 자동, 다음 회전에 남지 않는다 */
+static void test_seq_turn_speed(void)
+{
+    int16_t v15 = param_rpm(15), v;
+    int i;
+
+    boot();
+    (void)param_set(P_TURN_FORBACK, 10);
+    assert(P.turn_speed != v15);
+    seq_turn_start(SEQ_UNLOAD);
+    assert(D.turn_rpm == v15 && stop_turn_vmax() == v15);
+    v = tag_turn_run(0);
+    printf("  시퀀스 회전 15 m/min: 상한 %d rpm, 지령 최대 %d rpm\n", v15, v);
+    assert((v <= v15) && (v > v15 - 30));
+    assert(D.turn_rpm == 0);
+    for (i = 0; (i < 5) && seq_is_active(); i++) { seq_run(); }   /* 회전이 끝나면 다음 스텝(END_STOP) */
+    assert(!seq_is_active());
+    seq_turn_start(SEQ_BOX_LOAD);                     /* 생략: 자동 */
+    assert(D.turn_rpm == 0 && stop_turn_vmax() == P.turn_speed);
+    (void)tag_turn_run(0);
+    for (i = 0; (i < 5) && seq_is_active(); i++) { seq_run(); }
+    assert(!seq_is_active());
+    printf("  seq turn speed ok\n");
+}
+
 /* 태그 대기 보고: 번호(호기 - n), 스테이션 큐 지움(뒤·앞), 정지. 도착 보고 번호 = 스테이션 큐[1] */
 static void test_tag_standby(void)
 {
@@ -3052,6 +3105,7 @@ int main(void)
     test_lamp();
     test_align_turn();
     test_turn_speed();
+    test_seq_turn_speed();
     test_tag_standby();
     test_tune_entry();
     test_ee_probe();

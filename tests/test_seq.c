@@ -520,6 +520,7 @@ int main(void)
     D.obs_use = 1;
     seq_run();
     assert(fake_speed_arg == 20 && fake_forback_arg == DIR_BACK && D.obs_use == 0 && fake_turn_count == 1);
+    assert(fake_turn_next == (1u | (1u << 4)));                /* 셋째 칸 그대로 tagact_turn_next 로(속도 0 = 자동) */
     seq_run();
     assert(seq_active_step() == 4 && fake_turn_count == 1);      /* 완료 대기, 다시 요청하지 않음 */
     D.turn_pulses = 0;
