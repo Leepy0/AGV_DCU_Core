@@ -247,6 +247,7 @@ void run_seq_init(void)
 {
     seq_init_keep_tape();
     run_tape_req_clear();
+    tagact_fs_clear();                  /* 센서 정지 요청도: ACS 작업 취소 뒤 다시 출발해 감지 자리에서 서지 않게 */
 }
 
 static void tape_clear(void)
@@ -346,6 +347,7 @@ void run_relay(int16_t backward, int16_t save)
 {
     if ((backward != 0) == (D.backward != 0)) { return; }
     run_tape_req_clear();               /* 앞에서 찾던 교차선·맡은 GD 목표는 반대 방향에 없다 */
+    tagact_fs_clear();                  /* 센서 정지 요청도 */
     io_out(OUT_AGV_BACK, (uint16_t)(backward != 0));
     D.backward = (int16_t)(backward != 0);
     if (save) { keep_set(KEEP_BACKWARD, D.backward); }

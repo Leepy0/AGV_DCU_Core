@@ -38,7 +38,7 @@ int16_t  run_wait_left(void);              /* 재출발 대기 남은 초. 대�
 int32_t  run_rail_cut(void);               /* 마지막 정상 응답 뒤 이동 펄스 */
 void     run_rail_cut_clear(void);
 
-void     run_seq_init(void);               /* Auto_Loading_Init. 교차선 요청도 지운다(run_tape_req_clear) */
+void     run_seq_init(void);               /* Auto_Loading_Init. 교차선 요청·센서 정지 요청도 지운다(run_tape_req_clear, tagact_fs_clear) */
 void     run_tape_req_clear(void);         /* 교차선 요청·GD 구간을 지운다. 다시 출발은 지우지 않는다(수동 전환은 ui.c 가 부른다) */
 void     run_reset_request(void);          /* Flag_Reset_control */
 void     run_wait_start(void);             /* Flag_Wait_Start = ON */

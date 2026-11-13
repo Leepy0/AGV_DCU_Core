@@ -112,6 +112,7 @@ void     tagact_bind_packed(const tag_packed_t *t, uint16_t profile);   /* 압�
 uint16_t tagact_display_tag(void);
 int      tagact_run(uint16_t tag);     /* DA_Tag_Selection 대체. 반환 1 = 이 태그로 새 정지가 시작됨 */
 void     tagact_tick(void);            /* 10 ms(site_manual 앞): 센서 정지 요청을 본다 */
+void     tagact_fs_clear(void);        /* 센서 정지 요청을 지운다(표 묶기, run_seq_init, run_relay) */
 uint16_t tagact_dry_run(uint16_t tag, uint16_t *acts, uint16_t cap);  /* 실행하지 않고 액션 열거 (관리 TT/TR) */
 
 /* 개별 액션 (사용자 정의 코드용) */

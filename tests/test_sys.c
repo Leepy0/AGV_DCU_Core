@@ -3851,6 +3851,18 @@ static void fs_restart(void)
     assert(D.flag_run);
 }
 
+/* 설 때까지(펄스 없이) 틱, back 이면 전후진 전환(run_relay), ACS 출발 대기로 다시 달린다 */
+static void fs_stop_go(int back)
+{
+    int i;
+    for (i = 0; (i < 600) && (D.flag_run || D.flag_stopping); i++) { guide_reply(0); tick(); }
+    assert(!D.flag_run && !D.flag_stopping);
+    if (back) { run_relay((int16_t)!D.backward, 0); }
+    run_wait_start();
+    for (i = 0; (i < 50) && !(D.flag_run && !D.flag_stopping); i++) { guide_reply(0); tick(); }
+    assert(D.flag_run && !D.flag_stopping);
+}
+
 typedef struct { int t, seq; int16_t sp; } fs_res_t;
 /* n 틱 달린다(틱마다 두 바퀴 1 펄스). 입력 EXT_4 는 on_at 틱부터 켜짐, gap_at 부터 gap 틱 꺼짐. 처음 정지가 걸린 틱·정지 펄스·시퀀스 */
 static void fs_run(int n, int on_at, int gap_at, int gap, fs_res_t *r)
@@ -3954,6 +3966,38 @@ static void test_from_sensor(void)
     fs_restart();
     fs_run(200, 0, 999, 0, &b);
     assert(!seq_request_flag[SEQ_LOAD] && (s_fs_fb == 0));
+    /* ACS 작업 취소('C' 2·3, 'W' 'C' 2·3)에서 지운다: 선 뒤 다시 출발해도 감지 자리에서 서지 않는다 */
+    for (i = 0; i < 4; i++) {
+        char f[32];
+        fs_up(0);
+        (void)tagact_run(49);
+        fs_run(20, 999, 999, 0, &b);
+        if (i < 2) {
+            sprintf(f, "C1B%02dC00%c", AGV_ID, '2' + i);    /* 'C' 프레임은 12 바이트 */
+        }
+        else {
+            sprintf(f, "W1B%02dC00000000000", AGV_ID);
+            f[8] = '0';                                  /* 교통 정지로 선 뒤 */
+            send_frame(f, 0);
+            f[2] = 'C';
+            f[8] = (char)('2' + i - 2);
+        }
+        send_frame(f, 0);
+        fs_stop_go(0);
+        fs_run(200, 0, 999, 0, &b);
+        assert((b.t < 0) && !seq_request_flag[SEQ_LOAD] && (s_fs_fb == 0));
+        run_seq_init();
+    }
+    /* 전·후진 방향 전환(run_relay: AGV_FORBACK·수동 스위치·ACS 'C' 4·5 가 모두 이리로)에서 지운다. 명령 정지만으로는 남는다(위) */
+    fs_up(0);
+    (void)tagact_run(49);
+    stop_request_rapid(STOP_REASON_COMMAND);
+    D.flag_stopping = 1;
+    fs_stop_go(1);
+    assert(D.backward);
+    fs_run(200, 0, 999, 0, &b);
+    assert((b.t < 0) && !seq_request_flag[SEQ_LOAD]);
+    run_seq_init();
     /* 5 m 안에 감지가 시작되지 않으면 서고 270(전진·후진) */
     for (i = 0; i < 2; i++) {
         int t, lim = (int)(5000.0f * P.one_length_pulse);
