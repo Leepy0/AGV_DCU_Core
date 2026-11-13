@@ -431,6 +431,10 @@ static void act_exec(uint16_t code, uint16_t next, int16_t cls)
     }
 }
 
+/* 이번 태그 처리에서 정지 거리를 이미 정했다. 번호 변환 별칭(1xx·2xx)은 사용자 함수가 tagact_run 을 다시 부르므로, 안쪽 규칙이
+ * 정한 정지 방식(분류 2 거리 등)을 바깥 호출이 SL 로 덮지 않게 한다 */
+static int16_t s_depth, s_len_set;
+
 int tagact_run(uint16_t tag)
 {
     int16_t was_stopping = D.flag_stopping;
@@ -441,6 +445,7 @@ int tagact_run(uint16_t tag)
     int started;
 
     if (tune_active()) { return 0; }         /* 튜닝 주행은 태그를 쓰지 않는다 */
+    if (s_depth++ == 0) { s_len_set = 0; }
     r = rule_find(tag);
     if (r != 0) {
         uint16_t act[4];                      /* 사용자 함수가 tagact_run 을 다시 불러도 s_hit 가 덮이지 않게 복사 */
@@ -460,9 +465,11 @@ int tagact_run(uint16_t tag)
      * 분류 2 는 SL 과 같은 cm(× 10 mm × 펄스/mm)·같은 정지에 거리만 다르다.
      * shortcut: 방향별 정지 거리를 쓰는 타입을 옮길 때 사이트 선택으로 바꾼다 */
     started = (int)(D.flag_stopping && !was_stopping);
-    if (started) {
+    if (started && !s_len_set) {
         D.stop_pulses = (cls == 2) ? (int16_t)((float)carg * P.one_length_pulse * 10.0f) : P.stop_len;
+        s_len_set = 1;
     }
+    s_depth--;
     s_display_tag = tag;
     irq = hal_irq_save();
     D.straight_cnt = 0;

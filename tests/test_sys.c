@@ -80,7 +80,8 @@ static const seq_def_t s_seqs[] = {
 };
 static const seq_def_t s_acts[] = { { 0, ACT_HOLD, a_hold_steps, sizeof(a_hold_steps) / sizeof(a_hold_steps[0]) } };
 static int stop_len_call(seq_ctx_t *c) { (void)c; tagact_stop_length(); return 1; }
-static const seq_call_fn s_calls[] = { stop_len_call };
+static int alias_call(seq_ctx_t *c) { (void)c; (void)tagact_run(47); return 1; }   /* 번호 변환 별칭처럼 tagact_run 을 다시 부른다 */
+static const seq_call_fn s_calls[] = { stop_len_call, alias_call };
 /* 호기 77 만 적재 센서가 있다(시험용) */
 PROFILE_TABLE_BEGIN( s_profiles )
     PROFILE_LOAD( 1, 0, 77, 77, LOAD_SENSORS(IN_EXT_1, IN_EXT_2) )
@@ -88,7 +89,7 @@ PROFILE_TABLE_END
 /* 현장 적재 판정 시험용. 음수 = 판정 없음(센서 묶음을 쓴다) */
 static int16_t s_load_site = -1;
 static int16_t site_load(void) { return s_load_site; }
-static const seq_site_t s_site = { s_seqs, sizeof(s_seqs) / sizeof(s_seqs[0]), s_acts, 1, s_calls, 1, s_profiles, 1, site_load };
+static const seq_site_t s_site = { s_seqs, sizeof(s_seqs) / sizeof(s_seqs[0]), s_acts, 1, s_calls, 2, s_profiles, 1, site_load };
 
 /* 태그 표 */
 static const tag_rule_t s_rules[] = {
@@ -125,6 +126,8 @@ static const tag_rule_t s_rules[] = {
     TAG( 41, 0, SEQ_START( TAPE_GD, LOAD ) )
     TAG( 42, 0, AGV_STOP( 20 ), SEQ_START( TAPE, LOAD ), AGV_STOP )
     TAG( 43, 0, AGV_TURN( CW, 90, 0, 1, 0, TAPE ) )
+    TAG( 46, 0, CALL( 1 ) )                                   /* 별칭: 47 을 다시 부른다 */
+    TAG( 47, 0, AGV_STOP( 30 ) )
     TAG( 44, 0, AGV_AUTOSTART( 1 ), SEQ_START( TAPE, LOAD ) )
     TAG( 45, 0, AGV_STOP( TAPE ), ACS_SEND( STANDBY, 7 ), AGV_AUTOSTART( 1 ) )
 };
@@ -1712,6 +1715,10 @@ static void test_tag_stop_class(void)
     assert(stop_is_position(stop_reason()));
     run_standby_clear(0);
     run_seq_init();                              /* 요청한 시퀀스를 지운다(부팅은 남긴다) */
+
+    /* 별칭(사용자 함수가 tagact_run 을 다시 부름): 안쪽 규칙의 분류 2 거리(30 cm)를 바깥 호출이 SL 로 덮지 않는다 */
+    tag_stop_rule(46);
+    assert(D.flag_stopping && (D.stop_pulses == (int16_t)(30.0f * P.one_length_pulse * 10.0f)) && (P.stop_len != D.stop_pulses));
 
     /* 분류 2, 0 cm = 바로 정지. 앞의 AGV_STOP(SL) 을 이긴다 */
     tag_stop_rule(38);
