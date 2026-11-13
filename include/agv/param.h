@@ -36,7 +36,7 @@ enum {
     P_ACS_VERSION,
     P_PARA_INIT, P_VERSION, P_BAT_DV, P_BAT_PERCENT,
     P_GUIDE_DIST_MM,        /* 50: 회전 중심에서 가이드센서까지 mm. 체크섬 밖 EEPROM 115 에 따로 둔다 */
-    P_OPT_FLAGS,            /* 51: 시험용 개선 스위치 비트. 0 = 전부 끔 */
+    P_OPT_FLAGS,            /* 51 OPT: 안 씀(v0.49.0). 값이 남아 있어도 무시한다. 번호·EEPROM 자리·한계는 유지 */
     P_SPEED_FF,             /* 52 FF: 기본 속도 루프는 안 쓴다(피드포워드 고정 motor.h). 개발 이미지 TST 2(예전 루프)만 1000 rpm 당 토크 지령 */
     P_ENC_STALL_TICKS,      /* 53: 엔코더 고착 판정 틱(10 ms). 0 = 끔 */
     /* 54~58: 공차 프로필. 체크섬 밖 EEPROM 77~81(KEEP 빈 칸). 공차 값이 적재 칸 하한보다 작으면(0 포함) 적재 값을 쓴다 */
@@ -79,11 +79,9 @@ enum {
 #define PARAM_GUIDE_DIST_UP      999
 #define PARAM_EMPTY_ADDR0        77    /* 54~58 번 → 77~81 */
 
-/* P_OPT_FLAGS 비트. 기본 0 = 끔. 실차 A/B 뒤 기본값을 정한다.
- * b0·b1·b4 는 기본 동작이 되어 비었다(값이 남아 있어도 무시한다). 예전 동작은 QUIRK_STEER_LEGACY.
- * b3(8, 칼만 위치를 조향 입력으로)은 버렸다(v0.46.0). 값이 남아 있어도 무시한다 */
-#define OPT_RESUME_CRUISE  0x04u   /* 일시정지 재개 때 남은 거리가 길면 최대 속도까지 가속한다 */
-#define OPT_PAUSE_RESUME_SMOOTH 0x20u /* 비었다(v0.26 기본 동작). 예전 동작(LG b7)은 버렸다(v0.49.0) */
+/* P_OPT_FLAGS(51 OPT) 는 안 쓴다(v0.49.0). 살아 있는 비트가 없다. 값이 남아 있어도 무시한다. 번호·EEPROM 116·한계 0~63 은 그대로.
+ * b0·b1·b4 는 기본 동작이 되어 비었다(예전 동작은 QUIRK_STEER_LEGACY). b5 도 기본이 되어 비었다(v0.26).
+ * b3(8, 칼만 위치를 조향 입력으로)은 v0.46.0, b2(4, 일시정지 재개 때 최대 속도까지 가속)는 v0.49.0 에 버렸다 */
 
 /* 저장 계층. 부팅 경로의 write 는 끝난 뒤 돌아와야 한다.
  * 운전 중에는 저장 큐에 넣는 구현으로 바꿔 끼워도 된다 */
@@ -132,7 +130,6 @@ void     param_default(void);
 /* 기본값의 P_AGV_TYPE. 사이트 값이라 앱이 준다. 0 이 초기값 */
 void     param_default_type(int16_t kind);
 int16_t  param_quirk(uint16_t bit);
-int16_t  param_opt(uint16_t bit);                          /* P_OPT_FLAGS 비트 */
 int16_t  param_rpm(int16_t m_per_min);                     /* GetSpeed_Pulse */
 int16_t  param_digit(int16_t value, int16_t place);        /* Get_Decimal_Point_Value */
 /* 적재·공차 프로필. empty 1 이면 target_speed·turn_speed·acc·dcc(와 low·llow)를 공차 값으로 다시 계산한다.

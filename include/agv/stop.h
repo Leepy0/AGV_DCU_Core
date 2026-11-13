@@ -39,7 +39,7 @@
 #define STOP_RAPID_DCC_DIV       1
 #define STOP_RAPID_DCC_MAX       60
 #define STOP_ENCODER_PPR         12
-#define STOP_OBSTACLE_CLEAR_TICKS 30    /* OPT_PAUSE_RESUME_SMOOTH: 감속 중 장애물이 이만큼 비어야 이어 간다 */
+#define STOP_OBSTACLE_CLEAR_TICKS 30    /* 일시정지 감속 중 장애물이 이만큼 비어야 이어 간다 */
 
 typedef enum {
     STOP_REASON_NONE = 0,

@@ -404,7 +404,7 @@ static void test_end_step(void)
     (void)param_set(P_LEGACY_QUIRKS, 0);
 }
 
-/* OPT_PAUSE_RESUME_SMOOTH: 감속 중 원인이 풀리면 0 까지 가지 않는다 */
+/* 일시정지 감속 중 원인이 풀리면 0 까지 가지 않는다(v0.26 부터 기본). opt 는 51번에 남은 값(안 씀, 무시) */
 static void pause_begin(int16_t opt)
 {
     setup(3000);
@@ -417,7 +417,7 @@ static void test_smooth_resume(void)
     int t;
 
     /* 장애물이 0.3 s 비면 감속 중에 지금 지령에서 다시 간다 */
-    pause_begin(OPT_PAUSE_RESUME_SMOOTH);
+    pause_begin(0);
     D.ext_sen_on = 1;
     for (t = 0; t < 5; t++) { watch_tick(); }
     D.ext_sen_on = 0;
@@ -434,7 +434,7 @@ static void test_smooth_resume(void)
     assert(s_zero == 0 && s_jump == 0 && s_flip == 0 && D.last_input == 3000);
 
     /* 일시정지(PAUSE)는 풀리는 즉시 */
-    pause_begin(OPT_PAUSE_RESUME_SMOOTH);
+    pause_begin(0);
     D.pause_stop = 1;
     for (t = 0; t < 20; t++) { watch_tick(); }
     D.pause_stop = 0;
@@ -444,7 +444,7 @@ static void test_smooth_resume(void)
     assert(s_zero == 0 && s_jump == 0 && D.last_input == 3000);
 
     /* 태그 위치 정지가 끊긴 경우: 같은 목표로 지금 지령에서 다시 제동한다 */
-    pause_begin(OPT_PAUSE_RESUME_SMOOTH);
+    pause_begin(0);
     D.stop_pulses = 3000;
     D.flag_stopping = 1;
     stop_request_tag();
@@ -458,8 +458,8 @@ static void test_smooth_resume(void)
     assert(D.stop_pulses == 0 && s_jump == 0 && s_flip == 0);
     { long n = s_travel; assert(n >= 2998 && n <= 3002); }
 
-    /* 비트가 꺼져 있어도 같다(v0.26 부터 기본 동작): 짧은 장애물은 0 까지 서지 않고 이어 간다 */
-    pause_begin(0);
+    /* OPT 에 값이 남아 있어도 같다(51번 안 씀): 짧은 장애물은 0 까지 서지 않고 이어 간다 */
+    pause_begin(63);
     D.ext_sen_on = 1;
     for (t = 0; t < 5; t++) { watch_tick(); }
     D.ext_sen_on = 0;
@@ -789,26 +789,23 @@ int main(int argc, char **argv)
     tick(0);
     assert(stop_phase() == STOP_PHASE_IDLE && D.step == DRIVE_CHANGE_SPEED);
 
-    /* 선택 비트: 재개 때 남은 거리가 길면 바닥 속도 위로 가속한다 */
-    { int16_t peak_off = 0, peak_on = 0, k;
-      for (k = 0; k < 2; k++) {
-          setup(2000);
-          (void)param_set(P_OPT_FLAGS, k ? OPT_RESUME_CRUISE : 0);   /* setup 이 EEPROM 을 지운다 */
-          D.stop_pulses = 6000;
-          D.flag_stopping = 1;
-          stop_request_tag();
-          for (int i = 0; i < 20; i++) { tick(0); }
-          D.pause_stop = 1;
-          for (int t = 0; t < 3000 && stop_phase() != STOP_PHASE_COMPLETE; t++) { tick(0); }
-          D.pause_stop = 0;
-          tick(0);
-          { int16_t peak = 0;
-            for (int t = 0; t < 400; t++) { tick(0); if (D.vin_out > peak) { peak = D.vin_out; } }
-            if (k) { peak_on = peak; } else { peak_off = peak; } }
-      }
-      assert(peak_off <= STOP_MIN_RPM);
-      assert(peak_on > STOP_MIN_RPM + 100);
-      (void)param_set(P_OPT_FLAGS, 0); }
+    /* 멈춘 뒤 재개는 남은 거리가 길어도 바닥 속도로 간다. OPT 4(예전 최대 속도 가속)가 남아 있어도 무시한다 */
+    for (int16_t k = 0; k < 2; k++) {
+        setup(2000);
+        (void)param_set(P_OPT_FLAGS, (int16_t)(k * 4));   /* setup 이 EEPROM 을 지운다 */
+        D.stop_pulses = 6000;
+        D.flag_stopping = 1;
+        stop_request_tag();
+        for (int i = 0; i < 20; i++) { tick(0); }
+        D.pause_stop = 1;
+        for (int t = 0; t < 3000 && stop_phase() != STOP_PHASE_COMPLETE; t++) { tick(0); }
+        D.pause_stop = 0;
+        tick(0);
+        { int16_t peak = 0;
+          for (int t = 0; t < 400; t++) { tick(0); if (D.vin_out > peak) { peak = D.vin_out; } }
+          assert(peak <= STOP_MIN_RPM); }
+    }
+    (void)param_set(P_OPT_FLAGS, 0);
 
     /* 위험 감속 표시는 일시정지 완료·정지 완료에서 내려간다. LG 1 에 남은 b0 은 무시한다 */
     for (int q = 0; q < 2; q++) {

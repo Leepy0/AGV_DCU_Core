@@ -63,7 +63,6 @@ int16_t param_gain(uint16_t idx)
 #endif
     return v ? v : ((idx == P_STEER_KP) ? PARAM_KP_DEFAULT : PARAM_KI_DEFAULT);
 }
-int16_t param_opt(uint16_t bit)        { return (((uint16_t)s_set[P_OPT_FLAGS] & bit) != 0) ? 1 : 0; }
 int16_t param_quirk(uint16_t bit)      { return (((uint16_t)s_set[P_LEGACY_QUIRKS] & bit) != 0) ? 1 : 0; }
 
 int16_t param_rpm(int16_t m_per_min)

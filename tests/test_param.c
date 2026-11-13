@@ -48,11 +48,10 @@ int main(void)
     assert(param_set(P_GUIDE_DIST_MM, 50) == -1);
     assert(param_boot(&fake_store, 2611) == 0 && param_get(P_GUIDE_DIST_MM) == 300);
     assert(param_set(P_GUIDE_DIST_MM, 250) == 0);
-    /* 시험용 스위치: 기본 0, 체크섬 밖 116~118 */
+    /* 51(OPT, v0.49.0 부터 안 씀. 칸·한계 0~63 만 남는다)·52·53: 기본 0, 체크섬 밖 116~118 */
     assert(param_get(P_OPT_FLAGS) == 0 && param_get(P_SPEED_FF) == 0 && param_get(P_ENC_STALL_TICKS) == 0);
-    assert(param_set(P_OPT_FLAGS, 64) == -1 && param_set(P_OPT_FLAGS, 37) == 0 && param_opt(OPT_PAUSE_RESUME_SMOOTH));
+    assert(param_set(P_OPT_FLAGS, 64) == -1 && param_set(P_OPT_FLAGS, 37) == 0 && param_get(P_OPT_FLAGS) == 37);
     assert(param_set(P_OPT_FLAGS, 5) == 0 && fake_ee[116] == 5);
-    assert(!param_opt(8) && param_opt(OPT_RESUME_CRUISE));
 #if AGV_DEV_TESTS   /* FF 파생값은 TST 2 예전 속도 루프만 쓴다 */
     assert(param_set(P_SPEED_FF, 120) == 0 && fake_ee[117] == 120 && P.speed_ff == 0.12f);
 #else
@@ -63,7 +62,7 @@ int main(void)
     /* RAM 에만: 값은 바뀌고 EEPROM 은 그대로 */
     fake_ee_writes = 0;
     assert(param_set_ram(P_OPT_FLAGS, 64) == -1 && param_set_ram(0, 1) == -1);
-    assert(param_set_ram(P_OPT_FLAGS, 2) == 0 && param_get(P_OPT_FLAGS) == 2 && !param_opt(OPT_RESUME_CRUISE));
+    assert(param_set_ram(P_OPT_FLAGS, 2) == 0 && param_get(P_OPT_FLAGS) == 2);
     assert(param_set_ram(P_SPEED_TURN, 12) == 0 && param_get(P_SPEED_TURN) == 12);
     assert(fake_ee_writes == 0 && fake_ee[116] == 5 && fake_ee[P_SPEED_TURN] == 13);
     assert(param_boot(&fake_store, 2611) == 0 && param_get(P_OPT_FLAGS) == 5 && param_get(P_SPEED_TURN) == 13);
