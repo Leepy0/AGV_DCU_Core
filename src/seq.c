@@ -377,16 +377,33 @@ static uint16_t eval_turn(seq_runner_t *r, const seq_step_t *s)
 {
     if (r->a == 0) {
         /* 셋째 칸은 태그 회전 둘째 칸과 같은 배치(장애물 b8~10, 속도 b11~15) */
-        if (s->kind == SK_TURN_ALIGN) { tagact_turn_align_stopped((turn_dir_t)s->arg0, s->arg1, s->timeout); }
-        else                          { tagact_turn_next((turn_dir_t)s->arg0, s->arg1, s->timeout); }
+        if (s->kind == SK_TURN_ALIGN) {
+            int16_t busy = D.turn_pulses;
+            tagact_turn_align_stopped((turn_dir_t)s->arg0, s->arg1, s->timeout);
+            /* 정렬 회전이 거부되면(회전 모드 0, 회전·정지 진행 중 등) 다음 스텝으로 가지 않고 오류로 끝낸다 */
+            if ((busy != 0) || !D.tape_align) {
+                runner_fail(r, SEQ_ERR_TURN);
+                return R_ENDED;
+            }
+        }
+        else { tagact_turn_next((turn_dir_t)s->arg0, s->arg1, s->timeout); }
         r->a = 1;
         return R_WAIT;
     }
     if (s->kind == SK_TURN_NOWAIT) { return R_NEXT; }
-    /* 정렬 회전은 정착·보정까지 끝나야 하고, 오류로 끝났으면 다음 스텝(출력)으로 가지 않는다. 이 틱 뒤 run_after_motor 가 끝낸다 */
-    if ((s->kind == SK_TURN_ALIGN) && (D.tape_align || (D.system_err != 0) || (D.stop_err != 0))) { return R_WAIT; }
-    /* 거부된 회전은 다음 스캔에 바로 통과한다 */
-    return ((D.turn_pulses <= 0) && (D.turn_motion == 0) && !D.flag_turn) ? (uint16_t)R_NEXT : (uint16_t)R_WAIT;
+    /* 오류가 선 틱에는 다음 스텝(출력)으로 가지 않는다. 이 틱 뒤 run_after_motor 가 시퀀스를 끝낸다 */
+    if ((D.system_err != 0) || (D.stop_err != 0)) { return R_WAIT; }
+    /* 정렬 회전은 정착·보정까지 끝나야 한다 */
+    if ((s->kind == SK_TURN_ALIGN) && D.tape_align) { return R_WAIT; }
+    /* 거부된 일반 회전은 다음 스캔에 바로 통과한다 */
+    if ((D.turn_pulses > 0) || (D.turn_motion != 0) || D.flag_turn) { return R_WAIT; }
+    /* 정렬이 실패로 끝났으면(tape_fix_end: 0 가운데에 섬. -1 선을 잡은 뒤 범위 초과, 1 보정 횟수 끝,
+     * 2 보정 각 초과, 3 선 놓침, 4 다가온 쪽 모름) 다음 스텝으로 가지 않고 오류로 끝낸다 */
+    if ((s->kind == SK_TURN_ALIGN) && (D.tape_fix_end != 0)) {
+        runner_fail(r, ERR_GUIDE_SENSOR);
+        return R_ENDED;
+    }
+    return R_NEXT;
 }
 
 static uint16_t eval_call(seq_runner_t *r, const seq_step_t *s)

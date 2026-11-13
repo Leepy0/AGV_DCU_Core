@@ -441,8 +441,31 @@ int main(void)
     seq_run();
     assert(fake_out == 0);
     D.stop_err = 0;
+    D.tape_fix_end = 0;                                          /* 가운데에 섰다 */
     seq_run();                                                   /* 오류 없이 끝났다 */
     assert(fake_out == BIT(OUT_EXT_2) && !seq_is_active());
+    fake_out = 0;
+    /* 오류 없이 실패로 끝남(선을 잡은 뒤 범위 초과 -1, 보정 못 끝냄 1, 선 놓침 3): B 를 켜지 않고 258 로 끝난다 */
+    {
+        static const int16_t fails[] = { -1, 1, 2, 3, 4 };
+        for (int k = 0; k < 5; k++) {
+            start(S_ALIGN);
+            seq_run();
+            D.tape_align = 0;
+            D.tape_fix_end = fails[k];
+            seq_run();
+            assert(fake_out == 0 && !seq_is_active() && D.action_err == ERR_GUIDE_SENSOR);
+            D.action_err = 0;
+        }
+    }
+    /* 거부(회전 모드 0 등): 다음 스텝으로 가지 않고 오류로 끝난다 */
+    fake_align_refuse = 1;
+    start(S_ALIGN);
+    seq_run();
+    assert(fake_out == 0 && !seq_is_active() && D.action_err == SEQ_ERR_TURN);
+    fake_align_refuse = 0;
+    D.action_err = 0;
+    D.tape_fix_end = 0;
     fake_turn_count = 0;                                         /* 뒤 시험은 처음부터 센다 */
     BAD(a_bad_align);
     assert(seq_bind(&s_site_ok) == 0);
@@ -586,6 +609,10 @@ int main(void)
     seq_run();
     assert(seq_active_step() == 4 && fake_turn_count == 1);      /* 완료 대기, 다시 요청하지 않음 */
     D.turn_pulses = 0;
+    D.system_err = 258;                                          /* 오류로 회전이 끝난 틱: 다음 스텝으로 가지 않는다 */
+    seq_run();
+    assert(seq_active_step() == 4);
+    D.system_err = 0;
     seq_run();
     assert(D.obs_use == 1 && seq_state_get(ST_0) == 7);
     seq_run();

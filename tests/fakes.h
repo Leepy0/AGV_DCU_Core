@@ -11,6 +11,7 @@ extern uint16_t fake_tx[256][20];
 extern int      fake_speed_arg, fake_forback_arg, fake_turn_count;
 extern int16_t  fake_move_mm;      /* tagact_move_mm 마지막 인자. 부르면 move_on 3 */
 extern uint16_t fake_turn_next;    /* tagact_turn_next 마지막 둘째 칸 */
+extern int      fake_align_refuse;  /* 1 = tagact_turn_align_stopped 가 거부한다 */
 extern int      fake_log_count;     /* log_event 횟수. 마지막 code·a 를 남긴다 */
 extern uint16_t fake_log_code;
 extern int16_t  fake_log_a;
