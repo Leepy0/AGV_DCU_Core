@@ -239,6 +239,23 @@ TAG_TABLE_BEGIN( site_tags )
 #ifdef NEG_RANGE_MAX
     TAG_RANGE( 1000, 1024, 1, AGV_STOP )                           /* hi <= 1023 */
 #endif
+    TAG( 56, 1, AGV_STOP( FL, FROM_SENSOR( IN_EXT_4, 100 ) ), SEQ_START( LOAD ), AGV_FORBACK( TOGGLE ) )   /* 30 센서 정지 */
+    TAG( 57, 1, AGV_STOP( 255, FROM_SENSOR( IN_AMP_R_OVERLOAD, 511 ) ), AGV_STOP( 0 ) )                    /* 31 */
+#ifdef NEG_FS_TICKS
+    TAG( 39, 1, AGV_STOP( FL, FROM_SENSOR( IN_EXT_4, 512 ) ) )      /* 유지틱 1~511 */
+#endif
+#ifdef NEG_FS_TICK0
+    TAG( 39, 1, AGV_STOP( FL, FROM_SENSOR( IN_EXT_4, 0 ) ) )
+#endif
+#ifdef NEG_FS_CM
+    TAG( 39, 1, AGV_STOP( 256, FROM_SENSOR( IN_EXT_4, 100 ) ) )     /* cm 0~255 */
+#endif
+#ifdef NEG_FS_IN
+    TAG( 39, 1, AGV_STOP( FL, FROM_SENSOR( IO_NONE, 100 ) ) )       /* 입력 0~63 */
+#endif
+#ifdef NEG_FS_TAPE
+    TAG( 39, 1, AGV_STOP( TAPE, FROM_SENSOR( IN_EXT_4, 100 ) ) )    /* 거리는 FL 이나 cm */
+#endif
 #ifdef NEG_TAG_AUTO16
     TAG( 39, 1, AGV_TURN( CW, 90, 0, 16 ) )                        /* 자동 출발 0~15 */
 #endif
@@ -409,6 +426,10 @@ int main(void)
            && site_tags[20].act[2] == TA_TAPE_STOP && site_tags[20].act[3] == TA_TAPE_STOP_GD);
     assert(site_tags[21].act[0] == (TA_STOP_CM | 12) && site_tags[21].act[1] == (TA_SEQ | SEQ_LOAD)
            && site_tags[21].act[2] == (TA_TAPE_STOP_GD | SEQ_UNLOAD) && site_tags[21].act[3] == TA_STOP);
+    assert(site_tags[30].act[0] == TA_STOP_SENSOR && site_tags[30].act[1] == (TA_FS_FL | (100u << TA_FS_TICKS_SHIFT) | IN_EXT_4)
+           && site_tags[30].act[2] == (TA_SEQ | SEQ_LOAD) && site_tags[30].act[3] == (TA_FORBACK | DIR_TOGGLE));
+    assert(site_tags[31].act[0] == (TA_STOP_SENSOR | 255) && site_tags[31].act[1] == ((511u << TA_FS_TICKS_SHIFT) | IN_AMP_R_OVERLOAD)
+           && site_tags[31].act[2] == TA_STOP_CM);
     {   /* 시퀀스 회전 옵션: 셋째 칸 b8 = OBS, 차례 자유 */
         const seq_step_t *e = ext_steps;
         assert(e[21].kind == SK_TURN_NOWAIT && e[21].arg0 == TURN_CW && e[21].arg1 == 180 && e[21].timeout == (1 << 8));

@@ -14,7 +14,7 @@ foreach ($n in 'AMP_INPUT', 'NO_DIRECTION', 'PARAM_ZERO', 'MOD_ZERO', 'HIGH_ANY'
               'SEQ_TAPE', 'SEQ_OPT', 'SEQ_OLD5', 'SEQ_SPEED', 'MMIN', 'TAG_NOWAIT', 'TAG_KIND2', 'TAG_OBS2', 'TAG_WORD', 'TAG_OLD6', 'SEQSTART_OPT', 'SEQSTART_ORDER', 'SEQ_KIND2', 'MOVE_LIMIT', 'MOVE_OPT', 'MOVE_MAX',
               'STOP_NEG', 'STOP_MAX', 'STOP_WORD', 'SEQSTART_MAX', 'SEQ_AUTO16', 'SEQ_FB16', 'TAG_AUTO16', 'TAG_FB16', 'TAG_DEG45', 'BELT_OPT', 'BELT_DIR', 'BELT_UNTIL_NODIR',
               'TAGNUM_PLAIN', 'TAGNUM_N', 'MOD_N', 'MOD_M0', 'SEND_N', 'SEND_MOD', 'SEND_TAG', 'SEND_BIG', 'PARAM_NAME', 'RANGE_ORDER', 'RANGE_MAX',
-              'SEQ_SEND_N') {
+              'SEQ_SEND_N', 'FS_TICKS', 'FS_TICK0', 'FS_CM', 'FS_IN', 'FS_TAPE') {
     & cmd /c "gcc -std=c99 -DAGV_HOST_BUILD -Iinclude -DNEG_$n -fsyntax-only tests/test_dsl.c >nul 2>nul"
     if ($LASTEXITCODE -eq 0) { Write-Output "NEG_$n compiled"; $failed++ }
 }
