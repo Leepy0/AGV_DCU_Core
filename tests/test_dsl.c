@@ -61,6 +61,15 @@ SEQ_BEGIN( demo )
 #ifdef NEG_NO_DIRECTION
     BELT_ON( 3, CCW )
 #endif
+#ifdef NEG_BELT_OPT
+    BELT_ON( 1, CW, ON(SEN_A) )                                              /* 셋째 칸은 UNTIL( 조건 ) 만 */
+#endif
+#ifdef NEG_BELT_DIR
+    BELT_ON( 1, UP, UNTIL( ON(SEN_A) ) )                                     /* 정하지 않은 방향 */
+#endif
+#ifdef NEG_BELT_UNTIL_NODIR
+    BELT_ON( 3, CCW, UNTIL( ON(SEN_A) ) )                                    /* 없는 방향은 UNTIL 에서도 오류 */
+#endif
 #ifdef NEG_PARAM_ZERO
     DELAY_PARAM( 0, SEC )
 #endif

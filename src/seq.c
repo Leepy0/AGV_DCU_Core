@@ -36,6 +36,7 @@ static uint32_t      s_load_mask;
 static seq_runner_t  s_seq;
 static seq_runner_t  s_act[ACT_SLOTS];
 static uint16_t      s_state[SEQ_STATE_COUNT];
+static uint16_t      s_belt[SEQ_BELTS];   /* 건 벨트 정지 조건: 시퀀스 표의 SK_BELT_UNTIL 스텝 번호 + 1, 0 빈 칸 */
 
 uint16_t seq_profile(void)      { return s_profile; }
 uint32_t seq_load_mask(void)    { return s_load_mask; }
@@ -61,7 +62,7 @@ static int16_t forbidden_in_act(uint16_t kind)
 {
     return (kind == SK_SPEED) || (kind == SK_FORBACK) || (kind == SK_TURN) || (kind == SK_TURN_NOWAIT)
         || (kind == SK_ERROR_HOLD) || (kind == SK_END_RESTART) || (kind == SK_MOVE_MM) || (kind == SK_TURN_ALIGN)
-        || (kind == SK_MOVE_TAPE);
+        || (kind == SK_MOVE_TAPE) || (kind == SK_BELT_UNTIL);
 }
 
 void seq_pick_profile(void)
@@ -129,11 +130,21 @@ static void runner_start(seq_runner_t *r, const seq_def_t *def, uint16_t is_act)
     enter_step(r, 0);
 }
 
+/* 벨트 정지 조건을 모두 지운다(출력은 그대로) */
+static void belt_clear(void)
+{
+    uint16_t i;
+    for (i = 0; i < SEQ_BELTS; i++) { s_belt[i] = 0; }
+}
+
 static void runner_end(seq_runner_t *r)
 {
     r->active = 0;
     r->owned = 0;
-    if (!r->is_act) { seq_request_flag[r->c.id] = 0; }
+    if (!r->is_act) {
+        seq_request_flag[r->c.id] = 0;
+        belt_clear();
+    }
 }
 
 /* 시퀀스 오류는 action_err, ACT 오류는 주행을 세우는 stop_err 다 */
@@ -148,6 +159,50 @@ static void out_apply(seq_runner_t *r, uint32_t on, uint32_t off)
 {
     io_out_masks(on, off);
     r->owned = (r->owned & ~off) | on;
+}
+
+/* ---- 벨트 정지 조건(SK_BELT_UNTIL). 칸은 시퀀스 표의 스텝을 가리킨다: 벨트 출력 = on | off, 조건 = out · arg0·arg1 ---- */
+
+static const seq_step_t *belt_step(uint16_t i) { return &s_seq.tbl[s_belt[i] - 1u]; }
+
+/* 조건이 참인 벨트의 출력 둘을 끄고 칸을 비운다 */
+static void belt_check(void)
+{
+    uint16_t i;
+    for (i = 0; i < SEQ_BELTS; i++) {
+        if (s_belt[i] != 0u) {
+            const seq_step_t *s = belt_step(i);
+            if (seq_mask_true(io_in_mask(), s->out, (uint32_t)s->arg0 | ((uint32_t)s->arg1 << 16))) {
+                out_apply(&s_seq, 0, s->on | s->off);
+                s_belt[i] = 0;
+            }
+        }
+    }
+}
+
+/* 시퀀스의 출력 스텝이 건 벨트의 출력을 바꾸면 그 벨트 조건을 지운다(BELT_OFF·BELT_ON 을 다시 실행) */
+static void belt_drop(uint32_t m)
+{
+    uint16_t i;
+    for (i = 0; i < SEQ_BELTS; i++) {
+        if ((s_belt[i] != 0u) && (((belt_step(i)->on | belt_step(i)->off) & m) != 0u)) { s_belt[i] = 0; }
+    }
+}
+
+/* 켜고 빈 칸에 조건을 건다. 이미 참이면 이 틱에 끈다(끝 센서를 같은 틱에 보던 사용자 함수와 같다) */
+static uint16_t belt_until(seq_runner_t *r, const seq_step_t *s)
+{
+    uint16_t i;
+    belt_drop(s->on | s->off);
+    out_apply(r, s->on, s->off);
+    for (i = 0; (i < SEQ_BELTS) && (s_belt[i] != 0u); i++) {}
+    if (i == SEQ_BELTS) {
+        runner_fail(r, SEQ_ERR_TABLE);
+        return R_ENDED;
+    }
+    s_belt[i] = (uint16_t)(r->c.step + 1u);
+    belt_check();
+    return R_NEXT;
 }
 
 uint16_t seq_mask_true(uint32_t v, uint32_t on, uint32_t off)
@@ -443,8 +498,11 @@ static uint16_t eval_step(seq_runner_t *r, const seq_step_t *s)
         runner_fail(r, s->arg0);
         return R_ENDED;
     case SK_OUT:
+        if (!r->is_act) { belt_drop(s->on | s->off); }
         out_apply(r, s->on, s->off);
         return R_NEXT;
+    case SK_BELT_UNTIL:
+        return belt_until(r, s);
     case SK_WAIT:
         tick(r);
         if (cond_full(s)) { return R_NEXT; }
@@ -576,8 +634,14 @@ void seq_cancel(uint16_t id)
     seq_request_flag[id] = 0;
     if (s_seq.active && (s_seq.c.id == id)) {
         s_seq.active = 0;
+        belt_clear();
         io_seq_outputs_off();
     }
+}
+
+void seq_belt_tick(void)
+{
+    if (s_seq.active) { belt_check(); }
 }
 
 void seq_run(void)
@@ -595,7 +659,10 @@ void seq_run(void)
             for (id = SEQ_NONE + 1; id < SEQ_MAX; id++) { seq_request_flag[id] = 0; }
         }
     }
-    if (s_seq.active) { runner_scan(&s_seq); }
+    if (s_seq.active) {
+        belt_check();               /* 스텝보다 먼저: 이 틱에 선 벨트를 WAIT_BELTS 가 같은 틱에 본다 */
+        runner_scan(&s_seq);
+    }
 }
 
 void seq_abort_all(void)
@@ -603,6 +670,7 @@ void seq_abort_all(void)
     uint16_t id;
     for (id = 0; id < SEQ_MAX; id++) { seq_request_flag[id] = 0; }
     s_seq.active = 0;
+    belt_clear();
     /* 위험 감속 표시도 시퀀스 초기화와 함께 내린다 */
     D.risk_stop = 0;
     io_seq_outputs_off();

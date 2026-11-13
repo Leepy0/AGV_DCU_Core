@@ -1352,6 +1352,7 @@ void run_seq(void)
         gd_overrun_fail();
     }
     if (s_run.seq_go) { seq_run(); }
+    else              { seq_belt_tick(); }   /* 시퀀스가 살아 있으면(이동 중 등) 건 벨트 정지 조건은 매 틱 본다 */
     act_run();
     request_tag_if_new(s_run.was_stopping, s_run.prev_len);
 }

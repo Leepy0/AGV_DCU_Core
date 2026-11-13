@@ -75,6 +75,9 @@ typedef enum {
                            * 오류(system_err·stop_err)가 서 있으면 다음으로 가지 않는다(run_after_motor 가 시퀀스를 끝낸다). ACT 금지 */
     SK_MOVE_TAPE,         /* arg0 = 한계 mm(1~32767), arg1 = 4 면 GD 더 가서(TAPE_GD). 그 자리에서 출발해 다음 교차선에서 서고 설 때까지 대기(tagact_move_tape).
                            * 한계 안에 못 찾으면 서고 오류 258(시퀀스 끝). ACT 금지 */
+    SK_BELT_UNTIL,        /* BELT_ON( n, 방향, UNTIL( 조건 ) ): SK_OUT 처럼 켜고(on|off = 그 벨트 출력) 정지 조건을 건다. 조건은
+                           * must_on = out, must_off = arg0 | arg1 << 16. 시퀀스가 살아 있는 동안 매 틱 보고 참이면 그 벨트 출력을 끈다.
+                           * 칸 SEQ_BELTS 개. ACT 금지 */
     SK_KIND_MAX
 } seq_kind_t;
 
@@ -118,6 +121,7 @@ enum { SEQ_SPD_HIGH = 0xFFF0, SEQ_SPD_LOW = 0xFFF1, SEQ_SPD_LLOW = 0xFFF2, SEQ_S
 #define SEQ_ERR_TURN     290u     /* 시퀀스 정렬 회전을 걸 수 없음(회전 모드 0, 회전·정지 진행 중 등) */
 #define SEQ_ERR_CROSS    290      /* 시퀀스 이동·교차선 회전 앞 찾기 중 교차로 IN·OUT 태그(stop_err: 서고 오류) */
 #define SEQ_STATE_COUNT  16       /* 사이트 상태 변수 칸 수 */
+#define SEQ_BELTS        3        /* 동시에 건 벨트 정지 조건(SK_BELT_UNTIL) 칸 수. 넘치면 표 오류 */
 
 typedef struct {
     uint16_t kind;      /* seq_kind_t */
@@ -178,6 +182,7 @@ int      seq_is_active(void);
 uint16_t seq_active_id(void);
 uint16_t seq_active_step(void);
 void     seq_run(void);          /* 10 ms */
+void     seq_belt_tick(void);    /* 10 ms, seq_run 을 부르지 않는 틱: 건 벨트 정지 조건만 본다(seq_run 은 스스로 본다) */
 void     seq_abort_all(void);    /* STOP·E-STOP·W 리셋 */
 
 /* 확장 조건 평가. tag 는 태그 번호 조건용 (시퀀스는 0) */

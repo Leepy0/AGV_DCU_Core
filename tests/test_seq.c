@@ -20,6 +20,12 @@
 
 #define BELT1_CW   OUTS(O_A)
 #define BELT1_CCW  OUTS(O_A, O_B)
+#define BELT2_CW   OUTS(O_C)
+#define BELT2_CCW  OUTS(O_C, OUT_EXT_4)
+#define BELT3_CW   OUTS(OUT_EXT_5)
+#define BELT3_CCW  OUTS(OUT_EXT_5, OUT_EXT_6)
+#define BELT4_CW   OUTS(OUT_EXT_9)
+#define BELT4_CCW  NO_OUT
 
 enum { PF_ONE = 1, PF_TWO = 2 };
 enum { ACT_PULSE = 1, ACT_HOLD, ACT_FAIL, ACT_BAD_FN, ACT_SPARE1, ACT_SPARE2, ACT_SPARE3 };
@@ -145,6 +151,46 @@ SEQ_BEGIN( s_wait_out )
     WAIT_OUT( IN( ON(O_A), OFF(O_B) ) )
     END_STOP
 SEQ_END
+
+/* 벨트 정지 조건: 셋이 각자 끝 센서에서 서고 모두 서면(출력이 꺼지면) 다음 */
+SEQ_BEGIN( s_belts )
+    BELT_ON( 1, CW, UNTIL( ON(SEN_A) ) )
+    BELT_ON( 2, CCW, UNTIL( ON(SEN_B) ) )
+    BELT_ON( 3, CW, UNTIL( IN( ON(SEN_C), OFF(SEN_D, IN_START_SW) ) ) )
+    WAIT_BELTS( 1, 2, 3 )
+    OUT_ON( OUT_EXT_7 )
+    END_STOP
+SEQ_END
+
+/* 조건을 건 채 BELT_OFF, 같은 벨트를 다시 BELT_ON(조건 지움), 조건을 건 채 대기·중단 */
+SEQ_BEGIN( s_belt_off )
+    BELT_ON( 1, CW, UNTIL( ON(SEN_A) ) )
+    BELT_ON( 2, CW, UNTIL( ON(SEN_B) ) )
+    BELT_OFF( 1 )
+    BELT_ON( 2, CCW )
+    WAIT( IN( ON(SEN_E) ) )
+    BELT_ON( 3, CW, UNTIL( ON(SEN_C) ) )
+    WAIT( IN( ON(SEN_D) ) )
+    END_STOP
+SEQ_END
+
+/* 조건을 건 채 끝난다 */
+SEQ_BEGIN( s_belt_end )
+    BELT_ON( 1, CW, UNTIL( ON(SEN_A) ) )
+    END_STOP
+SEQ_END
+
+/* 칸(SEQ_BELTS 3)이 모자라면 표 오류 */
+SEQ_BEGIN( s_belt_many )
+    BELT_ON( 1, CW, UNTIL( ON(SEN_A) ) )
+    BELT_ON( 2, CW, UNTIL( ON(SEN_A) ) )
+    BELT_ON( 3, CW, UNTIL( ON(SEN_A) ) )
+    BELT_ON( 4, CW, UNTIL( ON(SEN_A) ) )
+    END_STOP
+SEQ_END
+ACT_BEGIN( a_bad_belt )
+    BELT_ON( 1, CW, UNTIL( ON(SEN_A) ) )
+ACT_END
 
 /* 확장 조건: 방향, 호기 + 입력 */
 SEQ_BEGIN( s_xwhen )
@@ -312,7 +358,8 @@ ACT_END
 enum {
     S_BRANCH = SEQ_SITE_BASE, S_UNMATCHED, S_TIMING, S_ACS, S_DRIVE, S_BUDGET, S_OUTS, S_FLICKER,
     S_ANY, S_HANDSHAKE, S_WAIT_OUT, S_CALL, S_BAD_LABEL, S_ACT_START, S_PROF, S_NO_TABLE,
-    S_XWHEN, S_XWAIT, S_ANY2, S_DPARAM, S_TPARAM, S_NOWAIT, S_MOVE, S_ALIGN, S_MOVE_TAPE
+    S_XWHEN, S_XWAIT, S_ANY2, S_DPARAM, S_TPARAM, S_NOWAIT, S_MOVE, S_ALIGN, S_MOVE_TAPE,
+    S_BELTS, S_BELT_OFF, S_BELT_END, S_BELT_MANY
 };
 
 SEQ_MAP_BEGIN( site_seqs )
@@ -342,6 +389,10 @@ SEQ_MAP_BEGIN( site_seqs )
     SEQ_MAP( 0, S_MOVE, s_move )
     SEQ_MAP( 0, S_ALIGN, s_align )
     SEQ_MAP( 0, S_MOVE_TAPE, s_move_tape )
+    SEQ_MAP( 0, S_BELTS, s_belts )
+    SEQ_MAP( 0, S_BELT_OFF, s_belt_off )
+    SEQ_MAP( 0, S_BELT_END, s_belt_end )
+    SEQ_MAP( 0, S_BELT_MANY, s_belt_many )
 SEQ_MAP_END
 
 ACT_MAP_BEGIN( site_acts )
@@ -695,6 +746,87 @@ int main(void)
     fake_out = BIT(O_A);
     seq_run();
     assert(!seq_is_active());
+
+    /* 벨트 정지 조건(BELT_ON … UNTIL, WAIT_BELTS). 표 칸: 켤·끌 출력은 옵션 없는 BELT_ON 과 같고 조건은 out·arg0·arg1 */
+    assert(s_belts_steps[0].kind == SK_BELT_UNTIL && s_belts_steps[0].on == BIT(O_A) && s_belts_steps[0].off == BIT(O_B)
+           && s_belts_steps[0].out == BIT(SEN_A) && s_belts_steps[0].arg0 == 0 && s_belts_steps[0].arg1 == 0);
+    assert(s_belts_steps[2].out == BIT(SEN_C) && s_belts_steps[2].arg0 == (uint16_t)BIT(SEN_D)
+           && s_belts_steps[2].arg1 == (uint16_t)(BIT(IN_START_SW) >> 16));
+    assert(s_belts_steps[3].kind == SK_WAIT_OUT && s_belts_steps[3].on == 0
+           && s_belts_steps[3].off == (BIT(O_A) | BIT(O_B) | BIT(O_C) | BIT(OUT_EXT_4) | BIT(OUT_EXT_5) | BIT(OUT_EXT_6)));
+    assert(s_belt_off_steps[3].kind == SK_OUT && s_belt_off_steps[3].on == (BIT(O_C) | BIT(OUT_EXT_4)) && s_belt_off_steps[3].off == 0);
+    BAD(a_bad_belt);                                              /* ACT 금지 */
+    assert(seq_bind(&s_site_ok) == 0);
+    /* 셋이 다른 틱에 선다. 끝 센서가 켜졌다 꺼져도 그 벨트는 끝났다. 셋째는 OFF 조건까지 맞아야 선다. 마지막이 서는 틱에 통과 */
+    start(S_BELTS);
+    seq_run();
+    assert(seq_is_active() && fake_out == (BIT(O_A) | BIT(O_C) | BIT(OUT_EXT_4) | BIT(OUT_EXT_5)));
+    fake_in = BIT(SEN_A);
+    seq_run();
+    assert(seq_is_active() && fake_out == (BIT(O_C) | BIT(OUT_EXT_4) | BIT(OUT_EXT_5)));
+    fake_in = 0;
+    seq_run();
+    fake_in = BIT(SEN_C) | BIT(SEN_D);
+    seq_run();
+    fake_in = BIT(SEN_C) | BIT(IN_START_SW);
+    seq_run();
+    assert(seq_is_active() && fake_out == (BIT(O_C) | BIT(OUT_EXT_4) | BIT(OUT_EXT_5)));
+    fake_in = BIT(SEN_C);
+    seq_run();
+    assert(seq_is_active() && fake_out == (BIT(O_C) | BIT(OUT_EXT_4)));
+    fake_in = BIT(SEN_B);
+    seq_run();
+    assert(!seq_is_active() && fake_out == BIT(OUT_EXT_7));
+    /* 켤 때 이미 참이면 그 틱에 끄고 같은 틱에 통과 */
+    start(S_BELTS);
+    fake_in = BIT(SEN_A) | BIT(SEN_B) | BIT(SEN_C);
+    seq_run();
+    assert(!seq_is_active() && fake_out == BIT(OUT_EXT_7));
+    /* BELT_OFF 와 같은 벨트의 BELT_ON 이 조건을 지운다 */
+    start(S_BELT_OFF);
+    seq_run();
+    assert(seq_is_active() && fake_out == (BIT(O_C) | BIT(OUT_EXT_4)));
+    fake_in = BIT(SEN_A) | BIT(SEN_B);
+    seq_run();
+    assert(fake_out == (BIT(O_C) | BIT(OUT_EXT_4)));               /* 벨트 2 는 조건 없이 돈다 */
+    fake_in = BIT(SEN_E);
+    seq_run();
+    assert(seq_is_active() && fake_out == (BIT(O_C) | BIT(OUT_EXT_4) | BIT(OUT_EXT_5)));
+    fake_in = BIT(SEN_C);
+    seq_belt_tick();                                              /* seq_run 을 부르지 않는 틱(이동 중 등)에도 본다 */
+    assert(seq_is_active() && fake_out == (BIT(O_C) | BIT(OUT_EXT_4)));
+    /* 중단·끝에서 조건만 지운다 */
+    start(S_BELT_OFF);
+    seq_run();
+    fake_in = BIT(SEN_E);
+    seq_run();                                                    /* 벨트 3 조건을 건 채 */
+    seq_abort_all();
+    fake_out = BIT(OUT_EXT_5);
+    fake_in = BIT(SEN_C);
+    seq_belt_tick();
+    seq_run();
+    assert(fake_out == BIT(OUT_EXT_5));
+    start(S_BELT_OFF);
+    seq_run();
+    fake_in = BIT(SEN_E);
+    seq_run();                                                    /* 벨트 3 조건을 건 채 */
+    seq_cancel(S_BELT_OFF);
+    fake_out = BIT(OUT_EXT_5);
+    fake_in = BIT(SEN_C);
+    seq_belt_tick();
+    assert(fake_out == BIT(OUT_EXT_5));
+    start(S_BELT_END);
+    seq_run();
+    assert(!seq_is_active() && fake_out == BIT(O_A));
+    fake_in = BIT(SEN_A);
+    seq_belt_tick();
+    seq_run();
+    assert(fake_out == BIT(O_A));
+    /* 칸이 모자라면 표 오류 */
+    start(S_BELT_MANY);
+    seq_run();
+    assert(!seq_is_active() && D.action_err == SEQ_ERR_TABLE);
+    D.action_err = 0;
 
     /* 사용자 함수: 0 대기, 1 다음, 2 오류 */
     call_ret = 0; call_count = 0;

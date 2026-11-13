@@ -192,11 +192,33 @@ typedef unsigned long long dsl_cond_t;
 #define OUTS(...)        DSL_MASK(__VA_ARGS__)
 #define NO_OUT           0UL
 #define DSL_BELT_OK(m)   (0 * sizeof(char[(m) ? 1 : -1]))
-#define BELT_ON(n, dir)                                                             \
+/* BELT_ON( n, 방향 ): 켜고 다음 스텝. BELT_ON( n, 방향, UNTIL( 조건 ) ): 켜고 그 벨트의 정지 조건을 걸고 바로 다음 스텝.
+ * 코어가 시퀀스가 살아 있는 동안 매 틱 조건을 보고 참이면 그 벨트 출력 둘을 끄고 조건을 지운다(켤 때 이미 참이면 그 틱에 끈다).
+ * 조건을 지우는 때: 벨트를 껐을 때, 그 벨트 출력을 바꾸는 OUT·BELT 스텝(BELT_OFF·BELT_ON 등), 시퀀스 끝·중단·초기화(출력은 그대로).
+ * 시퀀스 전용(ACT 금지), 동시에 SEQ_BELTS(3) 개. 방향은 첫 매크로에서 붙인다(사이트 CW·CCW 매크로가 펼쳐지지 않게) */
+#define BELT_ON(n, ...)  DSL_BELTON_(BELT##n, DSL_BELTD_##__VA_ARGS__)
+#define DSL_BELTD_CW     _CW
+#define DSL_BELTD_CCW    _CCW
+/* 벨트 마스크(BELTn_*)가 펼쳐질 때 DSL_CAT·DSL_FMASK 를 쓰므로 고르는 데는 따로 붙이는 매크로를 쓴다(중첩 펼침 막힘 방지) */
+#define DSL_BPASTE_(a, b)    a##b
+#define DSL_BPASTE(a, b)     DSL_BPASTE_(a, b)
+#define DSL_BELTON_(b, ...)  DSL_BPASTE(DSL_BELTON, DSL_NARG(__VA_ARGS__))(b, __VA_ARGS__)
+#define DSL_BELTON1(b, d)                                                           \
     DSL_STEP(SK_OUT, SEQ_NO_LABEL, 0, 0, 0,                                         \
-             BELT##n##_##dir + DSL_BELT_OK(BELT##n##_##dir),                        \
-             (BELT##n##_CW | BELT##n##_CCW) & ~(uint32_t)(BELT##n##_##dir), 0)
+             b##d + DSL_BELT_OK(b##d), (b##_CW | b##_CCW) & ~(uint32_t)(b##d), 0)
+#define DSL_BELTON3(b, d, k, c)                                                     \
+    DSL_STEP(SK_BELT_UNTIL, SEQ_NO_LABEL, (uint16_t)DSL_COND_OFF(c), (uint16_t)(DSL_COND_OFF(c) >> 16), DSL_UNTIL_OK_##k, \
+             b##d + DSL_BELT_OK(b##d), (b##_CW | b##_CCW) & ~(uint32_t)(b##d), DSL_COND_ON(c))
+/* 셋째 칸은 UNTIL( 조건 ) 만 받는다(다른 것은 컴파일 오류) */
+#define UNTIL(c)         DSL_UNTIL_MARK, (c)
+#define DSL_UNTIL_OK_DSL_UNTIL_MARK  0
 #define BELT_OFF(n)      DSL_STEP(SK_OUT, SEQ_NO_LABEL, 0, 0, 0, 0, BELT##n##_CW | BELT##n##_CCW, 0)
+/* WAIT_BELTS( 1, 2, 3 ): 적은 벨트마다 출력 둘(CW·CCW)이 모두 꺼질 때까지 대기(입력이 아니라 출력을 본다. WAIT_OUT 과 같은 스텝) */
+#define DSL_BELTM(n)     (BELT##n##_CW | BELT##n##_CCW)
+#define DSL_WB1(a)       DSL_BELTM(a)
+#define DSL_WB2(a, b)    (DSL_BELTM(a) | DSL_BELTM(b))
+#define DSL_WB3(a, b, c) (DSL_BELTM(a) | DSL_BELTM(b) | DSL_BELTM(c))
+#define WAIT_BELTS(...)  DSL_STEP(SK_WAIT_OUT, SEQ_NO_LABEL, 0, 0, 0, 0, DSL_BPASTE(DSL_WB, DSL_NARG(__VA_ARGS__))(__VA_ARGS__), 0)
 
 /* ---- 대기 ---- */
 #define WAIT(c)                     DSL_STEP_C(SK_WAIT, SEQ_NO_LABEL, 0, 0, 0, c, 0)
