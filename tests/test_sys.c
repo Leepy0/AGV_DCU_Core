@@ -3498,6 +3498,20 @@ static void test_gd_overrun(void)
     for (i = 0; (i < 900) && (D.flag_run || (i < 3)); i++) { led_run(0x01FFu, 1, ((D.vin_out > 0) || (coast++ < 40)) ? 2 : 0); }
     led_run(0x0180u, 5, 0);
     assert(!D.system_err && (run_tape_last.kind == 3) && (run_tape_last.over_mm > 20.0f));
+
+    /* AGV_MOVE( 한계, TAPE_GD ): 지나쳤으면 도착(MOVE_DONE)이 아니라 MOVE_FAIL + 258 */
+    boot();
+    (void)param_set_ram(P_LEGACY_QUIRKS, 0);
+    assert(tagact_move_tape(3000, 4) == 1);
+    ticks(3);
+    guide_led_reply(0x0180u);
+    tick();
+    led_run(0x0180u, 60, 1);
+    led_run(0x01FFu, 2, 1);
+    assert((D.move_on == MOVE_FOUND) && D.steer_hold);
+    coast = 0;
+    for (i = 0; (i < 900) && D.flag_run; i++) { led_run(0x0180u, 1, ((D.vin_out > 0) || (coast++ < 80)) ? 2 : 0); }
+    assert((D.move_on != MOVE_DONE) && (D.system_err == ERR_GUIDE_SENSOR) && (run_tape_last.over_mm > 60.0f));   /* MOVE_FAIL 은 run_seq_init 이 0 으로 */
     printf("  gd overrun ok\n");
 }
 
@@ -3517,15 +3531,19 @@ static void test_gd_autostart(void)
     printf("  gd autostart ok\n");
 }
 
-/* 맡은 채 서 있는 동안 바퀴가 돌면(밀림) 다시 걸지 않고 258. 떨림(몇 펄스)은 둔다 */
+/* 맡은 채 서 있는 동안 바퀴가 돌면(밀림) 다시 걸지 않고 258. 선 직후 굴러감(0.5 s 안)과 20 mm 안 떨림은 둔다 */
 static void test_gd_pushed(void)
 {
     int i;
     gd_to_cmd_stop(1, 0u);
     assert(!D.system_err && run_tape_turn_held());
-    for (i = 0; i < 3; i++) { run_encoder(0, 20000); run_encoder(1, 20000); }
+    for (i = 0; i < 10; i++) { run_encoder(0, 20000); run_encoder(1, 20000); }   /* 선 직후 굴러감 */
     ticks(2);
     assert(!D.system_err && run_tape_turn_held());
+    ticks(50);                                  /* 기준 자리가 잡힌다 */
+    for (i = 0; i < 10; i++) { run_encoder(0, 20000); run_encoder(1, 20000); }
+    ticks(2);
+    assert(!D.system_err && run_tape_turn_held() && (10.0f * P.one_pulse_length < 20.0f));
     for (i = 0; i < 60; i++) { run_encoder(0, 20000); run_encoder(1, 20000); }
     ticks(2);
     assert((D.system_err == ERR_GUIDE_SENSOR) && !run_tape_turn_held());
