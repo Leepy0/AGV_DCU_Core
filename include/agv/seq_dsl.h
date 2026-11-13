@@ -270,10 +270,13 @@ typedef unsigned long long dsl_cond_t;
 #define DSL_SOPT_O_ALIGN       0
 #define DSL_SOPT_O_OBS         1
 #define DSL_SKIND(k)           (((k) == 0) ? SK_TURN : (((k) == 1) ? SK_TURN_NOWAIT : SK_TURN_ALIGN))
-#define DSL_STURN_OK(v, k1, k2, o)  (0 * sizeof(char[(((v) >= 0) && ((v) < 32) && (((k1) == 0) || ((k2) == 0)) && ((o) <= 1)) ? 1 : -1]))
+/* 회전 뒤 방향·자동 출발은 0~15(넘치면 옆 칸으로 샌다) */
+#define DSL_STURN_OK(fb, au, v, k1, k2, o) \
+    (0 * sizeof(char[(((v) >= 0) && ((v) < 32) && (((k1) == 0) || ((k2) == 0)) && ((o) <= 1) \
+                      && ((fb) >= 0) && ((fb) < 16) && ((au) >= 0) && ((au) < 16)) ? 1 : -1]))
 #define DSL_STURN_W(d, deg, fb, au, v, k1, k2, o) \
     DSL_STEP(DSL_SKIND((k1) + (k2)), SEQ_NO_LABEL, d, deg, \
-             ((fb) | ((au) << 4) | ((o) << 8) | ((uint16_t)(v) << 11)) + DSL_STURN_OK(v, k1, k2, o), 0, 0, 0)
+             ((fb) | ((au) << 4) | ((o) << 8) | ((uint16_t)(v) << 11)) + DSL_STURN_OK(fb, au, v, k1, k2, o), 0, 0, 0)
 #define DSL_STURN3(d, deg, fb, au)             DSL_STURN_W(d, deg, fb, au, 0, 0, 0, 0)
 #define DSL_STURN4(d, deg, fb, au, v)          DSL_STURN_W(d, deg, fb, au, v, 0, 0, 0)
 #define DSL_STURN5(d, deg, fb, au, v, a)       DSL_STURN_W(d, deg, fb, au, v, DSL_SOPT_K_##a, 0, DSL_SOPT_O_##a)

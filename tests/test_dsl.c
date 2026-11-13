@@ -120,6 +120,12 @@ SEQ_BEGIN( ext )
 #ifdef NEG_SEQ_KIND2
     AGV_TURN( CW, 90, 0, 1, 0, NOWAIT, ALIGN )                               /* 종류 옵션 둘 */
 #endif
+#ifdef NEG_SEQ_AUTO16
+    AGV_TURN( CW, 90, 0, 16 )                                                /* 자동 출발 0~15 (장애물 칸으로 샌다) */
+#endif
+#ifdef NEG_SEQ_FB16
+    AGV_TURN( CW, 90, 16, 1 )                                                /* 회전 뒤 방향 0~15 */
+#endif
 #ifdef NEG_MMIN
     AGV_SPEED_MMIN( 3 )                                                      /* 0~3 은 단계 번호 */
 #endif
@@ -175,6 +181,15 @@ TAG_TABLE_BEGIN( site_tags )
     TAG( 47, 1, AGV_TURN( CW, 90, 0, 1, 0, TAPE ), SEQ_START( TAPE, LOAD ), AGV_SPEED_MMIN( 20 ) )  /* 19 */
     TAG( 48, 1, AGV_STOP( 2550 ), AGV_STOP( 0 ), AGV_STOP( TAPE ), AGV_STOP( TAPE_GD ) )         /* 20 정지 4분류 */
     TAG( 49, 1, SEQ_START( 120, LOAD ), SEQ_START( TAPE_GD, UNLOAD ), AGV_STOP )                  /* 21 */
+#ifdef NEG_TAG_AUTO16
+    TAG( 39, 1, AGV_TURN( CW, 90, 0, 16 ) )                        /* 자동 출발 0~15 */
+#endif
+#ifdef NEG_TAG_FB16
+    TAG( 39, 1, AGV_TURN( CW, 90, 16, 1 ) )                        /* 회전 뒤 방향 0~15 */
+#endif
+#ifdef NEG_TAG_DEG45
+    TAG( 39, 1, AGV_TURN( CW, 45, 0, 1 ) )                         /* 태그 각도는 90 의 배수 */
+#endif
 #ifdef NEG_STOP_UNIT
     TAG( 39, 1, AGV_STOP( 255 ) )                                  /* 10 mm 단위 */
 #endif
