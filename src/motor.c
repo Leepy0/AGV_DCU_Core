@@ -670,7 +670,7 @@ static int16_t tape_after(int16_t seen, int32_t pos)
             D.tape_fix_turned = 0;
             D.tape_lost_cnt = 0;
             D.tape_step = TAPE_STEP_FIX;
-            if (!param_quirk(QUIRK_TURN_START)) { D.vin_out = stop_min_rpm(); }   /* 바닥 아래 구간을 건너뛴다(회전 시작과 같다) */
+            D.vin_out = stop_min_rpm();   /* 바닥 아래 구간을 건너뛴다(회전 시작과 같다) */
             s_tr.have = 0;
             D.tape_plan_min = 0;
             s_fix_side = (D.guide_pos > 0) ? 1 : -1;

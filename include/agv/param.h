@@ -56,7 +56,7 @@ enum {
 /* b0(1) 안 씀. 정지 완료 때 위험 감속 표시를 내리지 않던 예전 결함 재현은 버렸다(v0.49.0). 값이 남아 있어도 무시한다 */
 #define QUIRK_H_POSITION   0x02u   /* b1 'h' 응답이 위치값을 자리표 10 으로 덮는다 */
 #define QUIRK_CURVE_NOW    0x04u   /* b2 위험 감속 중 curve_now 를 켠다 */
-#define QUIRK_TURN_START   0x08u   /* b3 회전을 0 rpm 부터 시작한다 */
+/* b3(8) 안 씀. 회전을 0 rpm 부터 시작하던 예전 동작은 버렸다(v0.49.0). 값이 남아 있어도 무시한다 */
 /* b4~b6: 기본이 된 조향 개선(예전 P_OPT_FLAGS b0·b1·b4)을 하나씩 끈다. 셋 다 켜면 예전 OPT 0 조향 */
 #define QUIRK_STEER_20MS    0x10u  /* b4 조향을 20 ms 마다 돌린다 (기본 10 ms, 칼만 dt 0.01, 적분 이득 1/2) */
 #define QUIRK_DAMP_SIGN_OLD 0x20u  /* b5 변화율 항을 예전 부호로 더한다 (기본은 감쇠) */

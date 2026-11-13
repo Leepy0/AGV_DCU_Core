@@ -455,7 +455,7 @@ static void auto_run(void)
                 if (D.tape_align && !D.flag_turn) {
                     guide_poll_start();
                     D.guide_all_off = 1;     /* 첫 응답 전에는 라인이 있다고 보지 않는다 */
-                    if (!param_quirk(QUIRK_TURN_START)) { D.vin_out = stop_min_rpm(); }
+                    D.vin_out = stop_min_rpm();
                 }
                 D.flag_turn = 1;
                 D.control = RUN_TURN;
