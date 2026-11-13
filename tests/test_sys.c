@@ -126,6 +126,7 @@ static const tag_rule_t s_rules[] = {
     TAG( 41, 0, SEQ_START( TAPE_GD, LOAD ) )
     TAG( 42, 0, AGV_STOP( 20 ), SEQ_START( TAPE, LOAD ), AGV_STOP )
     TAG( 43, 0, AGV_TURN( CW, 90, 0, 1, 0, TAPE ) )
+    TAG( 48, 0, AGV_TURN( CW, 180, DIR_BACK_AFTER_TURN, 0, 0, TAPE ) )   /* 전진 중이면 회전을 걸지 못하는 조합 */
     TAG( 46, 0, CALL( 1 ) )                                   /* 별칭: 47 을 다시 부른다 */
     TAG( 47, 0, AGV_STOP( 30 ) )
     TAG( 44, 0, AGV_AUTOSTART( 1 ), SEQ_START( TAPE, LOAD ) )
@@ -1870,6 +1871,14 @@ static void test_tape_turn_request(void)
         for (i = 0; (i < 400) && !D.flag_ready && !D.flag_run; i++) { guide_reply(0); tick(); }
         assert((D.flag_ready || D.flag_run) && (D.tape_turn_dir == TURN_CW));
     }
+
+    /* 180도 + 회전 뒤 방향이 지금(전진)과 반대: 회전을 걸 수 없는 조합이라 교차선 요청도 걸지 않는다 */
+    boot();
+    (void)param_set(P_TURN_FORBACK, 10);
+    drive_up();
+    run_scan(20);
+    (void)tagact_run(48);
+    assert((D.tape_turn_dir == 0) && !D.backward);
 
     /* 조그로 움직이며 읽은 교차선 태그(회전·분류 4)와 서 있는 자동 차가 다시 읽은 태그는 요청이 되지 않는다 */
     boot();

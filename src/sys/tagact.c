@@ -190,6 +190,13 @@ static int tape_req_allowed(void)
     return (D.control == RUN_DRIVE) && D.flag_run;
 }
 
+/* 회전을 걸지 못하는 조합: 180도 이상인데 회전 뒤 방향이 지금 방향과 반대(반대로 돌아 같은 곳을 볼 수 없다) */
+static int turn_noop(uint16_t deg, uint16_t fb)
+{
+    return ((int16_t)fb > DIR_TOGGLE) && (deg >= 180u)
+           && ((!D.backward && (fb == DIR_BACK_AFTER_TURN)) || (D.backward && (fb == DIR_FWD_AFTER_TURN)));
+}
+
 void tagact_turn(turn_dir_t d, uint16_t deg, dir_t fb, uint16_t autostart, uint16_t obs)
 {
     if (turn_refused()) { return; }
@@ -200,7 +207,7 @@ void tagact_turn(turn_dir_t d, uint16_t deg, dir_t fb, uint16_t autostart, uint1
     /* 회전 뒤 방향 지정: 지금 방향과 다르면 반대로 돌아 같은 곳을 본다 */
     if ((int16_t)fb > DIR_TOGGLE) {
         if ((!D.backward && (fb == DIR_BACK_AFTER_TURN)) || (D.backward && (fb == DIR_FWD_AFTER_TURN))) {
-            if (deg >= 180u) { return; }
+            if (turn_noop(deg, (uint16_t)fb)) { return; }   /* 레거시와 같이 위의 정지만 남는다 */
             d = (d == TURN_CW) ? TURN_CCW : TURN_CW;
             deg = (uint16_t)(180u - deg);
         }
@@ -402,7 +409,7 @@ static void act_exec(uint16_t code, uint16_t next, int16_t cls)
         break;
     case TA_TURN_TAPE:      /* 일반 회전을 걸지 않는 상황(거리 정지 진행 중 포함)에만 요청하지 않는다. 명령 정지 감속 중에는
                              * 건다(레거시는 SL 정지를 다시 걸고 돈다). 다른 정지 중의 보류는 run.c(tape_stop) */
-        if (!turn_refused() && tape_req_allowed()) {
+        if (!turn_refused() && tape_req_allowed() && !turn_noop((uint16_t)((arg >> 2) * 90u), (uint16_t)(next & 0xFu))) {
             D.tape_turn_dir = (int16_t)(arg & 3u);
             D.tape_turn_deg = (int16_t)((arg >> 2) * 90u);
             D.tape_turn_next = next;
