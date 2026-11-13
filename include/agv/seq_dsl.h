@@ -206,15 +206,19 @@ typedef unsigned long long dsl_cond_t;
 /* 적재 센서가 있는 프로파일. mask = LOAD_SENSORS(SEN_1, ...) 하나라도 켜지면 적재 */
 #define PROFILE_LOAD(profile, type, from, to, mask)  { (uint16_t)(profile), (uint16_t)(type), (uint16_t)(from), (uint16_t)(to), (uint32_t)(mask), 0 },
 #define LOAD_SENSORS(...)          DSL_MASK(__VA_ARGS__)
-/* 적재 조건 하나나 둘, 하나라도 참이면 적재: PROFILE_LOAD_IF( 프로파일, 타입, 처음, 끝, IN( … )[, IN( … )] ).
- * 조건이 비면(NO_IN) 컴파일 오류. seq_site_t.load_fn = manual_load 일 때 쓴다(agv/manual.h) */
+/* 적재 조건 하나나 둘, 하나라도 참이면 적재. 표 앞에 이름 있는 상수로 두고 행은 그 이름을 쓴다:
+ *   LOAD_IF( 이름, IN( … )[, IN( … )] )              static const uint32_t 이름[4]
+ *   PROFILE_LOAD_IF( 프로파일, 타입, 처음, 끝, 이름 )
+ * 조건이 비면(NO_IN) 컴파일 오류. 이름이 LOAD_IF 배열이 아니면 컴파일 오류. seq_site_t.load_fn = manual_load 일 때 쓴다(agv/manual.h).
+ * v0.53.0 은 조건을 행 안의 compound literal 로 두었다(C28x 에서도 .econst 였다). 놓는 곳을 이름으로 보이게 바꿨다 */
 #define DSL_LIF_OK(c)        (0 * sizeof(char[((c) != 0) ? 1 : -1]))
 #define DSL_LIF1(c)          DSL_LIF2(c, c)
-#define DSL_LIF2(c1, c2)     (const uint32_t[4]){ DSL_COND_ON(c1) + DSL_LIF_OK(c1), DSL_COND_OFF(c1), \
-                                                  DSL_COND_ON(c2) + DSL_LIF_OK(c2), DSL_COND_OFF(c2) }
-#define PROFILE_LOAD_IF(profile, type, from, to, ...)                                \
+#define DSL_LIF2(c1, c2)     { DSL_COND_ON(c1) + DSL_LIF_OK(c1), DSL_COND_OFF(c1), \
+                               DSL_COND_ON(c2) + DSL_LIF_OK(c2), DSL_COND_OFF(c2) }
+#define LOAD_IF(name, ...)   static const uint32_t name[4] = DSL_CAT(DSL_LIF, DSL_NARG(__VA_ARGS__))(__VA_ARGS__);
+#define PROFILE_LOAD_IF(profile, type, from, to, name)                               \
     { (uint16_t)(profile), (uint16_t)(type), (uint16_t)(from), (uint16_t)(to), 0UL, \
-      DSL_CAT(DSL_LIF, DSL_NARG(__VA_ARGS__))(__VA_ARGS__) },
+      (name) + 0 * sizeof(char[(sizeof(name) == sizeof(uint32_t[4])) ? 1 : -1]) },
 #define PROFILE_TABLE_END          };
 
 /* ---- 라벨·분기 ---- */

@@ -30,9 +30,11 @@ MANUAL_BEGIN( s_tab )
     MAN_OBS_B( ID(4), IN_IF_4 )
 MANUAL_END
 
+LOAD_IF( s_lif_4, IN( ON(IN_IF_1) ), IN( OFF(IN_IF_2), ON(IN_IF_3) ) )
+LOAD_IF( s_lif_6, IN( ON(IN_IF_4) ) )
 PROFILE_TABLE_BEGIN( s_prof )
-    PROFILE_LOAD_IF( 1, 0, 4, 4, IN( ON(IN_IF_1) ), IN( OFF(IN_IF_2), ON(IN_IF_3) ) )
-    PROFILE_LOAD_IF( 2, 0, 6, 6, IN( ON(IN_IF_4) ) )
+    PROFILE_LOAD_IF( 1, 0, 4, 4, s_lif_4 )
+    PROFILE_LOAD_IF( 2, 0, 6, 6, s_lif_6 )
     PROFILE_LOAD( 3, 0, 5, 5, LOAD_SENSORS(IN_IF_1) )
 PROFILE_TABLE_END
 
@@ -47,7 +49,11 @@ MANUAL_BEGIN( s_neg )  MAN( ID(1), JOG, NO_IN, BELT( 2, CCW ) )  MANUAL_END     
 MANUAL_BEGIN( s_neg )  MAN_ELSE( ID(5, 4), JOG, NO_OUT )  MANUAL_END
 #endif
 #ifdef NEG_MAN_LOAD_EMPTY
-PROFILE_TABLE_BEGIN( s_neg )  PROFILE_LOAD_IF( 1, 0, 1, 1, NO_IN )  PROFILE_TABLE_END             /* 늘 참인 적재 조건 */
+LOAD_IF( s_neg_if, NO_IN )                                                                        /* 늘 참인 적재 조건 */
+#endif
+#ifdef NEG_MAN_LOAD_NAME
+static const uint32_t s_neg_if[2] = { 1, 0 };
+PROFILE_TABLE_BEGIN( s_neg )  PROFILE_LOAD_IF( 1, 0, 1, 1, s_neg_if )  PROFILE_TABLE_END          /* LOAD_IF 배열이 아님 */
 #endif
 
 void site_register(void) {}

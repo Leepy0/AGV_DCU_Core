@@ -617,10 +617,14 @@ MANUAL_END
 - 넘기기: `manual_bind( 표, 줄 수, 프로파일 표, 행 수 )`, `site_manual()` 에서 `manual_tick()`. 줄 하나 10워드(C28x).
 - 표로 쓰지 않는 것(상태기계·주행 명령·오류 값 비교)은 `site_manual()` C 에 남긴다.
 
-적재 조건: 프로파일 표에 조건 하나나 둘을 적는다. 하나라도 참이면 적재, 조건이 비면 컴파일 오류. `seq_site_t.load_fn = manual_load` 로 넘긴다. 이 칸이 없는 프로파일은 `PROFILE_LOAD` 의 센서 묶음을 쓴다.
+적재 조건: 조건 하나나 둘을 표 앞에 이름 있는 상수(`LOAD_IF`, `static const uint32_t 이름[4]`, C28x `.econst`)로 두고 프로파일 행은 그 이름을 쓴다. 하나라도 참이면 적재, 조건이 비면 컴파일 오류, 행의 이름이 `LOAD_IF` 배열이 아니면 컴파일 오류. `seq_site_t.load_fn = manual_load` 로 넘긴다. 이 칸이 없는 프로파일은 `PROFILE_LOAD` 의 센서 묶음을 쓴다. v0.53.0 은 조건을 행 안에 바로 적었다(compound literal).
 
 ```c
-PROFILE_LOAD_IF( PF_ANT, 0, 4, 5, IN( ON(ANT_TOP) ), IN( OFF(ANT_BOTTOM), ON(ANT_CART) ) )
+LOAD_IF( LIF_ANT, IN( ON(ANT_TOP) ), IN( OFF(ANT_BOTTOM), ON(ANT_CART) ) )
+
+PROFILE_TABLE_BEGIN( site_profiles )
+    PROFILE_LOAD_IF( PF_ANT, 0, 4, 5, LIF_ANT )
+PROFILE_TABLE_END
 ```
 
 ## 6. 도구

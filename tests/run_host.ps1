@@ -18,7 +18,7 @@ foreach ($n in 'AMP_INPUT', 'NO_DIRECTION', 'PARAM_ZERO', 'MOD_ZERO', 'HIGH_ANY'
     & cmd /c "gcc -std=c99 -DAGV_HOST_BUILD -Iinclude -DNEG_$n -fsyntax-only tests/test_dsl.c >nul 2>nul"
     if ($LASTEXITCODE -eq 0) { Write-Output "NEG_$n compiled"; $failed++ }
 }
-foreach ($n in 'MAN_SETCLR', 'MAN_BELT_NODIR', 'MAN_ID_ORDER', 'MAN_LOAD_EMPTY') {
+foreach ($n in 'MAN_SETCLR', 'MAN_BELT_NODIR', 'MAN_ID_ORDER', 'MAN_LOAD_EMPTY', 'MAN_LOAD_NAME') {
     & cmd /c "gcc -std=gnu99 -DAGV_HOST_BUILD -Iinclude -Ihal/host -DNEG_$n -fsyntax-only tests/test_manual.c >nul 2>nul"
     if ($LASTEXITCODE -eq 0) { Write-Output "NEG_$n compiled"; $failed++ }
 }
