@@ -8,10 +8,11 @@ param([Parameter(Mandatory = $true)][string]$Site, [Parameter(Mandatory = $true)
       [string]$ObjDir = '', [string]$SiteDef = '', [string]$Lib = '',
       [string]$Cgt = 'C:\ti\ti-cgt-c2000_18.12.2.LTS\ti-cgt-c2000_18.12.2.LTS')
 $ErrorActionPreference = 'Stop'
+function Full([string]$p) { return $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($p) }
 $Site = (Resolve-Path $Site).Path
-$Out = [IO.Path]::GetFullPath($Out)
+$Out = Full $Out
 if ($ObjDir -eq '') { $ObjDir = "$Out.obj" }
-$ObjDir = [IO.Path]::GetFullPath($ObjDir)
+$ObjDir = Full $ObjDir
 if ($Lib -ne '') { $Lib = (Resolve-Path $Lib).Path }
 Set-Location (Split-Path -Parent $PSScriptRoot)
 
@@ -27,8 +28,11 @@ if (Test-Path VERSION) {
 }
 
 $devTests = 1
-$m = [regex]::Match([IO.File]::ReadAllText((Join-Path $Site 'site.h')), '(?m)^\s*#\s*define\s+AGV_DEV_TESTS\s+(\d+)')
-if ($m.Success) { $devTests = [int]$m.Groups[1].Value }
+$siteH = Join-Path $Site 'site.h'
+if (Test-Path $siteH) {
+    $m = [regex]::Match([IO.File]::ReadAllText($siteH), '(?m)^\s*#\s*define\s+AGV_DEV_TESTS\s+(\d+)')
+    if ($m.Success) { $devTests = [int]$m.Groups[1].Value }
+}
 $devFlag = @()
 if ($devTests -eq 0) { $devFlag = @('-DAGV_DEV_TESTS=0') }
 if ($Lib -eq '') { $Lib = (Resolve-Path $(if ($devTests -eq 0) { 'lib/core_dev0.lib' } else { 'lib/core.lib' })).Path }
