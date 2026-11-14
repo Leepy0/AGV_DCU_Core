@@ -85,8 +85,7 @@ $wt = Join-Path $root 'build\dist_wt'
 if (Test-Path $wt) { & git worktree remove --force $wt; Run 'git worktree remove' }
 & git worktree prune
 if (@(& git branch --list dist).Count -eq 0) {
-    & git fetch origin dist:dist 2>$null
-    if ($LASTEXITCODE -ne 0) { $global:LASTEXITCODE = 0 }      # no remote dist yet
+    & cmd /c "git fetch -q origin dist:dist 2>nul"              # fails when there is no remote dist yet
 }
 if (@(& git branch --list dist).Count -ne 0) {
     & git worktree add $wt dist; Run 'git worktree add'
