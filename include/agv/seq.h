@@ -141,6 +141,20 @@ typedef struct {
     uint16_t nsteps;
 } seq_def_t;
 
+/* 압축 시퀀스 표(v0.56.0). 펼친 표(seq_def_t + seq_step_t)에서 앱 생성기가 만들고, 이미지에는 이것만 넣는다.
+ * 스텝 = 머리 1워드 + 0 이 아닌 칸의 값(칸 순서). 머리 하위 12비트는 0 이 아닌 칸, 상위 4비트는 뒤따르는 값 워드 수.
+ * 칸: 0 kind, 1 target, 2 arg0, 3 arg1, 4 timeout, 5 xc, 6·7 on(하위·상위 16비트), 8·9 off, 10·11 out.
+ * 대응표 한 줄 = pid(프로파일 | ID << 8), off(w 안 첫 스텝 머리), n(스텝 수). 펼친 대응표와 같은 순서 */
+typedef struct { uint16_t pid, off, n; } seq_pmap_t;
+typedef struct {
+    const uint16_t   *w;
+    const seq_pmap_t *seqs;  uint16_t nseqs;
+    const seq_pmap_t *acts;  uint16_t nacts;
+} seq_packed_t;
+#define SEQ_PK_LEN(head)  ((uint16_t)(1u + ((uint16_t)(head) >> 12)))   /* 스텝 하나의 워드 수 */
+/* 압축 스텝 p 를 s 로 푼다. 반환: 그 스텝의 워드 수 */
+uint16_t seq_unpack(const uint16_t *p, seq_step_t *s);
+
 typedef struct {
     uint16_t sub;        /* 사용자 정의 서브 스텝 */
     uint16_t timer;      /* 스텝 진입 후 틱 */
@@ -164,10 +178,12 @@ typedef struct {
     const profile_row_t *profiles;  uint16_t nprofiles;
     /* 현장 적재 판정(선택). 1 적재, 0 공차, 음수 = 이 프로파일은 판정 없음(load_mask 를 쓴다). NULL 이면 load_mask 만 */
     int16_t (*load_fn)(void);
+    /* 압축 시퀀스 표(선택, v0.56.0). 있으면 seqs·acts 대신 이것을 쓴다 */
+    const seq_packed_t *packed;
 } seq_site_t;
 
 /* 부팅 시 등록. P_AGV_TYPE·P_AGV_ID 로 프로파일을 고르고, ACT 표의 금지 스텝을 검사한다.
- * 반환 0 정상, 그 외 첫 금지 스텝이 있는 ACT ID. */
+ * 펼친 표와 압축 표(site->packed) 둘 다 받는다. 반환 0 정상, 그 외 첫 금지 스텝이 있는 ACT ID. */
 uint16_t seq_bind(const seq_site_t *site);
 uint16_t seq_profile(void);
 uint32_t seq_load_mask(void);      /* 고른 프로파일의 적재 센서 비트. 0 = 없음 */
