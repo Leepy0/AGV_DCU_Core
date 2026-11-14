@@ -1,0 +1,134 @@
+/* tagact.h - 태그 액션 API. 태그 규칙 표(tag_rule_t)와 사용자 정의 코드가 호출한다.
+ * 설계: docs/03_시퀀스_DSL.md 4절 */
+#ifndef AGV_TAGACT_H
+#define AGV_TAGACT_H
+#include "agv/types.h"
+#include "agv/seq.h"
+
+typedef enum { DIR_FWD = 1, DIR_BACK = 2, DIR_TOGGLE = 3, DIR_FWD_AFTER_TURN = 4, DIR_BACK_AFTER_TURN = 5 } dir_t;
+typedef enum { TURN_CW = 1, TURN_CCW = 2 } turn_dir_t;
+typedef enum { BRANCH_LEFT = 1, BRANCH_RIGHT = 2 } branch_dir_t;
+
+/* 조건 셋을 모두 만족하는 규칙만 맞는다. 새 칸은 끝에 두어 예전 {tag, profile, cond, a, b, {act}} 초기화가 그대로 된다 */
+typedef struct {
+    uint16_t tag;        /* 태그 번호 */
+    uint16_t profile;    /* 0 = 모든 프로파일 */
+    uint16_t cond;       /* 확장 조건 1: XC_* (agv/seq.h). 태그 번호 조건은 이 규칙의 tag 를 쓴다 */
+    uint16_t cond_a;     /* 조건 인자 */
+    uint16_t cond_b;
+    uint16_t act[4];     /* TA_* 액션 코드, 0 종료. TA_TURN은 2칸 */
+    uint16_t cond2;      /* 확장 조건 2 */
+    uint16_t cond2_a;
+    uint16_t cond2_b;
+    uint32_t in_on;      /* 입력 조건. 시퀀스 WHEN 과 같은 인코딩 (양쪽에 선 비트 = 하나라도 ON) */
+    uint32_t in_off;
+    uint16_t tag_hi;     /* 범위 규칙(TAG_RANGE)이면 받는 마지막 태그, 0 = 태그 하나 */
+} tag_rule_t;            /* C28x 18워드 */
+
+/* 압축 표(생성기용). 규칙은 3워드이고 조건·입력·동작은 중복을 없앤 표의 번호다. 번호 0 = 없음(조건 없음, 입력 없음, 동작 없음).
+ * 표 번호는 0~255, 태그 0~1023, 프로파일 0~63. 맞은 규칙은 tag_rule_t 로 펼쳐 같은 길로 돈다 */
+typedef struct { uint16_t cond, a, b; } tag_x_t;           /* 확장 조건 하나 (3워드) */
+typedef struct { uint32_t on, off; } tag_in_t;              /* 입력 조건 (4워드) */
+typedef struct { uint16_t act[4]; } tag_act_t;              /* 동작 칸 (4워드) */
+typedef struct {
+    uint16_t tp;         /* 태그 | 프로파일 << 10 */
+    uint16_t x;          /* 확장 조건 1 번호 | 확장 조건 2 번호 << 8 */
+    uint16_t ai;         /* 동작 번호 | 입력 조건 번호 << 8 */
+} tag_pack_t;
+typedef struct { uint16_t i, hi; } tag_range_t;            /* 범위 규칙: 규칙 번호 i(오름차순)가 태그 lo(규칙의 태그)~hi 를 받는다 */
+typedef struct {
+    const tag_pack_t *rules;
+    const tag_x_t    *x;
+    const tag_in_t   *in;
+    const tag_act_t  *act;
+    uint16_t          n;
+    const tag_range_t *ranges;   /* 0 = 범위 규칙 없음 */
+    uint16_t          nranges;
+} tag_packed_t;
+
+/* 예전 이름 */
+#define TAG_COND_NONE            XC_NONE
+#define TAG_COND_FORBACK_MODE    XC_FORBACK_MODE
+#define TAG_COND_LOW_BATTERY     XC_LOW_BATTERY
+#define TAG_COND_FORWARD         XC_FORWARD
+#define TAG_COND_BACKWARD        XC_BACKWARD
+#define TAG_COND_STATION_RANGE   XC_STATION
+#define TAG_COND_STATION_RUNNING XC_STATION_RUNNING
+
+#ifdef AGV_HOST_BUILD
+extern void (*tagact_trace)(uint16_t code, uint16_t next);   /* 호스트 시험 전용: 실행 동작 기록 훅. 0 = 끔 */
+#endif
+
+/* 액션 코드: 상위 8비트 종류, 하위 8비트 인자 */
+#define TA_KIND(code)     ((code) >> 8)
+#define TA_ARG(code)      ((code) & 0xFF)
+#define TA_STOP           0x0100
+#define TA_STOP_AUTOSTART 0x0200   /* 인자: 초, 0 = P_AUTO_START_SEC */
+#define TA_SPEED          0x0300   /* 인자: 0 HIGH, 1 LOW, 2 LLOW, 3 MIN, 10~ m/min */
+#define TA_FORBACK        0x0400   /* 인자: dir_t */
+#define TA_TURN           0x0500   /* 인자: dir | (deg/5)<<2 ; 다음 칸: fb | auto<<4 | obs<<8 (0~7) | m/min<<11 (0 = 자동) */
+#define TA_TURN_SPEED_SHIFT 11
+#define TA_TURN_DEG(arg)  ((uint16_t)((((arg) >> 2) & 0x3Fu) * 5u))   /* 각도 칸: 5도 단위 0~315(v0.54.0, 예전 90 단위) */
+#define TA_BRANCH         0x0600   /* 인자: branch_dir_t */
+#define TA_SEQ            0x0700   /* 인자: seq_id_t (정지 + 시퀀스 요청) */
+#define TA_TAPE_STOP      0x0800   /* 인자: seq_id_t(0 = 시퀀스 없음). 교차선을 찾아 본 자리에서 정지 뒤 시퀀스 */
+#define TA_ACS            0x0900   /* 인자: DSL_INFO_* ; 번호는 스테이션 큐[0] */
+#define TA_ACS_NUM        0x0A00   /* 인자: 번호 상수 (다음 칸에 Info | TA_ACS_* 비트) */
+#define TA_ACS_STANDBY_RESET 0x0100   /* 다음 칸: Info 'B' 에서 먼저 스테이션 큐를 지운다 */
+#define TA_ACS_SRC        0x0600   /* 다음 칸 번호 출처(둘 중 하나): 0 상수 = 인자 0~255 */
+#define TA_ACS_AGV_MINUS  0x0200   /* 번호 = 호기 번호 - 인자 */
+#define TA_ACS_STATION    0x0400   /* 번호 = 스테이션 큐[다음 칸 >> TA_ACS_K_SHIFT] + 인자(부호 8비트 -128~127) */
+#define TA_ACS_TAG_NUM    0x0600   /* 번호 = 지금 태그 번호 + 인자(부호 8비트) */
+#define TA_ACS_K_SHIFT    11       /* 다음 칸 b11~15: 스테이션 큐 칸 k */
+#define TA_OBS            0x0B00   /* 인자 = D.obs_use: 1 켬, 0 끔, 2 끔(자동 복귀) */
+#define TA_STATE          0x0C00   /* 인자: 사이트 상태 id (다음 칸: 값) */
+#define TA_STATION_RESET  0x0E00
+#define TA_ACT            0x0F00   /* 인자: ACT ID. 주행을 멈추지 않고 병렬 동작 시작 */
+#define TA_CALL           0x0D00   /* 인자: 사용자 함수 표 인덱스 */
+#define TA_TURN_ALIGN     0x1000   /* TA_TURN 과 같은 인자. 목표각 근방에서 주행로에 정렬 */
+#define TA_TURN_TAPE      0x1100   /* TA_TURN_ALIGN 과 같다. 교차 테이프를 찾은 뒤 시작 */
+/* 태그 정지 4분류: 1 TA_STOP(SL), 2 TA_STOP_CM(지정 거리), 3 TA_TAPE_STOP(교차선에서 바로), 4 TA_TAPE_STOP_GD(교차선 뒤 GD).
+ * 규칙에 분류 2·3·4 가 있으면 그 정지가 이긴다(같은 규칙의 TA_STOP·자동 출발·대기 보고가 태그 자리 SL 정지를 걸지 않는다) */
+#define TA_STOP_CM        0x1200   /* 인자: 정지 거리 cm 0~255(SL 과 같은 단위, 0 = 바로 정지). 태그를 읽은 자리에서 잰다 */
+#define TA_TAPE_STOP_GD   0x1300   /* 인자: seq_id_t(0 = 시퀀스 없음). 교차선을 찾아 GD 더 가서 정지 뒤 시퀀스 */
+/* 센서 정지 AGV_STOP( 거리, FROM_SENSOR( 입력, 유지틱 ) ). 인자: 거리 cm(FL 이면 0). 다음 칸: 입력 b0~5 | 유지틱 b6~14 | FL b15.
+ * 서지 않고 기다리다 입력이 유지틱(10 ms) 동안 켜지면 처음 켜진 자리 + 거리에서 선다. 규칙에서 이 동작 뒤 칸(최대 2칸)은 그때 실행한다.
+ * 교차선 요청(분류 3·4·교차선 회전)과 한 규칙에 쓰면 표 오류(SEQ_ERR_TABLE) */
+#define TA_STOP_SENSOR    0x1400
+#define TA_FS_TICKS_SHIFT 6
+#define TA_FS_FL          0x8000u
+#define ERR_SENSOR_STOP_MISS 270   /* stop_err: 센서 정지 요청 뒤 5 m 안에 감지가 시작되지 않음 */
+#define TA_WAIT           0x1500   /* 인자: 1 대기 시작(run_wait_start), 0 대기 풀기(run_wait_cancel). AGV_WAIT_START·AGV_WAIT_CANCEL */
+#define TA_STOP_KIND_TAPE    3     /* D.tape_stop_kind: 교차선에서 바로 정지 */
+#define TA_STOP_KIND_TAPE_GD 4     /* D.tape_stop_kind: 교차선 뒤 GD 가서 정지 */
+
+/* 시퀀스 AGV_MOVE( mm ): 서 있을 때 mm 앞에 위치 정지하는 이동을 건다. 달리거나 회전·정지 중이면 0(D.move_on 0 그대로),
+ * mm < 1 이거나 펄스가 32767 을 넘으면 -1(줄이지 않는다) */
+int16_t  tagact_move_mm(int16_t mm);      /* 1 걸었다, 0 지금 못 건다(회전·정지 중 등), -1 거리 범위 밖 */
+/* 시퀀스 AGV_MOVE( 한계 mm, TAPE… ): 서 있을 때 다음 교차선까지 가서 서는 이동을 건다. kind 4 = TAPE_GD(GD 더 가서), 그 밖 = TAPE.
+ * 한계를 넘기면 오류 258. 거부 조건은 tagact_move_mm 과 같다 */
+int16_t  tagact_move_tape(int16_t lim_mm, int16_t kind);
+void     tagact_bind(const tag_rule_t *rules, uint16_t n, uint16_t profile);
+void     tagact_bind_packed(const tag_packed_t *t, uint16_t profile);   /* 압축 표 */
+uint16_t tagact_display_tag(void);
+int      tagact_run(uint16_t tag);     /* DA_Tag_Selection 대체. 반환 1 = 이 태그로 새 정지가 시작됨 */
+void     tagact_tick(void);            /* 10 ms(site_manual 앞): 센서 정지 요청을 본다 */
+void     tagact_fs_clear(void);        /* 센서 정지 요청을 지운다(표 묶기, run_seq_init, run_relay) */
+uint16_t tagact_dry_run(uint16_t tag, uint16_t *acts, uint16_t cap);  /* 실행하지 않고 액션 열거 (관리 TT/TR) */
+
+/* 개별 액션 (사용자 정의 코드용) */
+void tagact_autostart_arm(uint16_t arg);   /* 자동 출발의 재출발 예약(arg 초, 0 = AS). 서는 것은 걸지 않는다. 분류 3·4 는 run.c 가 정지를 건 때 부른다 */
+void tagact_stop(void);          /* 정지 거리 없이 멈춘다. AGV_STOP */
+void tagact_stop_length(void);   /* 방향별 정지 거리 뒤 멈춘다 */
+void tagact_stop_after_mm(int32_t mm);   /* 지금 자리에서 mm 만큼 더 가서 멈춘다. 현장 센서 정지용(레거시 FL_check: 센서가 켜지면 FL 만큼 가서 정지) */
+void tagact_speed(uint16_t level);
+void tagact_forback(dir_t d);
+void tagact_turn(turn_dir_t d, uint16_t deg, dir_t fb, uint16_t autostart, uint16_t obs);   /* 회전 속도 자동 */
+/* next: TA_TURN 둘째 칸(fb b0~3 | 자동 출발 b4~7 | 장애물 b8~10 | 속도 b11~15, 0 = 자동). 태그 TA_TURN 과 시퀀스 회전 스텝이 같이 쓴다 */
+void tagact_turn_next(turn_dir_t d, uint16_t deg, uint16_t next);
+void tagact_turn_align(turn_dir_t d, uint16_t deg, uint16_t next);   /* next: TA_TURN 둘째 칸(속도 포함) */
+void tagact_turn_align_stopped(turn_dir_t d, uint16_t deg, uint16_t next);   /* 멈춘 자리에서 바로 */
+void tagact_turn_align_cross(turn_dir_t d, uint16_t deg, uint16_t next);     /* 교차선 기준: GD 뒤 정지 */
+void tagact_branch(branch_dir_t d);
+void tagact_compensate(int32_t pulses);   /* 태그 처리 지연·RFID 재시도 거리 보정 */
+#endif
