@@ -223,7 +223,11 @@ void tagact_turn(turn_dir_t d, uint16_t deg, dir_t fb, uint16_t autostart, uint1
     D.turn_90 = turn_90();
     if (deg == 90u)       { D.turn_pulses = D.turn_90; }
     else if (deg == 180u) { D.turn_pulses = (int16_t)(D.turn_90 * 2); }   /* 보정이 없으면 P.turn_180 과 같다 */
-    else                  { D.turn_pulses = (int16_t)((D.turn_90 / 90) * (int16_t)deg); }
+    else {
+        /* 곱한 뒤 반올림해 나눈다(먼저 나누면 712·10도가 79 대신 70). 16비트를 넘는 큰 각은 최대 펄스로 */
+        int32_t n = ((int32_t)D.turn_90 * (int32_t)deg + 45L) / 90L;
+        D.turn_pulses = (int16_t)((n > 32767L) ? 32767L : n);
+    }
     D.turn_obs_use = (int16_t)obs;
     if (autostart == 1u) { D.wait_start = (P.turn_mode == 2) ? 1 : 0; }
     if (D.flag_stopping) { stop_request_tag(); }

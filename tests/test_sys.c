@@ -3306,6 +3306,38 @@ static void test_turn_scale(void)
     printf("  turn scale ok\n");
 }
 
+/* 90·180도 밖의 회전 목표 펄스는 반올림(곱한 뒤 나눔). 90·180도는 예전 식 그대로, 16비트를 넘으면 최대 */
+static void test_turn_deg_pulses(void)
+{
+    static const int16_t q90[] = { 712, 900, 2000, 16383 };
+    static const uint16_t deg[] = { 1, 10, 30, 45, 90, 135, 180, 270, 360 };
+    int16_t keep = P.turn_90;
+    int i, j;
+
+    boot();
+    (void)param_set(P_TURN_FORBACK, 10);
+    for (i = 0; i < 4; i++) {
+        for (j = 0; j < 9; j++) {
+            int32_t want = (int32_t)((float)q90[i] * (float)deg[j] / 90.0f + 0.5f);
+            P.turn_90 = q90[i];
+            D.turn_pulses = 0; D.tape_align = 0;
+            tagact_turn_align_stopped(TURN_CW, deg[j], 0u);
+            if (want > 32767L) { want = 32767L; }
+            assert(D.turn_90 == q90[i] && D.turn_pulses == (int16_t)want);
+            if (deg[j] == 90u)  { assert(D.turn_pulses == q90[i]); }                /* 예전 식 */
+            if (deg[j] == 180u) { assert(D.turn_pulses == (int16_t)(q90[i] * 2)); }
+        }
+    }
+    P.turn_90 = 712;
+    D.turn_pulses = 0; D.tape_align = 0;
+    tagact_turn_align_stopped(TURN_CW, 10u, 0u);
+    printf("  turn_90 712 10도: %d 펄스(예전 %d)\n", D.turn_pulses, (712 / 90) * 10);
+    assert(D.turn_pulses == 79);
+    D.turn_pulses = 0; D.tape_align = 0;
+    P.turn_90 = keep;
+    printf("  turn deg pulses ok\n");
+}
+
 /* 교차 테이프를 두 번 보면 정렬 회전을 건다 */
 static void test_tape_turn(void)
 {
@@ -4267,6 +4299,7 @@ int main(void)
 #endif
     test_edge_release();
     test_turn_scale();
+    test_turn_deg_pulses();
     test_tape_turn();
     test_tape_rule();
     test_tape_guard();
