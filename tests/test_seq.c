@@ -420,6 +420,66 @@ PROFILE_TABLE_END
 
 static const seq_site_t s_site_ok = { site_seqs, NSEQS, site_acts, NACTS, s_calls, 1, site_profiles, NPROFS };
 
+/* ---- 압축 표(v0.56.0): 같은 시험을 압축 표로 한 번 더 돈다. 꼴은 agv/seq.h seq_packed_t ---- */
+static int          s_packed_mode;
+static uint16_t     s_pw[8192], s_pwn;
+static seq_pmap_t   s_pseqs[64], s_pacts[16];
+static seq_packed_t s_pk;
+static seq_site_t   s_bound;
+
+static uint16_t pack_steps(const seq_step_t *st, uint16_t n, uint16_t at)
+{
+    uint16_t k;
+    for (k = 0; k < n; k++) {
+        const seq_step_t *s = &st[k];
+        const uint16_t v[12] = { s->kind, s->target, s->arg0, s->arg1, s->timeout, s->xc,
+                                 (uint16_t)s->on, (uint16_t)(s->on >> 16), (uint16_t)s->off, (uint16_t)(s->off >> 16),
+                                 (uint16_t)s->out, (uint16_t)(s->out >> 16) };
+        uint16_t head = at++, m = 0, c = 0, b;
+        seq_step_t u;
+        for (b = 0; b < 12; b++) {
+            if (v[b] != 0u) { m |= (uint16_t)(1u << b); s_pw[at++] = v[b]; c++; }
+        }
+        assert(at < sizeof(s_pw) / sizeof(s_pw[0]));
+        s_pw[head] = (uint16_t)(m | (c << 12));
+        /* 왕복: 푼 스텝이 펼친 스텝과 칸마다 같다 */
+        assert(seq_unpack(&s_pw[head], &u) == SEQ_PK_LEN(s_pw[head]) && SEQ_PK_LEN(s_pw[head]) == (uint16_t)(at - head));
+        assert(u.kind == s->kind && u.target == s->target && u.arg0 == s->arg0 && u.arg1 == s->arg1 && u.timeout == s->timeout
+               && u.xc == s->xc && u.on == s->on && u.off == s->off && u.out == s->out);
+    }
+    return at;
+}
+
+static uint16_t pack_map(const seq_def_t *d, uint16_t n, seq_pmap_t *pm, uint16_t at)
+{
+    uint16_t i;
+    for (i = 0; i < n; i++) {
+        pm[i].pid = (uint16_t)(d[i].profile | (d[i].id << 8));
+        pm[i].off = at;
+        pm[i].n = d[i].nsteps;
+        at = pack_steps(d[i].steps, d[i].nsteps, at);
+    }
+    return at;
+}
+
+/* 펼친 표 모드는 그대로, 압축 표 모드는 압축해서 seqs·acts 없이 묶는다(코어가 펼친 표를 건드리면 죽는다) */
+static uint16_t bind(const seq_site_t *src)
+{
+    uint16_t at;
+    if (!s_packed_mode) { return seq_bind(src); }
+    assert(src->nseqs <= 64 && src->nacts <= 16);
+    at = pack_map(src->seqs, src->nseqs, s_pseqs, 0);
+    s_pwn = pack_map(src->acts, src->nacts, s_pacts, at);
+    s_pk.w = s_pw;
+    s_pk.seqs = s_pseqs;  s_pk.nseqs = src->nseqs;
+    s_pk.acts = s_pacts;  s_pk.nacts = src->nacts;
+    s_bound = *src;
+    s_bound.seqs = 0;  s_bound.nseqs = 0;
+    s_bound.acts = 0;  s_bound.nacts = 0;
+    s_bound.packed = &s_pk;
+    return seq_bind(&s_bound);
+}
+
 static void start(uint16_t id)
 {
     seq_abort_all();
@@ -441,14 +501,17 @@ static void bad_act_rejected(const seq_step_t *steps, uint16_t n)
     bad[1].nsteps = n;
     site.acts = bad;
     site.nacts = 2;
-    assert(seq_bind(&site) == 77);
+    assert(bind(&site) == 77);
     assert(act_start(ACT_PULSE) == 2);   /* 거부된 표의 ACT 는 하나도 시작하지 않는다 */
 }
 
 #define BAD(t) bad_act_rejected(t##_steps, (uint16_t)(sizeof(t##_steps) / sizeof(seq_step_t)))
 
-int main(void)
+static void run_all(void)
 {
+    uint16_t k;
+
+    for (k = 0; k < SEQ_STATE_COUNT; k++) { seq_state_set(k, 0); }   /* 둘째 판(압축 표)도 같은 처음 상태 */
     fake_reset();
     fake_params();
     memset(&D, 0, sizeof(D));
@@ -465,7 +528,7 @@ int main(void)
     BAD(a_bad_hold);
     BAD(a_bad_nowait);
 
-    assert(seq_bind(&s_site_ok) == 0);
+    assert(bind(&s_site_ok) == 0);
     assert(seq_profile() == 0);
 
     /* AGV_MOVE: 앞 출력 → 이동 요청(100 mm) → 도착해 설(MOVE_DONE) 때까지 대기 → 뒤 출력. ACT 에서는 금지 */
@@ -499,7 +562,7 @@ int main(void)
     fake_move_ret = 1;
     fake_out = 0;
     BAD(a_bad_move);
-    assert(seq_bind(&s_site_ok) == 0);
+    assert(bind(&s_site_ok) == 0);
 
     /* 정렬 회전(ALIGN): 정렬이 끝나야(tape_align 0, 회전 끝) 다음 스텝. 오류가 서 있으면 다음으로 가지 않는다 */
     start(S_ALIGN);
@@ -546,7 +609,7 @@ int main(void)
     D.tape_fix_end = 0;
     fake_turn_count = 0;                                         /* 뒤 시험은 처음부터 센다 */
     BAD(a_bad_align);
-    assert(seq_bind(&s_site_ok) == 0);
+    assert(bind(&s_site_ok) == 0);
 
     /* 교차선까지 이동(AGV_MOVE( 150, TAPE )): 설 때까지 대기, 섰는데 오류가 서 있으면 B 를 켜지 않는다 */
     start(S_MOVE_TAPE);
@@ -563,7 +626,7 @@ int main(void)
     seq_run();                                                   /* 찾아 섰다 */
     assert(fake_out == (BIT(OUT_EXT_1) | BIT(OUT_EXT_2)) && !seq_is_active());
     BAD(a_bad_move_tape);
-    assert(seq_bind(&s_site_ok) == 0);
+    assert(bind(&s_site_ok) == 0);
 
     /* WHEN: 대기 → 첫 참의 가지 → 안정 초과 → 재출발 */
     start(S_BRANCH);
@@ -768,7 +831,7 @@ int main(void)
            && s_belts_steps[3].off == (BIT(O_A) | BIT(O_B) | BIT(O_C) | BIT(OUT_EXT_4) | BIT(OUT_EXT_5) | BIT(OUT_EXT_6)));
     assert(s_belt_off_steps[3].kind == SK_OUT && s_belt_off_steps[3].on == (BIT(O_C) | BIT(OUT_EXT_4)) && s_belt_off_steps[3].off == 0);
     BAD(a_bad_belt);                                              /* ACT 금지 */
-    assert(seq_bind(&s_site_ok) == 0);
+    assert(bind(&s_site_ok) == 0);
     /* 셋이 다른 틱에 선다. 끝 센서가 켜졌다 꺼져도 그 벨트는 끝났다. 셋째는 OFF 조건까지 맞아야 선다. 마지막이 서는 틱에 통과 */
     start(S_BELTS);
     seq_run();
@@ -867,19 +930,19 @@ int main(void)
     /* 프로파일: 표 순서대로 첫 일치 */
     (void)param_set(P_AGV_TYPE, 100);
     (void)param_set(P_AGV_ID, 3);
-    assert(seq_bind(&s_site_ok) == 0 && seq_profile() == PF_ONE);
+    assert(bind(&s_site_ok) == 0 && seq_profile() == PF_ONE);
     start(S_PROF);
     seq_run();
     assert(fake_out == BIT(O_A));
     (void)param_set(P_AGV_ID, 7);
-    assert(seq_bind(&s_site_ok) == 0 && seq_profile() == PF_TWO);
+    assert(bind(&s_site_ok) == 0 && seq_profile() == PF_TWO);
     start(S_PROF);
     seq_run();
     assert(fake_out == BIT(O_B));
     (void)param_set(P_AGV_ID, 50);
-    assert(seq_bind(&s_site_ok) == 0 && seq_profile() == 0);
+    assert(bind(&s_site_ok) == 0 && seq_profile() == 0);
     (void)param_set(P_AGV_ID, 7);
-    assert(seq_bind(&s_site_ok) == 0);
+    assert(bind(&s_site_ok) == 0);
 
     /* ACT: 펄스, 재요청 무시, 슬롯 4개, 미정의 */
     start(0);
@@ -1122,7 +1185,73 @@ int main(void)
     assert(fake_tx_count == 1 && fake_tx[0][6] == 'L' && fake_tx[0][7] == '1' && fake_tx[0][8] == '2' && fake_tx[0][9] == '3');
     D.turn_pulses = 0;
     acs_reset();
+}
 
+/* 펼친 표와 압축 표를 같은 난수 입력으로 돌려 틱마다 견준다(점프·WHEN 묶음·타임아웃·CALL·ACT·벨트 포함) */
+#define LS_TICKS 40000u
+static uint32_t s_ls[LS_TICKS][5];
+
+static long lockstep(int packed)
+{
+    uint32_t rng = 0x2545F491u, t;
+    long busy = 0;
+
+    s_packed_mode = packed;
+    for (t = 0; t < SEQ_STATE_COUNT; t++) { seq_state_set((uint16_t)t, 0); }
+    fake_reset();
+    memset(&D, 0, sizeof(D));
+    D.ui_mode = UI_AUTO;
+    acs_reset();
+    call_count = 0;
+    assert(bind(&s_site_ok) == 0);
+    seq_abort_all();
+    act_abort_all();
+    for (t = 0; t < LS_TICKS; t++) {
+        uint32_t rec[5];
+        rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5;
+        if ((rng & 7u) == 0u) { fake_in = ((rng >> 3) & 0x3FFu) | (((rng >> 20) & 1u) ? BIT(IN_START_SW) : 0u); }
+        if (!seq_is_active() && (((rng >> 8) & 15u) == 0u)) { seq_request((uint16_t)(S_BRANCH + ((rng >> 12) % (S_OBS_AUTO - S_BRANCH + 1)))); }
+        if (((rng >> 16) & 63u) == 0u) { D.move_on = MOVE_DONE; }
+        if (((rng >> 22) & 255u) == 0u) { D.action_err = 0; D.stop_err = 0; D.system_err = 0; }
+        if (((rng >> 24) & 31u) == 0u) { (void)act_start((uint16_t)(ACT_PULSE + ((rng >> 26) % 3u))); }
+        if (((rng >> 4) & 1023u) == 0u) { seq_abort_all(); act_abort_all(); }
+        call_ret = (int)((rng >> 28) % 3u);
+        D.turn_pulses = 0; D.turn_motion = 0; D.flag_turn = 0; D.tape_align = 0; D.tape_fix_end = 0;
+        seq_run();
+        act_run();
+        busy += seq_is_active();
+        rec[0] = fake_out;
+        rec[1] = ((uint32_t)seq_active_id() << 16) | (seq_is_active() ? seq_active_step() : 0u);   /* 쉬면 스텝 번호는 앞 판 값이 남는다 */
+        rec[2] = ((uint32_t)(uint16_t)D.action_err << 16) | (uint16_t)D.stop_err;
+        rec[3] = (uint32_t)(act_is_busy(ACT_PULSE) | (act_is_busy(ACT_HOLD) << 1) | (act_is_busy(ACT_FAIL) << 2))
+               | ((uint32_t)fake_restart_count << 8) | ((uint32_t)call_count << 16);
+        rec[4] = ((uint32_t)fake_tx_count << 16) | (uint16_t)D.obs_use;
+        if (!packed) { memcpy(s_ls[t], rec, sizeof(rec)); }
+        else if (memcmp(s_ls[t], rec, sizeof(rec)) != 0) {
+            printf("  압축 표 틱 %lu 다름: out %08lx/%08lx seq %08lx/%08lx err %08lx/%08lx\n", (unsigned long)t,
+                   (unsigned long)s_ls[t][0], (unsigned long)rec[0], (unsigned long)s_ls[t][1], (unsigned long)rec[1],
+                   (unsigned long)s_ls[t][2], (unsigned long)rec[2]);
+            assert(0);
+        }
+    }
+    seq_abort_all();
+    act_abort_all();
+    return busy;
+}
+
+int main(void)
+{
+    long busy;
+
+    busy = lockstep(0);
+    (void)lockstep(1);
+    printf("  펼친 표·압축 표 틱마다 같음(%u 틱, 시퀀스 도는 틱 %ld)\n", LS_TICKS, busy);
+    s_packed_mode = 0;
+    run_all();
+    puts("  펼친 표 ok");
+    s_packed_mode = 1;
+    run_all();
+    printf("  압축 표 ok(스텝 %u 워드, 대응표 %u+%u 줄)\n", (unsigned)s_pwn, (unsigned)NSEQS, (unsigned)NACTS);
     puts("test_seq ok");
     return 0;
 }

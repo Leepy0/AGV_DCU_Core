@@ -16,7 +16,10 @@
 /* 한 실행 흐름. 시퀀스 1개 + ACT 슬롯 4개 */
 typedef struct {
     seq_ctx_t c;
-    const seq_step_t *tbl;
+    union {
+        const seq_step_t *tbl;                  /* 펼친 표 */
+        struct { uint16_t base, at; } pk;       /* 압축 표: 첫 스텝과 지금 스텝(c.step) 머리의 w 안 자리 */
+    } t;
     uint16_t nsteps;
     uint16_t a, b;       /* 스텝 내부 카운터 */
     uint32_t owned;      /* ACT 가 켜 둔 출력 */
@@ -36,7 +39,8 @@ static uint32_t      s_load_mask;
 static seq_runner_t  s_seq;
 static seq_runner_t  s_act[ACT_SLOTS];
 static uint16_t      s_state[SEQ_STATE_COUNT];
-static uint16_t      s_belt[SEQ_BELTS];   /* 건 벨트 정지 조건: 시퀀스 표의 SK_BELT_UNTIL 스텝 번호 + 1, 0 빈 칸 */
+static uint16_t      s_belt[SEQ_BELTS];   /* 건 벨트 정지 조건: 시퀀스 표의 SK_BELT_UNTIL 스텝 번호(압축 표는 머리 자리) + 1, 0 빈 칸 */
+static seq_step_t    s_buf;               /* 압축 표에서 푼 스텝. 한 번에 하나: 평가 중인 스텝, WHEN 묶음 훑기, 벨트 조건 */
 
 uint16_t seq_profile(void)      { return s_profile; }
 uint32_t seq_load_mask(void)    { return s_load_mask; }
@@ -47,15 +51,99 @@ uint16_t seq_active_step(void)  { return s_seq.c.step; }
 uint16_t seq_state_get(uint16_t id)             { return (id < SEQ_STATE_COUNT) ? s_state[id] : 0; }
 void     seq_state_set(uint16_t id, uint16_t v) { if (id < SEQ_STATE_COUNT) { s_state[id] = v; } }
 
-static const seq_def_t *find_def(const seq_def_t *list, uint16_t n, uint16_t id)
+/* ---- 표 읽기: 펼친 표(seq_def_t·seq_step_t)와 압축 표(site->packed, agv/seq.h)는 여기서만 가른다 ---- */
+
+#define PK (s_site->packed)
+
+uint16_t seq_unpack(const uint16_t *p, seq_step_t *s)
 {
-    uint16_t i;
-    for (i = 0; i < n; i++) {
-        if ((list[i].id == id) && ((list[i].profile == 0) || (list[i].profile == s_profile))) {
-            return &list[i];
-        }
+    uint16_t m = p[0], k = 1;
+#define TAKE(b)  ((m & (1u << (b))) ? p[k++] : 0u)
+    s->kind = TAKE(0);
+    s->target = TAKE(1);
+    s->arg0 = TAKE(2);
+    s->arg1 = TAKE(3);
+    s->timeout = TAKE(4);
+    s->xc = TAKE(5);
+    s->on = TAKE(6);
+    s->on |= (uint32_t)TAKE(7) << 16;
+    s->off = TAKE(8);
+    s->off |= (uint32_t)TAKE(9) << 16;
+    s->out = TAKE(10);
+    s->out |= (uint32_t)TAKE(11) << 16;
+#undef TAKE
+    return k;
+}
+
+/* 압축 스텝 p 의 칸 b 하나(그 칸이 0 이면 0). 풀지 않는다 */
+static uint16_t pk_slot(const uint16_t *p, uint16_t b)
+{
+    uint16_t m = p[0], k = 1, i;
+    if ((m & (1u << b)) == 0u) { return 0; }
+    for (i = 0; i < b; i++) {
+        if (m & (1u << i)) { k++; }
     }
-    return 0;
+    return p[k];
+}
+
+/* 스텝 i(압축 표는 머리 자리 at). 펼친 표는 표 자리를, 압축 표는 s_buf 에 풀어 돌려준다 */
+static const seq_step_t *step_read(const seq_step_t *tbl, uint16_t i, uint16_t at)
+{
+    if (PK == 0) { return &tbl[i]; }
+    (void)seq_unpack(&PK->w[at], &s_buf);
+    return &s_buf;
+}
+
+/* 압축 표에서 at 다음 스텝의 머리 자리. 펼친 표는 0 */
+static uint16_t step_next_at(uint16_t at)
+{
+    return (PK != 0) ? (uint16_t)(at + SEQ_PK_LEN(PK->w[at])) : 0u;
+}
+
+/* 스텝 i 의 종류와 target 만(라벨 훑기). s_buf 를 쓰지 않는다 */
+static void step_head(const seq_step_t *tbl, uint16_t i, uint16_t at, uint16_t *kind, uint16_t *target)
+{
+    if (PK == 0) {
+        *kind = tbl[i].kind;
+        *target = tbl[i].target;
+    }
+    else {
+        const uint16_t *p = &PK->w[at];
+        *kind = (p[0] & 1u) ? p[1] : 0u;
+        *target = (p[0] & 2u) ? p[1u + (p[0] & 1u)] : 0u;
+    }
+}
+
+static uint16_t map_count(uint16_t is_act)
+{
+    if (is_act) { return s_nacts; }
+    return (PK != 0) ? PK->nseqs : s_site->nseqs;
+}
+
+/* 대응표(is_act 면 ACT) i 번째 줄의 프로파일과 ID */
+static void map_get(uint16_t is_act, uint16_t i, uint16_t *profile, uint16_t *id)
+{
+    if (PK != 0) {
+        const seq_pmap_t *m = is_act ? &PK->acts[i] : &PK->seqs[i];
+        *profile = (uint16_t)(m->pid & 0xFFu);
+        *id = (uint16_t)(m->pid >> 8);
+    }
+    else {
+        const seq_def_t *d = is_act ? &s_site->acts[i] : &s_site->seqs[i];
+        *profile = d->profile;
+        *id = d->id;
+    }
+}
+
+/* ACT 대응표에서 id 의 줄. 없으면 0xFFFF */
+static uint16_t find_act(uint16_t id)
+{
+    uint16_t i, pf, d;
+    for (i = 0; i < s_nacts; i++) {
+        map_get(1, i, &pf, &d);
+        if ((d == id) && ((pf == 0) || (pf == s_profile))) { return i; }
+    }
+    return 0xFFFFu;
 }
 
 static int16_t forbidden_in_act(uint16_t kind)
@@ -92,42 +180,61 @@ int seq_call_once(uint16_t idx)
 
 uint16_t seq_bind(const seq_site_t *site)
 {
-    uint16_t i, k;
+    uint16_t i, k, n;
 
     s_site = site;
-    s_nacts = site->nacts;
+    s_nacts = (site->packed != 0) ? site->packed->nacts : site->nacts;
+    n = s_nacts;
     seq_pick_profile();
-    for (i = 0; i < site->nacts; i++) {
-        for (k = 0; k < site->acts[i].nsteps; k++) {
-            if (forbidden_in_act(site->acts[i].steps[k].kind)) {
+    for (i = 0; i < n; i++) {
+        const seq_step_t *tbl = (PK != 0) ? 0 : site->acts[i].steps;
+        uint16_t ns = (PK != 0) ? PK->acts[i].n : site->acts[i].nsteps;
+        uint16_t at = (PK != 0) ? PK->acts[i].off : 0u;
+        for (k = 0; k < ns; k++) {
+            uint16_t kind, target, pf, id;
+            step_head(tbl, k, at, &kind, &target);
+            if (forbidden_in_act(kind)) {
+                map_get(1, i, &pf, &id);
                 s_nacts = 0;
-                return site->acts[i].id;
+                return id;
             }
+            at = step_next_at(at);
         }
     }
     return 0;
 }
 
-static void enter_step(seq_runner_t *r, uint16_t idx)
+/* at: 압축 표의 그 스텝 머리 자리(펼친 표는 쓰지 않는다) */
+static void enter_step(seq_runner_t *r, uint16_t idx, uint16_t at)
 {
     r->c.step = idx;
+    if (PK != 0) { r->t.pk.at = at; }
     r->c.timer = 0;
     r->c.sub = 0;
     r->a = 0;
     r->b = 0;
 }
 
-static void runner_start(seq_runner_t *r, const seq_def_t *def, uint16_t is_act)
+/* 대응표(is_act 면 ACT) i 번째 줄로 시작한다 */
+static void runner_start(seq_runner_t *r, uint16_t is_act, uint16_t i)
 {
-    uint16_t i;
-    r->tbl = def->steps;
-    r->nsteps = def->nsteps;
-    r->c.id = def->id;
-    for (i = 0; i < 4; i++) { r->c.scratch[i] = 0; }
+    uint16_t k, profile;
+    if (PK != 0) {
+        const seq_pmap_t *m = is_act ? &PK->acts[i] : &PK->seqs[i];
+        r->t.pk.base = m->off;
+        r->nsteps = m->n;
+    }
+    else {
+        const seq_def_t *def = is_act ? &s_site->acts[i] : &s_site->seqs[i];
+        r->t.tbl = def->steps;
+        r->nsteps = def->nsteps;
+    }
+    map_get(is_act, i, &profile, &r->c.id);
+    for (k = 0; k < 4; k++) { r->c.scratch[k] = 0; }
     r->owned = 0;
     r->is_act = is_act;
     r->active = 1;
-    enter_step(r, 0);
+    enter_step(r, 0, (PK != 0) ? r->t.pk.base : 0u);
 }
 
 /* 벨트 정지 조건을 모두 지운다(출력은 그대로) */
@@ -163,7 +270,17 @@ static void out_apply(seq_runner_t *r, uint32_t on, uint32_t off)
 
 /* ---- 벨트 정지 조건(SK_BELT_UNTIL). 칸은 시퀀스 표의 스텝을 가리킨다: 벨트 출력 = on | off, 조건 = out · arg0·arg1 ---- */
 
-static const seq_step_t *belt_step(uint16_t i) { return &s_seq.tbl[s_belt[i] - 1u]; }
+static const seq_step_t *belt_step(uint16_t i) { return step_read(s_seq.t.tbl, (uint16_t)(s_belt[i] - 1u), (uint16_t)(s_belt[i] - 1u)); }
+
+/* 벨트 i 의 출력(on | off). s_buf 를 쓰지 않는다: 시퀀스 출력 스텝을 평가하는 중에 부른다 */
+static uint32_t belt_outs(uint16_t i)
+{
+    if (PK != 0) {
+        const uint16_t *p = &PK->w[s_belt[i] - 1u];
+        return ((uint32_t)pk_slot(p, 6) | ((uint32_t)pk_slot(p, 7) << 16)) | ((uint32_t)pk_slot(p, 8) | ((uint32_t)pk_slot(p, 9) << 16));
+    }
+    return belt_step(i)->on | belt_step(i)->off;
+}
 
 /* 조건이 참인 벨트의 출력 둘을 끄고 칸을 비운다 */
 static void belt_check(void)
@@ -185,7 +302,7 @@ static void belt_drop(uint32_t m)
 {
     uint16_t i;
     for (i = 0; i < SEQ_BELTS; i++) {
-        if ((s_belt[i] != 0u) && (((belt_step(i)->on | belt_step(i)->off) & m) != 0u)) { s_belt[i] = 0; }
+        if ((s_belt[i] != 0u) && ((belt_outs(i) & m) != 0u)) { s_belt[i] = 0; }
     }
 }
 
@@ -200,7 +317,7 @@ static uint16_t belt_until(seq_runner_t *r, const seq_step_t *s)
         runner_fail(r, SEQ_ERR_TABLE);
         return R_ENDED;
     }
-    s_belt[i] = (uint16_t)(r->c.step + 1u);
+    s_belt[i] = (uint16_t)(((PK != 0) ? r->t.pk.at : r->c.step) + 1u);
     belt_check();
     return R_NEXT;
 }
@@ -300,12 +417,15 @@ static uint16_t param_time_over(seq_runner_t *r, const seq_step_t *s)
 /* 라벨은 분기할 때 표에서 찾는다. 없으면 표 오류로 끝낸다 */
 static uint16_t jump(seq_runner_t *r, uint16_t label)
 {
-    uint16_t i;
+    uint16_t i, at = (PK != 0) ? r->t.pk.base : 0u;
     for (i = 0; i < r->nsteps; i++) {
-        if ((r->tbl[i].kind == SK_LABEL) && (r->tbl[i].target == label)) {
-            enter_step(r, i);
+        uint16_t kind, target;
+        step_head(r->t.tbl, i, at, &kind, &target);
+        if ((kind == SK_LABEL) && (target == label)) {
+            enter_step(r, i, at);
             return R_JUMPED;
         }
+        at = step_next_at(at);
     }
     runner_fail(r, SEQ_ERR_TABLE);
     return R_ENDED;
@@ -314,10 +434,11 @@ static uint16_t jump(seq_runner_t *r, uint16_t label)
 /* 연속한 WHEN 묶음을 위에서 평가한다 */
 static uint16_t eval_when(seq_runner_t *r)
 {
-    uint16_t i;
+    uint16_t i, at = (PK != 0) ? r->t.pk.at : 0u;
     tick(r);
     for (i = r->c.step; i < r->nsteps; i++) {
-        const seq_step_t *s = &r->tbl[i];
+        const seq_step_t *s = step_read(r->t.tbl, i, at);
+        at = step_next_at(at);
         if (s->kind == SK_WHEN) {
             if (cond_full(s)) { return jump(r, s->target); }
         }
@@ -605,20 +726,21 @@ static void runner_scan(seq_runner_t *r)
 
     while (r->active && (budget > 0)) {
         const seq_step_t *s;
-        uint16_t result;
+        uint16_t result, next;
 
         if (r->c.step >= r->nsteps) {       /* 마지막 스텝을 지나면 끝 */
             runner_end(r);
             return;
         }
-        s = &r->tbl[r->c.step];
+        s = step_read(r->t.tbl, r->c.step, (PK != 0) ? r->t.pk.at : 0u);
+        next = (PK != 0) ? step_next_at(r->t.pk.at) : 0u;    /* 압축 표: 다음 스텝 머리(평가가 점프하기 전에 둔다) */
         if (s->kind == SK_LABEL) {          /* 라벨은 실행 시간이 없다 */
-            enter_step(r, (uint16_t)(r->c.step + 1));
+            enter_step(r, (uint16_t)(r->c.step + 1), next);
             continue;
         }
         result = eval_step(r, s);
         if (result == R_WAIT) { return; }
-        if (result == R_NEXT) { enter_step(r, (uint16_t)(r->c.step + 1)); }
+        if (result == R_NEXT) { enter_step(r, (uint16_t)(r->c.step + 1), next); }
         budget--;
     }
 }
@@ -649,11 +771,11 @@ void seq_belt_tick(void)
 void seq_run(void)
 {
     if (!s_seq.active && (s_site != 0)) {
-        uint16_t i, id;
-        for (i = 0; i < s_site->nseqs; i++) {
-            const seq_def_t *def = &s_site->seqs[i];
-            if (((def->profile == 0) || (def->profile == s_profile)) && seq_request_flag[def->id]) {
-                runner_start(&s_seq, def, 0);
+        uint16_t i, id, pf, n = map_count(0);
+        for (i = 0; i < n; i++) {
+            map_get(0, i, &pf, &id);
+            if (((pf == 0) || (pf == s_profile)) && seq_request_flag[id]) {
+                runner_start(&s_seq, 0, i);
                 break;
             }
         }
@@ -691,16 +813,15 @@ int act_is_busy(uint16_t id)
 
 int act_start(uint16_t id)
 {
-    uint16_t i;
-    const seq_def_t *def;
+    uint16_t i, row;
 
     if (act_is_busy(id)) { return 1; }
     if (s_site == 0) { return 2; }
-    def = find_def(s_site->acts, s_nacts, id);
-    if (def == 0) { return 2; }
+    row = find_act(id);
+    if (row == 0xFFFFu) { return 2; }
     for (i = 0; i < ACT_SLOTS; i++) {
         if (!s_act[i].active) {
-            runner_start(&s_act[i], def, 1);
+            runner_start(&s_act[i], 1, row);
             return 0;
         }
     }
