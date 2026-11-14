@@ -20,7 +20,7 @@ void manual_bind(const man_row_t *rows, uint16_t n, const profile_row_t *prof, u
 
 void manual_tick(void)
 {
-    uint16_t id = (uint16_t)param_get(P_AGV_ID);
+    uint16_t pf = seq_profile();     /* 0 = 프로파일 없음: 아무 줄도 안 맞는다(줄 프로파일은 1~63) */
     uint32_t in = io_in_mask();
     uint16_t mode_ok[2];
     uint16_t fb = IN_IF_5;           /* run.c 의 기본 입력 */
@@ -33,7 +33,7 @@ void manual_tick(void)
         const man_row_t *r = &s_rows[i];
         uint16_t k = r->kind & 0x0Fu;
         uint16_t key = r->kind >> 8;
-        uint16_t hit = (uint16_t)((id >= (r->id & 0xFFu)) && (id <= (r->id >> 8)));
+        uint16_t hit = (uint16_t)((pf != 0u) && (r->profile == pf));
 
         if (k == MAN_K_FB_SW) {
             if (hit) { fb = (uint16_t)r->set; }

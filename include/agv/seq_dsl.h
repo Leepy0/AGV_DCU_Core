@@ -411,21 +411,20 @@ typedef unsigned long long dsl_cond_t;
 #define END_ERROR(code)        DSL_STEP(SK_END_ERROR, SEQ_NO_LABEL, code, 0, 0, 0, 0, 0)
 
 /* ---- 수동 조작 표 (agv/manual.h, docs/03 5.4절) ----
- * MAN( 호기, 모드, 조건, 출력… ) 사슬의 가지, MAN_ELSE( 호기, 모드, 출력… ) 사슬 끝. 모든 사슬은 MAN_ELSE 로 닫는다
- * (할 일이 없으면 NO_OUT). 한 호기에 사슬이 여럿이어도 된다.
- * 호기: ID( n ) 또는 ID( 처음, 끝 ), 0~255.
+ * MAN( 프로파일, 모드, 조건, 출력… ) 사슬의 가지, MAN_ELSE( 프로파일, 모드, 출력… ) 사슬 끝. 모든 사슬은 MAN_ELSE 로 닫는다
+ * (할 일이 없으면 NO_OUT). 한 프로파일에 사슬이 여럿이어도 된다.
+ * 프로파일: 사이트 프로파일 상수 그대로(1~63, 0·범위 밖은 컴파일 오류). 지금 프로파일(seq_profile())과 같은 줄만 맞는다(v0.54.0,
+ * 예전 ID( 처음, 끝 ) 호기 범위). 여러 프로파일이 같은 동작이면 사슬을 프로파일마다 통째로 한 벌씩 적는다.
  * 모드: IDLE 자동 화면에서 대기(run_is_idle(), 준비 아님, STOP 아님), JOG 조그 화면이고 STOP 아님.
  * 조건: IN( ON(…), OFF(…) ), KEY( UP )(지금 눌린 키, 소비하지 않음), NO_IN(늘 참).
  * 출력(여럿이면 모두): ON( 출력… ) 켬, OFF( 출력… ) 끔, BELT( n, CW | CCW | OFF ). 한 출력을 켜면서 끄면 컴파일 오류.
  *   BELT 는 사이트 BELTn_CW·BELTn_CCW 마스크로 그 방향 마스크를 켜고 그 벨트의 나머지 출력을 끈다(BELT_ON 스텝과 같은 값).
- * MAN_FB_SW( 호기, 입력 ): 수동 방향 전환 스위치 입력(맞는 줄이 없으면 IN_IF_5). MAN_OBS_B( 호기, 입력 ): 매 틱
+ * MAN_FB_SW( 프로파일, 입력 ): 수동 방향 전환 스위치 입력(맞는 줄이 없으면 IN_IF_5). MAN_OBS_B( 프로파일, 입력 ): 매 틱
  * agv_drive.obs_b_ext = 그 입력. 둘 다 모드와 상관없이 매 틱 */
 #define MANUAL_BEGIN(name)  const man_row_t name[] = {
 #define MANUAL_END          };
-#define ID(...)             DSL_CAT(DSL_MID, DSL_NARG(__VA_ARGS__))(__VA_ARGS__)
-#define DSL_MID1(n)         DSL_MID2(n, n)
-#define DSL_MID2(lo, hi)    ((uint16_t)((lo) | ((uint16_t)(hi) << 8)) \
-                             + (0 * sizeof(char[(((lo) >= 0) && ((lo) <= (hi)) && ((hi) < 256)) ? 1 : -1])))
+/* 프로파일 1~63(압축 태그 표의 프로파일 칸 6비트와 같은 범위) */
+#define DSL_MPF(p)          ((uint16_t)(p) + (0 * sizeof(char[(((p) >= 1) && ((p) <= 63)) ? 1 : -1])))
 #define DSL_MM_IDLE         MAN_K_IDLE
 #define DSL_MM_JOG          MAN_K_JOG
 /* 조건 칸은 첫 낱말을 붙여 "키, 입력 조건" 둘로 펼친다 */
@@ -441,13 +440,13 @@ typedef unsigned long long dsl_cond_t;
 #define DSL_MBELT_CCW(cw, ccw)  DSL_MWSET((ccw) + DSL_BELT_OK(ccw), (cw) & ~(uint32_t)(ccw))
 #define DSL_MBELT_OFF(cw, ccw)  DSL_MWSET(0UL, (cw) | (ccw))
 #define DSL_MROW_(...)      DSL_MROW(__VA_ARGS__)
-#define DSL_MROW(ids, kind, key, c, w)                                                                \
-    { (uint16_t)(ids), (uint16_t)((uint16_t)(kind) | ((uint16_t)(key) << 8)) + DSL_NOX(DSL_COND_ON(w) & DSL_COND_OFF(w)), \
+#define DSL_MROW(pf, kind, key, c, w)                                                                 \
+    { DSL_MPF(pf), (uint16_t)((uint16_t)(kind) | ((uint16_t)(key) << 8)) + DSL_NOX(DSL_COND_ON(w) & DSL_COND_OFF(w)), \
       DSL_COND_ON(c), DSL_COND_OFF(c), DSL_COND_ON(w), DSL_COND_OFF(w) },
-#define MAN(ids, mode, cond, ...)   DSL_MROW_(ids, DSL_MM_##mode, DSL_MC_##cond, DSL_MW(__VA_ARGS__))
-#define MAN_ELSE(ids, mode, ...)    DSL_MROW_(ids, DSL_MM_##mode | MAN_F_ELSE, 0, NO_IN, DSL_MW(__VA_ARGS__))
-#define MAN_FB_SW(ids, pin)  { (uint16_t)(ids), MAN_K_FB_SW, 0UL, 0UL, (uint32_t)(pin) + DSL_ID_OK(pin), 0UL },
-#define MAN_OBS_B(ids, pin)  { (uint16_t)(ids), MAN_K_OBS_B, 0UL, 0UL, (uint32_t)(pin) + DSL_ID_OK(pin), 0UL },
+#define MAN(pf, mode, cond, ...)    DSL_MROW_(pf, DSL_MM_##mode, DSL_MC_##cond, DSL_MW(__VA_ARGS__))
+#define MAN_ELSE(pf, mode, ...)     DSL_MROW_(pf, DSL_MM_##mode | MAN_F_ELSE, 0, NO_IN, DSL_MW(__VA_ARGS__))
+#define MAN_FB_SW(pf, pin)   { DSL_MPF(pf), MAN_K_FB_SW, 0UL, 0UL, (uint32_t)(pin) + DSL_ID_OK(pin), 0UL },
+#define MAN_OBS_B(pf, pin)   { DSL_MPF(pf), MAN_K_OBS_B, 0UL, 0UL, (uint32_t)(pin) + DSL_ID_OK(pin), 0UL },
 
 /* ---- 태그 표 ---- */
 #define TAG_TABLE_BEGIN(name)  const tag_rule_t name[] = {

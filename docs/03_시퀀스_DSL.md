@@ -598,22 +598,26 @@ v0.51.1·v0.51.2 에서 더한 때:
 
 ```c
 MANUAL_BEGIN( site_manual_rows )
-    /* 호기,         모드, 조건,                                출력 */
-    MAN( ID(4, 5),   IDLE, IN( ON(IN_EXT_7), OFF(IN_EXT_1) ),  BELT( 1, CW ) )
-    MAN( ID(4, 5),   IDLE, IN( ON(IN_EXT_8), OFF(IN_EXT_2) ),  BELT( 1, CCW ) )
-    MAN_ELSE( ID(4, 5), IDLE,                                   BELT( 1, OFF ) )
-    MAN( ID(10, 25), IDLE, IN( ON(IN_IF_1) ),                  ON( OUT_IF_2 ) )    /* 그 출력만 켠다 */
-    MAN_ELSE( ID(10, 25), IDLE,                                 BELT( 1, OFF ), OFF( OUT_IF_1, OUT_IF_2 ) )
-    MAN( ID(63),     JOG,  KEY( UP ),                          BELT( 1, CW ) )
-    MAN_ELSE( ID(63), JOG,                                      BELT( 1, OFF ) )
-    MAN_OBS_B( ID(10, 25), IN_EXT_6 )      /* 매 틱 agv_drive.obs_b_ext = 입력 */
-    MAN_FB_SW( ID(63), IN_EXT_7 )          /* 수동 방향 전환 스위치 입력. 맞는 줄이 없으면 IN_IF_5 */
+    /* 프로파일,       모드, 조건,                                출력 */
+    MAN( PF_BELT,      IDLE, IN( ON(IN_EXT_7), OFF(IN_EXT_1) ),  BELT( 1, CW ) )
+    MAN( PF_BELT,      IDLE, IN( ON(IN_EXT_8), OFF(IN_EXT_2) ),  BELT( 1, CCW ) )
+    MAN_ELSE( PF_BELT, IDLE,                                     BELT( 1, OFF ) )
+    MAN( PF_LIFT,      IDLE, IN( ON(IN_IF_1) ),                  ON( OUT_IF_2 ) )    /* 그 출력만 켠다 */
+    MAN_ELSE( PF_LIFT, IDLE,                                     BELT( 1, OFF ), OFF( OUT_IF_1, OUT_IF_2 ) )
+    MAN( PF_BOX_A,     JOG,  KEY( UP ),                          BELT( 1, CW ) )
+    MAN_ELSE( PF_BOX_A, JOG,                                     BELT( 1, OFF ) )
+    MAN( PF_BOX_B,     JOG,  KEY( UP ),                          BELT( 1, CW ) )     /* 같은 동작: 사슬을 한 벌 더 */
+    MAN_ELSE( PF_BOX_B, JOG,                                     BELT( 1, OFF ) )
+    MAN_OBS_B( PF_LIFT, IN_EXT_6 )         /* 매 틱 agv_drive.obs_b_ext = 입력 */
+    MAN_FB_SW( PF_BOX_A, IN_EXT_7 )        /* 수동 방향 전환 스위치 입력. 맞는 줄이 없으면 IN_IF_5 */
+    MAN_FB_SW( PF_BOX_B, IN_EXT_7 )
 MANUAL_END
 ```
 
-- 한 사슬 = `MAN` 줄 여럿 + 끝의 `MAN_ELSE` 한 줄. 위에서부터 호기·모드·조건이 맞는 첫 `MAN` 줄의 출력만 쓰고, 맞는 줄이 없으면 `MAN_ELSE` 줄을 쓴다. 쓰지 않은 출력은 그대로 둔다(한 가지에서 출력 하나만 켜는 레거시 가지가 그대로 옮겨진다). 모든 사슬은 `MAN_ELSE` 로 닫는다(할 일이 없으면 `NO_OUT`). 안 닫으면 다음 사슬이 건너뛰어지고(앞 사슬에서 맞은 줄이 있으면 다음 `MAN_ELSE` 까지 아무 줄도 쓰지 않는다) 컴파일로 못 잡는다. 한 호기에 사슬이 여럿이어도 된다(벨트 셋을 따로 도는 차종).
+- 줄의 열쇠는 프로파일 하나다. 지금 프로파일(`seq_profile()`, 프로파일 표에서 차종·호기로 고른 행)과 같은 줄만 맞고, 프로파일이 없으면(0) 아무 줄도 안 맞는다. 범위로 묶이지 않는 호기들도 프로파일 표에서 한 프로파일로 모으면 된다. 여러 프로파일이 같은 동작이면 사슬(`MAN` 줄과 `MAN_ELSE`)을 프로파일마다 통째로 한 벌씩 적는다. 런 프로세스가 없는 호기도 수동 조작 표를 쓰려면 프로파일 행이 있어야 한다. 프로파일은 부팅·파라미터 초기화 때 고르므로 호기·차종을 바꾸면 수동 조작 표도 태그·시퀀스와 같이 그때 바뀐다. v0.53.x 까지는 줄마다 호기 범위 `ID( 처음, 끝 )` 이었고 매 틱 `P_AGV_ID` 를 봤다.
+- 한 사슬 = `MAN` 줄 여럿 + 끝의 `MAN_ELSE` 한 줄. 위에서부터 프로파일·모드·조건이 맞는 첫 `MAN` 줄의 출력만 쓰고, 맞는 줄이 없으면 `MAN_ELSE` 줄을 쓴다. 쓰지 않은 출력은 그대로 둔다(한 가지에서 출력 하나만 켜는 레거시 가지가 그대로 옮겨진다). 모든 사슬은 `MAN_ELSE` 로 닫는다(할 일이 없으면 `NO_OUT`). 안 닫으면 다음 사슬이 건너뛰어지고(앞 사슬에서 맞은 줄이 있으면 다음 `MAN_ELSE` 까지 아무 줄도 쓰지 않는다) 컴파일로 못 잡는다. 한 프로파일에 사슬이 여럿이어도 된다(벨트 셋을 따로 도는 차종).
 - 출력은 맞은 틱마다 쓴다. `IDLE` 줄은 시퀀스 중에는 쓰지 않지만 병렬 동작(ACT)이 쓰는 출력은 피하지 않는다: 같은 출력을 ACT 가 쓰면 대기 중 매 틱 표가 덮는다. 같은 출력을 ACT 와 `IDLE` 줄에 같이 두지 않는다.
-- 호기 `ID( n )`·`ID( 처음, 끝 )`(0\~255). 모드 `IDLE` = 자동 화면에서 대기(`run_is_idle()`, 준비 아님, STOP 아님), `JOG` = 조그 화면이고 STOP 아님.
+- 프로파일은 사이트 프로파일 상수 그대로(1\~63, 압축 태그 표의 프로파일 칸과 같은 범위). 0·범위 밖은 컴파일 오류. 모드 `IDLE` = 자동 화면에서 대기(`run_is_idle()`, 준비 아님, STOP 아님), `JOG` = 조그 화면이고 STOP 아님.
 - 조건 `IN( ON(…), OFF(…) )`(3.3절과 같다), `KEY( UP )`(지금 눌린 키, 소비하지 않음), `NO_IN`(늘 참).
 - 출력 `ON( … )`·`OFF( … )`·`BELT( n, CW | CCW | OFF )`, 여럿이면 모두. `BELT` 는 3.5절 `BELTn_CW`·`BELTn_CCW` 마스크로 그 방향 마스크를 켜고 그 벨트의 나머지 출력을 끈다(`BELT_ON` 스텝과 같은 값). 한 출력을 켜면서 끄면 컴파일 오류.
 - 넘기기: `manual_bind( 표, 줄 수, 프로파일 표, 행 수 )`, `site_manual()` 에서 `manual_tick()`. 줄 하나 10워드(C28x).
