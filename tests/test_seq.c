@@ -359,11 +359,30 @@ SEQ_BEGIN( s_obs_auto )
     END_STOP
 SEQ_END
 
+/* 32비트 칸의 상위 워드(입력·출력 ID 16 이상, 압축 표의 칸 7·9·11)를 쓰는 스텝 */
+SEQ_BEGIN( s_high )
+    WAIT( IN( ON(IN_IF_1), OFF(IN_IF_2) ) )
+    OUT_ON( OUT_IF_1, OUT_LAMP_G )
+    SELECT_BEGIN
+        WHEN( IN( ANY_ON(IN_IF_3, IN_IF_4), OFF(IN_IF_5) ), L_A )
+        WHEN( IN( ON(SEN_A) ), L_B )
+    SELECT_END_TO( 50, L_C )
+    L( L_A )
+    OUT_OFF( OUT_LAMP_G )
+    OUT_ON( OUT_BUZZER )
+    END_STOP
+    L( L_B )
+    OUT_PULSE( OUT_IF_2, 1, 1, 2 )
+    END_STOP
+    L( L_C )
+    END_ERROR( 123 )
+SEQ_END
+
 enum {
     S_BRANCH = SEQ_SITE_BASE, S_UNMATCHED, S_TIMING, S_ACS, S_DRIVE, S_BUDGET, S_OUTS, S_FLICKER,
     S_ANY, S_HANDSHAKE, S_WAIT_OUT, S_CALL, S_BAD_LABEL, S_ACT_START, S_PROF, S_NO_TABLE,
     S_XWHEN, S_XWAIT, S_ANY2, S_DPARAM, S_TPARAM, S_NOWAIT, S_MOVE, S_ALIGN, S_MOVE_TAPE,
-    S_BELTS, S_BELT_OFF, S_BELT_END, S_BELT_MANY, S_OBS_AUTO
+    S_BELTS, S_BELT_OFF, S_BELT_END, S_BELT_MANY, S_OBS_AUTO, S_HIGH
 };
 
 SEQ_MAP_BEGIN( site_seqs )
@@ -398,6 +417,7 @@ SEQ_MAP_BEGIN( site_seqs )
     SEQ_MAP( 0, S_BELT_END, s_belt_end )
     SEQ_MAP( 0, S_BELT_MANY, s_belt_many )
     SEQ_MAP( 0, S_OBS_AUTO, s_obs_auto )
+    SEQ_MAP( 0, S_HIGH, s_high )
 SEQ_MAP_END
 
 ACT_MAP_BEGIN( site_acts )
@@ -419,6 +439,34 @@ PROFILE_TABLE_END
 #define NPROFS (sizeof(site_profiles) / sizeof(site_profiles[0]))
 
 static const seq_site_t s_site_ok = { site_seqs, NSEQS, site_acts, NACTS, s_calls, 1, site_profiles, NPROFS };
+
+/* 사용자 함수가 같은 ACT 슬롯을 다시 시작하고 "다음"(1)을 돌려준다(74차 검토). 다음 스텝은 새 표의 1 번이다 */
+enum { ACT_R1 = 1, ACT_R2 };
+static int restart_fn(seq_ctx_t *c)
+{
+    (void)c;
+    act_abort_all();
+    (void)act_start(ACT_R2);
+    return 1;
+}
+static const seq_call_fn s_rcalls[] = { restart_fn };
+ACT_BEGIN( a_r1 )
+    OUT_ON( O_A )
+    CALL( 0 )
+    OUT_ON( O_B )            /* 옛 표의 2 번: 여기로 가면 안 된다 */
+    DELAY( 2 )
+ACT_END
+ACT_BEGIN( a_r2 )
+    OUT_ON( O_C )
+    OUT_ON( OUT_EXT_4 )
+    DELAY( 3 )
+    OUT_OFF( OUT_EXT_4 )
+ACT_END
+ACT_MAP_BEGIN( r_acts )
+    ACT_MAP( 0, ACT_R1, a_r1 )
+    ACT_MAP( 0, ACT_R2, a_r2 )
+ACT_MAP_END
+static const seq_site_t s_site_r = { 0, 0, r_acts, 2, s_rcalls, 1, site_profiles, NPROFS };
 
 /* ---- 압축 표(v0.56.0): 같은 시험을 압축 표로 한 번 더 돈다. 꼴은 agv/seq.h seq_packed_t ---- */
 static int          s_packed_mode;
@@ -1185,6 +1233,28 @@ static void run_all(void)
     assert(fake_tx_count == 1 && fake_tx[0][6] == 'L' && fake_tx[0][7] == '1' && fake_tx[0][8] == '2' && fake_tx[0][9] == '3');
     D.turn_pulses = 0;
     acs_reset();
+
+    /* 32비트 칸의 상위 워드: 입력 IF_1~5(ID 27~31), 출력 IF_1·램프·부저(ID 16 이상) */
+    start(S_HIGH);
+    seq_run();
+    assert(seq_is_active() && fake_out == 0);
+    fake_in = BIT(IN_IF_1) | BIT(IN_IF_2);               /* 끔 조건이 상위 워드 */
+    seq_run();
+    assert(fake_out == 0);
+    fake_in = BIT(IN_IF_1);
+    seq_run();
+    assert(fake_out == (BIT(OUT_IF_1) | BIT(OUT_LAMP_G)));
+    fake_in = BIT(IN_IF_4) | BIT(IN_IF_5);               /* 하나라도 켬(IF_3·4) + 끔(IF_5): 아직 거짓 */
+    seq_run();
+    assert(seq_is_active() && fake_out == (BIT(OUT_IF_1) | BIT(OUT_LAMP_G)));
+    fake_in = BIT(IN_IF_4);
+    seq_run();
+    assert(!seq_is_active() && fake_out == (BIT(OUT_IF_1) | BIT(OUT_BUZZER)));
+    if (s_packed_mode) {                                 /* 압축 표에 칸 7·9·11(상위 워드)이 실제로 있다 */
+        uint16_t k, at = s_pseqs[NSEQS - 1u].off, m = 0;
+        for (k = 0; k < s_pseqs[NSEQS - 1u].n; k++) { m |= s_pw[at]; at = (uint16_t)(at + SEQ_PK_LEN(s_pw[at])); }
+        assert((m & (1u << 7)) && (m & (1u << 9)) && (m & (1u << 11)));
+    }
 }
 
 /* 펼친 표와 압축 표를 같은 난수 입력으로 돌려 틱마다 견준다(점프·WHEN 묶음·타임아웃·CALL·ACT·벨트 포함) */
@@ -1209,8 +1279,10 @@ static long lockstep(int packed)
     for (t = 0; t < LS_TICKS; t++) {
         uint32_t rec[5];
         rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5;
-        if ((rng & 7u) == 0u) { fake_in = ((rng >> 3) & 0x3FFu) | (((rng >> 20) & 1u) ? BIT(IN_START_SW) : 0u); }
-        if (!seq_is_active() && (((rng >> 8) & 15u) == 0u)) { seq_request((uint16_t)(S_BRANCH + ((rng >> 12) % (S_OBS_AUTO - S_BRANCH + 1)))); }
+        if ((rng & 7u) == 0u) {
+            fake_in = ((rng >> 3) & 0x3FFu) | (((rng >> 20) & 1u) ? BIT(IN_START_SW) : 0u) | (((rng >> 21) & 31u) << IN_IF_1);
+        }
+        if (!seq_is_active() && (((rng >> 8) & 15u) == 0u)) { seq_request((uint16_t)(S_BRANCH + ((rng >> 12) % (S_HIGH - S_BRANCH + 1)))); }
         if (((rng >> 16) & 63u) == 0u) { D.move_on = MOVE_DONE; }
         if (((rng >> 22) & 255u) == 0u) { D.action_err = 0; D.stop_err = 0; D.system_err = 0; }
         if (((rng >> 24) & 31u) == 0u) { (void)act_start((uint16_t)(ACT_PULSE + ((rng >> 26) % 3u))); }
@@ -1239,10 +1311,44 @@ static long lockstep(int packed)
     return busy;
 }
 
+/* 사용자 함수 안에서 같은 ACT 슬롯 다시 시작: 두 표로 돌려 틱마다 견준다 */
+static void lockstep_restart(int packed, uint32_t rec[200][2])
+{
+    uint16_t t;
+    s_packed_mode = packed;
+    fake_reset();
+    memset(&D, 0, sizeof(D));
+    assert(bind(&s_site_r) == 0);
+    act_abort_all();
+    for (t = 0; t < 200u; t++) {
+        if (!act_is_busy(ACT_R1) && !act_is_busy(ACT_R2) && ((t % 7u) == 0u)) {
+            fake_out = 0;
+            (void)act_start(ACT_R1);
+        }
+        act_run();
+        rec[t][0] = fake_out;
+        rec[t][1] = (uint32_t)(act_is_busy(ACT_R1) | (act_is_busy(ACT_R2) << 1));
+    }
+    act_abort_all();
+}
+
 int main(void)
 {
+    static uint32_t rr[2][200][2];
     long busy;
+    uint16_t t;
 
+    lockstep_restart(0, rr[0]);
+    lockstep_restart(1, rr[1]);
+    assert((rr[0][0][0] == BIT(OUT_EXT_4)) && (rr[0][0][1] == 2u));   /* "다음" = 새 표의 1 번(EXT_4). 옛 표 2 번(O_B) 아님 */
+    for (t = 0; t < 200u; t++) {
+        if ((rr[0][t][0] != rr[1][t][0]) || (rr[0][t][1] != rr[1][t][1])) {
+            printf("  ACT 다시 시작: 틱 %u 다름 out %08lx/%08lx busy %lu/%lu\n", (unsigned)t, (unsigned long)rr[0][t][0],
+                   (unsigned long)rr[1][t][0], (unsigned long)rr[0][t][1], (unsigned long)rr[1][t][1]);
+            assert(0);
+        }
+    }
+    puts("  사용자 함수 안 ACT 다시 시작: 펼친 표·압축 표 같음");
     busy = lockstep(0);
     (void)lockstep(1);
     printf("  펼친 표·압축 표 틱마다 같음(%u 틱, 시퀀스 도는 틱 %ld)\n", LS_TICKS, busy);

@@ -726,21 +726,21 @@ static void runner_scan(seq_runner_t *r)
 
     while (r->active && (budget > 0)) {
         const seq_step_t *s;
-        uint16_t result, next;
+        uint16_t result;
 
         if (r->c.step >= r->nsteps) {       /* 마지막 스텝을 지나면 끝 */
             runner_end(r);
             return;
         }
         s = step_read(r->t.tbl, r->c.step, (PK != 0) ? r->t.pk.at : 0u);
-        next = (PK != 0) ? step_next_at(r->t.pk.at) : 0u;    /* 압축 표: 다음 스텝 머리(평가가 점프하기 전에 둔다) */
         if (s->kind == SK_LABEL) {          /* 라벨은 실행 시간이 없다 */
-            enter_step(r, (uint16_t)(r->c.step + 1), next);
+            enter_step(r, (uint16_t)(r->c.step + 1), step_next_at((PK != 0) ? r->t.pk.at : 0u));
             continue;
         }
         result = eval_step(r, s);
         if (result == R_WAIT) { return; }
-        if (result == R_NEXT) { enter_step(r, (uint16_t)(r->c.step + 1), next); }
+        /* 다음 스텝 머리는 평가 뒤에 구한다: 사용자 함수가 이 러너를 다시 시작했으면 새 표의 0 번이 지금 스텝이다 */
+        if (result == R_NEXT) { enter_step(r, (uint16_t)(r->c.step + 1), step_next_at((PK != 0) ? r->t.pk.at : 0u)); }
         budget--;
     }
 }
