@@ -1,5 +1,16 @@
 # 변경 이력
 
+## v0.55.0 (2026-11-15, lib 배포 묶음)
+
+**앱은 이 버전부터 소스 대신 배포 묶음(`dist-vX.Y.Z`)을 `core/` 에 통째로 둔다.**
+
+- 배포 묶음: 고아 브랜치 `dist` 와 태그 `dist-vX.Y.Z`. `VERSION`(버전·소스 커밋·cl2000 버전), `MANIFEST.sha256`(글 파일은 줄 끝 LF 로 맞춘 SHA-256, `.lib` 은 그대로), `README.md`(받는 법, 폴더 통째 교체), `include/agv/*.h`, `lib/core.lib`(`AGV_DEV_TESTS` 1), `lib/core_dev0.lib`(`AGV_DEV_TESTS` 0), `cmd/*.cmd`, `tools/build_site.ps1`. 소스·시험·문서는 없다.
+- `tools/make_dist.ps1 -Ver vX.Y.Z [-NoPush]`: 작업 트리 깨끗, HEAD = 태그, `agv/version.h` 이름 = 태그, 호스트 시험 통과를 확인하고 `build_target.ps1 -CoreOnly` 로 lib 둘을 만들어 묶음을 조립한다. git worktree 로 `dist` 에 커밋하고(master 작업 트리는 그대로, 경로를 지정해 add) 태그 `dist-vX.Y.Z` 를 달아 브랜치와 태그를 푸시한다. 태그가 이미 있으면 푸시만 한다.
+- `tools/build_site.ps1`: 묶음 안에서 소스 없이 사이트 파일을 컴파일하고 lib 과 링크한다. 컴파일 옵션·링크 순서·`cmd/F2808_app_direct.cmd`·`-SiteDef` 는 `build_target.ps1 -CoreLib` 의 사이트 부분과 같다. `site.h` 의 `AGV_DEV_TESTS 0` 이면 `lib/core_dev0.lib`. cl2000 버전이 `VERSION` 과 다르면 경고한다.
+- 버전 맞춤 검사: 새 `include/agv/version.h` 에 버전 이름 `AGV_CORE_VER`(한 곳)를 두고 `site_register` 를 `site_register_v0_55_0` 꼴로 바꾼다. `agv/types.h`·`agv/site.h` 가 포함하므로 사이트 코드는 그대로다. lib 과 다른 버전의 헤더로 컴파일한 사이트는 링크에서 unresolved 로 실패한다.
+- 동작은 v0.54.0 과 같다. 비트 확인: 조향 해시 `0aa33808`·`bf0ff2d4`, 곡선 해시 `97564846`·`bbbaafc2` 그대로. 타입 143 개발 이미지를 소스에서 빌드하면 로드 섹션(hex2000 출력)이 v0.54.0 이미지와 바이트까지 같다. 플래시 남은 워드 0x42B, RAML1 0xBB, CCS 주소 그대로.
+- 문서: README 빌드·릴리스, docs/01 10절 저장소와 릴리스.
+
 ## v0.54.0 (2026-11-15, 수동 조작 표 열쇠를 프로파일로, 태그 회전 각 5도 단위)
 
 **표 문법이 바뀌었다. 앱의 수동 조작 표와 압축 태그 표를 고쳐야 한다.**

@@ -1,6 +1,7 @@
 /* types.h - 코어 공용 타입. C2000: int 16비트, long 32비트 */
 #ifndef AGV_TYPES_H
 #define AGV_TYPES_H
+#include "agv/version.h"
 #ifdef AGV_HOST_BUILD
 #include <stdint.h>
 #else

@@ -8,6 +8,7 @@
  */
 #ifndef AGV_SITE_H
 #define AGV_SITE_H
+#include "agv/version.h"    /* site_register 는 버전 붙은 이름이다(링크로 버전 맞춤 검사) */
 void site_register(void);
 void site_manual(void);
 #endif

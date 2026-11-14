@@ -28,16 +28,16 @@ hal/f2808/     레지스터 HAL. TI 헤더 없이 빌드된다
 hal/host/      PC 시험용 HAL
 examples/      빈 사이트. 코어 단독 링크 검증용
 cmd/           OTA 앱 영역 링커 명령 파일 (브릿지 레포 예제 기준, 실기 검증 전 잠정)
-tools/         build_target.ps1 (cl2000 컴파일·링크). 라이브러리 빌드, 표 출력 도구는 예정
+tools/         build_target.ps1 (소스에서 cl2000 컴파일·링크), build_site.ps1 (배포 묶음 안에서 사이트 + lib 링크), make_dist.ps1 (배포 묶음)
 tests/         test_dsl.c (표 매크로 검사), 호스트 단위 시험. 실행: powershell -File tests/run_host.ps1
 docs/          설계 문서
 ```
 
 ## 빌드
 
-- 타깃: TI C2000 CGT 18.12.2.LTS, `powershell -File tools/build_target.ps1 -Site <사이트 폴더>`. `cl2000 -v28 -ml -mt --c99 --float_support=softlib` 로 컴파일하고 `cmd/F2808_app_direct.cmd` 로 링크한다. `ar2000 -r` 라이브러리 빌드는 예정.
+- 타깃: TI C2000 CGT 18.12.2.LTS, `powershell -File tools/build_target.ps1 -Site <사이트 폴더>`. `cl2000 -v28 -ml -mt --c99 --float_support=softlib` 로 컴파일하고 `cmd/F2808_app_direct.cmd` 로 링크한다. `-CoreLib` 이면 코어를 `ar2000` lib 으로 묶어 링크한다.
 - 호스트: gcc, `-DAGV_HOST_BUILD`, `tests/` 실행.
-- 릴리스: `agv_dcu_core-<ver>.zip` = `lib/` + `include/` + `cmd/` + `CHANGELOG.md`. 앱 저장소는 이 zip을 `third_party/agv_dcu_core/<ver>/`에 풀어 커밋한다.
+- 릴리스(v0.55.0\~): 버전 태그 `vX.Y.Z` 뒤 `powershell -ExecutionPolicy Bypass -File tools/make_dist.ps1 -Ver vX.Y.Z`. 소스 없는 배포 묶음(`VERSION`·`MANIFEST.sha256`·`README.md`·`include/agv/`·`lib/core.lib`·`lib/core_dev0.lib`·`cmd/`·`tools/build_site.ps1`)을 고아 브랜치 `dist` 에 커밋하고 태그 `dist-vX.Y.Z` 를 단다. 앱은 이 묶음을 `core/` 에 통째로 둔다(`tools/dist_README.md`). 버전 이름은 `include/agv/version.h` 한 곳이고, 다른 버전의 헤더로 컴파일한 사이트는 링크에서 실패한다.
 
 ## 공개 헤더 안정성
 
