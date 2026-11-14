@@ -1,6 +1,6 @@
 /*
  * tag_dsl.h - 태그 표 동작 이름. seq_dsl.h 를 포함한다. 태그 표 파일에서만 포함한다.
- * 시퀀스 표와 뜻이 같은 동작은 같은 이름이다(ACS·ACS_SEND·STATION_RESET·OBS_ON·OBS_OFF·CALL·ACT_START).
+ * 시퀀스 표와 뜻이 같은 동작은 같은 이름이다(ACS·ACS_SEND·STATION_RESET·OBS_ON·OBS_OFF·OBS_OFF_AUTO·CALL·ACT_START).
  * 이 헤더 뒤로 그 이름은 시퀀스 스텝이 아니라 태그 동작 칸을 만든다. 차가 움직이는 동작은 AGV_ 로 시작한다.
  *
  * 방식 옵션은 인자 맨 뒤에 적는다. 안 적으면 일반 동작이다. 정해 두지 않은 옵션·조합은 컴파일 오류다.
@@ -24,7 +24,9 @@
  *   AGV_BRANCH( LEFT | RIGHT )                  분기
  *   ACT_START( ACT ID )                        주행을 멈추지 않고 병렬 동작
  *   OBS_ON / OBS_OFF                             장애물 센서 사용
- *   CALL( 인덱스 )                               사용자 함수
+ *   OBS_OFF_AUTO                                 장애물 센서 끔. 일을 통째로 지우면(STOP·비상 정지·오류·ACS 작업 취소·수동 전환) 다시 켠다.
+ *                                    다시 출발·방향 전환에서는 켜지 않는다. OBS_OFF 는 그때도 꺼진 채다(레거시)
+ *   CALL( 인덱스 )                              사용자 함수
  *   ACS_SEND( 종류, 번호 )            보고, 번호 0~255  (2칸)
  *   ACS_SEND( 종류, STATION(k) )      보고, 번호 = 스테이션 큐[k] (레거시 ACS_Station_Call_Num[k])  (2칸)
  *   ACS_SEND( 종류, AGV_ID_MINUS(n) ) 보고, 번호 = 호기 번호 - n, n 0~255  (2칸)
@@ -48,6 +50,7 @@
 #undef STATION_RESET
 #undef OBS_ON
 #undef OBS_OFF
+#undef OBS_OFF_AUTO
 #undef CALL
 #undef ACT_START
 
@@ -128,6 +131,7 @@ enum { AGV_STOP = TA_STOP };
 #define ACT_START(id)            (TA_ACT | (id))
 #define OBS_ON                   (TA_OBS | 1)
 #define OBS_OFF                  (TA_OBS | 0)
+#define OBS_OFF_AUTO             (TA_OBS | 2)
 #define CALL(idx)                (TA_CALL | (idx))
 
 #define DSL_INFO_STANDBY_RESET   (DSL_INFO_STANDBY | TA_ACS_STANDBY_RESET)

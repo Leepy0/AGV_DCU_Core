@@ -79,7 +79,7 @@ extern void (*tagact_trace)(uint16_t code, uint16_t next);   /* 호스트 시험
 #define TA_ACS_STATION    0x0400   /* 번호 = 스테이션 큐[다음 칸 >> TA_ACS_K_SHIFT] + 인자(부호 8비트 -128~127) */
 #define TA_ACS_TAG_NUM    0x0600   /* 번호 = 지금 태그 번호 + 인자(부호 8비트) */
 #define TA_ACS_K_SHIFT    11       /* 다음 칸 b11~15: 스테이션 큐 칸 k */
-#define TA_OBS            0x0B00   /* 인자: on/off */
+#define TA_OBS            0x0B00   /* 인자 = D.obs_use: 1 켬, 0 끔, 2 끔(자동 복귀) */
 #define TA_STATE          0x0C00   /* 인자: 사이트 상태 id (다음 칸: 값) */
 #define TA_STATION_RESET  0x0E00
 #define TA_ACT            0x0F00   /* 인자: ACT ID. 주행을 멈추지 않고 병렬 동작 시작 */

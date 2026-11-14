@@ -732,6 +732,20 @@ int main(int argc, char **argv)
     (void)stop_run();
     assert(stop_reason() == STOP_REASON_BEFORE_TURN);
 
+    /* OBS_OFF_AUTO(2) 는 끈 것과 같다: 장애물 센서로 서지 않는다(1 이면 선다) */
+    for (int v = 1; v <= 2; v++) {
+        setup(2000);
+        D.obs_use = (int16_t)v;
+        D.stop_pulses = 1200;
+        D.flag_stopping = 1;
+        stop_request_tag();
+        for (int i = 0; i < 40; i++) { tick(0); }
+        D.obs_f = 1;
+        tick(0);
+        assert((stop_reason() == STOP_REASON_OBSTACLE) == (v == 1));
+        D.obs_f = 0;
+    }
+
     /* 일시정지 중 정지 거리 보존: 장애물로 끊겨도 남은 거리와 바닥을 이어 쓴다 */
     setup(2000);
     D.obs_use = 1;

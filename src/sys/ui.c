@@ -418,6 +418,7 @@ static void key_mode(void)
             D.ui_mode = UI_JOG;
             D.control = RUN_JOG;
             run_tape_req_clear();             /* 수동으로 옮기면 보류 중인 교차선 요청은 뜻을 잃는다 */
+            if (D.obs_use == 2) { D.obs_use = 1; }   /* OBS_OFF_AUTO 도 run_seq_init 처럼 다시 켠다 */
             if (!D.system_err && !D.stop_err && !D.estop) { D.flag_jog_on = 1; }
         }
     }

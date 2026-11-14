@@ -354,12 +354,16 @@ SEQ_END
 ACT_BEGIN( a_bad_move_tape )
     AGV_MOVE( 10, TAPE )
 ACT_END
+SEQ_BEGIN( s_obs_auto )
+    OBS_OFF_AUTO
+    END_STOP
+SEQ_END
 
 enum {
     S_BRANCH = SEQ_SITE_BASE, S_UNMATCHED, S_TIMING, S_ACS, S_DRIVE, S_BUDGET, S_OUTS, S_FLICKER,
     S_ANY, S_HANDSHAKE, S_WAIT_OUT, S_CALL, S_BAD_LABEL, S_ACT_START, S_PROF, S_NO_TABLE,
     S_XWHEN, S_XWAIT, S_ANY2, S_DPARAM, S_TPARAM, S_NOWAIT, S_MOVE, S_ALIGN, S_MOVE_TAPE,
-    S_BELTS, S_BELT_OFF, S_BELT_END, S_BELT_MANY
+    S_BELTS, S_BELT_OFF, S_BELT_END, S_BELT_MANY, S_OBS_AUTO
 };
 
 SEQ_MAP_BEGIN( site_seqs )
@@ -393,6 +397,7 @@ SEQ_MAP_BEGIN( site_seqs )
     SEQ_MAP( 0, S_BELT_OFF, s_belt_off )
     SEQ_MAP( 0, S_BELT_END, s_belt_end )
     SEQ_MAP( 0, S_BELT_MANY, s_belt_many )
+    SEQ_MAP( 0, S_OBS_AUTO, s_obs_auto )
 SEQ_MAP_END
 
 ACT_MAP_BEGIN( site_acts )
@@ -671,6 +676,13 @@ int main(void)
     seq_run();
     assert(fake_out == BIT(O_B));
     acs_reset();
+
+    /* OBS_OFF_AUTO 스텝: 값 2(끔, 자동 복귀) */
+    start(S_OBS_AUTO);
+    D.obs_use = 1;
+    seq_run();
+    assert(D.obs_use == 2);
+    seq_abort_all();
 
     /* 주행 스텝 */
     start(S_DRIVE);

@@ -248,6 +248,7 @@ void run_seq_init(void)
     seq_init_keep_tape();
     run_tape_req_clear();
     tagact_fs_clear();                  /* 센서 정지 요청도: ACS 작업 취소 뒤 다시 출발해 감지 자리에서 서지 않게 */
+    if (D.obs_use == 2) { D.obs_use = 1; }   /* OBS_OFF_AUTO: 켜 줄 OBS_ON 에 이제 닿지 못한다. OBS_OFF(0) 는 레거시대로 둔다 */
 }
 
 static void tape_clear(void)
@@ -866,7 +867,7 @@ static void drive_pre(void)
     }
     if (tune_active() || tape_busy()) { return; }   /* 튜닝·식별 시험, 시퀀스 이동·교차선 찾기·GD 구간은 속도를 스스로 정한다 */
     start_switch_high();
-    if (D.obs_use) { auto_speed_change(); }
+    if (D.obs_use == 1) { auto_speed_change(); }
 }
 
 /* ---- 교차선 찾아 서기 (DA_Tape_Stop·DA_Tape_Turn) ---- */

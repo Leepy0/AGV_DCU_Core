@@ -183,6 +183,9 @@ static const tag_rule_t s_rules[] = {
     TAG( 51, 0, AGV_STOP( 30, FROM_SENSOR( IN_EXT_4, 10 ) ), AGV_STOP( TAPE ) )   /* 교차선 요청과 같이: 표 오류 */
     TAG( 52, 0, CALL( 2 ) )                                   /* 견줌용 참조(ref_arm) */
     TAG( 53, 0, OBS_OFF, AGV_STOP( 30, FROM_SENSOR( IN_EXT_4, 10 ) ), AGV_FORBACK( TOGGLE ) )   /* 앞 동작은 태그 때 */
+    /* 교차선까지 장애물 센서를 끈다: 자동 복귀(일을 지우면 켬), 레거시(끊겨도 꺼진 채) */
+    TAG( 54, 0, OBS_OFF_AUTO, SEQ_START( TAPE, LOAD ) )
+    TAG( 55, 0, OBS_OFF, SEQ_START( TAPE, LOAD ) )
 };
 
 /* 위 20~23 과 같은 규칙의 압축 표. 앞 줄은 다른 프로파일이라 건너뛴다 */
@@ -3801,6 +3804,115 @@ static void test_gd_stop_switch(void)
     printf("  gd stop switch ok\n");
 }
 
+/* OBS_OFF_AUTO(D.obs_use 2): 일을 통째로 지우면(STOP·오류·ACS 작업 취소·수동 전환) 장애물 센서를 다시 켠다.
+ * 교통 정지 뒤 다시 출발·방향 전환은 그대로(접근 중). OBS_OFF(0) 는 레거시대로 꺼진 채, ACS 리셋은 0 */
+static void obs_auto_up(uint16_t tag)
+{
+    h_drive_up(0);
+    (void)param_set_ram(P_OBS_USE, 11);
+    (void)tagact_run(tag);
+    assert(D.tape_stop_kind == TA_STOP_KIND_TAPE);
+}
+
+static void stop_press(void)
+{
+    raw_a(RAW_STOP, 0);
+    ticks(3);
+    raw_a(0, RAW_STOP);
+    ticks(3);
+}
+
+static void test_obs_auto(void)
+{
+    char f[32];
+    int i;
+
+    obs_auto_up(54);                            /* OBS_OFF_AUTO, SEQ_START( TAPE, LOAD ) */
+    assert(D.obs_use == 2);
+    stop_press();
+    assert((D.obs_use == 1) && (D.tape_stop_kind == 0));
+    obs_auto_up(55);                            /* OBS_OFF: STOP 뒤에도 꺼진 채 */
+    assert(D.obs_use == 0);
+    stop_press();
+    assert(D.obs_use == 0);
+
+    /* 교차선을 못 찾아 258: 오류가 일을 지운다. 리셋하고 다시 달리면 켜져 있다 */
+    obs_auto_up(54);
+    for (i = 0; (i < 20000) && !D.system_err; i++) { led_run(0x0180u, 1, 4); }
+    assert((D.system_err == ERR_GUIDE_SENSOR) && (D.obs_use == 1));
+    for (i = 0; (i < 600) && D.flag_run; i++) { led_run(0x0180u, 1, (D.vin_out > 0) ? 1 : 0); }
+    run_reset_request();
+    led_run(0x0180u, 3, 0);
+    press_start();
+    for (i = 0; (i < 20) && !D.flag_run; i++) { guide_led_reply(0x0180u); tick(); }
+    assert(D.flag_run && !D.system_err && (D.obs_use == 1));
+
+    /* 시퀀스 도중 STOP */
+    boot();
+    D.obs_use = 2;                              /* 시퀀스의 OBS_OFF_AUTO 스텝 뒤 */
+    seq_request(SEQ_LOAD);
+    ticks(2);
+    assert(seq_is_active());
+    stop_press();
+    assert(!seq_is_active() && (D.obs_use == 1));
+
+    /* 교통 정지('W' 'C' 0) 뒤 다시 출발: 요청이 살아 있어 접근을 잇는다. 켜지 않고 장애물로 서지 않는다 */
+    obs_auto_up(54);
+    led_run(0x0180u, 5, 1);
+    stop_request_rapid(STOP_REASON_COMMAND);
+    D.flag_stopping = 1;
+    for (i = 0; (i < 400) && D.flag_run; i++) { led_run(0x0180u, 1, (D.vin_out > 0) ? 1 : 0); }
+    led_run(0x0180u, 5, 0);
+    assert(!D.flag_run && (D.tape_stop_kind == TA_STOP_KIND_TAPE) && (D.obs_use == 2));
+    run_wait_start();
+    for (i = 0; (i < 20) && !D.flag_run; i++) { guide_led_reply(0x0180u); tick(); }
+    host.bus_in[BUS_IN_B] &= (uint16_t)~0x02u;  /* 앞 장애물 감지 */
+    led_run(0x0180u, 5, 1);
+    assert(D.flag_run && D.obs_f && !D.obs_on && (stop_reason() != STOP_REASON_OBSTACLE));
+    assert((D.tape_stop_kind == TA_STOP_KIND_TAPE) && (D.obs_use == 2));
+    (void)tagact_run(125);                      /* OBS_ON: 켜면 서는 입력이다 */
+    assert(D.obs_use == 1);
+    led_run(0x0180u, 2, 1);
+    assert(stop_reason() == STOP_REASON_OBSTACLE);
+    host.bus_in[BUS_IN_B] |= 0x02u;
+
+    /* ACS 작업 취소('C' 3) */
+    obs_auto_up(54);
+    sprintf(f, "C1B%02dC00%c", AGV_ID, '3');
+    send_frame(f, 0);
+    tick();
+    assert(D.obs_use == 1);
+    /* ACS 리셋('W' 'C' 2): 레거시대로 0 */
+    obs_auto_up(54);
+    sprintf(f, "W1B%02dC00000000000", AGV_ID);
+    f[8] = '2';
+    send_frame(f, 0);
+    tick();
+    assert(D.obs_use == 0);
+
+    /* 방향 전환은 그대로, 수동 전환은 켠다 */
+    boot();
+    D.obs_use = 2;
+    run_dir_change(2);
+    ticks(5);
+    assert(D.backward && (D.obs_use == 2));
+    key(KEY_MODE);
+    assert((D.ui_mode == UI_JOG) && (D.obs_use == 1));
+
+    /* 2 이면 auto_speed_change 가 돌지 않는다 */
+    for (i = 1; i <= 2; i++) {
+        boot();
+        (void)param_set_ram(P_AUTO_DRIVE_MODE, 1);
+        drive_up();
+        assert(P.low_speed < P.target_speed);
+        D.obs_use = (int16_t)i;
+        D.straight_cnt = P.straight_len;
+        run_scan(2);
+        assert((D.speed_cmd == P.target_speed) == (i == 1));
+    }
+    printf("  obs off auto ok\n");
+}
+
 /* 맡은 채 다시 걸 때 목표를 60 mm 넘게 지났으면(끊긴 정지가 목표 뒤에 섰다) 달리는 중에는 오류 없이 제어 정지, 선 뒤 258, 회전 없음 */
 static void test_gd_resume_overrun(void)
 {
@@ -4315,6 +4427,7 @@ int main(void)
     test_gd_release();
     test_gd_held_tag();
     test_gd_stop_switch();
+    test_obs_auto();
     test_gd_resume_overrun();
     test_tape_lane_range();
     test_from_sensor();

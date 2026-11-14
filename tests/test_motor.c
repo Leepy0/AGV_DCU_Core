@@ -430,6 +430,14 @@ int main(void)
     motor_drive_step();
     assert(D.step == DRIVE_OBS_STOP && D.obs_on == 1 && D.action_err == ERR_OBSTACLE);
     assert(stop_reason() == STOP_REASON_OBSTACLE);
+    /* OBS_OFF_AUTO(2) 는 끈 것과 같다 */
+    setup();
+    D.step = DRIVE_CRUISE;
+    D.obs_use = 2;
+    D.vin_out = D.last_input = P.low_speed;
+    D.obs_f = 1;
+    motor_drive_step();
+    assert(D.step != DRIVE_OBS_STOP && D.obs_on == 0 && D.action_err == 0 && stop_reason() != STOP_REASON_OBSTACLE);
     /* 전진 중 후방 센서는 무시 */
     setup();
     D.obs_use = 1;

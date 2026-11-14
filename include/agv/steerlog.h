@@ -64,7 +64,7 @@ typedef struct {             /* 출발 때 설정 */
     int16_t  auto_drive_mode, auto_slow_mode;
     int16_t  tag_pulse2, tag_pulse10;   /* P.tag_pulse[2](자동 감속 곡선 거리), P.tag_pulse[10] */
     int16_t  los, drs, acc, dcc;        /* P.low_speed, P.target_speed rpm, P.acc, P.dcc */
-    int16_t  obs_use;        /* D.obs_use. 0 이면 auto_speed_change 가 안 돈다 */
+    int16_t  obs_use;        /* D.obs_use. 1 일 때만 auto_speed_change 가 돈다(2 = OBS_OFF_AUTO 끔) */
     int16_t  speed_high;     /* param P_SPEED_HIGH(m/min). 자동 감속은 이 값 범위에서만 */
     int16_t  tst;            /* TST(P_DEV_TEST) 임시 시험 번호. 뒤에 1워드 채움(int32 정렬): cfg 14워드 */
 } steerlog_cfg_t;

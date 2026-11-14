@@ -401,6 +401,7 @@ typedef unsigned long long dsl_cond_t;
 /* ---- 공통 ---- */
 #define OBS_ON                 DSL_STEP(SK_OBS, SEQ_NO_LABEL, 1, 0, 0, 0, 0, 0)
 #define OBS_OFF                DSL_STEP(SK_OBS, SEQ_NO_LABEL, 0, 0, 0, 0, 0, 0)
+#define OBS_OFF_AUTO           DSL_STEP(SK_OBS, SEQ_NO_LABEL, 2, 0, 0, 0, 0, 0)   /* 끔. 시퀀스가 통째로 지워지면 다시 켠다(D.obs_use) */
 #define SET_STATE(id, val)     DSL_STEP(SK_SET_STATE, SEQ_NO_LABEL, id, val, 0, 0, 0, 0)
 #define WAIT_STATE(id, val)    DSL_STEP(SK_WAIT_STATE, SEQ_NO_LABEL, id, val, 0, 0, 0, 0)
 #define ACT_START(id)          DSL_STEP(SK_ACT_START, SEQ_NO_LABEL, id, 0, 0, 0, 0, 0)

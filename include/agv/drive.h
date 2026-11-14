@@ -158,7 +158,7 @@ typedef struct {
     int16_t cross_ack_error;                /* DA_ACS_Cross_In/Out_Ack_Error 의 OR */
     int16_t pause_stop;              /* Flag_Pause_Stop */
     int16_t ext_sen_on;              /* Ext_Sen_OnOff */
-    int16_t obs_use;                 /* Flag_OBS_Sen_Use */
+    int16_t obs_use;                 /* Flag_OBS_Sen_Use. 1 일 때만 쓴다. 0 끔, 2 끔(OBS_OFF_AUTO: run_seq_init·수동 전환이 1 로) */
     int16_t obs_on;                  /* nOBS_On_Flag */
     int16_t guide_realign_cnt;       /* gGuideRealign_Cnt */
     int16_t risk_stop;               /* nGuide_Risk_Stop_Flag */

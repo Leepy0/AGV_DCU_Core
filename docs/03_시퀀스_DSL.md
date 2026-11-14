@@ -63,6 +63,7 @@
 | | `AGV_TURN( CW, 90, fb, auto, 0, NOWAIT )` | 회전 요청, 다음 스캔에 다음 스텝. 회전 중 뒤 스텝이 돈다 | `AGV_Turn_Action(…); step++;` |
 | | `AGV_MOVE( mm )` | 그 자리에서 mm 앞에 위치 정지하고 설 때까지 대기(3.2.1) | 없음(v0.41.0) |
 | | `OBS_ON` / `OBS_OFF` | 장애물 센서 사용 | `Flag_OBS_Sen_Use` |
+| | `OBS_OFF_AUTO` | 장애물 센서 끔(`D.obs_use` 2). 일을 통째로 지우면(STOP·비상 정지·오류·ACS 작업 취소·수동 전환, `run_seq_init`) 다시 켠다. 다시 출발·방향 전환에서는 켜지 않는다. 태그 표도 같은 이름 | 없음. `OBS_OFF` 는 그때도 꺼진 채(레거시) |
 | 상태 | `SET_STATE( id, 값 )` / `WAIT_STATE( id, 값 )` | 사이트 상태 변수 | `Gate1_Out`, `FL_check` 류 |
 | 병렬 | `ACT_START( id )` / `WAIT_ACT( id )` | 4절 | |
 | 확장 | `CALL( 인덱스 )` | 사용자 정의 함수 | 표로 안 되는 블록 |

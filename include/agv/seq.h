@@ -56,7 +56,7 @@ typedef enum {
     SK_SPEED,             /* arg0 = SEQ_SPD_* 또는 m/min. ACT 금지 */
     SK_FORBACK,           /* arg0 = dir_t. ACT 금지 */
     SK_TURN,              /* arg0 = turn_dir_t, arg1 = 각도, timeout = fb | auto<<4 | obs<<8. 완료 대기 포함. ACT 금지 */
-    SK_OBS,               /* arg0 = on/off */
+    SK_OBS,               /* arg0 = D.obs_use: 1 켬, 0 끔, 2 끔(자동 복귀) */
     SK_SET_STATE,         /* 사이트 상태 arg0 = arg1 */
     SK_WAIT_STATE,        /* 사이트 상태 arg0 == arg1 대기 */
     SK_GOTO,              /* target 으로 */
