@@ -443,16 +443,16 @@ static void act_exec(uint16_t code, uint16_t next, int16_t cls)
     case TA_SPEED:          tagact_speed(arg); break;
     case TA_FORBACK:        tagact_forback((dir_t)arg); break;
     case TA_TURN:
-        tagact_turn_next((turn_dir_t)(arg & 3u), (uint16_t)((arg >> 2) * 90u), next);
+        tagact_turn_next((turn_dir_t)(arg & 3u), TA_TURN_DEG(arg), next);
         break;
     case TA_TURN_ALIGN:
-        tagact_turn_align((turn_dir_t)(arg & 3u), (uint16_t)((arg >> 2) * 90u), next);
+        tagact_turn_align((turn_dir_t)(arg & 3u), TA_TURN_DEG(arg), next);
         break;
     case TA_TURN_TAPE:      /* 일반 회전을 걸지 않는 상황(거리 정지 진행 중 포함)에만 요청하지 않는다. 명령 정지 감속 중에는
                              * 건다(레거시는 SL 정지를 다시 걸고 돈다). 다른 정지 중의 보류는 run.c(tape_stop) */
-        if (!turn_refused() && tape_req_allowed() && !turn_noop((uint16_t)((arg >> 2) * 90u), (uint16_t)(next & 0xFu))) {
+        if (!turn_refused() && tape_req_allowed() && !turn_noop(TA_TURN_DEG(arg), (uint16_t)(next & 0xFu))) {
             D.tape_turn_dir = (int16_t)(arg & 3u);
-            D.tape_turn_deg = (int16_t)((arg >> 2) * 90u);
+            D.tape_turn_deg = (int16_t)TA_TURN_DEG(arg);
             D.tape_turn_next = next;
         }
         break;

@@ -186,6 +186,10 @@ static const tag_rule_t s_rules[] = {
     /* 교차선까지 장애물 센서를 끈다: 자동 복귀(일을 지우면 켬), 레거시(끊겨도 꺼진 채) */
     TAG( 54, 0, OBS_OFF_AUTO, SEQ_START( TAPE, LOAD ) )
     TAG( 55, 0, OBS_OFF, SEQ_START( TAPE, LOAD ) )
+    /* 회전 각 5도 단위(v0.54.0): 일반·정렬·교차선 */
+    TAG( 56, 0, AGV_TURN( CW, 50, 0, 0 ) )
+    TAG( 57, 0, AGV_TURN( CCW, 315, 0, 0, 0, ALIGN ) )
+    TAG( 58, 0, AGV_TURN( CW, 50, 0, 1, 0, TAPE ) )
 };
 
 /* 위 20~23 과 같은 규칙의 압축 표. 앞 줄은 다른 프로파일이라 건너뛴다 */
@@ -3337,6 +3341,23 @@ static void test_turn_deg_pulses(void)
     printf("  turn_90 712 10도: %d 펄스(예전 %d)\n", D.turn_pulses, (712 / 90) * 10);
     assert(D.turn_pulses == 79);
     D.turn_pulses = 0; D.tape_align = 0;
+
+    /* 태그 표 각도 칸(5도 단위, v0.54.0)이 실행까지 간다: 일반 50도, 정렬 315도, 교차선 50도 */
+    P.turn_90 = 712;
+    tag_turn_start(56);
+    assert(D.turn_pulses == 396);                                    /* (712 x 50 + 45) / 90 */
+    boot();
+    (void)param_set(P_TURN_FORBACK, 10);
+    P.turn_90 = 712;
+    tag_turn_start(57);
+    assert((D.turn_pulses == 2492) && (D.tape_total_pulse == 2492));   /* (712 x 315 + 45) / 90 */
+    boot();
+    (void)param_set(P_TURN_FORBACK, 10);
+    drive_up();
+    run_scan(20);
+    (void)tagact_run(58);
+    assert((D.tape_turn_dir == TURN_CW) && (D.tape_turn_deg == 50));
+    boot();
     P.turn_90 = keep;
     printf("  turn deg pulses ok\n");
 }

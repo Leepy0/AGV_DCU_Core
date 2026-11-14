@@ -2304,7 +2304,7 @@ static float s_xs_tv, s_xs_tpos;
 #define XS_PASS_MM 15.0f                   /* want 7: 센서가 교차선 가운데 이만큼 앞에서 명령 정지 → 감속하며 교차선을 지나친다 */
 #ifndef XS_OLD
 static const tag_rule_t s_xs_tags[] = {          /* 900 + method */
-    { 902, 0, 0, 0, 0, { TA_TURN_TAPE | TURN_CW | (1u << 2), 0, 0, 0 } },   /* AGV_TURN( CW, 90, 0, 0, 0, TAPE ) */
+    { 902, 0, 0, 0, 0, { TA_TURN_TAPE | TURN_CW | (18u << 2), 0, 0, 0 } },  /* AGV_TURN( CW, 90, 0, 0, 0, TAPE ), 5도 단위 */
     { 903, 0, 0, 0, 0, { TA_TAPE_STOP | 1u, 0, 0, 0 } },                     /* SEQ_START( TAPE, 시퀀스 1 ) */
     { 904, 0, 0, 0, 0, { TA_TAPE_STOP_GD, 0, 0, 0 } },                       /* AGV_STOP( TAPE_GD ) */
 };

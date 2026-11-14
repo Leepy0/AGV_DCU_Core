@@ -66,8 +66,9 @@ extern void (*tagact_trace)(uint16_t code, uint16_t next);   /* 호스트 시험
 #define TA_STOP_AUTOSTART 0x0200   /* 인자: 초, 0 = P_AUTO_START_SEC */
 #define TA_SPEED          0x0300   /* 인자: 0 HIGH, 1 LOW, 2 LLOW, 3 MIN, 10~ m/min */
 #define TA_FORBACK        0x0400   /* 인자: dir_t */
-#define TA_TURN           0x0500   /* 인자: dir | (deg/90)<<2 ; 다음 칸: fb | auto<<4 | obs<<8 (0~7) | m/min<<11 (0 = 자동) */
+#define TA_TURN           0x0500   /* 인자: dir | (deg/5)<<2 ; 다음 칸: fb | auto<<4 | obs<<8 (0~7) | m/min<<11 (0 = 자동) */
 #define TA_TURN_SPEED_SHIFT 11
+#define TA_TURN_DEG(arg)  ((uint16_t)((((arg) >> 2) & 0x3Fu) * 5u))   /* 각도 칸: 5도 단위 0~315(v0.54.0, 예전 90 단위) */
 #define TA_BRANCH         0x0600   /* 인자: branch_dir_t */
 #define TA_SEQ            0x0700   /* 인자: seq_id_t (정지 + 시퀀스 요청) */
 #define TA_TAPE_STOP      0x0800   /* 인자: seq_id_t(0 = 시퀀스 없음). 교차선을 찾아 본 자리에서 정지 뒤 시퀀스 */

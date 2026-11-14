@@ -262,8 +262,11 @@ TAG_TABLE_BEGIN( site_tags )
 #ifdef NEG_TAG_FB16
     TAG( 39, 1, AGV_TURN( CW, 90, 16, 1 ) )                        /* 회전 뒤 방향 0~15 */
 #endif
-#ifdef NEG_TAG_DEG45
-    TAG( 39, 1, AGV_TURN( CW, 45, 0, 1 ) )                         /* 태그 각도는 90 의 배수 */
+#ifdef NEG_TAG_DEG47
+    TAG( 39, 1, AGV_TURN( CW, 47, 0, 1 ) )                         /* 태그 각도는 5 의 배수 */
+#endif
+#ifdef NEG_TAG_DEG320
+    TAG( 39, 1, AGV_TURN( CW, 320, 0, 1 ) )                        /* 0~315(칸 6비트) */
 #endif
 #ifdef NEG_STOP_NEG
     TAG( 39, 1, AGV_STOP( -1 ) )                                   /* cm 0~255 */
@@ -309,6 +312,15 @@ TAG_TABLE_BEGIN( site_tags )
 #endif
 TAG_TABLE_END
 
+/* 회전 각 칸 왕복(5도 단위, v0.54.0): 각 다섯 x 종류 셋(일반·ALIGN·TAPE) */
+TAG_TABLE_BEGIN( s_turn5 )
+    TAG( 1, 1, AGV_TURN( CW, 5, 0, 1 ) )               TAG( 2, 1, AGV_TURN( CW, 5, 0, 1, 0, ALIGN ) )     TAG( 3, 1, AGV_TURN( CW, 5, 0, 1, 0, TAPE ) )
+    TAG( 4, 1, AGV_TURN( CCW, 50, 0, 1 ) )             TAG( 5, 1, AGV_TURN( CCW, 50, 0, 1, 0, ALIGN ) )   TAG( 6, 1, AGV_TURN( CCW, 50, 0, 1, 0, TAPE ) )
+    TAG( 7, 1, AGV_TURN( CW, 90, 0, 1 ) )              TAG( 8, 1, AGV_TURN( CW, 90, 0, 1, 0, ALIGN ) )    TAG( 9, 1, AGV_TURN( CW, 90, 0, 1, 0, TAPE ) )
+    TAG( 10, 1, AGV_TURN( CCW, 180, 0, 1 ) )           TAG( 11, 1, AGV_TURN( CCW, 180, 0, 1, 0, ALIGN ) ) TAG( 12, 1, AGV_TURN( CCW, 180, 0, 1, 0, TAPE ) )
+    TAG( 13, 1, AGV_TURN( CW, 315, 0, 1 ) )            TAG( 14, 1, AGV_TURN( CW, 315, 0, 1, 0, ALIGN ) )  TAG( 15, 1, AGV_TURN( CW, 315, 0, 1, 0, TAPE ) )
+TAG_TABLE_END
+
 #ifdef __TMS320C28XX__
 /* 타깃 크기 확인: 스텝 12워드, 태그 규칙 18워드(v0.53.0 범위 끝 칸) */
 typedef char step_size_is_12[(sizeof(seq_step_t) == 12) ? 1 : -1];
@@ -345,7 +357,7 @@ int main(void)
 
     assert(site_seqs[0].nsteps == sizeof(demo_steps) / sizeof(seq_step_t));
     assert(site_acts[0].id == ACT_DEMO && site_acts[0].nsteps == 1);
-    assert(site_tags[1].act[0] == (TA_TURN | TURN_CW | (1 << 2)) && site_tags[1].act[1] == (1 << 4));
+    assert(site_tags[1].act[0] == (TA_TURN | TURN_CW | (18 << 2)) && site_tags[1].act[1] == (1 << 4));   /* 90 / 5 */
     assert((site_tags[2].cond & 0xFF) == TAG_COND_STATION_RANGE && (site_tags[2].cond >> 8) == 1);
     assert(site_tags[2].cond_a == 101 && site_tags[2].cond_b == 116);
     assert(site_tags[2].act[0] == (TA_ACT | ACT_DEMO));
@@ -384,7 +396,7 @@ int main(void)
     assert(site_tags[4].in_on == 0x3UL && site_tags[4].in_off == 0x3UL);
     assert(site_tags[5].cond == XC_ID && site_tags[5].cond_a == 5 && site_tags[5].cond_b == 5);
     assert(site_tags[5].cond2 == (XC_STATION | (1 << 8)) && site_tags[5].cond2_a == 42 && site_tags[5].cond2_b == 42);
-    assert(site_tags[5].act[0] == (TA_TURN | TURN_CCW | (1 << 2)) && site_tags[5].act[1] == (1 << 4) && site_tags[5].in_on == 0);
+    assert(site_tags[5].act[0] == (TA_TURN | TURN_CCW | (18 << 2)) && site_tags[5].act[1] == (1 << 4) && site_tags[5].in_on == 0);
     assert(site_tags[6].cond == XC_ID && site_tags[6].cond2 == 0 && site_tags[6].in_off == 0x1UL);
     assert(site_tags[7].cond == (XC_TAG_NUM | (1 << 8)) && site_tags[7].cond_a == 20 && site_tags[7].cond_b == 0);
     assert(site_tags[8].cond == XC_STATION_MOD && site_tags[8].cond_a == 10 && site_tags[8].cond_b == 3);
@@ -417,11 +429,23 @@ int main(void)
     assert(site_tags[29].cond == (XC_TAG_NUM | (1 << 8)) && site_tags[29].cond_a == 0 && site_tags[29].cond_b == 4
            && site_tags[29].act[0] == (TA_ACS_NUM | 127));
     assert(site_tags[21].tag_hi == 0 && site_tags[0].tag_hi == 0);
-    assert(site_tags[17].act[0] == (TA_TURN_ALIGN | TURN_CCW | (2 << 2))
+    assert(site_tags[17].act[0] == (TA_TURN_ALIGN | TURN_CCW | (36 << 2))                               /* 180 / 5 */
            && site_tags[17].act[1] == (DIR_TOGGLE | (1 << 4) | (1 << 8) | (15 << TA_TURN_SPEED_SHIFT)));
-    assert(site_tags[18].act[0] == (TA_TURN | TURN_CW | (1 << 2)) && site_tags[18].act[1] == 0xF910u);   /* 31 << 11 | OBS 1 << 8 | 1 << 4 */
-    assert(site_tags[19].act[0] == (TA_TURN_TAPE | TURN_CW | (1 << 2)) && site_tags[19].act[1] == (1 << 4)
+    assert(site_tags[18].act[0] == (TA_TURN | TURN_CW | (18 << 2)) && site_tags[18].act[1] == 0xF910u);  /* 31 << 11 | OBS 1 << 8 | 1 << 4 */
+    assert(site_tags[19].act[0] == (TA_TURN_TAPE | TURN_CW | (18 << 2)) && site_tags[19].act[1] == (1 << 4)
            && site_tags[19].act[2] == (TA_TAPE_STOP | SEQ_LOAD) && site_tags[19].act[3] == (TA_SPEED | 20));
+    {   /* 회전 각 칸 왕복: 각 5·50·90·180·315 x 종류 셋, 방향·각도·종류가 되돌아온다 */
+        static const uint16_t deg[5] = { 5, 50, 90, 180, 315 };
+        static const uint16_t kind[3] = { TA_TURN, TA_TURN_ALIGN, TA_TURN_TAPE };
+        int i, k;
+        for (i = 0; i < 5; i++) {
+            for (k = 0; k < 3; k++) {
+                uint16_t a = s_turn5[i * 3 + k].act[0];
+                assert((uint16_t)(TA_KIND(a) << 8) == kind[k] && (TA_ARG(a) & 3u) == ((i & 1) ? TURN_CCW : TURN_CW));
+                assert(TA_TURN_DEG(TA_ARG(a)) == deg[i] && s_turn5[i * 3 + k].act[1] == (1 << 4));
+            }
+        }
+    }
     assert(site_tags[20].act[0] == (TA_STOP_CM | 255) && site_tags[20].act[1] == TA_STOP_CM
            && site_tags[20].act[2] == TA_TAPE_STOP && site_tags[20].act[3] == TA_TAPE_STOP_GD);
     assert(site_tags[21].act[0] == (TA_STOP_CM | 12) && site_tags[21].act[1] == (TA_SEQ | SEQ_LOAD)

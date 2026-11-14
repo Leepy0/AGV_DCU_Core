@@ -102,13 +102,13 @@ enum { AGV_STOP = TA_STOP };
 #define DSL_TOPT_O_TAPE          0
 #define DSL_TOPT_O_OBS           1
 #define DSL_TKIND(k)             (((k) == 0) ? TA_TURN : (((k) == 1) ? TA_TURN_ALIGN : TA_TURN_TAPE))
-/* 각도는 90 의 배수(칸은 90 단위 6비트), 회전 뒤 방향·자동 출발은 0~15(넘치면 옆 칸으로 샌다) */
+/* 각도는 5 의 배수 0~315(칸은 5도 단위 6비트, v0.54.0. 예전 90 단위), 회전 뒤 방향·자동 출발은 0~15(넘치면 옆 칸으로 샌다) */
 #define DSL_TURN_OK(deg, fb, au, v, k1, k2, o) \
     (0 * sizeof(char[(((v) >= 0) && ((v) < 32) && (((k1) == 0) || ((k2) == 0)) && ((o) <= 1) \
-                      && ((deg) >= 0) && (((deg) % 90) == 0) && (((deg) / 90) < 64) \
+                      && ((deg) >= 0) && (((deg) % 5) == 0) && (((deg) / 5) < 64) \
                       && ((fb) >= 0) && ((fb) < 16) && ((au) >= 0) && ((au) < 16)) ? 1 : -1]))
 #define DSL_TURN_W(d, deg, fb, au, v, k1, k2, o) \
-    (DSL_TKIND((k1) + (k2)) | (d) | (((deg) / 90) << 2)), \
+    (DSL_TKIND((k1) + (k2)) | (d) | (((deg) / 5) << 2)), \
     ((fb) | ((au) << 4) | ((o) << 8) | (((uint16_t)(v) << TA_TURN_SPEED_SHIFT) + DSL_TURN_OK(deg, fb, au, v, k1, k2, o)))
 #define DSL_TURN3(d, deg, fb, au)              DSL_TURN_W(d, deg, fb, au, 0, 0, 0, 0)
 #define DSL_TURN4(d, deg, fb, au, v)           DSL_TURN_W(d, deg, fb, au, v, 0, 0, 0)
