@@ -135,7 +135,7 @@
 
 /* ---- 소비자: 기록 DSL_ANDREC( k1, a1, b1, k2, a2, b2, c, m2 ) -> 칸 ---- */
 /* 시퀀스 WHEN·WAIT·WAIT_TO: xk, xa, xb, c, any2. 상태는 하나(둘째가 있으면 오류). 상태가 있으면 둘째 ANY 는 못 쓴다
- * (같은 스텝 칸 구성을 쓰는 압축 표 생성기·편집기와 맞춘 제한이다) */
+ * (해석기는 둘 다 받지만 표 편집기 사양과 같게 막는다: 상태 낱말과 둘째 ANY 는 한 조건에 함께 쓰지 않는다) */
 #define DSL_SQ_DSL_ANDREC(k1, a1, b1, k2, a2, b2, c, m2) k1, a1, b1, c, ((m2) + (0 * sizeof(char[((k2) == 0) ? 1 : -1])) \
                                                           + (0 * sizeof(char[(((k1) == 0) || ((m2) == 0)) ? 1 : -1])))
 /* 태그: k1 a1 b1 k2 a2 b2 on off. 상태는 둘까지, 둘째 ANY 는 오류(태그 규칙에 둘 칸이 없다) */
@@ -151,8 +151,8 @@
     ((k1) ? (a1) : 0) + (0 * sizeof(char[(((k1) == 0) || ((k1) == XC_KEY)) ? 1 : -1])), \
     ((c) + (0 * sizeof(char[((m2) == 0) ? 1 : -1])))
 #define DSL_MC_AND(...)   DSL_CAT(DSL_MN_, AND(__VA_ARGS__))
-/* 점멸: k1 이 0 이면 예전 칸 배치, 아니면 상태 인자가 arg0·arg1 을 쓰므로 주기·출력을 out 에 넣는다(seq.c flk_cells).
- * 상태 둘째·둘째 ANY 는 오류. 값: 주기 칸, arg1 칸, xc 칸, 입력 조건, 출력 칸(o 는 DSL_FLKOUT 을 쓴다) */
+/* 점멸(seq_dsl.h DSL_FLK_0): k1 이 0 이면 예전 칸 배치, 아니면 상태 인자가 arg0·arg1 을 쓰므로 주기·출력을 out 에 넣는다(seq.c flk_cells).
+ * 둘째 상태·둘째 ANY 는 오류. 값: xk, xa, xb, 입력 조건, 검사값(0) */
 #define DSL_FK_DSL_ANDREC(k1, a1, b1, k2, a2, b2, c, m2) \
     k1, a1, b1, c, ((m2) + (0 * sizeof(char[((k2) == 0) ? 1 : -1])) + (0 * sizeof(char[((m2) == 0) ? 1 : -1])))
 

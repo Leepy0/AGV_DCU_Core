@@ -384,7 +384,7 @@ typedef unsigned long long dsl_cond_t;
  * 상수식이라 정적 표에 쓴다(ACS( 종류, STATION(k) ) 의 출처 자리에서는 이름으로 붙는다).
  * 스테이션 큐 식: STATION(k) ± n, MOD( STATION(k), m ), n + MOD( STATION(k), m ) 를 C 연산 그대로 쓴다(IF_TAG_NUM, 태그 ACS_SEND).
  * 값 = 표식 2^29 + k << 16 + m << 21 + n. n 은 -2048~2047(넘으면 비트 12~15 가 서서 컴파일 오류), m 1~255.
- * 시퀀스 ACS_SEND 는 STATION(k) 만 받는다(± n, MOD 는 컴파일 오류) */
+ * 시퀀스 ACS·ACS_SEND 는 STATION(k) 와 STATION(0) + 1 만 받는다(다른 ± n, MOD 는 컴파일 오류) */
 #define DSL_STATION_MARK       0x20000000L
 /* STATION( k ) = 큐 값(위). STATION( k, lo, hi ) = AND 안의 상태 항목(스테이션[k] 가 lo 이상 hi 이하, 예전 X_STATION) */
 #define STATION(...)           DSL_CAT(DSL_STATION_, DSL_NARG(__VA_ARGS__))(__VA_ARGS__)

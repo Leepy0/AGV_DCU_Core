@@ -557,7 +557,7 @@ TAG_IF( 7,  PF_TUB,  IF_PARAM( TFB_1, 2 ),  AGV_STOP, AGV_WAIT_START )          
 - 조건이 거짓이면 다음 규칙을 본다. "조건이 아니면 아무것도 안 함"이면 뒤에 액션 없는 규칙 `TAG( n, PF, 0 )`을 둔다.
 - 태그 번호 조건은 읽은 태그 번호로 평가한다(범위 규칙이면 lo 가 아니라 읽은 번호).
 - `X_KEY`·`X_CROSS_*`도 쓸 수 있다. 표로 안 되는 동작은 `CALL`.
-- 스테이션 큐 식의 값: 표식 2^29 + k << 16 + m << 21 + n(C 연산 그대로). n 은 -2048\~2047(넘으면 비트 12\~15 가 서서 컴파일 오류), m 1\~255, `MOD` 안은 `STATION(k)` 하나만. 시퀀스 `ACS_SEND` 는 `STATION(k)` 만 받는다(± n, `MOD` 는 컴파일 오류). 코어 조건 하나: 태그 == (m ? 큐[k] % m : 큐[k]) + n(`XC_TAG_NUM`). 예전 `IF_TAG_MINUS_EQ_STATION( k, n )`·`IF_TAG_EQ_STATION( k )` 는 v0.53.0 에서 뺐다(`IF_TAG_NUM( STATION(k) + n )`·`IF_TAG_NUM( STATION(k) )`).
+- 스테이션 큐 식의 값: 표식 2^29 + k << 16 + m << 21 + n(C 연산 그대로). n 은 -2048\~2047(넘으면 비트 12\~15 가 서서 컴파일 오류), m 1\~255, `MOD` 안은 `STATION(k)` 하나만. 시퀀스 `ACS`·`ACS_SEND` 는 `STATION(k)` 와 `STATION(0) + 1` 만 받는다(다른 ± n, `MOD` 는 컴파일 오류, v0.58.0 전에는 `STATION(k)` 만). 코어 조건 하나: 태그 == (m ? 큐[k] % m : 큐[k]) + n(`XC_TAG_NUM`). 예전 `IF_TAG_MINUS_EQ_STATION( k, n )`·`IF_TAG_EQ_STATION( k )` 는 v0.53.0 에서 뺐다(`IF_TAG_NUM( STATION(k) + n )`·`IF_TAG_NUM( STATION(k) )`).
 - 범위 규칙(v0.53.0): `TAG_RANGE( lo, hi, 프로파일, 동작… )`, `TAG_RANGE_IF( lo, hi, 프로파일, 조건, 동작… )`. 한 규칙이 태그 lo\~hi(lo <= hi <= 1023)를 받는다. 고르는 순서는 다른 규칙과 같다(표에 적힌 순서, 먼저 맞는 하나). 예(레거시의 "큐[0] == 태그 - 100 이면 서고 도착 보고, 아니면 보고만" 꼴):
 
 ```c
