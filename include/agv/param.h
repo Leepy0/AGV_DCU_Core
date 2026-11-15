@@ -67,17 +67,21 @@ enum {
 #define QUIRK_STEER_STEP     0x100u /* b8 예전 조향을 되살린다: 속도 연동 불감대(안쪽 0, 선형 구간 안에서만 폭을 뺀다), 편차 문턱에서 Kp 가 한 번에 최대가 된다 */
 #define QUIRK_SRC_A         0x200u /* b9 위치 소스를 예전 'a' 로 되살린다(기본 'h' 전용). 조향 비트와 별개 */
 #define QUIRK_LOW_ACC       0x400u /* b10 저속 구간(llow 아래) 가속 한계를 예전 5 로 둔다(기본 max(5, ACC/2)) */
-/* b11(2048) 안 씀. 예전 저속(정지 바닥 350, 멈춤 판단 10틱, SPN 4 미만 6, 회전 끝·회전 감속 DCC/4, 예전 저크·정지 끝 계단)은
- * 버렸다(v0.40.0·v0.46.0). 값이 남아 있어도 무시한다. 한계 4095 는 그대로(저장값이 한계 위반이 되지 않게) */
+/* b11(2048): 예전 저속(정지 바닥 350, 멈춤 판단 10틱, SPN 4 미만 6, 회전 끝·회전 감속 DCC/4, 예전 저크·정지 끝 계단)은
+ * 버렸다(v0.40.0·v0.46.0). v0.58.0 부터 이 자리를 QUIRK_TAG_WHILE_STOPPING 이 쓴다(아래). 한계 4095 는 그대로(저장값이 한계 위반이 되지 않게) */
 #define QUIRK_STEER_LEGACY  (QUIRK_STEER_20MS | QUIRK_DAMP_SIGN_OLD | QUIRK_STEER_STEP)
-/* b12(4096) 정지 진행 중 읽은 태그의 정지·회전 동작을 건너뛰지 않고 예전처럼 모두 실행한다(v0.58.0, tagact.c).
- * 안 쓰는 비트를 되살리지 않고 새 비트를 쓴 것은 옛 저장값에 남은 값이 이 동작을 켜지 않게 하려는 것이다. 한계가 8191 이 됐다 */
-#define QUIRK_TAG_WHILE_STOPPING 0x1000u
+/* b11(2048) 정지 진행 중 읽은 태그의 정지·회전 동작을 건너뛰지 않고 예전처럼 모두 실행한다(v0.58.0, tagact.c. 뜻은 결정 대기).
+ * LG 는 EEPROM 체크섬 안이라 한계를 올리면 v0.57 이하로 되돌려 구울 때 한계 위반으로 파라미터 전체가 지워진다. 그래서 한계는 4095 그대로 두고
+ * 오래전에 버린 b11 을 다시 쓴다. 옛 저장값(2048)이 이 동작을 켜지 않게 첫 부팅에 한 번 b11 을 지운다(PARAM_QUIRK_MIGRATE_ADDR) */
+#define QUIRK_TAG_WHILE_STOPPING 0x800u
 /* b7(128) 안 씀. 일시정지(장애물·PAUSE) 감속 중 원인이 풀려도 0 까지 서고 다시 출발하던 예전 동작은 버렸다(v0.49.0).
  * 값이 남아 있어도 무시한다 */
 
 /* 주소 50 표시. 31·38·39·44 의 1회 초기화가 끝나면 쓴다 */
 #define PARAM_MIGRATE_ADDR 50
+/* 주소 83 표시(체크섬 밖, KEEP 빈 칸). LG b11 을 한 번 지웠다는 표시(v0.58.0). 이 표시가 있으면 b11 은 지금 뜻이다 */
+#define PARAM_QUIRK_MIGRATE_ADDR 83
+#define PARAM_QUIRK_MIGRATE_MARK 0x5B11u
 #define PARAM_MIGRATE_MARK 0xA55Au
 #define PARAM_GUIDE_DIST_ADDR    115
 #define PARAM_GUIDE_DIST_DEFAULT 250

@@ -58,7 +58,7 @@ static struct {
     int16_t start_prev, stop_prev, fb_prev;
     int16_t stop_hold;        /* Cnt_Stop_SW_1sec_Flag */
     int16_t bumper_run, bumper_cnt;
-    int16_t standby, standby_auto, standby_cnt;
+    int16_t standby, standby_auto, standby_cnt, standby_seq;   /* standby_seq: 시퀀스가 낸 대기 보고. 출발하면 정리한다 */
     int16_t status_cnt;
     int16_t bat_low_cnt;
     uint16_t bat_filtered;
@@ -89,7 +89,7 @@ void run_reset(void)
     s_run.fb_prev = 0;
     s_run.stop_hold = 0;
     s_run.bumper_run = s_run.bumper_cnt = 0;
-    s_run.standby = s_run.standby_auto = s_run.standby_cnt = 0;
+    s_run.standby = s_run.standby_auto = s_run.standby_cnt = s_run.standby_seq = 0;
     s_run.status_cnt = 0;
     s_run.bat_low_cnt = 0;
     s_run.bat_filtered = BAT_ADC_INIT;
@@ -170,6 +170,7 @@ void run_encoder(uint16_t wheel, uint32_t period)
 
 static void standby_forget(void)
 {
+    s_run.standby_seq = 0;
     s_run.standby = 0;
     s_run.standby_auto = 0;
     s_run.status_cnt = 0;
@@ -190,7 +191,8 @@ void run_report_stop(void)
 
 void run_standby(int16_t id, int16_t reset)
 {
-    D.wait_start = 0;
+    if (!(reset & RUN_STANDBY_SEQ)) { D.wait_start = 0; }
+    s_run.standby_seq = (int16_t)((reset & RUN_STANDBY_SEQ) ? 1 : 0);
     if (reset & RUN_STANDBY_RESET) { acs_station_reset(); }
     s_run.standby = id;
     if ((id > 0) && (D.turn_pulses == 0) && (D.turn_motion == 0)) {
@@ -291,6 +293,7 @@ static void start_run(void)
     s_curve_cnt = 0;
     D.pause_stop = 0;
     D.cross_in_on = D.cross_out_on = 0;
+    if (s_run.standby_seq) { standby_forget(); }   /* 시퀀스가 낸 대기 보고는 출발하면 끝난다(STB 번호·자동 재전송이 다음 출발을 막지 않게) */
     s_run.standby_auto = 0;
     s_run.standby_cnt = 0;
     if (D.move_on == 0) { seq_init_keep_tape(); }   /* MOVE_MM 출발은 시퀀스를 살려 둔다. 교차선 요청은 출발로 지우지 않는다 */

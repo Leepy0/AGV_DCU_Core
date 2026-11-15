@@ -10,7 +10,7 @@ TAG_TABLE_BEGIN(t_new)
     TAG_IF( 6, ANY_PROFILE, AND( PARAM(TFB_1, 2), CROSS_OUT ),                 AGV_STOP )
     TAG_IF( 7, ANY_PROFILE, AND( ID(1, 9), FORWARD ),                          AGV_STOP )
     TAG_IF( 8, ANY_PROFILE, AND( OFF(SEN_1), ANY(SEN_3, SEN_4), ON(SEN_2), LOW_BATTERY, NOT(CROSS_IN) ), SEQ_START( TAPE, LOAD ) )
-    TAG_IF( 9, ANY_PROFILE, X_BACKWARD,                                        AGV_STOP )
+    TAG_IF( 9, ANY_PROFILE, IF_BACKWARD,                                       AGV_STOP )
     TAG_IF( 10, ANY_PROFILE, IF_X2( X_FORWARD, X_ID(1, 9) ),                   AGV_STOP )
 TAG_TABLE_END
 

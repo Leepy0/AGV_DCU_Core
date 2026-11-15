@@ -464,6 +464,7 @@ static void act_exec(uint16_t code, uint16_t next, int16_t cls)
     case TA_TURN_ALIGN:
         tagact_turn_align((turn_dir_t)(arg & 3u), TA_TURN_DEG(arg), next);
         break;
+    /* TODO(정지 중 태그 무시 결정 뒤): 아래 주석 "명령 정지 감속 중에는 건다"는 v0.58.0 에서 틀렸다(정지가 진행 중이면 tagact_run 이 건너뛴다. 예전 동작 비트면 맞다) */
     case TA_TURN_TAPE:      /* 일반 회전을 걸지 않는 상황(거리 정지 진행 중 포함)에만 요청하지 않는다. 명령 정지 감속 중에는
                              * 건다(레거시는 SL 정지를 다시 걸고 돈다). 다른 정지 중의 보류는 run.c(tape_stop) */
         if (!turn_refused() && tape_req_allowed() && !turn_noop(TA_TURN_DEG(arg), (uint16_t)(next & 0xFu))) {

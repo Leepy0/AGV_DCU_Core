@@ -179,12 +179,26 @@ int main(void)
     assert(param_boot(&fake_store, 1) == 0);
     assert(param_get(P_LEGACY_QUIRKS) == 5);
     assert(param_quirk(QUIRK_CURVE_NOW) == 1 && param_quirk(QUIRK_H_POSITION) == 0);
-    /* 레거시 비트 b0~b12 까지 8191(b11 은 안 쓰지만 저장값이 한계 위반이 되지 않게 둔다, b12 는 정지 중 태그). 8192 는 넘는다 */
-    assert(param_set(P_LEGACY_QUIRKS, 8192) == -1 && param_set(P_LEGACY_QUIRKS, 4095) == 0 && param_quirk(QUIRK_SRC_A) && param_quirk(QUIRK_LOW_ACC)
-           && param_quirk(0x800u) && !param_quirk(QUIRK_TAG_WHILE_STOPPING));
-    assert(param_set(P_LEGACY_QUIRKS, 8191) == 0 && param_quirk(QUIRK_TAG_WHILE_STOPPING));
+    /* 레거시 비트 b0~b11 까지 4095(저장 한계는 v0.57 과 같다: 더 올리면 되돌려 구울 때 한계 위반으로 전체가 지워진다). 4096 은 넘는다 */
+    assert(param_set(P_LEGACY_QUIRKS, 4096) == -1 && param_set(P_LEGACY_QUIRKS, 4095) == 0 && param_quirk(QUIRK_SRC_A) && param_quirk(QUIRK_LOW_ACC)
+           && param_quirk(QUIRK_TAG_WHILE_STOPPING));
+    assert(param_set(P_LEGACY_QUIRKS, 5) == 0 && !param_quirk(QUIRK_TAG_WHILE_STOPPING));
     assert(param_set(P_LEGACY_QUIRKS, QUIRK_STEER_LEGACY | 0x0F) == 0);
     assert(param_get(P_LEGACY_QUIRKS) == 319 && param_quirk(QUIRK_STEER_20MS));
+    assert(param_set(P_LEGACY_QUIRKS, 5) == 0);
+
+    /* v0.58.0 LG b11: 옛 저장값(2048)은 첫 부팅에 한 번 지우고, 표시가 있으면 지금 뜻으로 둔다 */
+    field_image();
+    (void)param_boot(&fake_store, 1);                           /* 31·38·39·44 초기화 + 표시 */
+    assert(fake_ee[PARAM_QUIRK_MIGRATE_ADDR] == PARAM_QUIRK_MIGRATE_MARK);
+    fake_ee[PARAM_QUIRK_MIGRATE_ADDR] = 0xFFFFu;                /* v0.57 에서 올라온 칩: 표시 없음, b11 이 남아 있다 */
+    fake_ee[P_LEGACY_QUIRKS] = 0x0804u;
+    fake_ee[0] = ee_sum();
+    assert(param_boot(&fake_store, 1) == 0);
+    assert(fake_ee[P_LEGACY_QUIRKS] == 0x0004u && param_get(P_LEGACY_QUIRKS) == 4 && !param_quirk(QUIRK_TAG_WHILE_STOPPING));
+    assert(fake_ee[0] == ee_sum() && fake_ee[PARAM_QUIRK_MIGRATE_ADDR] == PARAM_QUIRK_MIGRATE_MARK);
+    assert(param_set(P_LEGACY_QUIRKS, QUIRK_TAG_WHILE_STOPPING) == 0);   /* 표시 뒤 b11 은 사용자가 켠 것이라 부팅이 지우지 않는다 */
+    assert(param_boot(&fake_store, 1) == 0 && param_quirk(QUIRK_TAG_WHILE_STOPPING));
     assert(param_set(P_LEGACY_QUIRKS, 5) == 0);
 
     /* 도중 전원 차단: 어느 쓰기에서 끊겨도 표시가 안 찍히고 다음 부팅에 끝난다 */

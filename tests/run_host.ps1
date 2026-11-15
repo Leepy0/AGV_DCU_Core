@@ -20,14 +20,14 @@ foreach ($n in 'AMP_INPUT', 'NO_DIRECTION', 'PARAM_ZERO', 'MOD_ZERO', 'HIGH_ANY'
 }
 # DSL unification (v0.58.0, tests/dsl): new forms (AND, AGV_SPEED, ACS, WAIT_TO PARAM_TIME, TAG_IF) must give the same bytes as the old forms,
 # and each -DNEG_* case must fail to compile (calling the build twice: with and without the NEG guard)
-foreach ($n in 'and_seq', 'and_tag', 'tagif', 'speed_seq', 'speed_tag', 'acs_seq', 'acs_tag', 'wait_to', 'checks_seq', 'checks_tag', 'mix_seq', 'mix_tag', 'man_and', 'and_neg_seq', 'and_neg_tag', 'and_neg_site') {
+foreach ($n in 'and_seq', 'and_tag', 'tagif', 'speed_seq', 'speed_tag', 'acs_seq', 'acs_tag', 'wait_to', 'checks_seq', 'checks_tag', 'mix_seq', 'mix_tag', 'man_and', 'site_words_seq', 'site_words_tag', 'paren_gcc', 'and_neg_seq', 'and_neg_tag', 'and_neg_site') {
     & cmd /c "gcc -std=c99 -DAGV_HOST_BUILD -Iinclude -Itests/dsl tests/dsl/$n.c -o build/t/dsl_$n.exe 2>nul"
     if ($LASTEXITCODE -ne 0) { Write-Output "BUILD FAIL dsl_$n"; $failed++ }
     else { & "build/t/dsl_$n.exe" | Out-Null; if ($LASTEXITCODE -ne 0) { Write-Output "FAIL dsl_$n"; $failed++ } }
 }
 $dslNeg = [ordered]@{
-    'and_neg_seq' = 'SEQ_2STATE SEQ_STATE_ANY2 ANY3 STATE3 POLARITY ANYDUP UNKNOWN EMPTY AMP SEVEN STATION_ARITY STATION_BAD_K STATE_ANY2B NOT_INPUT NOT_NOT PARAM_MIN_PLACE WAITSTABLE_STATE WAITSTABLE_ANY2 ERRHOLD_STATE FLICKER_ANY2 FLICKER_2STATE FLICKER_PERIOD STATIONK ALL_PARAM_ANDSTATE'
-    'and_neg_tag' = 'TAG_3STATE TAG_ANY2 TAG_CELLS TAG_RANGE_ANY2 TAG_RANGE_CELLS TAG_AUTOSTART'
+    'and_neg_seq' = 'ANY_MERGE1 ANY_MERGE2 ANY_MERGE3 SEQ_2STATE SEQ_STATE_ANY2 ANY3 STATE3 POLARITY ANYDUP UNKNOWN EMPTY AMP SEVEN STATION_ARITY STATION_BAD_K STATE_ANY2B NOT_INPUT NOT_NOT PARAM_MIN_PLACE WAITSTABLE_STATE WAITSTABLE_ANY2 ERRHOLD_STATE FLICKER_ANY2 FLICKER_2STATE FLICKER_PERIOD STATIONK ALL_PARAM_ANDSTATE'
+    'and_neg_tag' = 'TAG_3STATE TAG_ANY2 TAG_CELLS TAG_RANGE_ANY2 TAG_RANGE_CELLS TAG_AUTOSTART TAG_X1 TAG_X2 TAG_RANGE_X1'
     'and_neg_site' = 'SITE_NUM SITE_PAREN SITE_IDENT SITE_ID'
     'checks_seq' = 'WHEN_ANY2 IN_ANY2 IN_ANY2B WAITTO_ANY2 SELTO0 SELTO_BIG TAGNUM_WHEN_IF TAGNUM_WAIT_IF TAGNUM_WAIT_IF_IN_TO TAGNUM_AND HANDSHAKE_UNMATCHED FLICKER_UNMATCHED'
     'checks_tag' = 'AUTOSTART AUTOSTART300 CALL ACT CELLS5 CELLS_TURN CELLS_IF CELLS_RANGE SEQSTEP_OUT SEQSTEP_DELAY SEQSTEP_WAIT SEQSTEP_LABEL SEQSTEP_GOTO ANY2_IN ANY2_IN2 SEQSTEP_OUTIF SEQSTEP_HANDSHAKE SEQSTEP_WHEN AND_ANY2 AND_3STATE'
@@ -36,6 +36,7 @@ $dslNeg = [ordered]@{
     'speed_seq' = '0 3 256 WORD NEG LOWER EMPTY'
     'speed_tag' = '0 3 256 WORD NEG LOWER EMPTY'
     'man_and' = 'MAN_STATE MAN_ANY2'
+    'paren_gcc' = 'ACS_PAREN SPEED_PAREN'
     'wait_to' = 'UNMATCHED BIG NEG STATE_PARAM ANY2_PARAM UNIT PARAM0 FND PLACE PTM_ALONE PCOUNT UNMATCHED_AND'
 }
 foreach ($f in $dslNeg.Keys) {

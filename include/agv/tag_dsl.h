@@ -41,7 +41,7 @@
  *
  * 정지가 진행 중(감속·정지 진행 중, D.flag_stopping)에 읽은 다른 태그의 정지 계열(AGV_STOP·AGV_AUTOSTART·SEQ_START·교차선 정지·센서 정지)과
  * 회전 계열(AGV_TURN)은 모든 태그에서 건너뛴다(v0.58.0, tagact_run). 보고·출력·속도·전후진·ACT·CALL 은 그대로 실행한다.
- * 예전 동작은 P_LEGACY_QUIRKS b12(QUIRK_TAG_WHILE_STOPPING).
+ * 예전 동작은 P_LEGACY_QUIRKS b11(QUIRK_TAG_WHILE_STOPPING).
  * 태그 표 파일은 시퀀스 스텝 이름(WHEN·WAIT·L·GOTO·OUT_ON·DELAY·HANDSHAKE …)을 쓸 수 없다(아래 SEQ_STEP_NOT_ALLOWED_IN_TAG_TABLE 오류).
  */
 #ifndef AGV_TAG_DSL_H
@@ -97,10 +97,7 @@ enum { AGV_STOP = TA_STOP };
 #define DSL_TSPW_LOW             ~, DSL_TSPD_LOW
 #define DSL_TSPW_LLOW            ~, DSL_TSPD_LLOW
 #define DSL_TSPW_MIN             ~, DSL_TSPD_MIN
-#define DSL_TSPVAL(x)            DSL_CAT(DSL_TSPV_, DSL_IS_PAREN(x))(x)
-#define DSL_TSPV_1(x)            ((x) + DSL_MMIN_OK(x))
-#define DSL_TSPV_0(x)            DSL_ARG2(DSL_TSPW_##x, ((x) + DSL_MMIN_OK(x)))
-#define AGV_SPEED(x)             (TA_SPEED | DSL_TSPVAL(x))
+#define AGV_SPEED(x)             (TA_SPEED | DSL_ARG2(DSL_TSPW_##x, ((x) + DSL_MMIN_OK(x))))   /* 낱말은 펼치기 전에 붙인다. 첫 글자가 "(" 인 식은 못 받는다 */
 #define AGV_SPEED_MMIN(v)        (TA_SPEED | ((v) + DSL_MMIN_OK(v)))      /* m/min 4~255 */
 #define AGV_FORBACK(dir)         (TA_FORBACK | DIR_##dir)
 /* AGV_TURN( 방향, 각도, 회전 뒤 방향, 자동 출발[, 속도[, 옵션…]] ). 옵션을 쓰려면 속도 칸을 적는다.
@@ -169,9 +166,7 @@ enum { AGV_STOP = TA_STOP };
 /* ACS( 종류, 번호 ): 번호 칸이 괄호로 시작하거나(STATION(k), AGV_ID_MINUS(n) …) 낱말이 아닌 식(숫자, TAG_NUM ± n)이면 2칸 형식(ACS_SEND),
  * 낱말 STATION0 이면 1칸 형식, 낱말 AGV_ID 이면 AGV_ID_MINUS(0) 의 2칸 형식. 낱말은 붙여서 고르므로 사이트가 STATION0·AGV_ID 같은
  * 이름의 매크로를 정의하면 깨진다. ACS( 종류, STATION(0) ) 는 2칸 형식이다(1칸 STATION0 과 같은 뜻, 칸을 하나 더 쓴다) */
-#define ACS(info, x)             DSL_CAT(DSL_TACSP_, DSL_IS_PAREN(x))(info, x)
-#define DSL_TACSP_1(info, x)     ACS_SEND(info, x)
-#define DSL_TACSP_0(info, x)     DSL_ARG2(DSL_TACSW_##x, DSL_TACSN)(info, x)
+#define ACS(info, x)             DSL_ARG2(DSL_TACSW_##x, DSL_TACSN)(info, x)
 #define DSL_TACSW_STATION0       ~, DSL_TACSV_STATION0
 #define DSL_TACSW_AGV_ID         ~, DSL_TACSV_AGV_ID
 #define DSL_TACSV_STATION0(info, x)  DSL_TACS_STATION0(info)

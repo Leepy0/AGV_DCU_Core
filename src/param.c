@@ -23,7 +23,7 @@ static const limit_t s_limit[P_PARA_INIT + 1] = {
     {0, 300}, {0, 99}, {0, 20}, {10, 500}, {1, 250}, {30, 300},
     {0, 99}, {0, 999}, {0, 1}, {0, 999}, {1, 99}, {0, 99},
     {0, 1}, {0, 900}, {10000, 10066}, {1, 99}, {0, 999}, {0, 99},
-    {0, 989}, {0, 2}, {0, 8191}, {0, 99}, {0, 99}, {0, 10011},
+    {0, 989}, {0, 2}, {0, 4095}, {0, 99}, {0, 99}, {0, 10011},
     {-999, 999}, {0, 99}, {0, 99}, {0, 99}
 };
 
@@ -390,6 +390,25 @@ static int16_t migrate_new_params(void)
     return (s_store->read(PARAM_MIGRATE_ADDR) == PARAM_MIGRATE_MARK) ? 0 : 1;
 }
 
+/* LG b11 은 v0.46.0 에 버린 비트였고 v0.58.0 부터 새 뜻이다. 옛 저장값에 남은 b11 이 새 동작을 켜지 않게 첫 부팅에 한 번만 지운다.
+ * 표시(주소 83)를 마지막에 쓰므로 도중에 전원이 끊기면 다음 부팅에서 다시 한다. 읽은 값이 한계 밖(빈 칩 0xFFFF 등)이면 건드리지 않는다
+ * (아래 읽기·검증이 기본값으로 돌린다). 반환 0 = 정상, 1 = 읽기 검증 실패(표시를 쓰지 않음) */
+static int16_t migrate_quirk_bit(void)
+{
+    uint16_t i, sum = 0, lg;
+
+    if (s_store->read(PARAM_QUIRK_MIGRATE_ADDR) == PARAM_QUIRK_MIGRATE_MARK) { return 0; }
+    lg = s_store->read(P_LEGACY_QUIRKS);
+    if ((lg <= 4095u) && ((lg & QUIRK_TAG_WHILE_STOPPING) != 0u)) {
+        s_store->write(P_LEGACY_QUIRKS, (uint16_t)(lg & ~QUIRK_TAG_WHILE_STOPPING));
+        for (i = 1; i <= P_SAVED_LAST; i++) { sum = (uint16_t)(sum + s_store->read(i)); }
+        s_store->write(0, sum);
+        if ((s_store->read(P_LEGACY_QUIRKS) != (uint16_t)(lg & ~QUIRK_TAG_WHILE_STOPPING)) || (s_store->read(0) != sum)) { return 1; }
+    }
+    s_store->write(PARAM_QUIRK_MIGRATE_ADDR, PARAM_QUIRK_MIGRATE_MARK);
+    return (s_store->read(PARAM_QUIRK_MIGRATE_ADDR) == PARAM_QUIRK_MIGRATE_MARK) ? 0 : 1;
+}
+
 /* 턴 속도 상한을 낮췄다. 옛 값이 한계 위반이 되면 파라미터 전체가 기본값으로 지워진다.
  * 그 값만 상한으로 줄여 다시 저장한다 */
 static void clamp_turn_speed(void)
@@ -440,6 +459,7 @@ int16_t param_boot(const param_store_t *store, int16_t version)
     s_set[P_BAT_PERCENT] = 0;
 
     if (migrate_new_params() != 0) { status = ERR_PARAM_CHECKSUM; }
+    if (migrate_quirk_bit() != 0) { status = ERR_PARAM_CHECKSUM; }
     clamp_turn_speed();
     {   /* 새 파라미터는 체크섬 밖에 둔다. 빈 EEPROM 이나 범위 밖이면 기본값 */
         uint16_t k;

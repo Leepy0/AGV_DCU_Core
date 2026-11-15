@@ -269,14 +269,14 @@ TAG_IF( 10, PF_X, AND( FORWARD, STATION( 0, 70, 71 ) ), AGV_STOP )   /* TAG_IF( 
 
 - 점멸 스텝의 칸: 상태 낱말이 없으면 예전 그대로(`arg0` = 간격, `out` = 출력 비트). 상태 낱말이 있으면 `arg0`·`arg1` 이 상태 인자라 간격과 출력을 `out` 한 칸에 넣는다: 간격 << 8 \| (출력 번호 + 1). 그래서 둘째 `ANY` 와 둘째 상태는 못 쓴다. 점멸 간격은 0\~65535. 해석기는 `xc` 가 0 인지로 두 배치를 가른다(`seq.c` `flk_cells`).
 - 값 검사: 입력 항목이 괄호로 시작하는 64비트 식(`ON`·`OFF`·`IN`)이 아니면 오류(사이트가 `FORWARD` 를 `(1)` 같은 숫자 매크로로 정의한 경우). `IN( ANY2_ON( … ) )` 처럼 조건 칸에 `ANY2_ON` 이 들어와도 오류(32비트 값). `NOT` 은 상태 낱말에만.
-- **사이트 이름 충돌.** 낱말은 매크로가 아니라 붙여서 고르는 이름이다. 사이트가 같은 이름의 매크로(`#define FORWARD 1`, `#define ID 5`, `#define KEY …`, `#define HIGH …`, `#define STATION0 …`, `#define AGV_ID …` 등)를 정의하면 그 낱말은 숫자로 바뀌어 깨진다(대개 컴파일 오류, 낱말 칸에 숫자가 들어가면 조용히 틀릴 수 있는 곳이 `ACS( 종류, AGV_ID )`). 표 파일이 포함하는 헤더에 이런 이름의 매크로를 두지 않는다. 열거형·변수 이름은 상관없다.
+- **사이트 이름 충돌.** 낱말은 매크로가 아니라 붙여서 고르는 이름이다. 사이트가 같은 이름의 매크로(`#define FORWARD 1`, `#define ID 5`, `#define KEY …`, `#define HIGH …`, `#define STATION0 …`, `#define AGV_ID …` 등)를 정의하면 그 낱말은 숫자로 바뀌어 깨진다(대개 컴파일 오류). `ACS` 번호 출처 낱말(`STATION0`·`AGV_ID` …)과 `AGV_SPEED` 낱말은 펼치기 전에 붙여 고르므로 덮이지 않는다. 표 파일이 포함하는 헤더에 이런 이름의 매크로를 두지 않는다. 열거형·변수 이름은 상관없다.
 
 이름 별칭과 새 형식:
 
 | 새 | 내용 |
 |---|---|
-| `AGV_SPEED( HIGH \| LOW \| LLOW \| MIN \| m/min )` | 시퀀스·태그 같은 이름. 숫자는 4\~255. `AGV_SPEED_MMIN` 별칭 |
-| `ACS( 종류, 번호 )` | 번호: 숫자, `STATION(k)`, `STATION(0) + 1`(시퀀스), `AGV_ID`. 태그는 `STATION(k) ± n`, `TAG_NUM ± n`, `AGV_ID_MINUS( n )` 도. 옛 출처 낱말 `STATION0`·`STATION0_PLUS1`·`AGV_ID` 와 `ACS_SEND` 는 별칭. 펌웨어에 없는 조합은 컴파일 오류. 옛 `CONST` 는 늘 0 을 보고해 컴파일 오류로 바꿨다(숫자 0 을 쓴다). 태그 `STATION0` 만 1칸 형식 |
+| `AGV_SPEED( HIGH \| LOW \| LLOW \| MIN \| m/min )` | 시퀀스·태그 같은 이름. 숫자는 4\~255. `AGV_SPEED_MMIN` 별칭. 낱말은 펼치기 전에 붙여 골라 사이트의 `#define HIGH 1` 에 덮이지 않는다. 첫 글자가 `(` 인 식(`AGV_SPEED( (20 + 10) )`)은 못 받는다(`20 + 10`) |
+| `ACS( 종류, 번호 )` | 번호: 숫자, `STATION(k)`, `STATION(0) + 1`(시퀀스), `AGV_ID`. 태그는 `STATION(k) ± n`, `TAG_NUM ± n`, `AGV_ID_MINUS( n )` 도. 옛 출처 낱말 `STATION0`·`STATION0_PLUS1`·`AGV_ID` 와 `ACS_SEND` 는 별칭. 펌웨어에 없는 조합은 컴파일 오류. 옛 `CONST` 는 늘 0 을 보고해 **컴파일 오류로 바꿨다(호환 깨짐, 숫자 0 을 쓴다)**. 낱말은 펼치기 전에 붙여서 골라 사이트의 `#define AGV_ID 25` 에 덮이지 않는다. 대신 번호 칸이 `(` 로 시작하는 식(`ACS( 종류, (70 + 7) )`)은 못 받는다(`70 + 7`, 또는 `ACS_SEND( 종류, (70 + 7) )`) 태그 `STATION0` 만 1칸 형식 |
 | `WAIT_TO( 조건, 제한, 라벨 )` | 제한: 틱 숫자(0\~32767, 0 = 제한 없음) 또는 `PARAM_TIME( FND 또는 P_x, TICK \| DSEC \| SEC \| MIN )`. 0x8000 이상은 오류, `UNMATCHED` 는 `WAIT_STABLE_TO` 에서만 받는다(`WAIT_TO`·점멸·`HANDSHAKE`·`SELECT_END_TO`) |
 | `WAIT_PARAM_TO` | `WAIT_TO_PARAM` 별칭 |
 | `IN_INVERTED( x )` | `IN_ACTIVE_HIGH( x )` 별칭 |
@@ -284,7 +284,7 @@ TAG_IF( 10, PF_X, AND( FORWARD, STATION( 0, 70, 71 ) ), AGV_STOP )   /* TAG_IF( 
 | `OUT_SET( 켬, 끔 )` | 켜고 끄기를 한 스텝에(`BELT_ON` 과 같은 `SK_OUT`). 사이트가 같은 토큰열로 정의해 쓰던 것을 코어로 옮겼다(재정의 경고 없음) |
 | `NO_ACTION` | 태그 동작 칸 0. 뒤 규칙으로 넘어가지 않게 막는 용도 |
 
-그 밖의 정적 검사(v0.58.0): 태그 `AGV_AUTOSTART( n )`·`CALL( n )`·`ACT_START( n )` 는 0\~255. 태그 동작은 값 4개까지(`TAG`·`TAG_IF`·`TAG_RANGE`·`TAG_RANGE_IF`, `AGV_TURN`·`ACS_SEND` 는 2칸). 태그 표 파일(`tag_dsl.h` 를 포함)에서 시퀀스 스텝 이름(`WHEN` `WAIT…` `L` `GOTO` `OUT_ON` `DELAY` `HANDSHAKE` …)을 쓰면 `SEQ_STEP_NOT_ALLOWED_IN_TAG_TABLE` 이 선언 안 됐다는 오류가 난다. 시퀀스 `WHEN_IF`·`WAIT_IF*` 에 `X_TAG_NUM` 을 쓰면 오류(시퀀스에서는 태그 번호가 늘 0). `SELECT_END_TO` 의 제한은 1\~0x7FFF.
+그 밖의 정적 검사(v0.58.0): `AND` 안의 `ANY_ON`(또는 `IN( ANY_ON( … ) )`)과 `ANY( … )` 항목을 같이 쓰면 두 묶음이 하나로 합쳐져 조건이 조용히 약해지므로 컴파일 오류(둘째 묶음은 `ANY` 둘로). `TAG_IF`·`TAG_RANGE_IF` 의 조건 칸은 `AND( … )` 와 `IF_…` 만 받는다. 맨 `X_…` 는 컴파일 오류다(`TAG_IF( t, p, X_FORWARD, X_ID( 1, 9 ), 동작 )` 에서 둘째 `X_` 가 동작 칸으로 들어가 실행되기 때문. 상태 하나는 `AND( BACKWARD )` 나 `IF_X( X_BACKWARD )`). `AND` 안의 `ANY_ON`(또는 `IN( ANY_ON( … ) )`)과 `ANY( … )` 항목을 같이 쓰면 두 묶음이 하나로 합쳐져 조건이 조용히 약해지므로 컴파일 오류(둘째 묶음은 `ANY` 둘로). `TAG_IF`·`TAG_RANGE_IF` 의 조건 칸은 `AND( … )` 와 `IF_…` 만 받는다. 맨 `X_…` 는 컴파일 오류다(`TAG_IF( t, p, X_FORWARD, X_ID( 1, 9 ), 동작 )` 에서 둘째 `X_` 가 동작 칸으로 들어가 실행되기 때문. 상태 하나는 `AND( BACKWARD )` 나 `IF_X( X_BACKWARD )`). 태그 `AGV_AUTOSTART( n )`·`CALL( n )`·`ACT_START( n )` 는 0\~255. 태그 동작은 값 4개까지(`TAG`·`TAG_IF`·`TAG_RANGE`·`TAG_RANGE_IF`, `AGV_TURN`·`ACS_SEND` 는 2칸). 태그 표 파일(`tag_dsl.h` 를 포함)에서 시퀀스 스텝 이름(`WHEN` `WAIT…` `L` `GOTO` `OUT_ON` `DELAY` `HANDSHAKE` …)을 쓰면 `SEQ_STEP_NOT_ALLOWED_IN_TAG_TABLE` 이 선언 안 됐다는 오류가 난다. 시퀀스 `WHEN_IF`·`WAIT_IF*` 에 `X_TAG_NUM` 을 쓰면 오류(시퀀스에서는 태그 번호가 늘 0). `SELECT_END_TO` 의 제한은 1\~0x7FFF.
 
 ### 3.4 분기
 
@@ -713,10 +713,10 @@ PROFILE_TABLE_END
 - 이전에도 같았던 것: 정지 거리는 처음 정지를 건 태그가 정한다(`started` 만 거리를 건다). 회전은 `stop_pulses` 가 0 이 아니면 이미 거부했다. 달라진 것은 거리 없는 정지(명령 정지 감속)·교차선 회전 요청·`AGV_AUTOSTART`·`SEQ_START` 의 시퀀스 요청·대기 보고의 급정지가 이제 건너뛰는 쪽이라는 점이다.
 - 사용자 함수가 `tagact_run` 을 다시 부르면(번호 변환 별칭) 안쪽 호출은 바깥 호출의 판정을 따른다(바깥 규칙이 방금 건 정지를 안쪽 규칙이 "진행 중" 으로 보지 않게).
 - `X_STATION_RUNNING`·`IF_STATION_RUNNING` 은 `X_STATION`·`IF_STATION` 과 같은 뜻의 별칭이다. 전에는 정지가 걸린 뒤에는 규칙이 안 맞아 뒤 규칙으로 넘어갔지만 이제는 규칙이 맞고 그 규칙의 정지·회전만 건너뛴다.
-- 예전 동작: `P_LEGACY_QUIRKS` b12(4096, `QUIRK_TAG_WHILE_STOPPING`)를 켜면 정지 중에도 모두 실행하고, `X_STATION_RUNNING` 도 예전처럼 정지가 걸린 뒤에는 거짓이다. 한계가 4095 에서 8191 이 됐다.
+- 예전 동작: `P_LEGACY_QUIRKS` b11(2048, `QUIRK_TAG_WHILE_STOPPING`, 뜻은 결정 대기)을 켜면 정지 중에도 모두 실행하고, `X_STATION_RUNNING` 도 예전처럼 정지가 걸린 뒤에는 거짓이다. 한계는 4095 그대로(b11 은 v0.46.0 에 버린 비트를 다시 쓴 것이라 첫 부팅에 한 번 지운다, `02_네이밍_표준.md`).
 - 판정은 `D.flag_stopping` 이다. `stop_phase()`·`stop_is_braking()` 은 정지 제어의 단계(`stop_is_braking()` 은 감속 이후만, 거리 정지의 순항 구간은 아니다)라 쓰지 않는다. 일반 태그 정지(`tagact_stop`·`tagact_stop_length`·`rule_stop`)는 이 플래그를 바로 세운다(정지 제어가 다음 틱에 단계를 시작한다).
 
-**ACS 보고 재전송.** 모든 보고는 슬롯 큐(`acs.c`)에 들어가 ACK(같은 Info)가 올 때까지 `CT`(`P_ACS_RETRY_SEC` 초, 0 이면 `WRT`(`P_ACS_RETRY_LEGACY`) × 0.1 초) 간격 + 지터로 다시 보낸다. 같은 종류 보고는 슬롯을 덮고 횟수를 0 으로 되돌린다. 10번마다 MsgID 를 새로 받고, 99번을 보내면 포기한다(`LOG_ACS_GIVE_UP`). 이것은 v0.58.0 에서 바꾸지 않았다. `STANDBY` 만 정지를 건다(태그: `run_standby`, 번호 > 0 이면 ACK 와 상관없이 60초마다 자동 재전송을 계속, 'C' 해제·출발·정지로 끈다). 나머지 보고(`LOADING` `UNLOADING` `NEXT` `ARRIVE` `FINISH` `PROCESSING` `CALL`)는 정지하지 않고 ACK 까지 재전송만 한다. 시퀀스 표의 `ACS( STANDBY, n )` 는 이제 태그와 같은 보고 + 자동 재전송 + 대기 번호(`run_standby`)를 하되 정지는 걸지 않는다: 시퀀스는 이미 선 뒤에만 돌고(`run_seq` 는 주행·정지 중이 아닐 때 부른다), 정지를 걸면 시퀀스를 돌리는 스캔만 멈춘다. ACT 는 주행을 멈추지 않는 동작이라 같다.
+**ACS 보고 재전송.** 모든 보고는 슬롯 큐(`acs.c`)에 들어가 ACK(같은 Info)가 올 때까지 `CT`(`P_ACS_RETRY_SEC` 초, 0 이면 `WRT`(`P_ACS_RETRY_LEGACY`) × 0.1 초) 간격 + 지터로 다시 보낸다. 같은 종류 보고는 슬롯을 덮고 횟수를 0 으로 되돌린다. 10번마다 MsgID 를 새로 받고, 99번을 보내면 포기한다(`LOG_ACS_GIVE_UP`). 이것은 v0.58.0 에서 바꾸지 않았다. `STANDBY` 만 정지를 건다(태그: `run_standby`, 번호 > 0 이면 ACK 와 상관없이 60초마다 자동 재전송을 계속, 'C' 해제·출발·정지로 끈다). 나머지 보고(`LOADING` `UNLOADING` `NEXT` `ARRIVE` `FINISH` `PROCESSING` `CALL`)는 정지하지 않고 ACK 까지 재전송만 한다. 시퀀스 표의 `ACS( STANDBY, n )` 는 이제 태그와 같은 보고 + 자동 재전송 + 대기 번호(`run_standby`)를 하되 정지는 걸지 않는다: 시퀀스는 이미 선 뒤에만 돌고(`run_seq` 는 주행·정지 중이 아닐 때 부른다), 정지를 걸면 시퀀스를 돌리는 스캔만 멈춘다. ACT 는 주행을 멈추지 않는 동작이라 같다. 시퀀스 경로(`RUN_STANDBY_SEQ`)는 출발 대기(`wait_start`)를 지우지 않고, 다음 출발(`start_run`, `END_RESTART` 의 재출발 포함)이 대기 번호와 자동 재전송을 정리한다(안 그러면 출발 뒤에도 STB 가 남고 `comm.c` 의 출발 조건 `run_standby_num() == 0` 이 막는다). 태그의 대기 보고는 예전 그대로다. 시퀀스 경로(`RUN_STANDBY_SEQ`)는 출발 대기(`wait_start`)를 지우지 않고, 다음 출발(`start_run`, `END_RESTART` 의 재출발 포함)이 대기 번호와 자동 재전송을 정리한다(안 그러면 출발 뒤에도 STB 가 남고 `comm.c` 의 출발 조건 `run_standby_num() == 0` 이 막는다). 태그의 대기 보고는 예전 그대로다.
 
 ## 6. 도구
 

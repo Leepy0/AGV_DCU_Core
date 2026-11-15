@@ -672,7 +672,7 @@ static uint16_t eval_step(seq_runner_t *r, const seq_step_t *s)
     case SK_ACS:
         /* 대기 보고(STANDBY)는 태그와 같이 보고 + 자동 재전송 + 대기 번호 표시(run_standby). 정지는 걸지 않는다: 시퀀스는 이미 선 뒤에
          * 돌고(run_seq 가 정지·주행 중이 아닐 때만 부른다), ACT 는 주행을 멈추지 않는 동작이다. 정지를 걸면 시퀀스를 돌리는 스캔만 멈춘다 */
-        if (s->arg0 == (uint16_t)'B') { run_standby(acs_number(s), RUN_STANDBY_AUTO | RUN_STANDBY_NOSTOP); }
+        if (s->arg0 == (uint16_t)'B') { run_standby(acs_number(s), RUN_STANDBY_AUTO | RUN_STANDBY_NOSTOP | RUN_STANDBY_SEQ); }
         else                          { acs_report(s->arg0, acs_number(s)); }
         return R_NEXT;
     case SK_ACS_WAIT_ACK:

@@ -28,6 +28,12 @@ SEQ_BEGIN( n_seq )
     WHEN( AND( STATION(99, 70, 71) ), A )
 #elif defined(NEG_STATE_ANY2B)
     WHEN( AND( FORWARD, ON(SEN_1), ANY(SEN_1, SEN_2), ANY(SEN_3, SEN_4) ), A )
+#elif defined(NEG_ANY_MERGE1)
+    WHEN( AND( IN( ANY_ON(SEN_1, SEN_2) ), ANY(SEN_3, SEN_4) ), A )
+#elif defined(NEG_ANY_MERGE2)
+    WHEN( AND( ANY_ON(SEN_1, SEN_2), ON(SEN_5), ANY(SEN_3, SEN_4) ), A )
+#elif defined(NEG_ANY_MERGE3)
+    WHEN( AND( ANY(SEN_3, SEN_4), IN( ANY_ON(SEN_1, SEN_2), OFF(SEN_5) ) ), A )
 #elif defined(NEG_NOT_INPUT)
     WHEN( AND( NOT( ON(SEN_1) ) ), A )
 #elif defined(NEG_NOT_NOT)
@@ -52,6 +58,8 @@ SEQ_BEGIN( n_seq )
     WAIT_TO( AND( ON(SEN_1), FORWARD ), PARAM_TIME( AS, SEC ), A )
 #else
     WHEN( AND( ON(SEN_1) ), A )
+    WHEN( AND( ANY_ON(SEN_1, SEN_2), OFF(SEN_5) ), A )          /* ANY 항목이 없으면 ANY_ON 은 그대로 한 묶음 */
+    WHEN( AND( ANY(SEN_1, SEN_2), ANY(SEN_3, SEN_4), ON(SEN_5) ), A )
 #endif
 SEQ_END
 

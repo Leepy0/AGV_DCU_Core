@@ -403,10 +403,10 @@ typedef unsigned long long dsl_cond_t;
 /* ACS( 종류, 번호 ): 번호 칸은 숫자 0~65535, STATION(k), STATION(0) + 1, AGV_ID. 펌웨어에 없는 조합(STATION(k) ± n 의 k 가 0 이 아닌 것,
  * STATION(0) ± 1 말고 다른 n, MOD, 70000 같은 범위 밖 숫자)은 컴파일 오류다.
  * 옛 출처 낱말 STATION0·STATION0_PLUS1·AGV_ID 는 같은 스텝의 별칭이다. CONST 는 늘 0 을 보고하는 낱말이라 컴파일 오류다(숫자 0 을 쓴다).
- * 번호 칸이 숫자·식이면 괄호로 시작하든 아니든 숫자로 본다. 낱말은 붙여서 고르므로 사이트가 STATION0 같은 이름의 매크로를 정의하면 깨진다 */
-#define ACS(info, x)           DSL_CAT(DSL_ACSP_, DSL_IS_PAREN(x))(info, x)
-#define DSL_ACSP_1(info, x)    DSL_ACSN(info, x)
-#define DSL_ACSP_0(info, x)    DSL_ARG2(DSL_SACSW_##x, DSL_ACSN)(info, x)
+ * 낱말은 x 를 펼치기 전에 붙여서 고른다(DSL_SACSW_##x). 그래서 사이트가 STATION0·AGV_ID 같은 이름의 매크로(#define AGV_ID 25)를 정의해도
+ * 낱말이 숫자로 바뀌지 않는다(예전 SEQ_NUM_##src 와 같다). 대신 번호 칸 첫 글자가 "(" 인 식(ACS( 종류, (70 + 7) ))은 붙일 수 없어 못 받는다:
+ * 괄호 없이 70 + 7, 또는 ACS_SEND( 종류, (70 + 7) ) 로 쓴다 */
+#define ACS(info, x)           DSL_ARG2(DSL_SACSW_##x, DSL_ACSN)(info, x)
 #define DSL_SACSW_CONST          ~, DSL_ACSV_CONST
 #define DSL_SACSW_STATION0       ~, DSL_ACSV_STATION0
 #define DSL_SACSW_STATION0_PLUS1 ~, DSL_ACSV_STATION0_PLUS1
@@ -437,11 +437,9 @@ typedef unsigned long long dsl_cond_t;
 #define DSL_SPW_LOW            ~, SEQ_SPD_LOW
 #define DSL_SPW_LLOW           ~, SEQ_SPD_LLOW
 #define DSL_SPW_MIN            ~, SEQ_SPD_MIN
-/* "(" 로 시작하는 식은 붙이기를 건너뛴다(붙이면 gcc 오류, cl2000 은 경고만 내고 지나간다) */
-#define DSL_SPVAL(x)           DSL_CAT(DSL_SPV_, DSL_IS_PAREN(x))(x)
-#define DSL_SPV_1(x)           ((x) + DSL_MMIN_OK(x))
-#define DSL_SPV_0(x)           DSL_ARG2(DSL_SPW_##x, ((x) + DSL_MMIN_OK(x)))
-#define AGV_SPEED(x)           DSL_STEP(SK_SPEED, SEQ_NO_LABEL, DSL_SPVAL(x), 0, 0, 0, 0, 0)
+/* 낱말은 x 를 펼치기 전에 붙여서 고른다(사이트의 #define HIGH 1 이 낱말을 덮지 않는다). 첫 글자가 "(" 인 식 AGV_SPEED( (20 + 10) ) 은 붙일 수 없어
+ * 못 받는다(gcc 붙이기 오류): AGV_SPEED( 20 + 10 ) 이나 AGV_SPEED_MMIN( (20 + 10) ) 으로 쓴다 */
+#define AGV_SPEED(x)           DSL_STEP(SK_SPEED, SEQ_NO_LABEL, DSL_ARG2(DSL_SPW_##x, ((x) + DSL_MMIN_OK(x))), 0, 0, 0, 0, 0)
 #define AGV_SPEED_MMIN(v)      DSL_STEP(SK_SPEED, SEQ_NO_LABEL, (v) + DSL_MMIN_OK(v), 0, 0, 0, 0, 0)
 #define AGV_FORBACK(dir)       DSL_STEP(SK_FORBACK, SEQ_NO_LABEL, DIR_##dir, 0, 0, 0, 0, 0)
 /* AGV_TURN( 방향, 각도, 회전 뒤 방향, 자동 출발[, 속도[, 옵션…]] ). 옵션을 쓰려면 속도 칸(0 = 자동)을 적는다.
@@ -549,13 +547,12 @@ typedef unsigned long long dsl_cond_t;
 /* 동작 칸은 값이 4 개까지다(AGV_TURN·ACS_SEND 는 2 칸, 값 개수를 센다). 넘으면 컴파일 오류(검사값은 태그 번호 칸에 더한다) */
 #define DSL_ACTS_OK(acts)      (0 * sizeof(char[(DSL_NARG(DSL_UNPAREN acts) <= 4) ? 1 : -1]))
 #define TAG(tag, profile, ...)  { (uint16_t)((tag) + DSL_ACTS_OK((__VA_ARGS__))), (uint16_t)(profile), TAG_COND_NONE, 0, 0, { __VA_ARGS__ } },
-/* cond: AND( … ) 하나, 또는 X_… 하나(확장 조건 하나), 또는 IF_* 하나(확장 조건 둘과 입력 조건 하나를 AND 한다). 값 개수로 가린다:
- * AND 기록 1, X_ 3, IF_ 8. 다른 개수는 DSL_TAGC? 가 없어 컴파일 오류 */
+/* cond: AND( … ) 하나(기록 1값), 또는 IF_* 하나(확장 조건 둘과 입력 조건 하나를 AND 한다, 8값). 값 개수로 가린다.
+ * 맨 X_…(3값)는 받지 않는다: 둘째 X_ 가 동작 칸으로 들어가 실행되는 조용한 오류가 된다(상태 조건 하나는 AND( BACKWARD ) 나 IF_X( X_… )).
+ * 다른 개수는 DSL_TAGC? 가 없어 컴파일 오류 */
 #define TAG_IF(tag, profile, cond, ...)  DSL_TAGIF_(tag, profile, (__VA_ARGS__), cond)
 #define DSL_TAGIF_(t, p, acts, ...)      DSL_BPASTE(DSL_TAGC, DSL_NARG(__VA_ARGS__))(t, p, acts, __VA_ARGS__)
 #define DSL_TAGC1(t, p, acts, rec)       DSL_APPLY(DSL_TAG_, t, p, DSL_TG_##rec, acts)
-#define DSL_TAGC3(t, p, acts, k, a, b)   DSL_TAG_E(t, p, k, a, b, X_ALWAYS, 0UL, 0UL, acts)
-#define DSL_TAG_E(...)                   DSL_TAG_(__VA_ARGS__)   /* X_ALWAYS 를 먼저 펼친 뒤 칸을 센다 */
 #define DSL_TAGC8(t, p, acts, ...)       DSL_TAG_(t, p, __VA_ARGS__, acts)
 #define DSL_TAG_(t, p, k1, a1, b1, k2, a2, b2, on, off, acts)                                         \
     { (uint16_t)((t) + DSL_ACTS_OK(acts)), (uint16_t)(p), (uint16_t)(k1), (uint16_t)(a1), (uint16_t)(b1), { DSL_UNPAREN acts }, \
@@ -567,8 +564,6 @@ typedef unsigned long long dsl_cond_t;
 #define TAG_RANGE_IF(lo, hi, profile, cond, ...)  DSL_TAGRIF_(lo, hi, profile, (__VA_ARGS__), cond)
 #define DSL_TAGRIF_(lo, hi, p, acts, ...)    DSL_BPASTE(DSL_TAGRC, DSL_NARG(__VA_ARGS__))(lo, hi, p, acts, __VA_ARGS__)
 #define DSL_TAGRC1(lo, hi, p, acts, rec)     DSL_APPLY(DSL_TAGR_, lo, hi, p, DSL_TG_##rec, acts)
-#define DSL_TAGRC3(lo, hi, p, acts, k, a, b) DSL_TAGR_E(lo, hi, p, k, a, b, X_ALWAYS, 0UL, 0UL, acts)
-#define DSL_TAGR_E(...)                      DSL_TAGR_(__VA_ARGS__)
 #define DSL_TAGRC8(lo, hi, p, acts, ...)     DSL_TAGR_(lo, hi, p, __VA_ARGS__, acts)
 #define DSL_TAGR_(lo, hi, p, k1, a1, b1, k2, a2, b2, on, off, acts)                                    \
     { (uint16_t)((lo) + DSL_ACTS_OK(acts)), (uint16_t)(p), (uint16_t)(k1), (uint16_t)(a1), (uint16_t)(b1), { DSL_UNPAREN acts }, \

@@ -106,30 +106,33 @@
 #define DSL_ANYB(m)       ((((dsl_cond_t)(m))) | (((dsl_cond_t)(m)) << 32))
 #define DSL_CHK_LE(c, n)  (0 * sizeof(char[((c) <= (n)) ? 1 : -1]))
 /* 상태 항목 최대 2개(p1·p2, cp 개수), 입력 ANY 최대 2개(첫째는 cond 안, 둘째 m2, cm 개수) */
-#define DSL_ANDOUT(cond, m2, cm, p1, p2, cp) \
+/* 입력 항목(ON·OFF·IN)을 합친 plain 의 양쪽 절반에 같이 선 비트 = 그 안의 ANY_ON. ANY( … ) 항목이 따로 있으면 둘이 한 묶음으로 합쳐져
+ * 조건이 조용히 약해지므로 오류(둘째 묶음이 필요하면 ANY 둘로 쓴다) */
+#define DSL_ANYMERGE(plain, cm) (0 * sizeof(char[(((cm) == 0) || ((((plain) >> 32) & (plain) & 0xFFFFFFFFULL) == 0)) ? 1 : -1]))
+#define DSL_ANDOUT(plain, cond, m2, cm, p1, p2, cp) \
     DSL_ANDREC( (uint16_t)((p1) & 0xFFFF), (uint16_t)(((p1) >> 16) & 0xFFFF), (uint16_t)(((p1) >> 32) & 0xFFFF), \
                 (uint16_t)((p2) & 0xFFFF), (uint16_t)(((p2) >> 16) & 0xFFFF), (uint16_t)(((p2) >> 32) & 0xFFFF), \
-                (cond), (uint32_t)(m2) + DSL_CHK_LE(cm, 2) + DSL_CHK_LE(cp, 2) )
+                (cond), (uint32_t)(m2) + DSL_CHK_LE(cm, 2) + DSL_CHK_LE(cp, 2) + DSL_ANYMERGE(plain, cm) )
 #define DSL_AND1(i1) DSL_ANDM1(DSL_AI(i1))
-#define DSL_ANDM1(r1) DSL_ANDOUT( DSL_IN2(DSL_RC(r1), DSL_ANYB(DSL_F1(DSL_RM(r1)))), DSL_S1(DSL_RM(r1)), DSL_C1(DSL_RM(r1)), \
+#define DSL_ANDM1(r1) DSL_ANDOUT( (DSL_RC(r1)), DSL_IN2(DSL_RC(r1), DSL_ANYB(DSL_F1(DSL_RM(r1)))), DSL_S1(DSL_RM(r1)), DSL_C1(DSL_RM(r1)), \
                                   DSL_F1(DSL_RP(r1)), DSL_S1(DSL_RP(r1)), DSL_C1(DSL_RP(r1)) )
 #define DSL_AND2(i1, i2) DSL_ANDM2(DSL_AI(i1), DSL_AI(i2))
-#define DSL_ANDM2(r1, r2) DSL_ANDOUT( DSL_IN3(DSL_RC(r1), DSL_RC(r2), DSL_ANYB(DSL_F2(DSL_RM(r1), DSL_RM(r2)))), DSL_S2(DSL_RM(r1), DSL_RM(r2)), DSL_C2(DSL_RM(r1), DSL_RM(r2)), \
+#define DSL_ANDM2(r1, r2) DSL_ANDOUT( (DSL_RC(r1) | DSL_RC(r2)), DSL_IN3(DSL_RC(r1), DSL_RC(r2), DSL_ANYB(DSL_F2(DSL_RM(r1), DSL_RM(r2)))), DSL_S2(DSL_RM(r1), DSL_RM(r2)), DSL_C2(DSL_RM(r1), DSL_RM(r2)), \
                                   DSL_F2(DSL_RP(r1), DSL_RP(r2)), DSL_S2(DSL_RP(r1), DSL_RP(r2)), DSL_C2(DSL_RP(r1), DSL_RP(r2)) )
 #define DSL_AND3(i1, i2, i3) DSL_ANDM3(DSL_AI(i1), DSL_AI(i2), DSL_AI(i3))
-#define DSL_ANDM3(r1, r2, r3) DSL_ANDOUT( DSL_IN4(DSL_RC(r1), DSL_RC(r2), DSL_RC(r3), DSL_ANYB(DSL_F3(DSL_RM(r1), DSL_RM(r2), DSL_RM(r3)))), DSL_S3(DSL_RM(r1), DSL_RM(r2), DSL_RM(r3)), DSL_C3(DSL_RM(r1), DSL_RM(r2), DSL_RM(r3)), \
+#define DSL_ANDM3(r1, r2, r3) DSL_ANDOUT( (DSL_RC(r1) | DSL_RC(r2) | DSL_RC(r3)), DSL_IN4(DSL_RC(r1), DSL_RC(r2), DSL_RC(r3), DSL_ANYB(DSL_F3(DSL_RM(r1), DSL_RM(r2), DSL_RM(r3)))), DSL_S3(DSL_RM(r1), DSL_RM(r2), DSL_RM(r3)), DSL_C3(DSL_RM(r1), DSL_RM(r2), DSL_RM(r3)), \
                                   DSL_F3(DSL_RP(r1), DSL_RP(r2), DSL_RP(r3)), DSL_S3(DSL_RP(r1), DSL_RP(r2), DSL_RP(r3)), DSL_C3(DSL_RP(r1), DSL_RP(r2), DSL_RP(r3)) )
 #define DSL_AND4(i1, i2, i3, i4) DSL_ANDM4(DSL_AI(i1), DSL_AI(i2), DSL_AI(i3), DSL_AI(i4))
-#define DSL_ANDM4(r1, r2, r3, r4) DSL_ANDOUT( DSL_IN5(DSL_RC(r1), DSL_RC(r2), DSL_RC(r3), DSL_RC(r4), DSL_ANYB(DSL_F4(DSL_RM(r1), DSL_RM(r2), DSL_RM(r3), DSL_RM(r4)))), DSL_S4(DSL_RM(r1), DSL_RM(r2), DSL_RM(r3), DSL_RM(r4)), DSL_C4(DSL_RM(r1), DSL_RM(r2), DSL_RM(r3), DSL_RM(r4)), \
+#define DSL_ANDM4(r1, r2, r3, r4) DSL_ANDOUT( (DSL_RC(r1) | DSL_RC(r2) | DSL_RC(r3) | DSL_RC(r4)), DSL_IN5(DSL_RC(r1), DSL_RC(r2), DSL_RC(r3), DSL_RC(r4), DSL_ANYB(DSL_F4(DSL_RM(r1), DSL_RM(r2), DSL_RM(r3), DSL_RM(r4)))), DSL_S4(DSL_RM(r1), DSL_RM(r2), DSL_RM(r3), DSL_RM(r4)), DSL_C4(DSL_RM(r1), DSL_RM(r2), DSL_RM(r3), DSL_RM(r4)), \
                                   DSL_F4(DSL_RP(r1), DSL_RP(r2), DSL_RP(r3), DSL_RP(r4)), DSL_S4(DSL_RP(r1), DSL_RP(r2), DSL_RP(r3), DSL_RP(r4)), DSL_C4(DSL_RP(r1), DSL_RP(r2), DSL_RP(r3), DSL_RP(r4)) )
 #define DSL_AND5(i1, i2, i3, i4, i5) DSL_ANDM5(DSL_AI(i1), DSL_AI(i2), DSL_AI(i3), DSL_AI(i4), DSL_AI(i5))
-#define DSL_ANDM5(r1, r2, r3, r4, r5) DSL_ANDOUT( DSL_IN6(DSL_RC(r1), DSL_RC(r2), DSL_RC(r3), DSL_RC(r4), DSL_RC(r5), DSL_ANYB(DSL_F5(DSL_RM(r1), DSL_RM(r2), DSL_RM(r3), DSL_RM(r4), DSL_RM(r5)))), DSL_S5(DSL_RM(r1), DSL_RM(r2), DSL_RM(r3), DSL_RM(r4), DSL_RM(r5)), DSL_C5(DSL_RM(r1), DSL_RM(r2), DSL_RM(r3), DSL_RM(r4), DSL_RM(r5)), \
+#define DSL_ANDM5(r1, r2, r3, r4, r5) DSL_ANDOUT( (DSL_RC(r1) | DSL_RC(r2) | DSL_RC(r3) | DSL_RC(r4) | DSL_RC(r5)), DSL_IN6(DSL_RC(r1), DSL_RC(r2), DSL_RC(r3), DSL_RC(r4), DSL_RC(r5), DSL_ANYB(DSL_F5(DSL_RM(r1), DSL_RM(r2), DSL_RM(r3), DSL_RM(r4), DSL_RM(r5)))), DSL_S5(DSL_RM(r1), DSL_RM(r2), DSL_RM(r3), DSL_RM(r4), DSL_RM(r5)), DSL_C5(DSL_RM(r1), DSL_RM(r2), DSL_RM(r3), DSL_RM(r4), DSL_RM(r5)), \
                                   DSL_F5(DSL_RP(r1), DSL_RP(r2), DSL_RP(r3), DSL_RP(r4), DSL_RP(r5)), DSL_S5(DSL_RP(r1), DSL_RP(r2), DSL_RP(r3), DSL_RP(r4), DSL_RP(r5)), DSL_C5(DSL_RP(r1), DSL_RP(r2), DSL_RP(r3), DSL_RP(r4), DSL_RP(r5)) )
 #define DSL_AND6(i1, i2, i3, i4, i5, i6) DSL_ANDM6(DSL_AI(i1), DSL_AI(i2), DSL_AI(i3), DSL_AI(i4), DSL_AI(i5), DSL_AI(i6))
-#define DSL_ANDM6(r1, r2, r3, r4, r5, r6) DSL_ANDOUT( DSL_IN7(DSL_RC(r1), DSL_RC(r2), DSL_RC(r3), DSL_RC(r4), DSL_RC(r5), DSL_RC(r6), DSL_ANYB(DSL_F6(DSL_RM(r1), DSL_RM(r2), DSL_RM(r3), DSL_RM(r4), DSL_RM(r5), DSL_RM(r6)))), DSL_S6(DSL_RM(r1), DSL_RM(r2), DSL_RM(r3), DSL_RM(r4), DSL_RM(r5), DSL_RM(r6)), DSL_C6(DSL_RM(r1), DSL_RM(r2), DSL_RM(r3), DSL_RM(r4), DSL_RM(r5), DSL_RM(r6)), \
+#define DSL_ANDM6(r1, r2, r3, r4, r5, r6) DSL_ANDOUT( (DSL_RC(r1) | DSL_RC(r2) | DSL_RC(r3) | DSL_RC(r4) | DSL_RC(r5) | DSL_RC(r6)), DSL_IN7(DSL_RC(r1), DSL_RC(r2), DSL_RC(r3), DSL_RC(r4), DSL_RC(r5), DSL_RC(r6), DSL_ANYB(DSL_F6(DSL_RM(r1), DSL_RM(r2), DSL_RM(r3), DSL_RM(r4), DSL_RM(r5), DSL_RM(r6)))), DSL_S6(DSL_RM(r1), DSL_RM(r2), DSL_RM(r3), DSL_RM(r4), DSL_RM(r5), DSL_RM(r6)), DSL_C6(DSL_RM(r1), DSL_RM(r2), DSL_RM(r3), DSL_RM(r4), DSL_RM(r5), DSL_RM(r6)), \
                                   DSL_F6(DSL_RP(r1), DSL_RP(r2), DSL_RP(r3), DSL_RP(r4), DSL_RP(r5), DSL_RP(r6)), DSL_S6(DSL_RP(r1), DSL_RP(r2), DSL_RP(r3), DSL_RP(r4), DSL_RP(r5), DSL_RP(r6)), DSL_C6(DSL_RP(r1), DSL_RP(r2), DSL_RP(r3), DSL_RP(r4), DSL_RP(r5), DSL_RP(r6)) )
 #define DSL_AND7(i1, i2, i3, i4, i5, i6, i7) DSL_ANDM7(DSL_AI(i1), DSL_AI(i2), DSL_AI(i3), DSL_AI(i4), DSL_AI(i5), DSL_AI(i6), DSL_AI(i7))
-#define DSL_ANDM7(r1, r2, r3, r4, r5, r6, r7) DSL_ANDOUT( DSL_IN8(DSL_RC(r1), DSL_RC(r2), DSL_RC(r3), DSL_RC(r4), DSL_RC(r5), DSL_RC(r6), DSL_RC(r7), DSL_ANYB(DSL_F7(DSL_RM(r1), DSL_RM(r2), DSL_RM(r3), DSL_RM(r4), DSL_RM(r5), DSL_RM(r6), DSL_RM(r7)))), DSL_S7(DSL_RM(r1), DSL_RM(r2), DSL_RM(r3), DSL_RM(r4), DSL_RM(r5), DSL_RM(r6), DSL_RM(r7)), DSL_C7(DSL_RM(r1), DSL_RM(r2), DSL_RM(r3), DSL_RM(r4), DSL_RM(r5), DSL_RM(r6), DSL_RM(r7)), \
+#define DSL_ANDM7(r1, r2, r3, r4, r5, r6, r7) DSL_ANDOUT( (DSL_RC(r1) | DSL_RC(r2) | DSL_RC(r3) | DSL_RC(r4) | DSL_RC(r5) | DSL_RC(r6) | DSL_RC(r7)), DSL_IN8(DSL_RC(r1), DSL_RC(r2), DSL_RC(r3), DSL_RC(r4), DSL_RC(r5), DSL_RC(r6), DSL_RC(r7), DSL_ANYB(DSL_F7(DSL_RM(r1), DSL_RM(r2), DSL_RM(r3), DSL_RM(r4), DSL_RM(r5), DSL_RM(r6), DSL_RM(r7)))), DSL_S7(DSL_RM(r1), DSL_RM(r2), DSL_RM(r3), DSL_RM(r4), DSL_RM(r5), DSL_RM(r6), DSL_RM(r7)), DSL_C7(DSL_RM(r1), DSL_RM(r2), DSL_RM(r3), DSL_RM(r4), DSL_RM(r5), DSL_RM(r6), DSL_RM(r7)), \
                                   DSL_F7(DSL_RP(r1), DSL_RP(r2), DSL_RP(r3), DSL_RP(r4), DSL_RP(r5), DSL_RP(r6), DSL_RP(r7)), DSL_S7(DSL_RP(r1), DSL_RP(r2), DSL_RP(r3), DSL_RP(r4), DSL_RP(r5), DSL_RP(r6), DSL_RP(r7)), DSL_C7(DSL_RP(r1), DSL_RP(r2), DSL_RP(r3), DSL_RP(r4), DSL_RP(r5), DSL_RP(r6), DSL_RP(r7)) )
 #define AND(...)          DSL_CAT(DSL_AND, DSL_NARG(__VA_ARGS__))(__VA_ARGS__)
 

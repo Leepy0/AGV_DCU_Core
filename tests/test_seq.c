@@ -956,7 +956,7 @@ static void run_all(void)
     start(S_STANDBY);
     seq_run();
     assert(fake_standby_count == 2 && !seq_is_active());
-    assert((fake_standby_flags & RUN_STANDBY_AUTO) && (fake_standby_flags & RUN_STANDBY_NOSTOP) && !(fake_standby_flags & RUN_STANDBY_RESET));
+    assert((fake_standby_flags & RUN_STANDBY_AUTO) && (fake_standby_flags & RUN_STANDBY_NOSTOP) && (fake_standby_flags & RUN_STANDBY_SEQ) && !(fake_standby_flags & RUN_STANDBY_RESET));
     assert(fake_standby_id == 11);                          /* 마지막: STATION(0) + 1 */
     assert(acs_pending() == 1);                             /* CALL 만 슬롯에 있다(STANDBY 슬롯은 run_standby 가 채우는데 fake 다) */
     acs_reset();

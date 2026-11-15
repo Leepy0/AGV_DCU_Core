@@ -22,6 +22,8 @@ $pairs = @{
  'mix_seq' = @(,@('s_new_steps','s_old_steps'));
  'mix_tag' = @(,@('t_new','t_old'));
  'man_and' = @(,@('m_new','m_old'));
+ 'site_words_seq' = @(,@('s_new_steps','s_ref_steps'));
+ 'site_words_tag' = @(,@('t_new','t_ref'));
 }
 foreach ($n in $pairs.Keys | Sort-Object) {
   $src = "$core\tests\dsl\$n.c"
@@ -38,14 +40,14 @@ foreach ($n in $pairs.Keys | Sort-Object) {
       return @($m.Groups[1].Value -split "\r?\n" | Where-Object { $_ -match '^\s*\.bits' } | ForEach-Object { ($_ -replace ';.*','').Trim() })
     }
     $a = Grab $p[0]; $b = Grab $p[1]
-    if (-not $a -or -not $b) { "$n : asm label missing $($p[0]) $($p[1])"; continue }
+    if (-not $a -or -not $b) { "$n : asm label missing $($p[0]) $($p[1])"; $fail++; continue }
     if (($a -join "`n") -eq ($b -join "`n")) { "$n : cl2000 SAME $($p[0]) = $($p[1]) ($($a.Count) .bits)" } else { "$n : cl2000 DIFF $($p[0]) vs $($p[1])"; $fail++ }
   }
 }
 
 $neg = [ordered]@{
- 'and_neg_seq' = 'SEQ_2STATE SEQ_STATE_ANY2 ANY3 STATE3 POLARITY ANYDUP UNKNOWN EMPTY AMP SEVEN STATION_ARITY STATION_BAD_K STATE_ANY2B NOT_INPUT NOT_NOT PARAM_MIN_PLACE WAITSTABLE_STATE WAITSTABLE_ANY2 ERRHOLD_STATE FLICKER_ANY2 FLICKER_2STATE FLICKER_PERIOD STATIONK ALL_PARAM_ANDSTATE'
- 'and_neg_tag' = 'TAG_3STATE TAG_ANY2 TAG_CELLS TAG_RANGE_ANY2 TAG_RANGE_CELLS TAG_AUTOSTART'
+ 'and_neg_seq' = 'ANY_MERGE1 ANY_MERGE2 ANY_MERGE3 SEQ_2STATE SEQ_STATE_ANY2 ANY3 STATE3 POLARITY ANYDUP UNKNOWN EMPTY AMP SEVEN STATION_ARITY STATION_BAD_K STATE_ANY2B NOT_INPUT NOT_NOT PARAM_MIN_PLACE WAITSTABLE_STATE WAITSTABLE_ANY2 ERRHOLD_STATE FLICKER_ANY2 FLICKER_2STATE FLICKER_PERIOD STATIONK ALL_PARAM_ANDSTATE'
+ 'and_neg_tag' = 'TAG_3STATE TAG_ANY2 TAG_CELLS TAG_RANGE_ANY2 TAG_RANGE_CELLS TAG_AUTOSTART TAG_X1 TAG_X2 TAG_RANGE_X1'
  'and_neg_site' = 'SITE_NUM SITE_PAREN SITE_IDENT SITE_ID'
  'checks_seq' = 'WHEN_ANY2 IN_ANY2 IN_ANY2B WAITTO_ANY2 SELTO0 SELTO_BIG TAGNUM_WHEN_IF TAGNUM_WAIT_IF TAGNUM_WAIT_IF_IN_TO TAGNUM_AND HANDSHAKE_UNMATCHED FLICKER_UNMATCHED'
  'checks_tag' = 'AUTOSTART AUTOSTART300 CALL ACT CELLS5 CELLS_TURN CELLS_IF CELLS_RANGE SEQSTEP_OUT SEQSTEP_DELAY SEQSTEP_WAIT SEQSTEP_LABEL SEQSTEP_GOTO ANY2_IN ANY2_IN2 SEQSTEP_OUTIF SEQSTEP_HANDSHAKE SEQSTEP_WHEN AND_ANY2 AND_3STATE'

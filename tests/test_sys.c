@@ -2119,6 +2119,32 @@ static void test_acs_report_retransmit(void)
     printf("  acs report retransmit ok\n");
 }
 
+/* v0.58.0 시퀀스의 대기 보고(RUN_STANDBY_SEQ): 출발 대기(wait_start)를 지우지 않고, 다음 출발(재출발 예약 뒤 start_run)이 대기 번호·자동 재전송을
+ * 정리한다(안 그러면 FND 에 STB 가 남고 comm.c 의 출발 조건 run_standby_num() == 0 이 막힌다). 태그의 대기 보고는 예전 그대로다 */
+static void test_seq_standby_cleanup(void)
+{
+    int i;
+
+    boot();
+    D.wait_start = 1;
+    run_standby(7, RUN_STANDBY_AUTO | RUN_STANDBY_NOSTOP | RUN_STANDBY_SEQ);
+    assert((run_standby_num() == 7) && D.wait_start && !D.flag_stopping);   /* 출발 대기를 지우지 않고 정지도 안 건다 */
+    run_restart_now();                                                    /* END_RESTART 와 같은 재출발 */
+    for (i = 0; (i < 50) && !D.flag_ready && !D.flag_run; i++) { guide_reply(0); tick(); }
+    assert(D.flag_ready || D.flag_run);
+    assert(run_standby_num() == 0);                                       /* 출발했으니 STB 가 사라진다 */
+
+    boot();
+    run_standby(7, RUN_STANDBY_AUTO);                                     /* 태그의 대기 보고: 출발 대기를 지운다, 재출발해도 예전 그대로 남는다 */
+    assert(!D.wait_start && (run_standby_num() == 7));
+    run_restart_now();
+    for (i = 0; (i < 50) && !D.flag_ready && !D.flag_run; i++) { guide_reply(0); tick(); }
+    assert((D.flag_ready || D.flag_run) && (run_standby_num() == 7));
+    run_standby_clear(0);
+    boot();
+    printf("  seq standby cleanup ok\n");
+}
+
 /* 교차선 회전 요청: 일반 회전을 걸지 않는 상황(거리 정지 진행 중, 서 있음, 회전 모드 0)이면 아무 일도 없다.
  * 거리 없는 감속(명령 정지) 중에는 건다. 요청이 걸려 교차선을 찾는 동안 읽은 태그는 회전 중과 같이 ACK 없이 버린다 */
 static void test_tape_turn_request(void)
@@ -4611,6 +4637,7 @@ int main(void)
     test_tag_stop_class();
     test_tag_while_stopping();
     test_acs_report_retransmit();
+    test_seq_standby_cleanup();
     test_tape_turn_request();
     test_move_cross_tag();
     test_tune_entry();

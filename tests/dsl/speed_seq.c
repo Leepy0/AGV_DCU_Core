@@ -11,7 +11,7 @@ SEQ_BEGIN( s_new )
     AGV_SPEED( 30 )
     AGV_SPEED( 255 )
     AGV_SPEED( SPEED_FAST )
-    AGV_SPEED( (20 + 10) )
+    AGV_SPEED( 20 + 10 )
 SEQ_END
 SEQ_BEGIN( s_old )
     DSL_STEP(SK_SPEED, SEQ_NO_LABEL, SEQ_SPD_HIGH, 0, 0, 0, 0, 0)

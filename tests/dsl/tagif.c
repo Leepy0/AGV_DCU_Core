@@ -3,12 +3,12 @@
 
 /* TAG_IF 조건 칸이 X_…(펼치면 3값)·IF_…(8값)·AND(…)(기록 1값)를 모두 받는다 */
 TAG_TABLE_BEGIN(t_new)
-    TAG_IF( 10, ANY_PROFILE, X_BACKWARD,                     AGV_STOP )
-    TAG_IF( 11, ANY_PROFILE, X_STATION(0, 70, 71),           AGV_TURN( CW, 90, 0, 1, 0, TAPE ) )
-    TAG_IF( 12, ANY_PROFILE, X_NOT(X_ID(83, 83)),            AGV_STOP, OBS_ON )
-    TAG_IF( 13, ANY_PROFILE, X_PARAM(TFB_1, 2),              AGV_STOP )
-    TAG_IF( 14, ANY_PROFILE, X_TAG_NUM( STATION(0) + 100 ),  AGV_STOP )
-    TAG_IF( 15, ANY_PROFILE, X_CROSS_OUT,                    AGV_STOP )
+    TAG_IF( 10, ANY_PROFILE, AND( BACKWARD ),                     AGV_STOP )
+    TAG_IF( 11, ANY_PROFILE, AND( STATION(0, 70, 71) ),           AGV_TURN( CW, 90, 0, 1, 0, TAPE ) )
+    TAG_IF( 12, ANY_PROFILE, AND( NOT(ID(83, 83)) ),              AGV_STOP, OBS_ON )
+    TAG_IF( 13, ANY_PROFILE, AND( PARAM(TFB_1, 2) ),              AGV_STOP )
+    TAG_IF( 14, ANY_PROFILE, AND( TAG_IS( STATION(0) + 100 ) ),   AGV_STOP )
+    TAG_IF( 15, ANY_PROFILE, AND( CROSS_OUT ),                    AGV_STOP )
     TAG_IF( 20, ANY_PROFILE, IF_BACKWARD,                    AGV_STOP )
     TAG_IF( 21, ANY_PROFILE, IF_X2( X_FORWARD, X_ID(1, 9) ), AGV_TURN( CCW, 90, DIR_TOGGLE, 1 ) )
     TAG_IF( 22, ANY_PROFILE, IF_X_IN( X_ID(1, 10), IN( OFF(SEN_1, SEN_2) ) ), AGV_STOP )
