@@ -139,12 +139,12 @@ static int16_t sum_saved(void)
 
 static void recalc_stop_len(void)
 {
-    param_dv.stop_len = (int16_t)((float)s_set[P_STOP_LEN_MM] * param_dv.one_length_pulse * 10.0f);
+    param_dv.stop_len = (int16_t)((float)s_set[P_STOP_LEN_CM] * param_dv.one_length_pulse * 10.0f);
 }
 
 static void recalc_fwd_stop_len(void)
 {
-    param_dv.fwd_stop_len = (int16_t)((float)s_set[P_STOP_LEN_FWD_MM] * param_dv.one_length_pulse * 10.0f);
+    param_dv.fwd_stop_len = (int16_t)((float)s_set[P_STOP_LEN_FWD_CM] * param_dv.one_length_pulse * 10.0f);
 }
 
 static void recalc_turn_pulses(void)
@@ -275,7 +275,7 @@ static void recalc_one(uint16_t i)
         param_dv.turn_mode = param_digit(s_set[P_TURN_FORBACK], 10);
         param_dv.forback_mode = param_digit(s_set[P_TURN_FORBACK], 1);
         break;
-    case P_STOP_LEN_MM:   recalc_stop_len(); break;
+    case P_STOP_LEN_CM:   recalc_stop_len(); break;
     case P_STEER_KP:      D.p_kp = (float)param_gain(P_STEER_KP); break;         /* 0 = 권장값(TST 2 는 자동 이득) */
     case P_STEER_KI:      D.p_ki = (float)param_gain(P_STEER_KI) * 0.1f; break;
     case P_WHEEL_DIA_MM:

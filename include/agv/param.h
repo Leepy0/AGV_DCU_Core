@@ -21,11 +21,11 @@ enum {
                                레거시에서는 스테이션 태그의 정지/분기 방식이었다. 그런 사이트를 옮길 때 사이트 코드가 읽는다 */
     P_TURN_FORBACK,
     P_TAG_DIGITS,           /* TAG: 미사용. 값이 남아 있어도 무시한다. 번호·EEPROM 자리는 유지 */
-    P_STOP_LEN_MM,
+    P_STOP_LEN_CM,          /* SL: 정지 거리 cm. v0.58.0 에서 _MM 이름을 바꿨다(값 단위는 예전부터 cm) */
     P_STEER_KP, P_STEER_KI, P_WHEEL_DIA_MM, P_GEAR_RATIO, P_WHEEL_BASE_MM, P_AGV_ID, P_AGV_TYPE,
     P_LAMP_EXT_USE, P_SPEED_MIN, P_SWITCH_START_NUM, P_TAG_TYPE,
     P_COMM_LINK,            /* 31: 0 지그비, 1 WiFi 브릿지 */
-    P_STOP_LEN_FWD_MM, P_ACS_STANDBY, P_BRANCH_OFFSET,
+    P_STOP_LEN_FWD_CM, P_ACS_STANDBY, P_BRANCH_OFFSET,   /* FL: 전진 정지 거리 cm(예전 _MM 이름은 아래 #define) */
     P_CROSS_IN_CM,          /* 35: 교차로 대기 정지 위치, 'I' 태그 뒤 cm. 0 = 태그에서 바로 정지. 'O' 태그는 서지 않는다 */
     P_ACS_RETRY_LEGACY,     /* 36: 0 이면 ACS 통신 미사용 */
     P_ACS_RETRY_SEC,
@@ -51,6 +51,9 @@ enum {
     P_COUNT
 };
 #define P_SAVED_LAST 45   /* 이 번호까지 EEPROM 에 저장한다 */
+/* 예전 이름(v0.57.0 까지). 값 단위는 늘 cm 였다. 사이트 코드가 계속 쓸 수 있다 */
+#define P_STOP_LEN_MM     P_STOP_LEN_CM
+#define P_STOP_LEN_FWD_MM P_STOP_LEN_FWD_CM
 
 /* P_LEGACY_QUIRKS 비트 (docs/07_주행_조향_성능.md 4절) */
 /* b0(1) 안 씀. 정지 완료 때 위험 감속 표시를 내리지 않던 예전 결함 재현은 버렸다(v0.49.0). 값이 남아 있어도 무시한다 */
@@ -67,6 +70,9 @@ enum {
 /* b11(2048) 안 씀. 예전 저속(정지 바닥 350, 멈춤 판단 10틱, SPN 4 미만 6, 회전 끝·회전 감속 DCC/4, 예전 저크·정지 끝 계단)은
  * 버렸다(v0.40.0·v0.46.0). 값이 남아 있어도 무시한다. 한계 4095 는 그대로(저장값이 한계 위반이 되지 않게) */
 #define QUIRK_STEER_LEGACY  (QUIRK_STEER_20MS | QUIRK_DAMP_SIGN_OLD | QUIRK_STEER_STEP)
+/* b12(4096) 정지 진행 중 읽은 태그의 정지·회전 동작을 건너뛰지 않고 예전처럼 모두 실행한다(v0.58.0, tagact.c).
+ * 안 쓰는 비트를 되살리지 않고 새 비트를 쓴 것은 옛 저장값에 남은 값이 이 동작을 켜지 않게 하려는 것이다. 한계가 8191 이 됐다 */
+#define QUIRK_TAG_WHILE_STOPPING 0x1000u
 /* b7(128) 안 씀. 일시정지(장애물·PAUSE) 감속 중 원인이 풀려도 0 까지 서고 다시 출발하던 예전 동작은 버렸다(v0.49.0).
  * 값이 남아 있어도 무시한다 */
 

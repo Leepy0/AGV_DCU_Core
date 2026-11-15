@@ -1,0 +1,24 @@
+#include "agv/tag_dsl.h"
+#include "same.h"
+/* 태그 쪽 AND 조합 오류. -DNEG_x 는 컴파일 오류여야 한다 */
+TAG_TABLE_BEGIN(n_tag)
+#if defined(NEG_TAG_3STATE)
+    TAG_IF( 1, ANY_PROFILE, AND( FORWARD, ID(1, 9), LOW_BATTERY ), AGV_STOP )
+#elif defined(NEG_TAG_ANY2)
+    TAG_IF( 1, ANY_PROFILE, AND( ANY(SEN_1, SEN_2), ANY(SEN_3, SEN_4) ), AGV_STOP )
+#elif defined(NEG_TAG_CELLS)
+    TAG_IF( 1, ANY_PROFILE, AND( FORWARD ), AGV_STOP, OBS_ON, CALL( 1 ), CALL( 2 ), CALL( 3 ) )
+#elif defined(NEG_TAG_RANGE_ANY2)
+    TAG_RANGE_IF( 1, 5, ANY_PROFILE, AND( ANY(SEN_1, SEN_2), ANY(SEN_3, SEN_4) ), AGV_STOP )
+#elif defined(NEG_TAG_RANGE_CELLS)
+    TAG_RANGE_IF( 1, 5, ANY_PROFILE, AND( FORWARD ), AGV_STOP, OBS_ON, CALL( 1 ), CALL( 2 ), CALL( 3 ) )
+#elif defined(NEG_TAG_AUTOSTART)
+    TAG_IF( 1, ANY_PROFILE, AND( FORWARD ), AGV_AUTOSTART( 256 ) )
+#else
+    TAG_IF( 1, ANY_PROFILE, AND( ON(SEN_1) ), AGV_STOP )
+    TAG_IF( 2, ANY_PROFILE, AND( TAG_IS( STATION(0) + 100 ), FORWARD ), AGV_STOP )
+    TAG_RANGE_IF( 3, 7, ANY_PROFILE, AND( ANY(SEN_1, SEN_2), NOT( BACKWARD ) ), AGV_STOP )
+#endif
+TAG_TABLE_END
+MAIN_BEGIN
+MAIN_END

@@ -22,7 +22,7 @@
 #include "agv/param.h"
 #include "agv/rpmtest.h"
 #include "agv/run.h"
-#include "agv/tag_dsl.h"
+#include "agv/seq_dsl.h"   /* 시퀀스 표(아래)는 tag_dsl.h 를 포함하기 전에 쓴다: tag_dsl.h 뒤에는 시퀀스 스텝 이름을 쓸 수 없다 */
 #include "agv/site.h"
 #include "agv/stop.h"
 #include "agv/storage.h"

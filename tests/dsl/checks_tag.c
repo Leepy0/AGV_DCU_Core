@@ -1,0 +1,58 @@
+#include "agv/tag_dsl.h"
+#include "same.h"
+/* 태그 동작 칸 범위(0~255)·칸 수(4)·시퀀스 스텝 이름·ANY2_ON 자리를 정적으로 막는다. -DNEG_x 는 컴파일 오류여야 한다 */
+#ifndef NEG
+TAG_TABLE_BEGIN(t_ok)
+    TAG( 1, ANY_PROFILE, AGV_AUTOSTART( 255 ) )
+    TAG( 2, ANY_PROFILE, CALL( 255 ), ACT_START( 255 ), AGV_AUTOSTART( 0 ), AGV_STOP )
+    TAG( 3, ANY_PROFILE, AGV_TURN( CW, 90, 0, 1, 0, TAPE ), AGV_STOP, OBS_ON )
+    TAG_IF( 4, ANY_PROFILE, IF_BACKWARD, AGV_STOP, OBS_ON, CALL( 3 ), ACT_START( 4 ) )
+    TAG_RANGE( 10, 20, ANY_PROFILE, AGV_STOP, OBS_ON, CALL( 3 ), ACT_START( 4 ) )
+TAG_TABLE_END
+#else
+TAG_TABLE_BEGIN(n)
+#if defined(NEG_AUTOSTART)
+    TAG( 1, ANY_PROFILE, AGV_AUTOSTART( 256 ) )
+#elif defined(NEG_AUTOSTART300)
+    TAG( 1, ANY_PROFILE, AGV_AUTOSTART( 300 ) )
+#elif defined(NEG_CALL)
+    TAG( 1, ANY_PROFILE, CALL( 256 ) )
+#elif defined(NEG_ACT)
+    TAG( 1, ANY_PROFILE, ACT_START( 256 ) )
+#elif defined(NEG_CELLS5)
+    TAG( 1, ANY_PROFILE, AGV_STOP, OBS_ON, OBS_OFF, CALL( 1 ), CALL( 2 ) )
+#elif defined(NEG_CELLS_TURN)
+    TAG( 1, ANY_PROFILE, AGV_TURN( CW, 90, 0, 1 ), AGV_TURN( CW, 90, 0, 1 ), AGV_STOP )
+#elif defined(NEG_CELLS_IF)
+    TAG_IF( 1, ANY_PROFILE, IF_BACKWARD, AGV_STOP, OBS_ON, CALL( 1 ), CALL( 2 ), CALL( 3 ) )
+#elif defined(NEG_CELLS_RANGE)
+    TAG_RANGE( 1, 5, ANY_PROFILE, AGV_STOP, OBS_ON, CALL( 1 ), CALL( 2 ), CALL( 3 ) )
+#elif defined(NEG_SEQSTEP_OUT)
+    TAG( 1, ANY_PROFILE, OUT_ON( OUT_EXT_1 ) )
+#elif defined(NEG_SEQSTEP_DELAY)
+    TAG( 1, ANY_PROFILE, DELAY( 100 ) )
+#elif defined(NEG_SEQSTEP_WAIT)
+    TAG( 1, ANY_PROFILE, WAIT( IN( ON(SEN_1) ) ) )
+#elif defined(NEG_SEQSTEP_LABEL)
+    TAG( 1, ANY_PROFILE, AGV_STOP, END_STOP )
+#elif defined(NEG_SEQSTEP_GOTO)
+    TAG( 1, ANY_PROFILE, GOTO( 1 ) )
+#elif defined(NEG_AND_ANY2)
+    TAG_IF( 1, ANY_PROFILE, AND( ANY( IN_EXT_1, IN_EXT_2 ), ANY( IN_EXT_3, IN_EXT_4 ) ), AGV_STOP )
+#elif defined(NEG_AND_3STATE)
+    TAG_IF( 1, ANY_PROFILE, AND( FORWARD, ID( 1, 9 ), LOW_BATTERY ), AGV_STOP )
+#elif defined(NEG_ANY2_IN)
+    TAG_IF( 1, ANY_PROFILE, IF_IN( IN( ANY2_ON( SEN_1, SEN_2 ) ) ), AGV_STOP )
+#elif defined(NEG_ANY2_IN2)
+    TAG_IF( 1, ANY_PROFILE, IF_IN( IN( ON( SEN_3 ), ANY2_ON( SEN_1, SEN_2 ) ) ), AGV_STOP )
+#elif defined(NEG_SEQSTEP_HANDSHAKE)
+    TAG( 1, ANY_PROFILE, HANDSHAKE( OUT_EXT_1, IN_EXT_1, 100, 0 ) )
+#elif defined(NEG_SEQSTEP_WHEN)
+    TAG( 1, ANY_PROFILE, WHEN( AND( ON( IN_EXT_1 ) ), 1 ) )
+#elif defined(NEG_SEQSTEP_OUTIF)
+    TAG_IF( 1, ANY_PROFILE, IF_BACKWARD, OUT_OFF( OUT_EXT_2 ), AGV_STOP )
+#endif
+TAG_TABLE_END
+#endif
+MAIN_BEGIN
+MAIN_END

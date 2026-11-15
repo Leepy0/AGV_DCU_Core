@@ -1,0 +1,61 @@
+#include "agv/seq_dsl.h"
+#include "same.h"
+SEQ_LABELS( A, B, C )
+
+SEQ_BEGIN( s_new )
+    SELECT_BEGIN
+    WHEN( AND( ON(SEN_1), OFF(SEN_2) ), A )
+    WHEN( AND( BACKWARD, ON(SEN_1) ), B )
+    WHEN( AND( ANY(SEN_1, SEN_2), ON(SEN_3), FORWARD ), C )
+    WHEN( AND( ANY(SEN_1, SEN_2), OFF(SEN_3), ANY(SEN_4, SEN_5) ), A )
+    WHEN( AND( ANY(SEN_1, SEN_2), ANY(SEN_4, SEN_5) ), B )
+    WHEN( AND( PARAM(TFB_1, 2), ON(SEN_H) ), C )
+    WHEN( AND( NOT(BACKWARD), OFF(SEN_1) ), A )
+    WHEN( AND( LOW_BATTERY ), B )
+    WHEN( AND( ON(SEN_1) ), C )
+    WHEN( AND( ID(1, 9) ), A )
+    WHEN( AND( STATION(0, 70, 71) ), B )
+    WHEN( AND( NOT(STATION(0, 70, 71)), ON(SEN_1, SEN_2) ), C )
+    WHEN( AND( ON(SEN_1), FORWARD, OFF(SEN_2), ANY(SEN_3, SEN_4) ), A )
+    WHEN( AND( ANY(SEN_3, SEN_4), OFF(SEN_5), ON(SEN_1), CROSS_OUT_WAIT, ON(SEN_2) ), B )
+    WHEN( IN( ON(SEN_1) ), C )
+    SELECT_END
+    WAIT( AND( ON(SEN_1), OFF(SEN_2) ) )
+    WAIT( AND( CROSS_IN, ANY(SEN_1, SEN_2) ) )
+    WAIT( AND( STATION(1, 2, 3) ) )
+    WAIT_TO( AND( ON(SEN_1), FORBACK_MODE ), 500, A )
+    WAIT_TO( AND( ANY(SEN_3, SEN_4), ANY(SEN_1, SEN_5) ), 100, B )
+    WAIT_TO( AND( ID(1, 9) ), 100, B )
+    WAIT_TO( IN( ON(SEN_1) ), 100, B )
+SEQ_END
+
+SEQ_BEGIN( s_old )
+    SELECT_BEGIN
+    WHEN( IN( ON(SEN_1), OFF(SEN_2) ), A )
+    WHEN_IF_IN( X_BACKWARD, IN( ON(SEN_1) ), B )
+    WHEN_IF_IN( X_FORWARD, IN( ANY_ON(SEN_1, SEN_2), ON(SEN_3) ), C )
+    WHEN_ANY2( IN( ANY_ON(SEN_1, SEN_2), OFF(SEN_3) ), ANY2_ON(SEN_4, SEN_5), A )
+    WHEN_ANY2( IN( ANY_ON(SEN_1, SEN_2) ), ANY2_ON(SEN_4, SEN_5), B )
+    WHEN_IF_IN( X_PARAM(TFB_1, 2), IN( ON(SEN_H) ), C )
+    WHEN_IF_IN( X_NOT(X_BACKWARD), IN( OFF(SEN_1) ), A )
+    WHEN_IF( X_LOW_BATTERY, B )
+    WHEN( IN( ON(SEN_1) ), C )
+    WHEN_IF( X_ID(1, 9), A )
+    WHEN_IF( X_STATION(0, 70, 71), B )
+    WHEN_IF_IN( X_NOT(X_STATION(0, 70, 71)), IN( ON(SEN_1, SEN_2) ), C )
+    WHEN_IF_IN( X_FORWARD, IN( ANY_ON(SEN_3, SEN_4), ON(SEN_1), OFF(SEN_2) ), A )
+    WHEN_IF_IN( X_CROSS_OUT_ON, IN( ANY_ON(SEN_3, SEN_4), OFF(SEN_5), ON(SEN_1), ON(SEN_2) ), B )
+    WHEN( IN( ON(SEN_1) ), C )
+    SELECT_END
+    WAIT( IN( ON(SEN_1), OFF(SEN_2) ) )
+    WAIT_IF_IN( X_CROSS_IN, IN( ANY_ON(SEN_1, SEN_2) ) )
+    WAIT_IF( X_STATION(1, 2, 3) )
+    WAIT_IF_IN_TO( X_FORBACK_MODE, IN( ON(SEN_1) ), 500, A )
+    WAIT_ANY2_TO( IN( ANY_ON(SEN_3, SEN_4) ), ANY2_ON(SEN_1, SEN_5), 100, B )
+    WAIT_IF_TO( X_ID(1, 9), 100, B )
+    WAIT_TO( IN( ON(SEN_1) ), 100, B )
+SEQ_END
+
+MAIN_BEGIN
+    SAME(s_new_steps, s_old_steps);
+MAIN_END

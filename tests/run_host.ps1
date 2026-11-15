@@ -18,6 +18,32 @@ foreach ($n in 'AMP_INPUT', 'NO_DIRECTION', 'PARAM_ZERO', 'MOD_ZERO', 'HIGH_ANY'
     & cmd /c "gcc -std=c99 -DAGV_HOST_BUILD -Iinclude -DNEG_$n -fsyntax-only tests/test_dsl.c >nul 2>nul"
     if ($LASTEXITCODE -eq 0) { Write-Output "NEG_$n compiled"; $failed++ }
 }
+# DSL unification (v0.58.0, tests/dsl): new forms (AND, AGV_SPEED, ACS, WAIT_TO PARAM_TIME, TAG_IF) must give the same bytes as the old forms,
+# and each -DNEG_* case must fail to compile (calling the build twice: with and without the NEG guard)
+foreach ($n in 'and_seq', 'and_tag', 'tagif', 'speed_seq', 'speed_tag', 'acs_seq', 'acs_tag', 'wait_to', 'checks_seq', 'checks_tag', 'mix_seq', 'mix_tag', 'man_and', 'and_neg_seq', 'and_neg_tag', 'and_neg_site') {
+    & cmd /c "gcc -std=c99 -DAGV_HOST_BUILD -Iinclude -Itests/dsl tests/dsl/$n.c -o build/t/dsl_$n.exe 2>nul"
+    if ($LASTEXITCODE -ne 0) { Write-Output "BUILD FAIL dsl_$n"; $failed++ }
+    else { & "build/t/dsl_$n.exe" | Out-Null; if ($LASTEXITCODE -ne 0) { Write-Output "FAIL dsl_$n"; $failed++ } }
+}
+$dslNeg = [ordered]@{
+    'and_neg_seq' = 'SEQ_2STATE SEQ_STATE_ANY2 ANY3 STATE3 POLARITY ANYDUP UNKNOWN EMPTY AMP SEVEN STATION_ARITY STATION_BAD_K STATE_ANY2B NOT_INPUT NOT_NOT PARAM_MIN_PLACE WAITSTABLE_STATE WAITSTABLE_ANY2 ERRHOLD_STATE FLICKER_ANY2 FLICKER_2STATE FLICKER_PERIOD STATIONK ALL_PARAM_ANDSTATE'
+    'and_neg_tag' = 'TAG_3STATE TAG_ANY2 TAG_CELLS TAG_RANGE_ANY2 TAG_RANGE_CELLS TAG_AUTOSTART'
+    'and_neg_site' = 'SITE_NUM SITE_PAREN SITE_IDENT SITE_ID'
+    'checks_seq' = 'WHEN_ANY2 IN_ANY2 IN_ANY2B WAITTO_ANY2 SELTO0 SELTO_BIG TAGNUM_WHEN_IF TAGNUM_WAIT_IF TAGNUM_WAIT_IF_IN_TO TAGNUM_AND HANDSHAKE_UNMATCHED FLICKER_UNMATCHED'
+    'checks_tag' = 'AUTOSTART AUTOSTART300 CALL ACT CELLS5 CELLS_TURN CELLS_IF CELLS_RANGE SEQSTEP_OUT SEQSTEP_DELAY SEQSTEP_WAIT SEQSTEP_LABEL SEQSTEP_GOTO ANY2_IN ANY2_IN2 SEQSTEP_OUTIF SEQSTEP_HANDSHAKE SEQSTEP_WHEN AND_ANY2 AND_3STATE'
+    'acs_seq' = 'ST1_PLUS1 ST0_PLUS2 ST0_MINUS1 MOD BIG NEG STK BADWORD AGVMINUS TAGNUM CONST'
+    'acs_tag' = '256 MOD NEG STN129 RESET_ST0 BADWORD AGVMINUS256'
+    'speed_seq' = '0 3 256 WORD NEG LOWER EMPTY'
+    'speed_tag' = '0 3 256 WORD NEG LOWER EMPTY'
+    'man_and' = 'MAN_STATE MAN_ANY2'
+    'wait_to' = 'UNMATCHED BIG NEG STATE_PARAM ANY2_PARAM UNIT PARAM0 FND PLACE PTM_ALONE PCOUNT UNMATCHED_AND'
+}
+foreach ($f in $dslNeg.Keys) {
+    foreach ($n in $dslNeg[$f] -split ' ') {
+        & cmd /c "gcc -std=c99 -DAGV_HOST_BUILD -Iinclude -Itests/dsl -DNEG -DNEG_$n -fsyntax-only tests/dsl/$f.c >nul 2>nul"
+        if ($LASTEXITCODE -eq 0) { Write-Output "dsl $f NEG_$n compiled"; $failed++ }
+    }
+}
 foreach ($n in 'MAN_SETCLR', 'MAN_BELT_NODIR', 'MAN_PROFILE_0', 'MAN_PROFILE_RANGE', 'MAN_LOAD_EMPTY', 'MAN_LOAD_NAME') {
     & cmd /c "gcc -std=gnu99 -DAGV_HOST_BUILD -Iinclude -Ihal/host -DNEG_$n -fsyntax-only tests/test_manual.c >nul 2>nul"
     if ($LASTEXITCODE -eq 0) { Write-Output "NEG_$n compiled"; $failed++ }

@@ -16,8 +16,7 @@
  *   SEQ_START( TAPE, 시퀀스 )          3 + 시퀀스
  *   SEQ_START( TAPE_GD, 시퀀스 )       4 + 시퀀스. 분류 3·4 규칙의 SEQ_START( 시퀀스 ) 도 교차선 정지 뒤 시작한다
  *   AGV_AUTOSTART( 초 ) / AGV_AUTOSTART_PARAM   서고 그 초(또는 AS) 뒤 다시 출발
- *   AGV_SPEED( HIGH | LOW | LLOW | MIN )        주행 속도 단계
- *   AGV_SPEED_MMIN( m/min )                     주행 속도 m/min(4~255)
+ *   AGV_SPEED( HIGH | LOW | LLOW | MIN | m/min ) 주행 속도: 단계 낱말 또는 m/min 4~255(숫자·식). AGV_SPEED_MMIN 은 숫자만 받는 별칭
  *   AGV_FORBACK( FWD | BACK | TOGGLE )          전후진
  *   AGV_TURN( 방향, 각도, 회전 뒤 방향, 자동 출발[, 속도[, 옵션…]] )   제자리 회전. 옵션 ALIGN 주행로 정렬,
  *                                     TAPE 교차 테이프를 찾은 뒤 정렬(둘 중 하나까지), OBS 회전 중 장애물 감지
@@ -27,18 +26,23 @@
  *   OBS_OFF_AUTO                                 장애물 센서 끔. 일을 통째로 지우면(STOP·비상 정지·오류·ACS 작업 취소·수동 전환) 다시 켠다.
  *                                    다시 출발·방향 전환에서는 켜지 않는다. OBS_OFF 는 그때도 꺼진 채다(레거시)
  *   CALL( 인덱스 )                              사용자 함수
- *   ACS_SEND( 종류, 번호 )            보고, 번호 0~255  (2칸)
- *   ACS_SEND( 종류, STATION(k) )      보고, 번호 = 스테이션 큐[k] (레거시 ACS_Station_Call_Num[k])  (2칸)
- *   ACS_SEND( 종류, AGV_ID_MINUS(n) ) 보고, 번호 = 호기 번호 - n, n 0~255  (2칸)
- *   ACS_SEND( 종류, STATION(k) ± n )   보고, 번호 = 스테이션 큐[k] ± n, n -128~127  (2칸)
- *   ACS_SEND( 종류, TAG_NUM ± n )      보고, 번호 = 지금 태그 번호 ± n, n -128~127  (2칸)
+ *   ACS( 종류, 번호 )                 보고. 번호 칸(2칸 형식): 숫자 0~255, STATION(k)(스테이션 큐[k], 레거시 ACS_Station_Call_Num[k]),
+ *                                     STATION(k) ± n(n -128~127), TAG_NUM ± n(지금 태그 번호 ± n, n -128~127), AGV_ID(= AGV_ID_MINUS(0)),
+ *                                     AGV_ID_MINUS(n)(호기 번호 - n, n 0~255). ACS_SEND 는 같은 형식의 옛 이름(AGV_ID 낱말 말고)
+ *   ACS( 종류, STATION0 )             보고, 번호 = 스테이션 큐[0]  (1칸 형식. STANDBY_RESET 은 컴파일 오류, 2칸 형식으로)
  *   AGV_WAIT_START / AGV_WAIT_CANCEL    출발 대기 걸기·풀기
- *   ACS_SEND( STANDBY, 번호 )         대기 보고: 정지(분류 2·3·4 규칙에서는 그 정지), 번호 > 0 이면 자동 재전송 늘 켬(레거시 DA_ACS_Standby( n, NONE ) + 자동 재전송 켬)
- *   ACS_SEND( STANDBY_RESET, 번호 )   위와 같고 먼저 스테이션 큐를 지운다(레거시 DA_ACS_Standby( n, RESET ))
- *   ACS( 종류, STATION0 )            보고, 번호 = 스테이션 큐[0]  (1칸. STANDBY_RESET 은 컴파일 오류, ACS_SEND 로)
+ *   ACS( STANDBY, 번호 )              대기 보고: 정지(분류 2·3·4 규칙에서는 그 정지, 정지가 진행 중에 읽은 태그면 정지 없이), 번호 > 0 이면
+ *                                     자동 재전송 늘 켬(레거시 DA_ACS_Standby( n, NONE ) + 자동 재전송 켬). 다른 보고는 ACK 까지 재전송만 한다
+ *   ACS( STANDBY_RESET, 번호 )        위와 같고 먼저 스테이션 큐를 지운다(레거시 DA_ACS_Standby( n, RESET ))
  *   STATION_RESET                    스테이션 큐를 지운다
+ *   NO_ACTION                        아무 동작 없음(0). 뒤 규칙으로 넘어가지 않게 막는 용도
  * 종류는 seq_dsl.h DSL_INFO_* 이름(LOADING UNLOADING NEXT ARRIVE FINISH PROCESSING STANDBY CALL).
- * 시퀀스 표의 ACS_SEND( STANDBY, … ) 는 보고만 한다(정지·자동 재전송 없음).
+ * 시퀀스 표의 ACS( STANDBY, … ) 도 보고 + 자동 재전송을 하지만 정지는 걸지 않는다(시퀀스는 이미 선 뒤에 돈다).
+ *
+ * 정지가 진행 중(감속·정지 진행 중, D.flag_stopping)에 읽은 다른 태그의 정지 계열(AGV_STOP·AGV_AUTOSTART·SEQ_START·교차선 정지·센서 정지)과
+ * 회전 계열(AGV_TURN)은 모든 태그에서 건너뛴다(v0.58.0, tagact_run). 보고·출력·속도·전후진·ACT·CALL 은 그대로 실행한다.
+ * 예전 동작은 P_LEGACY_QUIRKS b12(QUIRK_TAG_WHILE_STOPPING).
+ * 태그 표 파일은 시퀀스 스텝 이름(WHEN·WAIT·L·GOTO·OUT_ON·DELAY·HANDSHAKE …)을 쓸 수 없다(아래 SEQ_STEP_NOT_ALLOWED_IN_TAG_TABLE 오류).
  */
 #ifndef AGV_TAG_DSL_H
 #define AGV_TAG_DSL_H
@@ -62,9 +66,7 @@
 
 /* AGV_STOP 은 괄호 없이 쓰면 이 상수(분류 1), 괄호를 쓰면 아래 매크로(분류 2·3·4) */
 enum { AGV_STOP = TA_STOP };
-/* 낱말 가리기: x 가 TAPE·TAPE_GD 면 DSL_xxx_TAPE… 가 "~, 값" 으로 펼쳐져 둘째 값이 뽑히고, 숫자면 dflt 가 뽑힌다 */
-#define DSL_ARG2_(a, b, ...)     b
-#define DSL_ARG2(...)            DSL_ARG2_(__VA_ARGS__, ~)
+/* 낱말 가리기: x 가 TAPE·TAPE_GD 면 DSL_xxx_TAPE… 가 "~, 값" 으로 펼쳐져 둘째 값이 뽑히고, 숫자면 dflt 가 뽑힌다(DSL_ARG2 는 agv/dsl_and.h) */
 #define DSL_STOPCM_OK(cm)        (0 * sizeof(char[(((cm) >= 0) && ((cm) <= 255)) ? 1 : -1]))
 #define DSL_STOPCM(cm)           (TA_STOP_CM | (uint16_t)((cm) + DSL_STOPCM_OK(cm)))
 #define DSL_STOPW_TAPE           ~, TA_TAPE_STOP
@@ -81,13 +83,24 @@ enum { AGV_STOP = TA_STOP };
                                  ((fs) | DSL_ARG2(DSL_FSF_##d, 0))
 #define DSL_FS_OK(in, t)         (0 * sizeof(char[(((in) >= 0) && ((in) < 64) && ((t) >= 1) && ((t) < 512)) ? 1 : -1]))
 #define FROM_SENSOR(in, t)       ((uint16_t)((in) | ((t) << TA_FS_TICKS_SHIFT)) + DSL_FS_OK(in, t))
-#define AGV_AUTOSTART(sec)     (TA_STOP_AUTOSTART | (sec))
+/* 태그 동작 칸의 인자는 8비트(0~255). 넘으면 윗비트가 동작 코드에 묻혀 조용히 다른 동작이 되므로 컴파일 오류 */
+#define DSL_U8_OK(n)             (0 * sizeof(char[(((n) >= 0) && ((n) < 256)) ? 1 : -1]))
+#define AGV_AUTOSTART(sec)       (TA_STOP_AUTOSTART | ((sec) + DSL_U8_OK(sec)))
 #define AGV_AUTOSTART_PARAM      TA_STOP_AUTOSTART
 #define DSL_TSPD_HIGH            0
 #define DSL_TSPD_LOW             1
 #define DSL_TSPD_LLOW            2
 #define DSL_TSPD_MIN             3
-#define AGV_SPEED(level)         (TA_SPEED | DSL_TSPD_##level)
+/* AGV_SPEED( HIGH | LOW | LLOW | MIN | m/min ): 낱말 또는 m/min 4~255(숫자·식). 낱말은 붙여서 고르므로 사이트가 HIGH 같은 이름의
+ * 매크로를 정의하면 깨진다. AGV_SPEED_MMIN 은 숫자만 받는 별칭 */
+#define DSL_TSPW_HIGH            ~, DSL_TSPD_HIGH
+#define DSL_TSPW_LOW             ~, DSL_TSPD_LOW
+#define DSL_TSPW_LLOW            ~, DSL_TSPD_LLOW
+#define DSL_TSPW_MIN             ~, DSL_TSPD_MIN
+#define DSL_TSPVAL(x)            DSL_CAT(DSL_TSPV_, DSL_IS_PAREN(x))(x)
+#define DSL_TSPV_1(x)            ((x) + DSL_MMIN_OK(x))
+#define DSL_TSPV_0(x)            DSL_ARG2(DSL_TSPW_##x, ((x) + DSL_MMIN_OK(x)))
+#define AGV_SPEED(x)             (TA_SPEED | DSL_TSPVAL(x))
 #define AGV_SPEED_MMIN(v)        (TA_SPEED | ((v) + DSL_MMIN_OK(v)))      /* m/min 4~255 */
 #define AGV_FORBACK(dir)         (TA_FORBACK | DIR_##dir)
 /* AGV_TURN( 방향, 각도, 회전 뒤 방향, 자동 출발[, 속도[, 옵션…]] ). 옵션을 쓰려면 속도 칸을 적는다.
@@ -128,11 +141,13 @@ enum { AGV_STOP = TA_STOP };
 #define DSL_SEQSTART_TAPE(opt, seq)    (TA_TAPE_STOP | SEQ_##seq)
 #define DSL_SEQSTART_TAPE_GD(opt, seq) (TA_TAPE_STOP_GD | SEQ_##seq)
 #define SEQ_START(...)           DSL_CAT(DSL_SEQSTART, DSL_NARG(__VA_ARGS__))(__VA_ARGS__)
-#define ACT_START(id)            (TA_ACT | (id))
+#define ACT_START(id)            (TA_ACT | ((id) + DSL_U8_OK(id)))
 #define OBS_ON                   (TA_OBS | 1)
 #define OBS_OFF                  (TA_OBS | 0)
 #define OBS_OFF_AUTO             (TA_OBS | 2)
-#define CALL(idx)                (TA_CALL | (idx))
+#define CALL(idx)                (TA_CALL | ((idx) + DSL_U8_OK(idx)))
+/* 아무 동작 없음. 규칙을 맞게 해 뒤 규칙으로 넘어가지 않게 막는 용도(동작 칸 0). 사이트가 같은 토큰열로 정의해 쓰던 것을 옮겼다 */
+#define NO_ACTION  0
 
 #define DSL_INFO_STANDBY_RESET   (DSL_INFO_STANDBY | TA_ACS_STANDBY_RESET)
 /* 번호 칸: 숫자 0~255, AGV_ID_MINUS(n)(n 0~255), STATION(k) ± n, TAG_NUM ± n(지금 태그 번호, n -128~127) */
@@ -151,10 +166,110 @@ enum { AGV_STOP = TA_STOP };
 /* 출발 대기 걸기·풀기(run_wait_start·run_wait_cancel, 레거시 Flag_Wait_Start = ON·OFF) */
 #define AGV_WAIT_START           (TA_WAIT | 1)
 #define AGV_WAIT_CANCEL          (TA_WAIT | 0)
-#define ACS(info, src)           DSL_TACS_##src(info)
+/* ACS( 종류, 번호 ): 번호 칸이 괄호로 시작하거나(STATION(k), AGV_ID_MINUS(n) …) 낱말이 아닌 식(숫자, TAG_NUM ± n)이면 2칸 형식(ACS_SEND),
+ * 낱말 STATION0 이면 1칸 형식, 낱말 AGV_ID 이면 AGV_ID_MINUS(0) 의 2칸 형식. 낱말은 붙여서 고르므로 사이트가 STATION0·AGV_ID 같은
+ * 이름의 매크로를 정의하면 깨진다. ACS( 종류, STATION(0) ) 는 2칸 형식이다(1칸 STATION0 과 같은 뜻, 칸을 하나 더 쓴다) */
+#define ACS(info, x)             DSL_CAT(DSL_TACSP_, DSL_IS_PAREN(x))(info, x)
+#define DSL_TACSP_1(info, x)     ACS_SEND(info, x)
+#define DSL_TACSP_0(info, x)     DSL_ARG2(DSL_TACSW_##x, DSL_TACSN)(info, x)
+#define DSL_TACSW_STATION0       ~, DSL_TACSV_STATION0
+#define DSL_TACSW_AGV_ID         ~, DSL_TACSV_AGV_ID
+#define DSL_TACSV_STATION0(info, x)  DSL_TACS_STATION0(info)
+#define DSL_TACSV_AGV_ID(info, x)    ACS_SEND(info, AGV_ID_MINUS(0))
+#define DSL_TACSN(info, x)       ACS_SEND(info, x)
 /* 1칸 형식은 정보 값이 인자 8비트뿐이다. 0xFF 를 넘으면(STANDBY_RESET 등) 윗비트가 동작 코드에 묻히므로 컴파일 오류 */
 #define DSL_TACS_OK(v)           (0 * sizeof(char[((v) <= 0xFF) ? 1 : -1]))
 #define DSL_TACS_STATION0(info)  (TA_ACS | (DSL_INFO_##info + DSL_TACS_OK(DSL_INFO_##info)))
 #define STATION_RESET            TA_STATION_RESET
+
+/* 태그 표에서 시퀀스 스텝 이름을 쓰면 읽을 수 있는 이름의 컴파일 오류로 막는다(예: 태그 동작 칸에 WAIT 를 쓰면 스텝 한 줄이 칸에 들어가
+ * 조용히 틀리거나 엉뚱한 오류가 난다). 이 헤더를 포함한 파일에서는 시퀀스 표를 쓸 수 없다(사이트 태그 표 파일에는 시퀀스가 없다) */
+#define DSL_NOT_IN_TAG SEQ_STEP_NOT_ALLOWED_IN_TAG_TABLE
+#undef L
+#define L(...) DSL_NOT_IN_TAG
+#undef GOTO
+#define GOTO(...) DSL_NOT_IN_TAG
+#undef WHEN
+#define WHEN(...) DSL_NOT_IN_TAG
+#undef WHEN_STATE
+#define WHEN_STATE(...) DSL_NOT_IN_TAG
+#undef WHEN_IF
+#define WHEN_IF(...) DSL_NOT_IN_TAG
+#undef WHEN_IF_IN
+#define WHEN_IF_IN(...) DSL_NOT_IN_TAG
+#undef WHEN_ANY2
+#define WHEN_ANY2(...) DSL_NOT_IN_TAG
+#undef WHEN_ID
+#define WHEN_ID(...) DSL_NOT_IN_TAG
+#undef OTHERWISE
+#define OTHERWISE(...) DSL_NOT_IN_TAG
+#undef SELECT_END_TO
+#define SELECT_END_TO(...) DSL_NOT_IN_TAG
+#undef OUT_ON
+#define OUT_ON(...) DSL_NOT_IN_TAG
+#undef OUT_OFF
+#define OUT_OFF(...) DSL_NOT_IN_TAG
+#undef OUT_PULSE
+#define OUT_PULSE(...) DSL_NOT_IN_TAG
+#undef OUT_FLICKER_UNTIL_IN
+#define OUT_FLICKER_UNTIL_IN(...) DSL_NOT_IN_TAG
+#undef OUT_FLICKER_UNTIL_IN_TO
+#define OUT_FLICKER_UNTIL_IN_TO(...) DSL_NOT_IN_TAG
+#undef HANDSHAKE
+#define HANDSHAKE(...) DSL_NOT_IN_TAG
+#undef BELT_ON
+#define BELT_ON(...) DSL_NOT_IN_TAG
+#undef BELT_OFF
+#define BELT_OFF(...) DSL_NOT_IN_TAG
+#undef WAIT_BELTS
+#define WAIT_BELTS(...) DSL_NOT_IN_TAG
+#undef WAIT
+#define WAIT(...) DSL_NOT_IN_TAG
+#undef WAIT_TO
+#define WAIT_TO(...) DSL_NOT_IN_TAG
+#undef WAIT_STABLE
+#define WAIT_STABLE(...) DSL_NOT_IN_TAG
+#undef WAIT_STABLE_TO
+#define WAIT_STABLE_TO(...) DSL_NOT_IN_TAG
+#undef WAIT_OUT
+#define WAIT_OUT(...) DSL_NOT_IN_TAG
+#undef DELAY
+#define DELAY(...) DSL_NOT_IN_TAG
+#undef WAIT_IF
+#define WAIT_IF(...) DSL_NOT_IN_TAG
+#undef WAIT_IF_TO
+#define WAIT_IF_TO(...) DSL_NOT_IN_TAG
+#undef WAIT_IF_IN
+#define WAIT_IF_IN(...) DSL_NOT_IN_TAG
+#undef WAIT_IF_IN_TO
+#define WAIT_IF_IN_TO(...) DSL_NOT_IN_TAG
+#undef WAIT_ANY2
+#define WAIT_ANY2(...) DSL_NOT_IN_TAG
+#undef WAIT_ANY2_TO
+#define WAIT_ANY2_TO(...) DSL_NOT_IN_TAG
+#undef DELAY_PARAM
+#define DELAY_PARAM(...) DSL_NOT_IN_TAG
+#undef WAIT_TO_PARAM
+#define WAIT_TO_PARAM(...) DSL_NOT_IN_TAG
+#undef WAIT_PARAM_TO
+#define WAIT_PARAM_TO(...) DSL_NOT_IN_TAG
+#undef ACS_WAIT_ACK
+#define ACS_WAIT_ACK(...) DSL_NOT_IN_TAG
+#undef ACS_STATION
+#define ACS_STATION(...) DSL_NOT_IN_TAG
+#undef SET_STATE
+#define SET_STATE(...) DSL_NOT_IN_TAG
+#undef WAIT_STATE
+#define WAIT_STATE(...) DSL_NOT_IN_TAG
+#undef WAIT_ACT
+#define WAIT_ACT(...) DSL_NOT_IN_TAG
+#undef ERROR_HOLD
+#define ERROR_HOLD(...) DSL_NOT_IN_TAG
+#undef END_ERROR
+#define END_ERROR(...) DSL_NOT_IN_TAG
+#undef END_STOP
+#define END_STOP DSL_NOT_IN_TAG
+#undef END_RESTART
+#define END_RESTART DSL_NOT_IN_TAG
 
 #endif /* AGV_TAG_DSL_H */

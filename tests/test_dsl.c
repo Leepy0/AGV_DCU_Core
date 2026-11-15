@@ -115,7 +115,7 @@ SEQ_BEGIN( ext )
     AGV_TURN( CW, 90, 0, 1, 0, 0 )                                           /* 예전 6인자(장애물, 속도) */
 #endif
 #ifdef NEG_SEQ_SEND_N
-    ACS_SEND( NEXT, STATION(0) + 1 )                                         /* 시퀀스 보고는 STATION(k) 만 */
+    ACS_SEND( NEXT, STATION(0) + 2 )                                         /* 시퀀스 보고는 STATION(0) + 1 까지(펌웨어에 있는 것) */
 #endif
 #ifdef NEG_SEQ_SPEED
     AGV_TURN( CW, 90, 0, 1, 32 )                                             /* 속도 32 이상 */

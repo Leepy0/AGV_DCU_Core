@@ -545,7 +545,7 @@ void tagact_tick(void)
         return;
     }
     if (++s_fs.ticks >= (int16_t)((s_fs.w2 >> TA_FS_TICKS_SHIFT) & 0x1FFu)) {
-        int32_t left = ((s_fs.w2 & TA_FS_FL) ? (int32_t)param_get(P_STOP_LEN_FWD_MM) : (int32_t)s_fs.cm) * 10L - fs_mm(s_fs.on_p);
+        int32_t left = ((s_fs.w2 & TA_FS_FL) ? (int32_t)param_get(P_STOP_LEN_FWD_CM) : (int32_t)s_fs.cm) * 10L - fs_mm(s_fs.on_p);
         s_fs.w2 = 0;
         tagact_stop_after_mm((left > 0) ? left : 1L);
         s_tag = s_fs.tag;
