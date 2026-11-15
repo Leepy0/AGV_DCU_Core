@@ -10,11 +10,11 @@
 
 #define MOTOR_TORQUE_LIMIT   4000.0f
 /* 속도 PI(54차부터 기본, 53차 시험 새1): 되먹임 1표본(D.rpm), 피드포워드 고정(FF 파라미터는 쓰지 않는다). 역계산 이득 1/Kp,
- * 포화 기준은 PI + 피드포워드 합 [0, 4000](v0.48.0. 예전 루프 TST 2 는 PI 단독 4000) */
+ * 포화 기준은 PI + 피드포워드 합 [0, 4000](v0.48.0. 예전 루프 TST 1·2 는 PI 단독 4000) */
 #define MOTOR_SPEED_KP       0.8f
 #define MOTOR_SPEED_KI       0.16f
 #define MOTOR_SPEED_FF       0.999f
-#define MOTOR_SPEED_KP_OLD   2.2f       /* 예전(TST 2): 되먹임 D.rpm_avg(6표본), 피드포워드 = FF 파라미터 */
+#define MOTOR_SPEED_KP_OLD   2.2f       /* 예전(TST 1·2): 되먹임 D.rpm_avg(6표본), 피드포워드 = FF 파라미터 */
 #define MOTOR_SPEED_KI_OLD   0.2f
 #define MOTOR_RPM_SPIKE      3500
 
@@ -42,10 +42,10 @@ int16_t motor_raw_rpm(uint16_t wheel);          /* 스파이크 컷 전 rpm. 327
 void    motor_spike_set(int16_t rpm);           /* 측정 rpm 스파이크 컷. 0 = 기본 MOTOR_RPM_SPIKE */
 int16_t motor_spike(void);
 
-/* 속도 루프는 기본(위 MOTOR_SPEED_*). 개발 이미지 TST 2(param_tst_old)만 예전(PI 되먹임 D.rpm_avg, *_OLD 이득, FF 파라미터).
+/* 속도 루프는 기본(위 MOTOR_SPEED_*). 개발 이미지 TST 1·2(param_tst_speed_old)만 예전(PI 되먹임 D.rpm_avg, *_OLD 이득, FF 파라미터).
  * D.rpm_avg 는 어느 쪽이든 6표본 평균이다 */
 #if AGV_DEV_TESTS
-float   motor_speed_ff(void);                   /* 지금 쓰는 피드포워드 계수(rpm 당 토크). 예전(TST 2)만 FF 파라미터 */
+float   motor_speed_ff(void);                   /* 지금 쓰는 피드포워드 계수(rpm 당 토크). 예전(TST 1·2)만 FF 파라미터 */
 #else
 #define motor_speed_ff() (MOTOR_SPEED_FF)
 #endif

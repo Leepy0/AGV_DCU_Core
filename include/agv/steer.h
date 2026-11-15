@@ -6,7 +6,7 @@
 #define AGV_STEER_H
 
 #include "agv/types.h"
-#include "agv/param.h"      /* AGV_DEV_TESTS 기본값, param_tst_old(TST 2 예전 곡선 끝 처리) */
+#include "agv/param.h"      /* AGV_DEV_TESTS 기본값, param_tst_steer_old(TST 2·3 예전 곡선 끝 처리) */
 
 void    steer_reset(void);
 void    steer_run(int16_t tuning_type);    /* DA_Gain_Guide_Direction. tuning_type = nTuningType */
