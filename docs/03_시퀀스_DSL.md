@@ -197,7 +197,7 @@ WAIT_ANY2( IN( ANY_ON( SEN_1, SEN_2 ), OFF( SEN_5 ) ),  ANY2_ON( SEN_3, SEN_4 ) 
 | `X_ID( lo, hi )` | lo <= `P_AGV_ID` <= hi | `set[AGV_ID] == N` |
 | `X_KEY( UP )` | 지금 눌린 키 값 == `KEY_UP`. `ui_key()`만 읽고 키를 소비하지 않는다. `UP DOWN SET RESET MODE SHIFT` | `Read_Key_buffer == UP_KEY` |
 | `X_FORBACK_MODE` / `X_LOW_BATTERY` | 방향 전환 모드 > 0 / 저전압 | |
-| `X_STATION( k, lo, hi )` / `X_STATION_RUNNING( k, lo, hi )` | lo <= 큐[k] <= hi. `X_STATION_RUNNING` 은 v0.58.0 부터 같은 뜻의 별칭(예전: 정지가 걸리기 전에만. 지금은 모든 태그가 정지 중 정지·회전을 건너뛴다, 5.5절) | `ACS_Station_Call_Num[k] == N` |
+| `X_STATION( k, lo, hi )` / `X_STATION_RUNNING( k, lo, hi )` | lo <= 큐[k] <= hi. `X_STATION_RUNNING` 은 v0.58.0 부터 같은 뜻의 별칭(예전: 정지가 걸리기 전에만. 지금은 모든 태그가 정지 중 정지·회전을 건너뛴다, 5.5절. 표 바이트는 예전 그대로 `XC_STATION_RUNNING` 이고 해석기가 `XC_STATION` 과 같게 본다) | `ACS_Station_Call_Num[k] == N` |
 | `X_STATION_MOD( k, n, m )` / `X_STATION_DIV( k, n, m )` | 큐[k] `%` n == m / 큐[k] `/` n == m. n = 0 은 컴파일 오류 | `ACS_Station_Call_Num[k] % N == M` |
 | `X_TAG_NUM( 식 )` | 지금 태그 번호 == 식(v0.53.0). 식 `STATION(k)`, `STATION(k) ± n`, `MOD( STATION(k), m )`, `n + MOD( STATION(k), m )`(덧셈 순서 자유). **태그 표 전용** | `ACS_Station_Call_Num[k] == Tag_Num - N` 은 `X_TAG_NUM( STATION(k) + N )` |
 | `X_PARAM( 이름, v )` | 파라미터 == v. 이름은 FND 이름(`DRS`·`AS`·`TFB` …). 자릿수 파라미터의 한 자리는 `이름_자리`(`TFB_1` 전후진 모드, `TFB_10` 회전 모드)(v0.53.0) | `ForBack_Mode == 2` 는 `X_PARAM( TFB_1, 2 )` |

@@ -95,7 +95,7 @@ enum {
     XC_FORWARD,           /* 주행 방향 전진 */
     XC_BACKWARD,
     XC_STATION,           /* a <= 큐[칸] <= b */
-    XC_STATION_RUNNING,   /* 위 조건 + 아직 정지가 걸리지 않음 */
+    XC_STATION_RUNNING,   /* XC_STATION 과 같다(v0.58.0. 예전: 위 조건 + 아직 정지가 걸리지 않음). 이미 만든 표의 코드라 남긴다 */
     XC_CROSS,             /* 교차로. 칸 비트0: 0 IN, 1 OUT. 비트1: 0 대기 또는 유지, 1 유지만 */
     XC_ERR_EQ,            /* action_err == a */
     XC_PARAM_EQ,          /* 파라미터[칸] == a. b != 0 이면 그 자리(1·10·100) 숫자 == a(자릿수 파라미터) */
