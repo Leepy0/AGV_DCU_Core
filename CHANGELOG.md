@@ -12,7 +12,7 @@ DSL 통일(`include/agv/dsl_and.h` 새 파일, `seq_dsl.h`·`tag_dsl.h`):
 - 별칭: `WAIT_PARAM_TO`, `IN_INVERTED`(= `IN_ACTIVE_HIGH`), `P_STOP_LEN_CM`·`P_STOP_LEN_FWD_CM`(옛 `_MM` 은 `#define` 으로 남기고 코어 C 코드는 새 이름), 사이트가 직접 만들어 쓰던 `OUT_SET( 켬, 끔 )`·태그 `NO_ACTION` 을 같은 토큰열로 코어에 넣었다(재정의 경고 없음). `IN( … )` 가 7·8 인자도 받는다.
 - 조용히 틀리던 표를 정적으로 막는다: 태그 `AGV_AUTOSTART`·`CALL`·`ACT_START` 0~255, 태그 동작 4칸 초과, 태그 표 파일의 시퀀스 스텝 이름(`SEQ_STEP_NOT_ALLOWED_IN_TAG_TABLE`), 조건 칸의 `ANY2_ON`·64비트가 아닌 식, 시퀀스 `WHEN_IF`·`WAIT_IF*` 의 `X_TAG_NUM`, `SELECT_END_TO` 제한 1~0x7FFF, 제한 0x8000 이상(`UNMATCHED` 는 `WAIT_STABLE_TO` 에서만).
 - 사이트 이름 충돌: `AND` 의 낱말(`FORWARD` `ID` `KEY` `PARAM` `HIGH` `STATION0` `AGV_ID` …)은 매크로가 아니라 붙여서 고르는 이름이라 사이트가 같은 이름의 매크로를 정의하면 깨진다. 지금 사이트 소스에서 걸리는 곳: `AGV_ID`(타입 83·175 `legacy_const.h`, 값 25). 표 파일이 그 헤더를 포함해 `ACS( 종류, AGV_ID )` 를 쓰면 숫자 25 로 바뀐다(지금 표에는 없다).
-- 시험: `tests/dsl/*.c` 15개(옛 꼴과 새 꼴이 같은 바이트, gcc·cl2000 둘 다. `man_and.c` 포함)와 `-DNEG_*` 컴파일 오류 시험 110여 개를 `run_host.ps1` 에 넣었다. `test_sys.c` 는 시퀀스 표를 `tag_dsl.h` 포함 앞에 쓰도록 순서를 바꿨다.
+- 시험: `tests/dsl/*.c` 16개(옛 꼴과 새 꼴이 같은 바이트: gcc 는 `run_host.ps1`, cl2000 은 `tests/dsl/cl2000_check.ps1`. `man_and.c` 포함)와 `-DNEG_*` 컴파일 오류 시험 112개(두 컴파일러 모두)를 넣었다. `test_sys.c` 는 시퀀스 표를 `tag_dsl.h` 포함 앞에 쓰도록 순서를 바꿨다.
 
 동작 변경:
 
@@ -20,6 +20,13 @@ DSL 통일(`include/agv/dsl_and.h` 새 파일, `seq_dsl.h`·`tag_dsl.h`):
 - `OUT_FLICKER_UNTIL_IN(_TO)`: 끝 조건이 상태 낱말(`AND`)을 받는다(`cond_true` → `flk_cond`: 입력 + `xc`). 칸이 겹쳐서(상태 인자가 `arg0`·`arg1`, 둘째 `ANY` 가 `out`, 점멸 간격이 `arg0`, 출력이 `out`) 상태 낱말이 있는 점멸 스텝만 간격과 출력을 `out` 한 칸에 넣는다(간격 << 8 | 출력 번호 + 1, `xc` != 0 이 신호). 상태 낱말이 없으면 칸 배치가 예전과 같다. 둘째 `ANY`·둘째 상태는 컴파일 오류.
 - 시퀀스·ACT 의 `ACS( STANDBY, n )`: 보고 + 자동 재전송 + 대기 번호(`run_standby( AUTO | NOSTOP )`), 정지는 안 건다. 시퀀스는 이미 선 뒤에 돌고 정지를 걸면 시퀀스 스캔만 멈추며, ACT 는 주행을 멈추지 않는 동작이라서다. 나머지 보고는 예전 그대로 ACK 까지 재전송만(슬롯 큐 `acs.c`는 안 바꿨다: 같은 Info 슬롯, `CT` 초 간격 + 지터, 10번마다 MsgID 재발급, 99번 포기).
 - 정지(`D.flag_stopping`)가 진행 중에 읽은 다른 태그의 정지 계열(`AGV_STOP`·`AGV_AUTOSTART`·교차선 정지·센서 정지)과 회전 계열(`AGV_TURN`)은 모든 태그에서 건너뛴다(`tagact_run`). 보고·출력·속도·전후진·ACT·CALL·`SEQ_START` 의 시퀀스 요청은 그대로(겹친 요청은 대응표 순서로 돈다), 대기 보고는 정지만 건너뛴다. 예전에는 `X_STATION_RUNNING` 규칙만 정지 뒤 안 맞았다. 이제 `X_STATION_RUNNING`·`IF_STATION_RUNNING` 은 `X_STATION`·`IF_STATION` 과 같은 뜻의 별칭(표 바이트는 예전 그대로, 해석기가 같게 본다). 예전 동작: `P_LEGACY_QUIRKS` b12(4096, `QUIRK_TAG_WHILE_STOPPING`), 한계 4095 → 8191. 바뀐 시험: `test_sys`(교차선 요청·교차선 회전 요청), `test_curve`(명령 정지 감속 중 교차선 회전 요청은 예전 비트로).
+
+사이트 확인(앱 사본에 이 코어를 넣고 `check.ps1`, 앱 저장소는 건드리지 않았다. 앞 코어 v0.57.0 과 같은 방법으로 견줌):
+
+- 사이트 소스 오브젝트(타입 143·83·175·EXAMPLE 의 모든 `.c`): 할당 섹션 원자료·재배치가 한 바이트도 안 바뀌었다. 새 경고도 없다(`OUT_SET`·`NO_ACTION` 재정의 경고 없음). 타입 143 압축 표(`tag_packed.c`·`seq_packed.c`)는 새 코어로 다시 만들어도 기존 파일과 바이트가 같다.
+- 이미지(타입 143, EXAMPLE, 현장 이미지 타입 175): `.text` +171 워드(`seq.obj` +62, `tagact.obj` +109, 다른 코어 오브젝트는 그대로). `.econst` 크기는 그대로이고 바뀐 칸은 코드가 늘어 밀린 주소(+0xAA·0xAB·0xAC)와 `LG` 한계 0x0FFF → 0x1FFF 한 칸뿐이다.
+- 타입 83·175 개발 이미지는 이전 코어(v0.57.0)에서도 플래시가 모자라 링크가 안 된다(`.econst` 배치 실패, 남은 플래시 0x2256·0x15d1 → 0x21ab·0x1526). 타입 83 은 현장 이미지도 안 된다.
+- 앱 레거시 대조(타입 143): 흐름·수동·시퀀스(펼친·압축) 시험은 그대로 통과한다. 코어 `seq.c` 가 `run_standby` 를 부르므로 `tests/legacy_ref/test_seq_143.c` 에 `run_standby` 스텁이 필요하다(앱 쪽 일). 태그 대조 `test_tag_143` 은 정지 중 태그 무시 때문에 불일치가 20938개다(회전 거리·방향 20826, 방향 전환 요청 11144, 교차선 요청 112 — 정지·회전을 건너뛴 것뿐). 예전 동작 비트(`LG` 4096)를 켜고 돌리면 0 이다.
 
 문서: docs/03 3.3.3(낱말 대응표·칸 한계·별칭)·5.5(정지 중 태그, ACS 재전송), docs/02 `SL`·`FL` 이름과 `LG` b12.
 
