@@ -4,6 +4,7 @@
 #include <string.h>
 #include "agv/seq_dsl.h"
 #include "agv/acs.h"
+#include "agv/run.h"
 #include "fakes.h"
 
 #define D agv_drive
@@ -145,6 +146,36 @@ SEQ_BEGIN( s_handshake )
     END_STOP
     L( L_ERR )
     OUT_ON( O_C )
+SEQ_END
+
+/* 점멸 끝 조건에 상태 낱말(AND): 칸 배치가 달라진다(주기·출력이 out 한 칸) */
+SEQ_BEGIN( s_flicker_st )
+    OUT_FLICKER_UNTIL_IN_TO( O_A, 2, AND( ON(SEN_A), FORWARD ), 20, L_ERR )
+    OUT_ON( O_B )
+    END_STOP
+    L( L_ERR )
+    OUT_ON( O_C )
+SEQ_END
+
+/* AND: 입력(켬·끔·하나라도)과 상태(호기)를 한 조건으로, 파라미터 제한 대기, 대기 보고 */
+SEQ_BEGIN( s_and )
+    WAIT( AND( ON(SEN_A), ANY(SEN_B, SEN_C), ID(5, 9) ) )
+    OUT_ON( O_A )
+    WAIT_STABLE( AND( ON(SEN_D), ANY(SEN_B, SEN_C) ), 3 )
+    OUT_ON( O_B )
+    WAIT_TO( AND( ON(SEN_E), BACKWARD ), 5, L_ERR )
+    OUT_ON( O_C )
+    END_STOP
+    L( L_ERR )
+    OUT_ON( OUT_EXT_5 )
+    END_STOP
+SEQ_END
+
+SEQ_BEGIN( s_standby )
+    ACS( STANDBY, 7 )
+    ACS( CALL, 9 )
+    ACS( STANDBY, STATION(0) + 1 )
+    END_STOP
 SEQ_END
 
 SEQ_BEGIN( s_wait_out )
@@ -384,6 +415,7 @@ enum {
     S_XWHEN, S_XWAIT, S_ANY2, S_DPARAM, S_TPARAM, S_NOWAIT, S_MOVE, S_ALIGN, S_MOVE_TAPE,
     S_BELTS, S_BELT_OFF, S_BELT_END, S_BELT_MANY, S_OBS_AUTO, S_HIGH
 };
+enum { S_FLICKER_ST = SEQ_UNLOAD_PART + 3, S_AND, S_STANDBY };   /* 사이트 ID 가 SEQ_MAX(64)를 넘지 않게 코어 ID 빈 자리를 쓴다 */
 
 SEQ_MAP_BEGIN( site_seqs )
     SEQ_MAP( 0, S_BRANCH, s_branch )
@@ -417,6 +449,9 @@ SEQ_MAP_BEGIN( site_seqs )
     SEQ_MAP( 0, S_BELT_END, s_belt_end )
     SEQ_MAP( 0, S_BELT_MANY, s_belt_many )
     SEQ_MAP( 0, S_OBS_AUTO, s_obs_auto )
+    SEQ_MAP( 0, S_FLICKER_ST, s_flicker_st )
+    SEQ_MAP( 0, S_AND, s_and )
+    SEQ_MAP( 0, S_STANDBY, s_standby )
     SEQ_MAP( 0, S_HIGH, s_high )
 SEQ_MAP_END
 
@@ -845,21 +880,86 @@ static void run_all(void)
     seq_run();
     assert((fake_out & BIT(O_A)) == 0 && fake_out == BIT(O_C));
 
-    /* 핸드셰이크 */
+    /* 핸드셰이크(v0.58.0): 출력 켬, 응답 켜짐 대기, 출력 끔, 바로 다음 스텝. 응답이 꺼지기를 기다리지 않는다 */
     start(S_HANDSHAKE);
     seq_run();
-    assert(fake_out == BIT(O_A));
+    assert(fake_out == BIT(O_A) && seq_is_active());
+    seq_run();
+    assert(fake_out == BIT(O_A) && seq_is_active());       /* 응답 전: 출력을 켠 채 기다린다 */
     fake_in = BIT(SEN_A);
-    seq_run();
-    assert(fake_out == 0);
-    seq_run();
-    assert(seq_is_active());
+    seq_run();                                              /* 응답 켜짐: 출력 끄고 같은 스캔에 다음 스텝(O_B)까지 */
+    assert(fake_out == BIT(O_B) && !seq_is_active());       /* 응답은 아직 켜진 채다. 꺼짐 대기 없음 */
     fake_in = 0;
-    seq_run();
-    assert(fake_out == BIT(O_B));
-    start(S_HANDSHAKE);
+    start(S_HANDSHAKE);                                     /* 제한 5 틱은 응답 켜짐 대기에만 적용: 응답이 없으면 라벨로 */
     for (int i = 0; i < 6; i++) { seq_run(); }
     assert(fake_out == BIT(O_C));
+    start(S_HANDSHAKE);
+    for (int i = 0; i < 3; i++) { seq_run(); }
+    fake_in = BIT(SEN_A);                                   /* 제한 안에 응답 */
+    seq_run();
+    assert(fake_out == BIT(O_B));
+    fake_in = 0;
+
+    /* 점멸 끝 조건에 AND 상태 낱말: 방향이 맞아야 끝난다. 칸 배치(xc != 0)는 주기·출력을 out 한 칸에 넣는다 */
+    assert(s_flicker_steps[0].xc == 0 && s_flicker_steps[0].arg0 == 2 && s_flicker_steps[0].out == BIT(O_A));
+    assert(s_flicker_st_steps[0].xc != 0 && s_flicker_st_steps[0].arg0 == 0 && s_flicker_st_steps[0].out == ((2uL << 8) | (O_A + 1)));
+    D.backward = 1;
+    start(S_FLICKER_ST);
+    fake_in = BIT(SEN_A);                                   /* 입력은 참, 후진이라 상태가 거짓 */
+    { int on = 0, off = 0;
+      for (int i = 0; i < 8; i++) { seq_run(); if (fake_out & BIT(O_A)) { on++; } else { off++; } }
+      assert(on > 0 && off > 0 && seq_is_active()); }
+    D.backward = 0;                                         /* 전진: 끄고 다음 스텝 */
+    seq_run();
+    assert(fake_out == BIT(O_B) && !seq_is_active());
+    fake_in = 0;
+    D.backward = 1;
+    start(S_FLICKER_ST);
+    for (int i = 0; i < 40; i++) { seq_run(); }             /* 제한 20 틱 */
+    assert(fake_out == BIT(O_C));
+    D.backward = 0;
+    fake_in = 0;
+
+    /* AND 조건(입력 + 하나라도 + 호기) */
+    (void)param_set(P_AGV_ID, 7);
+    start(S_AND);
+    fake_in = BIT(SEN_A);
+    seq_run();
+    assert(fake_out == 0);                                  /* SEN_B·SEN_C 둘 다 꺼짐 */
+    fake_in = BIT(SEN_A) | BIT(SEN_C);
+    seq_run();
+    assert(fake_out == BIT(O_A));                           /* 통과. 다음은 유지 대기 */
+    fake_in = BIT(SEN_C);
+    for (int i = 0; i < 6; i++) { seq_run(); }
+    assert(fake_out == BIT(O_A));                           /* SEN_D 없음 */
+    fake_in = BIT(SEN_C) | BIT(SEN_D);
+    for (int i = 0; i < 3; i++) { seq_run(); }
+    assert(fake_out == BIT(O_A));                           /* 유지 3 틱 초과 전 */
+    seq_run();
+    assert(fake_out == (BIT(O_A) | BIT(O_B)));
+    fake_in = BIT(SEN_E);
+    D.backward = 0;                                         /* 상태(후진)가 거짓: 제한 5 틱 */
+    for (int i = 0; i < 4; i++) { seq_run(); }
+    assert(fake_out == (BIT(O_A) | BIT(O_B)));
+    D.backward = 1;
+    seq_run();
+    assert(fake_out & BIT(O_C));
+    D.backward = 0;
+    fake_in = 0;
+    seq_abort_all();
+
+    /* 시퀀스의 대기 보고(STANDBY)는 보고 + 자동 재전송(run_standby)이고 정지는 걸지 않는다. 다른 보고는 슬롯만 */
+    fake_standby_count = 0;
+    acs_reset();
+    acs_station_reset();
+    (void)acs_station_push(10);
+    start(S_STANDBY);
+    seq_run();
+    assert(fake_standby_count == 2 && !seq_is_active());
+    assert((fake_standby_flags & RUN_STANDBY_AUTO) && (fake_standby_flags & RUN_STANDBY_NOSTOP) && !(fake_standby_flags & RUN_STANDBY_RESET));
+    assert(fake_standby_id == 11);                          /* 마지막: STATION(0) + 1 */
+    assert(acs_pending() == 1);                             /* CALL 만 슬롯에 있다(STANDBY 슬롯은 run_standby 가 채우는데 fake 다) */
+    acs_reset();
 
     /* 출력 대기 */
     start(S_WAIT_OUT);
@@ -1161,8 +1261,8 @@ static void run_all(void)
     assert(seq_xcond(X_PARAM_LE(P_STATION_NO, 4), 0) && !seq_xcond(X_PARAM_LE(P_STATION_NO, 3), 0));
     assert(seq_xcond(X_ID(7, 7), 0) && !seq_xcond(X_NOT(X_ID(7, 7)), 0));
     assert(seq_xcond(X_FORWARD, 0) && !seq_xcond(X_BACKWARD, 0));
-    D.flag_stopping = 1;
-    assert(seq_xcond(X_STATION(1, 42, 42), 0) && !seq_xcond(X_STATION_RUNNING(1, 42, 42), 0));
+    D.flag_stopping = 1;                         /* v0.58.0: X_STATION_RUNNING 은 X_STATION 과 같다(정지 중 무시는 tagact_run) */
+    assert(seq_xcond(X_STATION(1, 42, 42), 0) && seq_xcond(X_STATION_RUNNING(1, 42, 42), 0));
     D.flag_stopping = 0;
     assert(seq_xcond(X_STATION_RUNNING(1, 42, 42), 0));
     D.cross_out_flag = 1;

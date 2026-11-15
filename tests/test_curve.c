@@ -2522,6 +2522,13 @@ static void xs_sim(const xs_case_t *q, xs_res_t *r)
         if ((pre > 0) && (pre < 3) && (++pre == 3)) {  /* 감속 중(남은 정지 거리 0)에 태그: 회전 요청도 걸린다 */
             assert(D.flag_stopping && (D.stop_pulses == 0) && D.flag_run);
             (void)tagact_run((uint16_t)(900 + q->method));
+            assert(!xs_seeking());                     /* v0.58.0: 정지가 진행 중에 읽은 태그의 회전 요청은 무시한다 */
+            {
+                int16_t lg_saved = (int16_t)param_get(P_LEGACY_QUIRKS);
+                assert(param_set_ram(P_LEGACY_QUIRKS, (int16_t)(lg_saved | QUIRK_TAG_WHILE_STOPPING)) == 0);
+                (void)tagact_run((uint16_t)(900 + q->method));   /* 예전 동작 비트: 감속 중 태그도 회전 요청이 걸린다(레거시) */
+                assert(param_set_ram(P_LEGACY_QUIRKS, lg_saved) == 0);
+            }
             assert(xs_seeking());
             cmd = 1;                                   /* 서면 다시 출발(아래) */
         }

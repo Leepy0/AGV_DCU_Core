@@ -25,6 +25,7 @@ static tag_rule_t s_hit;           /* 압축 표에서 맞춰 보는 규칙을 �
                                     * 돌려받은 포인터를 사용자 함수 호출 뒤에 쓰지 않는다 */
 static uint16_t s_nrules, s_profile, s_display_tag;
 static uint16_t s_tag;             /* 지금 처리 중인 태그 번호(ACS_SEND( …, TAG_NUM ± n )) */
+static int16_t  s_busy;            /* 1 = 정지가 진행 중(D.flag_stopping)일 때 읽은 태그라 정지·회전 동작을 건너뛴다(tagact_run) */
 
 /* 표를 묶을 때(부팅·표 바꿈) 걸린 센서 정지 요청은 지운다(앞 표의 뒤 동작을 실행하지 않게) */
 void tagact_bind(const tag_rule_t *rules, uint16_t n, uint16_t profile)
@@ -355,6 +356,19 @@ static uint16_t has_second_word(uint16_t code)
                       || (kind == TA_ACS_NUM) || (kind == TA_STATE) || (kind == TA_STOP_SENSOR));
 }
 
+/* 정지 계열(서게 하거나 서는 것을 거는 동작: 정지·자동 출발·시퀀스·교차선 정지·센서 정지)과 회전 계열.
+ * 정지가 진행 중에 읽은 다른 태그에서는 이 동작들을 건너뛴다(v0.58.0). 보고·출력·속도·전후진·ACT·CALL 은 그대로 실행한다 */
+static int is_stop_or_turn(uint16_t code)
+{
+    switch ((uint16_t)(TA_KIND(code) << 8)) {
+    case TA_STOP: case TA_STOP_AUTOSTART: case TA_STOP_CM: case TA_STOP_SENSOR: case TA_TAPE_STOP: case TA_TAPE_STOP_GD:
+    case TA_SEQ: case TA_TURN: case TA_TURN_ALIGN: case TA_TURN_TAPE:
+        return 1;
+    default:
+        return 0;
+    }
+}
+
 /* 규칙의 정지 분류. 분류 2·3·4 가 있으면 그것(3·4 가 2 보다 앞, 같은 급이면 뒤의 것), 없으면 0.
  * *arg: 분류 2 는 거리 cm, 분류 3·4 는 정지 뒤 시퀀스(그 칸이 0 이면 같은 규칙 TA_SEQ 의 시퀀스) */
 static int16_t stop_class(const uint16_t *act, uint16_t *arg)
@@ -402,12 +416,13 @@ static void autostart(uint16_t sec, int16_t cls)
 }
 
 /* 태그 보고. 대기('B')는 레거시 DA_ACS_Standby + 자동 재전송 켬 = ON: 정지, 번호 > 0 이면 자동 재전송 늘 켬,
- * TA_ACS_STANDBY_RESET 이면 먼저 스테이션 큐를 지운다. 분류 2·3·4 규칙이면 정지는 그 분류가 건다 */
+ * TA_ACS_STANDBY_RESET 이면 먼저 스테이션 큐를 지운다. 분류 2·3·4 규칙이면 정지는 그 분류가 건다.
+ * 정지가 진행 중에 읽은 태그(s_busy)의 대기 보고는 정지만 건너뛴다(보고·자동 재전송은 한다) */
 static void tag_acs(uint16_t info, int16_t num, int16_t cls)
 {
     if ((info & 0xFFu) == 'B') {
         run_standby(num, (int16_t)(RUN_STANDBY_AUTO | ((info & TA_ACS_STANDBY_RESET) ? RUN_STANDBY_RESET : 0)
-                                   | ((cls != 0) ? RUN_STANDBY_NOSTOP : 0)));
+                                   | (((cls != 0) || s_busy) ? RUN_STANDBY_NOSTOP : 0)));
     }
     else { acs_report(info & 0xFFu, num); }
 }
@@ -568,25 +583,33 @@ int tagact_run(uint16_t tag)
     int16_t prev_len = D.stop_pulses;
     const tag_rule_t *r;
     uint16_t i, irq, carg = 0, prev_tag = s_tag;
-    int16_t cls = 0;
+    int16_t cls = 0, prev_busy = s_busy;
     int started;
 
     if (tune_active()) { return 0; }         /* 튜닝 주행은 태그를 쓰지 않는다 */
     if (s_depth++ == 0) { s_len_set = 0; }
     s_tag = tag;
+    /* 정지(감속·정지 진행 중: D.flag_stopping)가 진행 중에 읽은 태그는 정지·회전 동작을 건너뛴다. 지금 서는 정지가 이미 정해졌다.
+     * 레거시 비트(QUIRK_TAG_WHILE_STOPPING)를 켜면 예전처럼 모두 실행한다. 사용자 함수가 다시 부른 안쪽 호출은 바깥 호출의 판정을 따른다
+     * (바깥 규칙이 방금 건 정지를 안쪽 규칙이 "진행 중"으로 보지 않게) */
+    s_busy = (int16_t)((s_depth > 1) ? prev_busy : (was_stopping && !param_quirk(QUIRK_TAG_WHILE_STOPPING)));
     r = rule_find(tag);
     if (r != 0) {
         uint16_t act[4];                      /* 사용자 함수가 tagact_run 을 다시 불러도 s_hit 가 덮이지 않게 복사 */
         for (i = 0; i < 4u; i++) { act[i] = r->act[i]; }
-        cls = stop_class(act, &carg);         /* 분류 2·3·4 정지가 규칙 안 순서와 무관하게 이긴다 */
+        cls = s_busy ? 0 : stop_class(act, &carg);   /* 분류 2·3·4 정지가 규칙 안 순서와 무관하게 이긴다 */
         if ((cls >= 3) && tape_req_allowed()) { D.tape_autostart = 0; }   /* 새 분류 3·4 요청: 이 규칙의 자동 출발만(낡은 값을 잇지 않게) */
         for (i = 0; (i < 4u) && (act[i] != 0u); i++) {
             uint16_t second = has_second_word(act[i]);
-            if ((uint16_t)(TA_KIND(act[i]) << 8) == TA_STOP_SENSOR) {   /* 뒤 칸은 확정 때(tagact_tick) */
+            uint16_t kind = (uint16_t)(TA_KIND(act[i]) << 8);
+            if (s_busy && is_stop_or_turn(act[i])) {
+                if (kind == TA_STOP_SENSOR) { break; }   /* 뒤 칸은 그 센서 정지가 확정할 때 실행하는 동작이다 */
+            }
+            else if (kind == TA_STOP_SENSOR) {   /* 뒤 칸은 확정 때(tagact_tick) */
                 fs_arm(act, i, cls);
                 break;
             }
-            act_exec(act[i], (uint16_t)((second && (i < 3u)) ? act[i + 1u] : 0u), cls);
+            else { act_exec(act[i], (uint16_t)((second && (i < 3u)) ? act[i + 1u] : 0u), cls); }
             i = (uint16_t)(i + second);
         }
     }
@@ -603,6 +626,7 @@ int tagact_run(uint16_t tag)
         s_len_set = 1;
     }
     s_depth--;
+    s_busy = prev_busy;
     s_tag = prev_tag;                        /* 사용자 함수가 다시 부른 안쪽 태그가 바깥 번호를 덮지 않게 */
     s_display_tag = tag;
     irq = hal_irq_save();

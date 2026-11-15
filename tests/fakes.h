@@ -8,6 +8,8 @@ extern uint32_t fake_in, fake_out, fake_seq_off_count;
 extern uint16_t fake_key;           /* ui_key() */
 extern int      fake_restart_count, fake_link_full, fake_tx_count;
 extern uint16_t fake_tx[256][20];
+extern int      fake_standby_count;    /* run_standby 부른 횟수. 마지막 번호·플래그를 남긴다 */
+extern int16_t  fake_standby_id, fake_standby_flags;
 extern int      fake_speed_arg, fake_forback_arg, fake_turn_count;
 extern int16_t  fake_move_mm;      /* tagact_move_mm 마지막 인자. 부르면 move_on 3 */
 extern int16_t  fake_move_kind;    /* tagact_move_tape 마지막 kind */

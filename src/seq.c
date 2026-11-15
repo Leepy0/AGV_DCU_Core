@@ -5,6 +5,7 @@
 #include "agv/io.h"
 #include "agv/log.h"
 #include "agv/param.h"
+#include "agv/run.h"
 #include "agv/tagact.h"
 #include "agv/ui.h"
 
@@ -344,9 +345,9 @@ uint16_t seq_xcond(uint16_t c, uint16_t a, uint16_t b, uint16_t tag)
     case XC_LOW_BATTERY:     ok = (uint16_t)(param_get(P_BAT_DV) < LOW_BATTERY_DV); break;
     case XC_FORWARD:         ok = (uint16_t)(D.backward == 0); break;
     case XC_BACKWARD:        ok = (uint16_t)(D.backward != 0); break;
-    case XC_STATION_RUNNING:
+    case XC_STATION_RUNNING:   /* v0.58.0: XC_STATION 과 같다. 정지 중 태그 무시는 tagact_run 이 모든 태그에 한다 */
     case XC_STATION:
-        ok = (uint16_t)((st >= (int16_t)a) && (st <= (int16_t)b) && ((kind == XC_STATION) || !D.flag_stopping));
+        ok = (uint16_t)((st >= (int16_t)a) && (st <= (int16_t)b));
         break;
     case XC_CROSS:
         if (slot & 1u) { ok = (uint16_t)(D.cross_out_on || (!(slot & 2u) && D.cross_out_flag)); }
@@ -491,46 +492,63 @@ static uint16_t eval_pulse(seq_runner_t *r, const seq_step_t *s)
     return R_WAIT;
 }
 
+/* 점멸 스텝의 주기·출력 칸. 조건에 상태 낱말이 없으면(xc == 0) arg0 = 주기, out = 출력 비트(예전 배치 그대로).
+ * 상태 낱말이 있으면(xc != 0) arg0·arg1 이 상태 인자라 둘 다 out 한 칸에 넣는다: 주기 << 8 | (출력 번호 + 1, 0 = 출력 없음).
+ * 그래서 점멸은 둘째 "하나라도 ON"(out)을 어느 쪽으로도 받지 못한다(매크로가 컴파일 오류로 막는다) */
+static void flk_cells(const seq_step_t *s, uint16_t *period, uint32_t *outm)
+{
+    if (s->xc == 0u) {
+        *period = s->arg0;
+        *outm = s->out;
+    }
+    else {
+        *period = (uint16_t)(s->out >> 8);
+        *outm = ((s->out & 0xFFu) != 0u) ? (1UL << ((s->out & 0xFFu) - 1u)) : 0UL;
+    }
+}
+
+/* 점멸 끝 조건: 입력 조건 + 확장 조건(상태 낱말). cond_full 과 달리 out 칸은 출력이라 둘째 묶음을 보지 않는다 */
+static uint16_t flk_cond(const seq_step_t *s)
+{
+    return seq_mask_true(io_in_mask(), s->on, s->off) && ((s->xc == 0) || seq_xcond(s->xc, s->arg0, s->arg1, 0));
+}
+
 static uint16_t eval_flicker(seq_runner_t *r, const seq_step_t *s)
 {
+    uint16_t period;
+    uint32_t outm;
+
+    flk_cells(s, &period, &outm);
     tick(r);
-    if (cond_true(s)) {
-        out_apply(r, 0, s->out);
+    if (flk_cond(s)) {
+        out_apply(r, 0, outm);
         return R_NEXT;
     }
     if (timed_out(r, s)) {
-        out_apply(r, 0, s->out);
+        out_apply(r, 0, outm);
         return jump(r, s->target);
     }
     if (r->a == 0) {
         r->b = (uint16_t)!r->b;
-        if (r->b) { out_apply(r, s->out, 0); }
-        else      { out_apply(r, 0, s->out); }
-        r->a = s->arg0;
+        if (r->b) { out_apply(r, outm, 0); }
+        else      { out_apply(r, 0, outm); }
+        r->a = period;
     }
     if (r->a > 0) { r->a--; }
     return R_WAIT;
 }
 
-/* 제한 시간은 응답 켜짐·꺼짐 대기 각각에 적용한다 */
+/* 출력 켬, 응답 켜짐 대기, 출력 끔, 바로 다음 스텝(v0.58.0: 응답 꺼짐 대기를 없앴다).
+ * 제한 시간·라벨은 응답 켜짐 대기에만 적용한다 */
 static uint16_t eval_handshake(seq_runner_t *r, const seq_step_t *s)
 {
-    uint16_t in_on = (io_in_mask() & s->on) == s->on;
-
     tick(r);
     if (r->a == 0) {
         out_apply(r, s->out, 0);
         r->a = 1;
     }
-    if (r->a == 1) {
-        if (in_on) {
-            out_apply(r, 0, s->out);
-            r->a = 2;
-            r->c.timer = 0;
-            return R_WAIT;
-        }
-    }
-    else if ((io_in_mask() & s->on) == 0) {
+    if ((io_in_mask() & s->on) == s->on) {
+        out_apply(r, 0, s->out);
         return R_NEXT;
     }
     if (timed_out(r, s)) {
@@ -650,7 +668,10 @@ static uint16_t eval_step(seq_runner_t *r, const seq_step_t *s)
     case SK_HANDSHAKE:
         return eval_handshake(r, s);
     case SK_ACS:
-        acs_report(s->arg0, acs_number(s));
+        /* 대기 보고(STANDBY)는 태그와 같이 보고 + 자동 재전송 + 대기 번호 표시(run_standby). 정지는 걸지 않는다: 시퀀스는 이미 선 뒤에
+         * 돌고(run_seq 가 정지·주행 중이 아닐 때만 부른다), ACT 는 주행을 멈추지 않는 동작이다. 정지를 걸면 시퀀스를 돌리는 스캔만 멈춘다 */
+        if (s->arg0 == (uint16_t)'B') { run_standby(acs_number(s), RUN_STANDBY_AUTO | RUN_STANDBY_NOSTOP); }
+        else                          { acs_report(s->arg0, acs_number(s)); }
         return R_NEXT;
     case SK_ACS_WAIT_ACK:
         tick(r);

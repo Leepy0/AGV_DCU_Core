@@ -23,7 +23,7 @@ static const limit_t s_limit[P_PARA_INIT + 1] = {
     {0, 300}, {0, 99}, {0, 20}, {10, 500}, {1, 250}, {30, 300},
     {0, 99}, {0, 999}, {0, 1}, {0, 999}, {1, 99}, {0, 99},
     {0, 1}, {0, 900}, {10000, 10066}, {1, 99}, {0, 999}, {0, 99},
-    {0, 989}, {0, 2}, {0, 4095}, {0, 99}, {0, 99}, {0, 10011},
+    {0, 989}, {0, 2}, {0, 8191}, {0, 99}, {0, 99}, {0, 10011},
     {-999, 999}, {0, 99}, {0, 99}, {0, 99}
 };
 
@@ -291,7 +291,7 @@ static void recalc_one(uint16_t i)
         param_dv.agv_type_mode = (int16_t)(10 * param_digit(s_set[P_AGV_TYPE], 100) + param_digit(s_set[P_AGV_TYPE], 10));
         break;
     case P_SPEED_MIN:     param_dv.actuator_delay = (int16_t)(s_set[P_SPEED_MIN] * 10); break;
-    case P_STOP_LEN_FWD_MM:  recalc_fwd_stop_len(); break;
+    case P_STOP_LEN_FWD_CM:  recalc_fwd_stop_len(); break;
     case P_ACS_STANDBY:
         param_dv.acs_group = param_digit(s_set[P_ACS_STANDBY], 10);
         param_dv.acs_standby = param_digit(s_set[P_ACS_STANDBY], 1);

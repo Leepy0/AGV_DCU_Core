@@ -179,9 +179,10 @@ int main(void)
     assert(param_boot(&fake_store, 1) == 0);
     assert(param_get(P_LEGACY_QUIRKS) == 5);
     assert(param_quirk(QUIRK_CURVE_NOW) == 1 && param_quirk(QUIRK_H_POSITION) == 0);
-    /* 레거시 비트 b0~b11 까지 4095(b11 은 안 쓰지만 저장값이 한계 위반이 되지 않게 둔다). 4096 은 넘는다 */
-    assert(param_set(P_LEGACY_QUIRKS, 4096) == -1 && param_set(P_LEGACY_QUIRKS, 4095) == 0 && param_quirk(QUIRK_SRC_A) && param_quirk(QUIRK_LOW_ACC)
-           && param_quirk(0x800u));
+    /* 레거시 비트 b0~b12 까지 8191(b11 은 안 쓰지만 저장값이 한계 위반이 되지 않게 둔다, b12 는 정지 중 태그). 8192 는 넘는다 */
+    assert(param_set(P_LEGACY_QUIRKS, 8192) == -1 && param_set(P_LEGACY_QUIRKS, 4095) == 0 && param_quirk(QUIRK_SRC_A) && param_quirk(QUIRK_LOW_ACC)
+           && param_quirk(0x800u) && !param_quirk(QUIRK_TAG_WHILE_STOPPING));
+    assert(param_set(P_LEGACY_QUIRKS, 8191) == 0 && param_quirk(QUIRK_TAG_WHILE_STOPPING));
     assert(param_set(P_LEGACY_QUIRKS, QUIRK_STEER_LEGACY | 0x0F) == 0);
     assert(param_get(P_LEGACY_QUIRKS) == 319 && param_quirk(QUIRK_STEER_20MS));
     assert(param_set(P_LEGACY_QUIRKS, 5) == 0);

@@ -140,7 +140,8 @@ typedef unsigned long long dsl_cond_t;
 #define X_ID(lo, hi)                 XC_ID, (lo), (hi)
 #define X_KEY(k)                     XC_KEY, KEY_##k, 0
 #define X_STATION(k, lo, hi)         (XC_STATION | DSL_SLOT(k)), (lo), (hi)
-#define X_STATION_RUNNING(k, lo, hi) (XC_STATION_RUNNING | DSL_SLOT(k)), (lo), (hi)
+/* v0.58.0: X_STATION 과 같은 뜻의 별칭. 정지가 진행 중에 읽은 태그의 정지·회전은 모든 태그에서 tagact_run 이 건너뛴다 */
+#define X_STATION_RUNNING(k, lo, hi) X_STATION(k, lo, hi)
 #define X_STATION_MOD(k, n, m)       (XC_STATION_MOD | DSL_SLOT(k)), ((n) + DSL_NZ(n)), (m)
 #define X_STATION_DIV(k, n, m)       (XC_STATION_DIV | DSL_SLOT(k)), ((n) + DSL_NZ(n)), (m)
 /* 지금 태그 번호 == 식. 식은 스테이션 큐 식(아래 STATION): STATION(k), STATION(k) ± n, MOD( STATION(k), m ),

@@ -72,6 +72,7 @@ SEQ_BEGIN( s_turn0 )
     DSL_STURN3( TURN_CW, 90, 0, 0 )
     END_STOP
 SEQ_END
+#include "agv/tag_dsl.h"   /* 여기부터 태그 표 */
 
 static const seq_def_t s_seqs[] = {
     { 0, SEQ_LOAD, s_load_steps, sizeof(s_load_steps) / sizeof(s_load_steps[0]) },
@@ -190,6 +191,12 @@ static const tag_rule_t s_rules[] = {
     TAG( 56, 0, AGV_TURN( CW, 50, 0, 0 ) )
     TAG( 57, 0, AGV_TURN( CCW, 315, 0, 0, 0, ALIGN ) )
     TAG( 58, 0, AGV_TURN( CW, 50, 0, 1, 0, TAPE ) )
+    /* v0.58.0 정지가 진행 중에 읽은 태그: 정지·자동 출발·회전·시퀀스는 건너뛰고 출력·보고는 한다 */
+    TAG( 200, 0, AGV_STOP( 30 ), AGV_AUTOSTART( 5 ), ACS_SEND( NEXT, 9 ) )
+    TAG( 201, 0, AGV_TURN( CW, 90, 0, 1 ), OBS_ON )
+    TAG( 202, 0, ACS_SEND( STANDBY, 6 ), OBS_ON )
+    TAG( 203, 0, SEQ_START( LOAD ), OBS_ON )
+    TAG( 204, 0, ACS_SEND( NEXT, 9 ) )                         /* 보고만: 서지 않고 ACK 까지 재전송 */
 };
 
 /* 위 20~23 과 같은 규칙의 압축 표. 앞 줄은 다른 프로파일이라 건너뛴다 */
@@ -1708,6 +1715,7 @@ static void tag_turn_start(uint16_t tag)
 {
     D.vin_out = 50;
     D.flag_run = 0;
+    D.flag_stopping = 0;                 /* 앞 회전·정지가 남긴 정지 표시(실기는 서고 한 틱 뒤 모터 리셋이 지운다). 정지 중 태그는 무시되므로 비운다 */
     (void)tagact_run(tag);
     assert(D.turn_pulses > 0);
     stop_reset();
@@ -1935,7 +1943,8 @@ static void test_tag_stop_class(void)
     tag_stop_rule(42);
     assert(!D.flag_stopping && (D.tape_stop_kind == TA_STOP_KIND_TAPE) && (D.tape_stop_id == SEQ_LOAD));
 
-    /* 진행 중인 정지가 있어도 교차선 정지 요청은 AGV_STOP 처럼 받는다(정지 거리는 그대로. 보류는 run.c) */
+    /* 정지가 진행 중이면(v0.58.0) 다른 태그의 교차선 정지 요청은 정지 계열이라 무시한다. 예전 동작 비트(QUIRK_TAG_WHILE_STOPPING)를 켜면
+     * AGV_STOP 처럼 받는다(정지 거리는 그대로. 보류는 run.c) */
     boot();
     drive_up();
     run_scan(20);
@@ -1945,7 +1954,11 @@ static void test_tag_stop_class(void)
     {
         int16_t len = D.stop_pulses;
         (void)tagact_run(41);
+        assert((D.tape_stop_kind == 0) && (D.tape_stop_id == 0) && (D.stop_pulses == len));
+        assert(param_set(P_LEGACY_QUIRKS, QUIRK_TAG_WHILE_STOPPING) == 0);
+        (void)tagact_run(41);
         assert((D.tape_stop_kind == TA_STOP_KIND_TAPE_GD) && (D.tape_stop_id == SEQ_LOAD) && (D.stop_pulses == len));
+        assert(param_set(P_LEGACY_QUIRKS, 0) == 0);
     }
     D.tape_stop_kind = 0;
     D.tape_stop_id = 0;
@@ -1990,6 +2003,116 @@ static void test_tag_stop_class(void)
     printf("  tag stop class ok\n");
 }
 
+/* v0.58.0: 정지(감속·정지 진행 중, D.flag_stopping)가 진행 중에 읽은 다른 태그의 정지·회전 계열은 모든 태그에서 건너뛴다.
+ * 출력·보고(OBS_ON, ACS_SEND)는 그대로 하고, 대기 보고는 보고·재전송만 하고 정지는 걸지 않는다. 예전 동작 비트로 되살린다 */
+static void test_tag_while_stopping(void)
+{
+    int len, n0;
+
+    boot();
+    drive_up();
+    run_scan(20);
+    tag_frame(1, '1', 0);                        /* AGV_STOP: 거리 정지가 걸렸다 */
+    run_scan(1);
+    assert(D.flag_stopping && (D.stop_pulses > 0));
+    len = D.stop_pulses;
+
+    /* 정지 + 자동 출발은 건너뛰고(거리·재출발 예약 그대로) 보고는 한다 */
+    D.wait_start = 0;
+    n0 = (int)acs_pending();
+    (void)tagact_run(200);
+    assert((D.stop_pulses == len) && !D.wait_start && ((int)acs_pending() == n0 + 1));
+    /* 시퀀스 요청도 정지 계열이라 건너뛴다 */
+    D.obs_use = 0;
+    (void)tagact_run(203);
+    assert(!seq_request_flag[SEQ_LOAD] && (D.obs_use == 1));
+    /* 대기 보고: 보고·대기 번호·자동 재전송은 하고 정지 요청(급정지로 바꾸기)은 하지 않는다 */
+    guide_reply(0);
+    tick();
+    assert(stop_is_position(stop_reason()));
+    (void)tagact_run(202);
+    assert(run_standby_num() == 6);
+    guide_reply(0);
+    tick();
+    assert(stop_is_position(stop_reason()) && D.flag_stopping);
+    run_standby_clear(0);
+
+    /* 예전 동작 비트: 모두 실행한다(정지 거리는 이미 걸려 그대로, 자동 출발·시퀀스·대기 정지는 걸린다) */
+    assert(param_set(P_LEGACY_QUIRKS, QUIRK_TAG_WHILE_STOPPING) == 0);
+    D.wait_start = 0;
+    (void)tagact_run(200);
+    assert((D.stop_pulses == len) && D.wait_start);
+    (void)tagact_run(203);
+    assert(seq_request_flag[SEQ_LOAD]);
+    (void)tagact_run(202);
+    guide_reply(0);
+    tick();
+    assert(!stop_is_position(stop_reason()));    /* 대기 보고의 급정지가 위치 정지를 덮는다(예전) */
+    run_standby_clear(0);
+    run_seq_init();
+    assert(param_set(P_LEGACY_QUIRKS, 0) == 0);
+
+    /* 거리 없는 정지(명령 정지) 감속 중 회전 태그: 건너뛴다. 예전 동작 비트면 회전이 걸린다 */
+    boot();
+    (void)param_set(P_TURN_FORBACK, 10);
+    drive_up();
+    run_scan(20);
+    run_command_stop();
+    assert(D.flag_stopping && (D.stop_pulses == 0));
+    D.obs_use = 0;
+    (void)tagact_run(201);
+    assert((D.turn_pulses == 0) && (D.obs_use == 1));
+    assert(param_set(P_LEGACY_QUIRKS, QUIRK_TAG_WHILE_STOPPING) == 0);
+    (void)tagact_run(201);
+    assert(D.turn_pulses > 0);
+    assert(param_set(P_LEGACY_QUIRKS, 0) == 0);
+
+    /* 서지 않는 중이면 이전처럼 모두 실행한다 */
+    boot();
+    drive_up();
+    run_scan(20);
+    assert(!D.flag_stopping);
+    (void)tagact_run(200);
+    assert(D.flag_stopping && D.wait_start && (D.stop_pulses > 0));
+    boot();
+    printf("  tag while stopping ok\n");
+}
+
+/* v0.58.0 ACS 보고 재전송. STANDBY 만 정지 + 재전송(번호 > 0 이면 ACK 와 상관없이 1분마다 자동 재전송).
+ * 나머지 보고는 ACK 가 올 때까지 슬롯이 재전송만 하고 정지하지 않는다 */
+static void test_acs_report_retransmit(void)
+{
+    int sent = 0, t;
+
+    boot();
+    drive_up();
+    run_scan(20);
+    (void)param_set_ram(P_ACS_RETRY_SEC, 1);                 /* 슬롯 재전송 1 초 간격 */
+    (void)tagact_run(204);                                   /* ACS_SEND( NEXT, 9 ) */
+    assert(!D.flag_stopping && (acs_pending() >= 1u));
+    for (t = 0; t < 400; t++) { host.sci[HAL_SCI_A].tx_len = 0; guide_reply(0); tick(); sent += tx_has('E', 'N'); }
+    assert((sent >= 3) && !D.flag_stopping && (run_standby_num() == 0));   /* 재전송은 하고 서지 않는다 */
+    acs_on_ack('N', '0');
+    sent = 0;
+    for (t = 0; t < 400; t++) { host.sci[HAL_SCI_A].tx_len = 0; guide_reply(0); tick(); sent += tx_has('E', 'N'); }
+    assert((sent == 0) && !D.flag_stopping);                 /* ACK 뒤에는 다시 보내지 않는다 */
+
+    boot();
+    drive_up();
+    run_scan(20);
+    (void)param_set_ram(P_ACS_RETRY_SEC, 1);
+    (void)tagact_run(202);                                   /* ACS_SEND( STANDBY, 6 ) */
+    assert(D.flag_stopping && (run_standby_num() == 6));     /* 정지 + 대기 번호 */
+    acs_on_ack('B', '0');                                    /* 첫 보고는 받았다. 그래도 자동 재전송은 1분마다 계속 */
+    for (t = 0; t < 6100; t++) { host.sci[HAL_SCI_A].tx_len = 0; guide_reply(0); tick(); sent += tx_has('E', 'B'); }
+    assert(sent >= 1);
+    run_standby_clear(0);
+    acs_slot_clear(ACS_SLOT_STANDBY);
+    (void)param_set_ram(P_ACS_RETRY_SEC, 0);
+    boot();
+    printf("  acs report retransmit ok\n");
+}
+
 /* 교차선 회전 요청: 일반 회전을 걸지 않는 상황(거리 정지 진행 중, 서 있음, 회전 모드 0)이면 아무 일도 없다.
  * 거리 없는 감속(명령 정지) 중에는 건다. 요청이 걸려 교차선을 찾는 동안 읽은 태그는 회전 중과 같이 ACK 없이 버린다 */
 static void test_tape_turn_request(void)
@@ -2002,9 +2125,13 @@ static void test_tape_turn_request(void)
     D.flag_stopping = 1;                         /* 거리 정지 진행 중 */
     (void)tagact_run(43);
     assert(D.tape_turn_dir == 0);
-    D.stop_pulses = 0;                           /* 거리 없는 감속(명령 정지) 중: 건다(레거시는 SL 정지 뒤 회전) */
+    D.stop_pulses = 0;                           /* 거리 없는 감속(명령 정지) 중: v0.58.0 부터 정지·회전은 무시(모든 태그) */
+    (void)tagact_run(43);
+    assert((D.tape_turn_dir == 0) && (D.stop_pulses == 0));
+    assert(param_set(P_LEGACY_QUIRKS, QUIRK_TAG_WHILE_STOPPING) == 0);   /* 예전 동작 비트: 건다(레거시는 SL 정지 뒤 회전) */
     (void)tagact_run(43);
     assert((D.tape_turn_dir == TURN_CW) && (D.stop_pulses == 0));
+    assert(param_set(P_LEGACY_QUIRKS, 0) == 0);
     D.tape_turn_dir = 0;
 
     boot();                                      /* 서 있음 */
@@ -4476,6 +4603,8 @@ int main(void)
     test_seq_turn_speed();
     test_tag_standby();
     test_tag_stop_class();
+    test_tag_while_stopping();
+    test_acs_report_retransmit();
     test_tape_turn_request();
     test_move_cross_tag();
     test_tune_entry();

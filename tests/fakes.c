@@ -25,6 +25,7 @@ void fake_reset(void)
     fake_restart_count = fake_link_full = fake_tx_count = 0;
     fake_speed_arg = fake_forback_arg = -1;
     fake_turn_count = 0;
+    fake_standby_count = 0;
     fake_ee_writes = 0;
     fake_ee_cut = -1;
 }
@@ -37,6 +38,9 @@ void     io_seq_outputs_off(void) { fake_seq_off_count++; fake_out = 0; }
 uint16_t ui_key(void) { return fake_key; }
 
 void run_request_restart(uint16_t sec) { (void)sec; fake_restart_count++; }
+int     fake_standby_count;
+int16_t fake_standby_id, fake_standby_flags;
+void run_standby(int16_t id, int16_t flags) { fake_standby_count++; fake_standby_id = id; fake_standby_flags = flags; }
 int      fake_log_count;
 uint16_t fake_log_code;
 int16_t  fake_log_a;
