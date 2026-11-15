@@ -708,12 +708,12 @@ PROFILE_TABLE_END
 
 **정지 중 읽은 다른 태그의 정지·회전은 무시한다(모든 태그).** RFID 리더가 같은 태그를 연달아 읽으면 한 번만 보내는 것과 별개로, 정지 명령을 수행하는 동안(`D.flag_stopping`: 태그 정지가 걸린 때부터 감속·정지가 끝나 모터 리셋이 지울 때까지, 일시정지(장애물·PAUSE·교통)는 아니다) 읽은 다른 태그에서 다음 동작은 건너뛴다.
 
-- 건너뛴다(정지 계열): `AGV_STOP`(전부), `AGV_AUTOSTART`, `SEQ_START`(정지 + 시퀀스 요청, 시퀀스 요청도), 교차선 정지, `FROM_SENSOR` 센서 정지(뒤 동작 포함). 회전 계열: `AGV_TURN`(일반·`ALIGN`·`TAPE`).
-- 그대로 실행한다: `AGV_SPEED`·`AGV_FORBACK`·`AGV_BRANCH`·`OBS_*`·`ACS`·`ACS_SEND`·`STATION_RESET`·`CALL`·`ACT_START`·`AGV_WAIT_*`·상태 변경. 대기 보고(`STANDBY`)는 보고·대기 번호·자동 재전송은 하고 정지 요청(급정지로 바꾸기)만 건너뛴다.
+- 건너뛴다(정지 계열): `AGV_STOP`(전부), `AGV_AUTOSTART`, 교차선 정지(`SEQ_START( TAPE·TAPE_GD, … )`·`AGV_STOP( TAPE… )`, 그 정지에 딸린 시퀀스 포함), `FROM_SENSOR` 센서 정지(뒤 동작 포함). 회전 계열: `AGV_TURN`(일반·`ALIGN`·`TAPE`).
+- 그대로 실행한다: `AGV_SPEED`·`AGV_FORBACK`·`AGV_BRANCH`·`OBS_*`·`ACS`·`ACS_SEND`·`STATION_RESET`·`CALL`·`ACT_START`·`AGV_WAIT_*`·상태 변경, 그리고 `SEQ_START( 시퀀스 )`·`SEQ_START( cm, 시퀀스 )` 의 시퀀스 요청(정지는 이미 걸려 있다. 정지 거리는 처음 정지를 건 태그 것이고, 겹친 요청은 대응표 순서로 돈다). 대기 보고(`STANDBY`)는 보고·대기 번호·자동 재전송은 하고 정지 요청(급정지로 바꾸기)만 건너뛴다.
 - 이전에도 같았던 것: 정지 거리는 처음 정지를 건 태그가 정한다(`started` 만 거리를 건다). 회전은 `stop_pulses` 가 0 이 아니면 이미 거부했다. 달라진 것은 거리 없는 정지(명령 정지 감속)·교차선 회전 요청·`AGV_AUTOSTART`·`SEQ_START` 의 시퀀스 요청·대기 보고의 급정지가 이제 건너뛰는 쪽이라는 점이다.
 - 사용자 함수가 `tagact_run` 을 다시 부르면(번호 변환 별칭) 안쪽 호출은 바깥 호출의 판정을 따른다(바깥 규칙이 방금 건 정지를 안쪽 규칙이 "진행 중" 으로 보지 않게).
 - `X_STATION_RUNNING`·`IF_STATION_RUNNING` 은 `X_STATION`·`IF_STATION` 과 같은 뜻의 별칭이다. 전에는 정지가 걸린 뒤에는 규칙이 안 맞아 뒤 규칙으로 넘어갔지만 이제는 규칙이 맞고 그 규칙의 정지·회전만 건너뛴다.
-- 예전 동작: `P_LEGACY_QUIRKS` b12(4096, `QUIRK_TAG_WHILE_STOPPING`)를 켜면 정지 중에도 모두 실행한다. 한계가 4095 에서 8191 이 됐다.
+- 예전 동작: `P_LEGACY_QUIRKS` b12(4096, `QUIRK_TAG_WHILE_STOPPING`)를 켜면 정지 중에도 모두 실행하고, `X_STATION_RUNNING` 도 예전처럼 정지가 걸린 뒤에는 거짓이다. 한계가 4095 에서 8191 이 됐다.
 - 판정은 `D.flag_stopping` 이다. `stop_phase()`·`stop_is_braking()` 은 정지 제어의 단계(`stop_is_braking()` 은 감속 이후만, 거리 정지의 순항 구간은 아니다)라 쓰지 않는다. 일반 태그 정지(`tagact_stop`·`tagact_stop_length`·`rule_stop`)는 이 플래그를 바로 세운다(정지 제어가 다음 틱에 단계를 시작한다).
 
 **ACS 보고 재전송.** 모든 보고는 슬롯 큐(`acs.c`)에 들어가 ACK(같은 Info)가 올 때까지 `CT`(`P_ACS_RETRY_SEC` 초, 0 이면 `WRT`(`P_ACS_RETRY_LEGACY`) × 0.1 초) 간격 + 지터로 다시 보낸다. 같은 종류 보고는 슬롯을 덮고 횟수를 0 으로 되돌린다. 10번마다 MsgID 를 새로 받고, 99번을 보내면 포기한다(`LOG_ACS_GIVE_UP`). 이것은 v0.58.0 에서 바꾸지 않았다. `STANDBY` 만 정지를 건다(태그: `run_standby`, 번호 > 0 이면 ACK 와 상관없이 60초마다 자동 재전송을 계속, 'C' 해제·출발·정지로 끈다). 나머지 보고(`LOADING` `UNLOADING` `NEXT` `ARRIVE` `FINISH` `PROCESSING` `CALL`)는 정지하지 않고 ACK 까지 재전송만 한다. 시퀀스 표의 `ACS( STANDBY, n )` 는 이제 태그와 같은 보고 + 자동 재전송 + 대기 번호(`run_standby`)를 하되 정지는 걸지 않는다: 시퀀스는 이미 선 뒤에만 돌고(`run_seq` 는 주행·정지 중이 아닐 때 부른다), 정지를 걸면 시퀀스를 돌리는 스캔만 멈춘다. ACT 는 주행을 멈추지 않는 동작이라 같다.

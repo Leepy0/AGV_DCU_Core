@@ -1,5 +1,28 @@
 # 변경 이력
 
+## v0.58.0 (2026-11-16, DSL 통일 `AND( … )`, 정지 중 태그 무시, HANDSHAKE·STANDBY 동작)
+
+표 형식은 **추가·별칭만** 했다. 옛 표는 그대로 컴파일되고 같은 바이트를 낸다(타입 143·83·175·EXAMPLE 사이트 표 오브젝트 대조). 동작이 바뀌는 것은 아래 "동작 변경" 네 가지뿐이다.
+
+DSL 통일(`include/agv/dsl_and.h` 새 파일, `seq_dsl.h`·`tag_dsl.h`):
+
+- `AND( ON · OFF · ANY · 상태 낱말 … )`: 항목 7개까지, 아무 순서. 받는 곳은 `WHEN` `WAIT` `WAIT_TO` `WAIT_STABLE(_TO)` `ERROR_HOLD` `OUT_FLICKER_UNTIL_IN(_TO)` `TAG_IF` `TAG_RANGE_IF` 수동 `MAN` 조건 칸. 칸 한계를 넘는 조합은 컴파일 오류다(상태 낱말 시퀀스 1·태그 2, 둘째 `ANY` 는 시퀀스 `WHEN`·`WAIT`·`WAIT_TO` 에서 상태가 없을 때만). 낱말 ↔ 옛 `X_` 대응표는 docs/03 3.3.3.
+- `TAG_IF`·`TAG_RANGE_IF` 가 `X_…`(3값)·`IF_…`(8값)·`AND( … )`(기록 1값)를 모두 받는다(값 개수로 가린다).
+- `AGV_SPEED( HIGH | LOW | LLOW | MIN | m/min )`, `ACS( 종류, 번호 )`(번호: 숫자·`STATION(k)`·`STATION(0) + 1`·`AGV_ID`, 태그는 `STATION(k) ± n`·`TAG_NUM ± n`·`AGV_ID_MINUS( n )`), `WAIT_TO( 조건, 틱 | PARAM_TIME( FND 또는 P_x, 단위 ), 라벨 )`. 옛 이름(`AGV_SPEED_MMIN`·`ACS_SEND`·`ACS( 종류, STATION0 )`·`WAIT_TO_PARAM` …)은 별칭으로 남았다. `ACS( 종류, CONST )` 는 늘 0 을 보고해 컴파일 오류로 바꿨다(사이트 사용 0건).
+- 별칭: `WAIT_PARAM_TO`, `IN_INVERTED`(= `IN_ACTIVE_HIGH`), `P_STOP_LEN_CM`·`P_STOP_LEN_FWD_CM`(옛 `_MM` 은 `#define` 으로 남기고 코어 C 코드는 새 이름), 사이트가 직접 만들어 쓰던 `OUT_SET( 켬, 끔 )`·태그 `NO_ACTION` 을 같은 토큰열로 코어에 넣었다(재정의 경고 없음). `IN( … )` 가 7·8 인자도 받는다.
+- 조용히 틀리던 표를 정적으로 막는다: 태그 `AGV_AUTOSTART`·`CALL`·`ACT_START` 0~255, 태그 동작 4칸 초과, 태그 표 파일의 시퀀스 스텝 이름(`SEQ_STEP_NOT_ALLOWED_IN_TAG_TABLE`), 조건 칸의 `ANY2_ON`·64비트가 아닌 식, 시퀀스 `WHEN_IF`·`WAIT_IF*` 의 `X_TAG_NUM`, `SELECT_END_TO` 제한 1~0x7FFF, 제한 0x8000 이상(`UNMATCHED` 는 `WAIT_STABLE_TO` 에서만).
+- 사이트 이름 충돌: `AND` 의 낱말(`FORWARD` `ID` `KEY` `PARAM` `HIGH` `STATION0` `AGV_ID` …)은 매크로가 아니라 붙여서 고르는 이름이라 사이트가 같은 이름의 매크로를 정의하면 깨진다. 지금 사이트 소스에서 걸리는 곳: `AGV_ID`(타입 83·175 `legacy_const.h`, 값 25). 표 파일이 그 헤더를 포함해 `ACS( 종류, AGV_ID )` 를 쓰면 숫자 25 로 바뀐다(지금 표에는 없다).
+- 시험: `tests/dsl/*.c` 15개(옛 꼴과 새 꼴이 같은 바이트, gcc·cl2000 둘 다. `man_and.c` 포함)와 `-DNEG_*` 컴파일 오류 시험 110여 개를 `run_host.ps1` 에 넣었다. `test_sys.c` 는 시퀀스 표를 `tag_dsl.h` 포함 앞에 쓰도록 순서를 바꿨다.
+
+동작 변경:
+
+- `HANDSHAKE`: 출력 켬 → 응답 켜짐 대기 → 출력 끔 → 바로 다음 스텝. 응답 꺼짐 대기를 없앴다. 제한·라벨은 응답 켜짐 대기에만 적용한다(`seq.c` `eval_handshake`). 사이트 표에는 `HANDSHAKE` 가 없다.
+- `OUT_FLICKER_UNTIL_IN(_TO)`: 끝 조건이 상태 낱말(`AND`)을 받는다(`cond_true` → `flk_cond`: 입력 + `xc`). 칸이 겹쳐서(상태 인자가 `arg0`·`arg1`, 둘째 `ANY` 가 `out`, 점멸 간격이 `arg0`, 출력이 `out`) 상태 낱말이 있는 점멸 스텝만 간격과 출력을 `out` 한 칸에 넣는다(간격 << 8 | 출력 번호 + 1, `xc` != 0 이 신호). 상태 낱말이 없으면 칸 배치가 예전과 같다. 둘째 `ANY`·둘째 상태는 컴파일 오류.
+- 시퀀스·ACT 의 `ACS( STANDBY, n )`: 보고 + 자동 재전송 + 대기 번호(`run_standby( AUTO | NOSTOP )`), 정지는 안 건다. 시퀀스는 이미 선 뒤에 돌고 정지를 걸면 시퀀스 스캔만 멈추며, ACT 는 주행을 멈추지 않는 동작이라서다. 나머지 보고는 예전 그대로 ACK 까지 재전송만(슬롯 큐 `acs.c`는 안 바꿨다: 같은 Info 슬롯, `CT` 초 간격 + 지터, 10번마다 MsgID 재발급, 99번 포기).
+- 정지(`D.flag_stopping`)가 진행 중에 읽은 다른 태그의 정지 계열(`AGV_STOP`·`AGV_AUTOSTART`·교차선 정지·센서 정지)과 회전 계열(`AGV_TURN`)은 모든 태그에서 건너뛴다(`tagact_run`). 보고·출력·속도·전후진·ACT·CALL·`SEQ_START` 의 시퀀스 요청은 그대로(겹친 요청은 대응표 순서로 돈다), 대기 보고는 정지만 건너뛴다. 예전에는 `X_STATION_RUNNING` 규칙만 정지 뒤 안 맞았다. 이제 `X_STATION_RUNNING`·`IF_STATION_RUNNING` 은 `X_STATION`·`IF_STATION` 과 같은 뜻의 별칭(표 바이트는 예전 그대로, 해석기가 같게 본다). 예전 동작: `P_LEGACY_QUIRKS` b12(4096, `QUIRK_TAG_WHILE_STOPPING`), 한계 4095 → 8191. 바뀐 시험: `test_sys`(교차선 요청·교차선 회전 요청), `test_curve`(명령 정지 감속 중 교차선 회전 요청은 예전 비트로).
+
+문서: docs/03 3.3.3(낱말 대응표·칸 한계·별칭)·5.5(정지 중 태그, ACS 재전송), docs/02 `SL`·`FL` 이름과 `LG` b12.
+
 ## v0.57.0 (2026-11-15, 휠 간격 비례 제거, t1 조향 이득 찾기)
 
 **조향 이득이 휠 간격에 더는 비례하지 않는다.** 휠 간격이 기준(60 cm)이 아닌 차는 같은 `K_P`·`K_I` 로 조향 출력이 달라진다(휠 간격 60 에서는 한 비트도 안 바뀐다).
