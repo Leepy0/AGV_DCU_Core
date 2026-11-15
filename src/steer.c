@@ -37,7 +37,6 @@
 #define GUIDE_DEADBAND_CURVE_SCALE  0.3f
 #define GUIDE_KD_RATE               0.08f
 #define STEER_GUIDE_REF_MM          250.0f    /* 이득을 맞춘 센서 거리 */
-#define STEER_WB_REF_MM             600.0f    /* 이득을 맞춘 휠 간격 */
 #define STEER_LIMIT_RPM             1500
 /* 곡선 계단 완화. 'h' 위치는 1단위 계단이라 Kp 가 오르는 편차 4~12단위에서 칸이 바뀔 때마다 출력이 150~260 rpm 씩 뛰었다
  * (기울기 Kp + a·dKp/da). 10 ms 당 출력 변화를 50 rpm 으로 묶는다. 센서 반폭의 약 60% 넘게 벗어나면 선을 놓치지 않게 묶지 않는다.
@@ -51,7 +50,7 @@
 #define STEER_I_EXIT_ARM            6
 #define STEER_I_EXIT_DECAY          0.95f
 #define STEER_I_EXIT_DONE           5.0f      /* 이보다 작아지면 감쇠를 끝낸다 rpm */
-/* 곡선 끝 처리·속도 비례 적분(54차부터 기본: 실차 53차 TST 1 이 가장 나았다). 개발 이미지 TST 2(param_tst_old)는 예전 규칙이고
+/* 곡선 끝 처리·속도 비례 적분(54차부터 기본: 실차 53차 TST 1 이 가장 나았다). 개발 이미지 TST 2·3(param_tst_steer_old)은 예전 규칙이고
  * 속도 비례가 없다. 예전 규칙은 적분이 곡선을 붙든 채 편차가 4단위 아래로 내려오자 곡선 안에서 걸려 0.3 s 만에 -480 → -96 rpm 이
  * 빠졌고, 편차가 3 → 13단위로 다시 벌어졌다(실차 51차 덤프).
  *  A: 오차와 적분의 부호가 반대(선이 반대쪽으로 넘어감)일 때만 10 ms 마다 STEER_I_FLIP_DECAY 배. 무장 없음. |적분| < STEER_I_EXIT_DONE 은 그대로.
@@ -269,7 +268,7 @@ void steer_run(int16_t tuning_type)
     if ((D.flag_stopping || stop_is_braking()) && (s_steer.previous_speed > 0) && (v_abs < s_steer.previous_speed)) {
         s_steer.i_out *= (float)v_abs / (float)s_steer.previous_speed;
     }
-    else if (!param_tst_old && (v_abs != s_steer.previous_speed) && (v_abs >= STEER_I_V_MIN) && (s_steer.previous_speed >= STEER_I_V_MIN)) {
+    else if (!param_tst_steer_old && (v_abs != s_steer.previous_speed) && (v_abs >= STEER_I_V_MIN) && (s_steer.previous_speed >= STEER_I_V_MIN)) {
         float k = (float)v_abs / (float)s_steer.previous_speed;     /* C: 위험 감속·재가속에 적분을 속도에 맞춰 옮긴다 */
         if (k > 1.1f) { k = 1.1f; } else if (k < 0.9f) { k = 0.9f; }
         s_steer.i_out *= k;
@@ -286,8 +285,7 @@ void steer_run(int16_t tuning_type)
         float p_out, i_candidate, rate_ff, unsat, out;
         /* 센서가 회전 중심에서 멀수록 같은 방향 오차에 위치가 크게 변한다. 기준 거리 250 mm 로 맞춘다 */
         float geom = (P.guide_dist_mm > 0.0f) ? (STEER_GUIDE_REF_MM / P.guide_dist_mm) : 1.0f;
-        /* 같은 바퀴 차에 차체가 도는 속도는 휠 간격에 반비례한다. 간격이 넓으면 그만큼 크게 준다 */
-        if (!param_quirk(QUIRK_NO_WB_GAIN)) { geom *= ((float)param_get(P_WHEEL_BASE_MM) * 10.0f) / STEER_WB_REF_MM; }
+        /* 휠 간격은 이득에 곱하지 않는다(v0.57.0). 차마다 남는 차이는 t1 이 K_P 를 찾아 맞춘다 */
 
         if (D.steer_hold) {     /* 교차선 뒤 GD 구간(run.c): 조향 보정 0, 적분 지움. 바퀴 보정(offset_kp)은 둔다 */
             s_steer.i_out = 0.0f;
@@ -319,7 +317,7 @@ void steer_run(int16_t tuning_type)
         rate_ff = GUIDE_KD_RATE * (!D.backward ? D.kf_rate : -D.kf_rate) * geom;
         /* 오차 = 지령 - 위치 이므로 감쇠는 -Kd × 위치 변화율이다. 예전 부호는 반대다 */
         if (!param_quirk(QUIRK_DAMP_SIGN_OLD)) { rate_ff = -rate_ff; }
-        if (smooth && !param_tst_old) { hist_push(D.guide_pos, fast); }
+        if (smooth && !param_tst_steer_old) { hist_push(D.guide_pos, fast); }
 
         /* 다른 선과 붙은 동안의 오차를 적분에 쌓지 않는다 */
         if (!clear_integral && !D.flag_stopping && !stop_is_braking() && (D.guide_track == GUIDE_TRK_NORMAL)) {
@@ -332,7 +330,7 @@ void steer_run(int16_t tuning_type)
         }
         if (s_steer.i_out > (float)limit)       { s_steer.i_out = (float)limit; }
         else if (s_steer.i_out < (float)-limit) { s_steer.i_out = (float)-limit; }
-        if (smooth && !param_tst_old) { exit_ab(dev, fast); }
+        if (smooth && !param_tst_steer_old) { exit_ab(dev, fast); }
         else if (smooth) {      /* 예전 끝 감쇠(TST 2) */
             if (dev >= STEER_I_EXIT_ARM) { s_steer.i_exit = 1; }
             if (s_steer.i_exit && (dev < GUIDE_KP_RAMP_LO)) {

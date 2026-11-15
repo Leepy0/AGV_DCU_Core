@@ -106,7 +106,7 @@ enum { PH_RAMP = 1, PH_SETTLE, PH_HOLD, PH_SPD_UP, PH_SPD_DOWN, PH_LAT, PH_STOP,
 /* 순서 8 안의 이동: 선까지(LOS 뒤 마지막 APPROACH_MM 만 최저 속도), 직선 위 회전 자리까지 LOS, 서기 기다림 */
 enum { MV_LINE = 0, MV_POS, MV_HALT };
 /* 다음 회의 종류 */
-enum { NX_END = 0, NX_LINE, NX_IDENT, NX_SWEEP, NX_COAST, NX_STOPT, NX_RPM, NX_BACK };
+enum { NX_END = 0, NX_LINE, NX_IDENT, NX_SWEEP, NX_COAST, NX_STOPT, NX_RPM, NX_BACK, NX_GAIN };
 #define PH_COAST PH_STOP          /* 가감속 찾기 감속 */
 #define PH_STOPT PH_STOP          /* 지정 시험 단계 4 위치 정지 */
 
@@ -128,9 +128,8 @@ stopt_result_t agv_stopt;
 build_result_t agv_build;
 uint16_t       test_keep_mark;
 
-/* 예전 OPT 값 o(b0 10 ms, b1 감쇠 부호, b4 휠 간격)와 같은 조향 칸(LG). 위치 소스는 'h'(표준) */
-#define OLD_OPT(o) { (int16_t)((((o) & 1) ? 0 : QUIRK_STEER_20MS) | (((o) & 2) ? 0 : QUIRK_DAMP_SIGN_OLD) \
-                               | (((o) & 16) ? 0 : QUIRK_NO_WB_GAIN)) }
+/* 예전 OPT 값 o(b0 10 ms, b1 감쇠 부호)와 같은 조향 칸(LG). b4(휠 간격)는 v0.57.0 에 뜻이 없어져 0·16 같은 칸이 같다. 위치 소스는 'h'(표준) */
+#define OLD_OPT(o) { (int16_t)((((o) & 1) ? 0 : QUIRK_STEER_20MS) | (((o) & 2) ? 0 : QUIRK_DAMP_SIGN_OLD)) }
 #if AGV_DEV_TESTS
 #define SWEEP_DEF_N 8u
 static const sweep_cand_t s_sweep_def[SWEEP_DEF_N] = {
@@ -209,6 +208,10 @@ static srch_t s_acc, s_dcc;
 enum { BK_NONE = 0, BK_OUT, BK_RUN, BK_RET, BK_END };
 static struct { int16_t st, d0, to, flip, creep, grow, last, ok, lost; } s_bk;
 
+/* 연속 시험 단계 7(조향 이득 찾기). q: 후보 순서, miss: 지금 후보에서 창이 모자라 다시 한 번 한 상태 */
+#define GAIN_STAGE 7
+static struct { gain_seq_t q; int16_t miss; } s_gain;
+
 static struct {                  /* 정지 정확도·가감속 찾기 한 회 */
     int16_t  last[2];
     int32_t  v0[2];
@@ -232,14 +235,17 @@ static struct {
     uint32_t start, begin, ticks;     /* ticks: 통합 시험 경과 */
     float    budget;
     step_t   lat, spd[2];
-    union { float y[WIN_TICKS]; int16_t ring[2][TOP_RING]; } u;   /* ring: 최고 속도 시험 0.3 s 원시 rpm */
+    union { float y[WIN_TICKS]; int16_t ring[2][TOP_RING]; int16_t g[GAIN_WIN_MAX]; } u;   /* ring: 최고 속도 시험 0.3 s 원시 rpm, g: 단계 7 정속 창 가이드 위치 × 8 */
     float    steer_ss, rpm_s[2], rpm_ss[2], tq_s[2];
 } s_id;
 
 #define PASS ((uint16_t)*s_r.pass)
 
-/* 통합 시험 단계 2 (조향 스윕) 중. 연속 시험은 단계 6 */
-static int sweep(void) { return s_all && (agv_all.stage == (s_build ? 6 : 2)); }
+/* 연속 시험 단계 7 (조향 이득 찾기) 중. 스윕(단계 6)과 같은 회 길(SL 정지·속도 계단 없음)로 달리고 옆 계단만 없다 */
+static int gain(void) { return s_build && s_all && (agv_all.stage == GAIN_STAGE); }
+
+/* 통합 시험 단계 2 (조향 스윕) 중. 연속 시험은 단계 6 과 7 */
+static int sweep(void) { return s_all && (s_build ? ((agv_all.stage == 6) || (agv_all.stage == GAIN_STAGE)) : (agv_all.stage == 2)); }
 
 /* 지정 시험 단계 4 (정지 정확도) 중. 연속 시험은 단계 4 (가감속 찾기)·5 (정지 정확도) */
 static int coast(void)
@@ -260,6 +266,7 @@ static uint16_t lvl(void)
 static ident_level_t *cur_lv(void)
 {
     uint16_t p = (PASS > 0u) ? PASS - 1u : 0u;
+    if (gain()) { return &agv_all.sw[0].lv[0]; }     /* 단계 7 은 결과 칸을 안 쓴다(판정은 agv_build.kp_log). 쓰고 버리는 칸 */
     if (sweep()) { return &agv_all.sw[p / SWEEP_PASSES].lv[p % SWEEP_PASSES]; }
     return &agv_ident.lv[p];
 }
@@ -324,10 +331,18 @@ static void set_speed(int16_t v, int ramp)
 
 void ident_speed(int16_t v, int ramp) { set_speed(v, ramp); }
 
+/* 단계 7 속도 = min(GAIN_V_MPM, 단계 6 과 같은 최고 속도의 2/3) */
+static int16_t gain_clamp(int16_t v)
+{
+    int16_t g = param_rpm(GAIN_V_MPM);
+    return (gain() && (v > g)) ? g : v;
+}
+
 /* 1, 2회 → 1/3, 3, 4회 → 2/3, 5, 6회 → 최고 속도. 고속 스윕은 입력 속도 */
 static int16_t level_rpm(void)
 {
     int16_t v = s_hs ? s_hs : (int16_t)(((int32_t)P.target_speed * (int32_t)(lvl() + 1u)) / IDENT_LEVELS);
+    v = gain_clamp(v);
     return (v < P.min_speed) ? P.min_speed : v;
 }
 
@@ -335,6 +350,7 @@ static int16_t level_rpm(void)
 static int16_t rpm_at(uint16_t level)
 {
     int16_t v = s_hs ? s_hs : (int16_t)(((int32_t)P.target_speed * (int32_t)(level + 1u)) / IDENT_LEVELS);
+    v = gain_clamp(v);
     if (v < P.min_speed) { v = P.min_speed; }
     return (v > s_id.cap[level]) ? s_id.cap[level] : v;
 }
@@ -575,6 +591,8 @@ static void build_restore(int16_t state)
 {
     (void)param_set_ram(P_SPEED_HIGH, agv_build.cfg_high);
     (void)param_set_ram(P_DCC, agv_build.cfg_dcc);
+    (void)param_set_ram(P_STEER_KP, agv_build.cfg_kp);        /* 조향 이득 찾기가 RAM 에 넣은 값 */
+    (void)param_set_ram(P_STEER_KI, agv_build.cfg_ki);
     if (s_acc.a0 > 0) { (void)param_set_ram(P_ACC, s_acc.a0); }   /* ACC 찾기 후보 */
     s_acc.a0 = -1;
     if ((s_bk.st != BK_NONE) && (s_bk.st != BK_END)) {   /* 후진 점검 중 끊겼다. 서면 시작 방향으로(정식 경로) */
@@ -780,10 +798,15 @@ static void pass_begin(void)
     }
     else {
         (*s_r.pass)++;
-        if (sweep() && (((PASS - 1u) % SWEEP_PASSES) == 0u)) {
+        if (sweep() && !gain() && (((PASS - 1u) % SWEEP_PASSES) == 0u)) {
             agv_all.sweep_k = (int16_t)((PASS - 1u) / SWEEP_PASSES);
             (void)param_set_ram(P_LEGACY_QUIRKS, agv_all.sw[agv_all.sweep_k].quirk);   /* QUIRK_SRC_A 가 바뀌면 다음 요청부터 'A'/'H' 가 바뀐다 */
         }
+    }
+    if (gain()) {                    /* 이 후보를 RAM 에 넣고 달린다. 결과 칸은 쓰고 버린다 */
+        memset(cur_lv(), 0, sizeof(ident_level_t));
+        (void)param_set_ram(P_STEER_KP, gain_kp(&s_gain.q));
+        (void)param_set_ram(P_STEER_KI, gain_ki(&s_gain.q));
     }
     if (sweep()) { steer_reset(); }
     if (pass_rpm() < level_rpm()) { cur_lv()->cut |= 2; }   /* 낮춘 속도로 잰다 */
@@ -794,6 +817,21 @@ static void pass_begin(void)
     s_bk.grow = s_bk.last = 0;
     s_bk.ok = s_bk.lost = 0;
     enter(PH_RAMP);
+}
+
+/* 단계 7: 남은 거리로 정속 창(최대 GAIN_WIN_MAX 틱)을 정한다. 옆 계단은 없다. 0 = GAIN_WIN_MIN 보다 짧다 */
+static int gain_plan(ident_level_t *lv)
+{
+    const float k = 1000.0f / 6000.0f;
+    float v = (float)s_id.want / P.one_meter_rpm * k;
+    float rem = (s_id.budget - mm_since(s_id.begin)) / v * PLAN_SLACK - (float)SETTLE_TICKS;
+    float hold = (rem < (float)GAIN_WIN_MAX) ? rem : (float)GAIN_WIN_MAX;
+
+    if (hold < (float)GAIN_WIN_MIN) { return 0; }
+    s_id.hold_n = (int16_t)hold;
+    s_id.lat_n = 0;
+    lv->hold_ms = ms(s_id.hold_n);
+    return 1;
 }
 
 /* 남은 거리로 정속·옆 계단 창을 나눈다. 0 = 창이 너무 짧다 */
@@ -807,6 +845,7 @@ static int plan(ident_level_t *lv)
     float hold = (rem * 0.5f < (float)WIN_TICKS) ? rem * 0.5f : (float)WIN_TICKS;
     float lat = (rem - hold < (float)WIN_TICKS) ? rem - hold : (float)WIN_TICKS;
 
+    if (gain()) { return gain_plan(lv); }
     if ((hold < (float)WIN_MIN) || (lat < (float)WIN_MIN)) { return 0; }
     s_id.hold_n = (int16_t)hold;
     s_id.lat_n = (int16_t)lat;
@@ -866,10 +905,48 @@ static int fail_now(void)
     return -1;
 }
 
+/* ---- 연속 시험 단계 7: 조향 이득 찾기 ---- */
+
+/* 정속 창 매 틱: 가이드 위치 × 8 을 쌓는다(기존 편차 창 버퍼 u 를 그대로 쓴다. 새 RAM 없음) */
+static void gain_sample(void)
+{
+    float x = lateral() * (float)GAIN_SCALE;
+    s_id.u.g[s_id.t] = (int16_t)((x > 4000.0f) ? 4000.0f : ((x < -4000.0f) ? -4000.0f : x));
+}
+
+/* 창이 모자라 판정하지 못했다. 같은 후보로 한 번 더 하고 또 못 보면 실패(속도는 안 낮춘다) */
+static int gain_miss(void)
+{
+    agv_build.kp_log[s_gain.q.idx].verdict = GAIN_V_NONE;
+    if (s_gain.miss) { return fail_now(); }
+    s_gain.miss = 1;
+    s_id.retry = 1;
+    D.p_test = 0;
+    set_speed(P.min_speed, 1);
+    leave(0);
+    return 0;
+}
+
+/* 정속 창 n 틱을 판정해 기록하고 다음 후보(또는 끝)로. 차는 감속하며 다음 자리로 간다 */
+static int gain_hold_end(int16_t n)
+{
+    gain_log_t *e = &agv_build.kp_log[s_gain.q.idx];
+
+    gain_judge(s_id.u.g, n, e);
+    if (e->verdict == GAIN_V_NONE) { return gain_miss(); }
+    s_gain.miss = 0;
+    gain_seq_next(&s_gain.q, e->verdict == GAIN_V_CLEAN);
+    D.p_test = 0;
+    set_speed(P.min_speed, 1);
+    leave(0);
+    return 0;
+}
+
 /* 창이 안 들어간다. 속도를 4/5 로 낮춰 같은 회를 다시 한다. 최저 속도에서도 안 되면 실패 */
 static int slow_down(void)
 {
     int16_t c = (int16_t)(((int32_t)s_id.want * 4) / 5);
+    if (gain()) { return gain_miss(); }
     if (s_bk.st == BK_RUN) {         /* 후진 점검은 다시 하지 않는다. 잰 만큼으로 끝낸다 */
         cur_lv()->cut |= 1;
         sl_stop();
@@ -1539,6 +1616,10 @@ void ident_start_build(uint16_t mask, int16_t track_in_mm, int16_t cap_mpm)
     agv_build.cfg_dcc = param_get(P_DCC);
     agv_build.cfg_dia = param_get(P_WHEEL_DIA_MM);
     agv_build.cfg_wb = param_get(P_WHEEL_BASE_MM);
+    agv_build.cfg_kp = param_get(P_STEER_KP);
+    agv_build.cfg_ki = param_get(P_STEER_KI);
+    agv_build.kp_rec = agv_build.ki_rec = -1;
+    memset(&s_gain, 0, sizeof(s_gain));
     agv_build.min_rec = agv_build.high_rec = agv_build.dcc_rec = agv_build.cid_rec = -1;
     agv_build.acc_max = agv_build.acc_rec = agv_build.dcc_max = -1;
     memset(&s_acc, 0, sizeof(s_acc));
@@ -1608,6 +1689,13 @@ static void stage_end(uint16_t st)
     case 4:                           /* 가감속 찾기: 뒤 정지 단계는 DCC 추천으로 간다 */
         (void)param_set_ram(P_DCC, b->dcc_rec);
         break;
+    case GAIN_STAGE:                  /* 찾은 값을 RAM 에 넣어 뒤 단계가 그 값으로 달린다. 저장은 채택 쪽 */
+        b->kp_rec = gain_kp(&s_gain.q);
+        b->ki_rec = gain_ki(&s_gain.q);
+        b->kp_ng = s_gain.q.ng;
+        (void)param_set_ram(P_STEER_KP, b->kp_rec);
+        (void)param_set_ram(P_STEER_KI, b->ki_rec);
+        break;
     case 5: {
         const stopt_pass_t *sp = &agv_stopt.p[PASS - 1u];
         stopt_profile(0);
@@ -1626,6 +1714,8 @@ static void stage_end(uint16_t st)
 /* mask 에서 st 다음 단계. 0 = 없음 */
 static uint16_t bld_after(uint16_t st)
 {
+    if ((st == 1u) && (s_build & BLD_GAIN)) { return GAIN_STAGE; }   /* 단계 7 은 1 바로 뒤. 끝나면 1 다음 단계로 */
+    if (st == GAIN_STAGE) { st = 1u; }
     do { st++; } while ((st <= BLD_STAGES) && !(s_build & (1u << (st - 1u))));
     return (st > BLD_STAGES) ? 0u : st;
 }
@@ -1653,6 +1743,13 @@ static int build_next(void)
         point(&agv_coast.state, &agv_coast.fail, &agv_coast.pass, &agv_coast.phase, &agv_all.track_mm);
         srch_begin(&s_dcc, P.dcc, dcc_cap(), &agv_build.dcc_max, &agv_build.dcc_rec);
         break;
+    case GAIN_STAGE:
+        memset(&agv_all.sw[0].lv, 0, sizeof(agv_all.sw[0].lv));
+        gain_seq_begin(&s_gain.q);
+        s_gain.miss = 0;
+        agv_build.gain_pass = agv_build.gain_phase = agv_build.gain_fail = 0;
+        point(&agv_build.gain_state, &agv_build.gain_fail, &agv_build.gain_pass, &agv_build.gain_phase, &agv_all.track_mm);
+        break;
     case 5: {
         uint16_t i;
         point(&agv_stopt.state, &agv_stopt.fail, &agv_stopt.pass, &agv_stopt.phase, &agv_all.track_mm);
@@ -1663,11 +1760,12 @@ static int build_next(void)
         break;
     }
     default:
+        memset(&agv_all.sw[0].lv, 0, sizeof(agv_all.sw[0].lv));   /* 단계 7 이 쓴 칸을 지운다 */
         agv_all.pass = agv_all.phase = 0;
         point(&agv_all.state, &agv_all.fail, &agv_all.pass, &agv_all.phase, &agv_all.track_mm);
         break;
     }
-    if ((st >= 3u) && (s_acc.a0 < 0)) { acc_begin(); }   /* 최고 속도 단계(없으면 그 뒤)부터 ACC 찾기 */
+    if ((st >= 3u) && (st != GAIN_STAGE) && (s_acc.a0 < 0)) { acc_begin(); }   /* 최고 속도 단계(없으면 그 뒤)부터 ACC 찾기 */
     if ((st == 4u) && (s_acc.c == 0) && (s_dcc.c == 0)) {   /* 가감속 찾기에 찾을 것이 없다. 달리지 않는다 */
         stage_end(4u);
         return build_next();
@@ -1824,6 +1922,7 @@ static int build_turn(void)
         done = cid_done();
         if (!done) { s_bld.cid = cid_next(); }
     }
+    else if (st == GAIN_STAGE) { done = s_gain.q.done; }
     else {
         int r = 0;
         if (s_bk.st <= BK_OUT) { agv_all.sw[agv_all.sweep_k].done++; }   /* 전진 회. 후진 회는 세지 않는다 */
@@ -1874,17 +1973,17 @@ static int16_t next_kind(uint16_t *np, int16_t *free)
         int last = (p >= TOP_PASSES) || (s_build && top_capped());
         return (last && (!s_build || (bld_after(3u) == 0u))) ? NX_END : NX_LINE;
     }
-    if (s_id.retry) { return sweep() ? NX_SWEEP : (stopt() ? NX_STOPT : (coast() ? NX_COAST : NX_IDENT)); }
+    if (s_id.retry) { return gain() ? NX_GAIN : sweep() ? NX_SWEEP : (stopt() ? NX_STOPT : (coast() ? NX_COAST : NX_IDENT)); }
     *np = (uint16_t)(p + 1u);
     /* 제작·점검(t1·t2)은 앞이 넉넉하면 같은 방향으로 잇는다. 식별·지정·통합 시험의 같은 속도
      * 왕복 둘째 회는 반대 방향 그대로다: 옆 계단·편차는 정렬 회전이 테이프 가운데에 다시 세운 뒤 재야 한다 */
     *free = s_build || ((p & 1u) == 0u);
     if (s_build) {
         done = (st == 2u) ? (p >= 4u) : (st == 4u) ? coast_done(p) : (st == 5u) ? cid_done()
-             : (p >= BLD_DEV_PASSES);
+             : (st == GAIN_STAGE) ? s_gain.q.done : (p >= BLD_DEV_PASSES);
         if (!done) {
             if (st == 2u) { *np = 4u; *free = 1; return NX_RPM; }   /* 점검 1회 뒤 4회 */
-            return (st == 4u) ? NX_COAST : (st == 5u) ? NX_STOPT : NX_SWEEP;
+            return (st == 4u) ? NX_COAST : (st == 5u) ? NX_STOPT : (st == GAIN_STAGE) ? NX_GAIN : NX_SWEEP;
         }
         if ((st == 6u) && (s_bk.st == BK_NONE) && bk_want() && s_pos.ok
             && (bk_need() <= s_pos.len - P.guide_dist_mm - MARGIN_MM)) {   /* 후진 회. 직선에 안 들어가면 안 한다 */
@@ -1895,7 +1994,8 @@ static int16_t next_kind(uint16_t *np, int16_t *free)
         *np = 1u;
         st = bld_after(st);
         if (st == 2u) { *np = (s_build & BLD_CHECK) ? 1u : 4u; return NX_RPM; }
-        return (st == 0u) ? NX_END : (st == 3u) ? NX_LINE : (st == 4u) ? NX_COAST : (st == 5u) ? NX_STOPT : NX_SWEEP;
+        return (st == 0u) ? NX_END : (st == 3u) ? NX_LINE : (st == 4u) ? NX_COAST : (st == 5u) ? NX_STOPT
+             : (st == GAIN_STAGE) ? NX_GAIN : NX_SWEEP;
     }
 #if AGV_DEV_TESTS                  /* 여기부터는 t3 시험(연속 시험이 아님) */
     if (sweep()) {
@@ -1937,6 +2037,9 @@ static float next_need(int16_t *free)
     case NX_SWEEP:
         v = rpm_at(SWEEP_LEVEL);
         return run_need(v, SETTLE_TICKS + 2 * WIN_TICKS, DEC_MARGIN_MM + decel_mm(v));
+    case NX_GAIN:                    /* 단계 7: 안정 + 정속 창 GAIN_WIN_MIN 틱 + 감속 */
+        v = rpm_at(SWEEP_LEVEL);
+        return run_need(v, SETTLE_TICKS + GAIN_WIN_MIN, DEC_MARGIN_MM + decel_mm(v));
     case NX_COAST:                   /* 가감속 찾기는 안정 뒤 감속 */
         v = rpm_at(IDENT_LEVELS - 1u);
         return run_need(v, SETTLE_TICKS, DEC_MARGIN_MM + decel_mm(v));
@@ -2203,6 +2306,7 @@ int ident_run(void)
     }
     if (s_top) { return top_run(); }
     if (mm_since(s_id.begin) > s_id.budget) {
+        if (gain()) { return ((ph == PH_HOLD) && (s_id.t >= GAIN_WIN_MIN)) ? gain_hold_end(s_id.t) : gain_miss(); }   /* 3 s 넘게 봤으면 그만큼으로 판정 */
         if (ph == PH_RAMP) { return slow_down(); }
         lv->cut |= 1;
         sl_stop();
@@ -2231,6 +2335,11 @@ int ident_run(void)
         }
         break;
     case PH_HOLD:
+        if (gain()) {
+            gain_sample();
+            if (++s_id.t >= s_id.hold_n) { return gain_hold_end(s_id.t); }
+            break;
+        }
         hold_sample();
         if (++s_id.t >= s_id.hold_n) {
             hold_finish(lv);

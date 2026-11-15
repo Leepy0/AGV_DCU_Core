@@ -457,37 +457,22 @@ int main(void)
     assert(D.p_err == 0);
     (void)param_set(P_OPT_FLAGS, 0);
 
-    /* 휠 간격 비례: 기본. 60 cm 면 그대로, 120 cm 면 비례 출력이 두 배. QUIRK_NO_WB_GAIN 은 비례하지 않는다.
-     * 예전 OPT 값 19(b0·b1·b4)는 비어 있는 비트라 아무 일도 하지 않는다.
+    /* 휠 간격은 조향 이득에 곱하지 않는다(v0.57.0): 60·80·122 cm 모두 같은 출력이다. LG 64(예전 휠 간격 스위치 비트)도 무시한다.
      * 편차 10단위(출력 변화 묶음 밖)에 지령을 9 옮겨 오차 1단위만 본다 */
-    { float out60;
-      setup();
-      (void)param_set(P_WHEEL_BASE_MM, 60);
-      D.guide_pos = 10;
-      D.p_test = 9;
-      steer_run(0);
-      out60 = D.p_pi_out;
-      setup();
-      (void)param_set(P_WHEEL_BASE_MM, 120);
-      D.guide_pos = 10;
-      D.p_test = 9;
-      steer_run(0);
-      assert(near0(D.p_pi_out - 2.0f * out60) < 1e-2f);
-      setup();
-      (void)param_set(P_WHEEL_BASE_MM, 120);
-      (void)param_set(P_OPT_FLAGS, 19);
-      D.guide_pos = 10;
-      D.p_test = 9;
-      steer_run(0);
-      assert(near0(D.p_pi_out - 2.0f * out60) < 1e-2f);
-      (void)param_set(P_OPT_FLAGS, 0);
-      setup();
-      (void)param_set(P_WHEEL_BASE_MM, 120);
-      (void)param_set(P_LEGACY_QUIRKS, QUIRK_NO_WB_GAIN);
-      D.guide_pos = 10;
-      D.p_test = 9;
-      steer_run(0);
-      assert(near0(D.p_pi_out - out60) < 1e-3f);
+    { static const int16_t ww[] = { 60, 80, 122, 122 };
+      float out60 = 0.0f;
+      int k;
+      for (k = 0; k < 4; k++) {
+          setup();
+          (void)param_set(P_WHEEL_BASE_MM, ww[k]);
+          assert(param_get(P_WHEEL_BASE_MM) == ww[k]);
+          if (k == 3) { (void)param_set(P_LEGACY_QUIRKS, 64); }
+          D.guide_pos = 10;
+          D.p_test = 9;
+          steer_run(0);
+          if (k == 0) { out60 = D.p_pi_out; assert(out60 != 0.0f); }
+          assert(D.p_pi_out == out60);
+      }
       (void)param_set(P_LEGACY_QUIRKS, 0);
       (void)param_set(P_WHEEL_BASE_MM, 60); }
 
@@ -642,7 +627,7 @@ int main(void)
     /* B: |적분| ≥ 100 rpm 이고 100 ms 동안 |위치| 가 2단위 이상 줄면 그 틱도 0.95 배. 위치는 내내 적분 쪽(A 는 안 걸린다).
      * 틱마다 적분 = (앞 + 이번 증가) 이거나 B 가 걸려 그것 × 0.95. 곡선 안 빠르기(1단위 120 ms)·작은 적분(K_I 1)은 한 번도 안 걸린다 */
     { static const struct { int16_t ki, per; int fire; } cs[] = { { 5, 5, 1 }, { 5, 12, 0 }, { 1, 5, 0 } };
-      float geom = (250.0f / P.guide_dist_mm) * (((float)param_get(P_WHEEL_BASE_MM) * 10.0f) / 600.0f);
+      float geom = 250.0f / P.guide_dist_mm;
       int c, k;
       for (c = 0; c < 3; c++) {
           int fired = 0, other = 0;

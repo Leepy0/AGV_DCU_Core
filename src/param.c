@@ -44,14 +44,17 @@ int16_t param_digit(int16_t value, int16_t place)
 int16_t param_get(uint16_t idx)        { return (idx < P_COUNT) ? s_set[idx] : 0; }
 
 #if AGV_DEV_TESTS
-/* TST(param.h): 0 기본(현장 이미지와 같다), 2 예전(53차 TST 0. 비교용). 1 은 비었다(limit_ok 가 받지 않는다) */
-int16_t param_tst_old;
+/* TST(param.h): 0 기본(현장 이미지와 같다), 1 새 조향 + 예전 속도 루프, 2 예전(53차 TST 0), 3 예전 조향 + 새 속도 루프 */
+int16_t param_tst_steer_old;
+int16_t param_tst_speed_old;
 
 void param_tst_apply(void)
 {
+    int16_t t = s_set[P_DEV_TEST];
+    param_tst_steer_old = (int16_t)((t == 2) || (t == 3));
+    param_tst_speed_old = (int16_t)((t == 1) || (t == 2));
     D.p_kp = (float)param_gain(P_STEER_KP);      /* 0 이면 steer.c 가 경사로 다시 잡는다 */
     D.p_ki = (float)param_gain(P_STEER_KI) * 0.1f;
-    param_tst_old = (int16_t)(s_set[P_DEV_TEST] == 2);
 }
 #endif
 
@@ -59,7 +62,7 @@ int16_t param_gain(uint16_t idx)
 {
     int16_t v = param_get(idx);
 #if AGV_DEV_TESTS
-    if (s_set[P_DEV_TEST] == 2) { return v; }    /* 예전: 0 = 37차 자동 이득 */
+    if ((s_set[P_DEV_TEST] == 2) || (s_set[P_DEV_TEST] == 3)) { return v; }    /* 예전 조향: 0 = 37차 자동 이득 */
 #endif
     return v ? v : ((idx == P_STEER_KP) ? PARAM_KP_DEFAULT : PARAM_KI_DEFAULT);
 }
@@ -86,7 +89,7 @@ static const extra_t s_extra[] = {
     { P_EMPTY_DCC,   PARAM_EMPTY_ADDR0 + 3u, 0, 60, 0 },
     { P_LOAD_DETECT, PARAM_EMPTY_ADDR0 + 4u, 0, 1,  0 }
 #if AGV_DEV_TESTS
-    , { P_DEV_TEST,  PARAM_EMPTY_ADDR0 + 5u, 0, 2,  0 }   /* 82: 레거시 KEEP 빈 칸(77~88). 53차까지의 3~8 은 부팅 때 0 */
+    , { P_DEV_TEST,  PARAM_EMPTY_ADDR0 + 5u, 0, 3,  0 }   /* 82: 레거시 KEEP 빈 칸(77~88). 4~8 은 부팅 때 0 */
 #endif
 };
 static int16_t s_empty;
@@ -103,9 +106,6 @@ static int16_t limit_ok(uint16_t i, int16_t v)
 {
     int16_t p;
     const extra_t *e = extra_find(i);
-#if AGV_DEV_TESTS
-    if ((i == P_DEV_TEST) && (v == 1)) { return 0; }     /* TST 1 은 비었다(54차). 53차의 1 도 부팅 때 0 */
-#endif
     if (e != 0) { return (v >= e->low) && (v <= e->up); }
     if (i > P_PARA_INIT) { return 1; }
     if ((s_limit[i].low > 10000) || (s_limit[i].up > 10000)) {

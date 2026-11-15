@@ -53,7 +53,7 @@ float atanf(float x);
 
 agv_drive_t agv_drive;
 #if AGV_DEV_TESTS
-float motor_speed_ff(void) { return param_tst_old ? P.speed_ff : MOTOR_SPEED_FF; }
+float motor_speed_ff(void) { return param_tst_speed_old ? P.speed_ff : MOTOR_SPEED_FF; }
 #endif
 
 static struct {
@@ -216,7 +216,7 @@ void motor_speed_pi(int16_t input)
     const float ff = motor_speed_ff();
 #if AGV_DEV_TESTS   /* TST 2: 예전 루프(되먹임 6표본 평균, *_OLD 이득) */
     static const float ka_new = 1.0f / MOTOR_SPEED_KP, ka_old = 1.0f / MOTOR_SPEED_KP_OLD;
-    const int16_t old = param_tst_old;
+    const int16_t old = param_tst_speed_old;
     const float kp = old ? MOTOR_SPEED_KP_OLD : MOTOR_SPEED_KP, ki = old ? MOTOR_SPEED_KI_OLD : MOTOR_SPEED_KI, ka = old ? ka_old : ka_new;
 #define PI_FB(i) (old ? D.rpm_avg[i] : D.rpm[i])
 #else

@@ -1215,31 +1215,32 @@ static void test_menu5(void)
 #if AGV_DEV_TESTS
 static void boot_keys(uint16_t keys, int keep);
 /* TST 임시 시험: 0·2, EEPROM 82 에 남아 부팅 뒤 되살아난다. K_P·K_I·FF 원래 값은 그대로 둔다.
- * 0 기본(param_tst_old 0: 속도 루프·끝 처리 A+B·속도 비례, K_P·K_I 0 = 60·5), 1 비었다,
- * 2 예전(param_tst_old 1: 예전 속도 루프·끝 감쇠, 속도 비례 없음, K_P·K_I 0 = 자동 이득) */
+ * 0 기본(두 깃발 0: 속도 루프·끝 처리 A+B·속도 비례, K_P·K_I 0 = 60·5), 1 새 조향 + 예전 속도 루프,
+ * 2 예전(두 깃발 1: 예전 속도 루프·끝 감쇠, 속도 비례 없음, K_P·K_I 0 = 자동 이득), 3 예전 조향 + 새 속도 루프 */
 static void test_tst(void)
 {
     char c[5];
     int16_t lg, t, k;
     boot();
     lg = param_get(P_LEGACY_QUIRKS);
-    assert(!(lg & QUIRK_STEER_STEP) && param_get(P_DEV_TEST) == 0 && !param_tst_old && param_get(P_STEER_KP) == 0);
+    assert(!(lg & QUIRK_STEER_STEP) && param_get(P_DEV_TEST) == 0 && !param_tst_steer_old && !param_tst_speed_old && param_get(P_STEER_KP) == 0);
     assert(param_get(P_STEER_KI) == 0);
     assert(D.p_kp == 60.0f && D.p_ki == 0.5f && motor_speed_ff() == 0.999f);          /* 부팅: K_P·K_I 0 = 권장값 */
     ui_param_text(P_DEV_TEST, 5, c);
     assert(memcmp(c, "TST 5", 5) == 0);
-    assert(param_set(P_DEV_TEST, 1) != 0 && param_set(P_DEV_TEST, 3) != 0 && param_set(P_DEV_TEST, 9) != 0);
+    assert(param_set(P_DEV_TEST, 4) != 0 && param_set(P_DEV_TEST, 9) != 0);
     assert(param_get(P_DEV_TEST) == 0);
     assert(param_set_ram(P_SPEED_FF, 300) == 0);
     for (k = 0; k < 2; k++) {                         /* K_P·K_I 파라미터 45·3, 0·0 */
         assert((param_set_ram(P_STEER_KP, (int16_t)(k ? 0 : 45)) == 0) && (param_set_ram(P_STEER_KI, (int16_t)(k ? 0 : 3)) == 0));
-        for (t = 2; t >= 0; t -= 2) {
+        for (t = 0; t <= 3; t++) {
+            int16_t so = (int16_t)(t >= 2), vo = (int16_t)((t == 1) || (t == 2));   /* 예전 조향, 예전 속도 루프 */
             assert(param_set(P_DEV_TEST, t) == 0);
-            assert(param_tst_old == (t == 2) && param_get(P_OPT_FLAGS) == 0);
+            assert(param_tst_steer_old == so && param_tst_speed_old == vo && param_get(P_OPT_FLAGS) == 0);
             assert(param_get(P_STEER_KP) == (k ? 0 : 45) && param_get(P_STEER_KI) == (k ? 0 : 3));   /* 파라미터 칸은 그대로 */
-            assert(param_gain(P_STEER_KP) == (k ? (t ? 0 : 60) : 45) && D.p_kp == (float)param_gain(P_STEER_KP));
-            assert(param_gain(P_STEER_KI) == (k ? (t ? 0 : 5) : 3) && D.p_ki == (float)param_gain(P_STEER_KI) * 0.1f);
-            assert(motor_speed_ff() == (t ? 0.3f : 0.999f) && param_get(P_SPEED_FF) == 300);   /* FF 파라미터는 예전 루프만 */
+            assert(param_gain(P_STEER_KP) == (k ? (so ? 0 : 60) : 45) && D.p_kp == (float)param_gain(P_STEER_KP));
+            assert(param_gain(P_STEER_KI) == (k ? (so ? 0 : 5) : 3) && D.p_ki == (float)param_gain(P_STEER_KI) * 0.1f);
+            assert(motor_speed_ff() == (vo ? 0.3f : 0.999f) && param_get(P_SPEED_FF) == 300);   /* FF 파라미터는 예전 루프만 */
             assert(!param_quirk(QUIRK_STEER_STEP) && param_get(P_LEGACY_QUIRKS) == lg);
         }
     }
@@ -1248,19 +1249,23 @@ static void test_tst(void)
     ticks(100);
     assert(host.ee[82] == 2);
     boot_keys(0, 1);                                  /* 전원을 다시 켜도 2 */
-    assert(param_get(P_DEV_TEST) == 2 && param_tst_old);
-    for (k = 0; k < 2; k++) {                         /* 53차까지의 1·8 이 EEPROM 에 남아 있으면 부팅 때 0 */
-        host.ee[82] = (uint16_t)(k ? 8 : 1);
+    assert(param_get(P_DEV_TEST) == 2 && param_tst_steer_old && param_tst_speed_old);
+    for (k = 0; k < 2; k++) {                         /* 4~8 이 EEPROM 에 남아 있으면 부팅 때 0 */
+        host.ee[82] = (uint16_t)(k ? 8 : 4);
         boot_keys(0, 1);
-        assert(param_get(P_DEV_TEST) == 0 && !param_tst_old);
+        assert(param_get(P_DEV_TEST) == 0 && !param_tst_steer_old && !param_tst_speed_old);
     }
+    host.ee[82] = 3;                                  /* 3 은 예전 조향 + 새 속도 루프로 되살아난다 */
+    boot_keys(0, 1);
+    assert(param_get(P_DEV_TEST) == 3 && param_tst_steer_old && !param_tst_speed_old);
     boot();
-    assert(param_set(P_DEV_TEST, 2) == 0 && param_tst_old);
-    param_tst_old = 0;                                /* 주행 시작 때 다시 건다(guide_poll, TST 0 이 아니면) */
+    assert(param_set(P_DEV_TEST, 2) == 0 && param_tst_steer_old && param_tst_speed_old);
+    param_tst_steer_old = 0;                          /* 주행 시작 때 다시 건다(guide_poll, TST 0 이 아니면) */
+    param_tst_speed_old = 0;
     ticks(120);
     drive_up();
     run_scan(20);
-    assert(D.flag_run && param_tst_old);
+    assert(D.flag_run && param_tst_steer_old && param_tst_speed_old);
     (void)param_set(P_DEV_TEST, 0);
     printf("  TST ok\n");
 }
@@ -2656,6 +2661,67 @@ static void test_tune_t1_save(void)
     key(KEY_RESET);
     assert(tune_state() == TUNE_SAVED && D.ui_mode == UI_AUTO);
     printf("  tune t1 save ok\n");
+}
+
+/* t1 조향 이득 찾기 결과 쪽: 찾은 값이 저장값과 다르면 K_P·K_I 채택 쪽(첫 자리 점), 60 이면 저장 0 이고 저장값이 0 이면 채택 쪽 없음.
+ * KP 값 쪽은 늘 있고 후보 전부 탈락(NG)이면 깜박인다. SAVE 에서 쓴다 */
+static void gain_case(int16_t kp, int16_t ki, int16_t ng, int16_t saved_kp, int16_t saved_ki, int want_sets, const char *val)
+{
+    int k;
+    char c[5];
+    boot_keys(KEY_MODE + KEY_SET, 0);
+    (void)param_set(P_STEER_KP, saved_kp);
+    (void)param_set(P_STEER_KI, saved_ki);
+    drive_up();
+    run_scan(3);
+    assert(tune_state() == TUNE_BLD && (agv_build.mask & BLD_GAIN) && agv_build.kp_rec == -1);
+    assert(agv_build.cfg_kp == saved_kp && agv_build.cfg_ki == saved_ki);
+    agv_build.kp_rec = kp;
+    agv_build.ki_rec = ki;
+    agv_build.kp_ng = ng;
+    fake_build_done();
+    ticks(200);
+    if (want_sets) {
+        for (k = 0; (k < 250) && !shows(kp == 60 ? "K_P 0" : (kp == 30 ? "K_P30" : "K_P20")); k++) { tick(); }
+        (void)tune_text(c);
+        assert(c[0] == 'K' && c[1] == '_' && c[2] == 'P');
+        assert(tune_page() == 0);
+    }
+    else {
+        for (k = 0; k < 40; k++) {    /* 어느 쪽에도 K_P·K_I 채택 쪽이 없다 */
+            ticks(1);
+            (void)tune_text(c);
+            assert(!((c[0] == 'K') && (c[1] == '_')));
+            key(KEY_MODE);
+        }
+    }
+    for (k = 0; (k < 40) && !shows(val); k++) { key(KEY_MODE); }
+    assert(shows(val));
+    assert(tune_flick() == (ng ? 0x03u : 0u));
+    to_save();
+    {
+        int n = want_sets ? 2 : 0;
+        char w[6] = "SV  0";
+        w[4] = (char)('0' + n);
+        assert(want_sets ? shows(w) : shows("NONE "));
+    }
+    key(KEY_SET);
+    for (k = 0; (k < 300) && (storage_pending() != 0u); k++) { tick(); }
+    ticks(5);
+    if (want_sets) {
+        assert(param_get(P_STEER_KP) == (kp == 60 ? 0 : kp) && param_get(P_STEER_KI) == (kp == 60 ? 0 : ki));
+    }
+    else { assert(param_get(P_STEER_KP) == saved_kp && param_get(P_STEER_KI) == saved_ki); }
+}
+
+static void test_tune_gain_pages(void)
+{
+    gain_case(30, 3, 0, 0, 0, 1, "KP030");     /* 30·3: 저장 0·0 과 다르다 → K_P·K_I 채택 둘 */
+    gain_case(60, 5, 0, 0, 0, 0, "KP060");     /* 60: 저장값 0 = 지금 저장값 → 채택 쪽 없음 */
+    gain_case(60, 5, 0, 40, 3, 1, "KP060");    /* 60 인데 지금 저장 40·3: 0·0 으로 채택 */
+    gain_case(30, 3, 0, 30, 3, 0, "KP030");    /* 지금 저장값과 같다 → 없음 */
+    gain_case(20, 2, 1, 0, 0, 1, "KP020");     /* 후보 전부 탈락: 20·2 와 NG 깜박임 */
+    printf("  tune gain pages ok\n");
 }
 
 /* EEPROM 자리: 128 워드 안, 파라미터·KEEP·체크섬 밖 파라미터·OUT 큐와 안 겹치고 서로 다르다 */
@@ -4419,6 +4485,7 @@ int main(void)
     test_tune_inputs();
     test_fnd_fit();
     test_tune_ee_layout();
+    test_tune_gain_pages();
     test_tune_t2_compare();
     test_tune_t24_amp();
     test_tune_guide();

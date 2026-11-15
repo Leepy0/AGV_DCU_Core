@@ -15,6 +15,7 @@
 #define AGV_IDENT_H
 #include "agv/types.h"
 #include "agv/gresp.h"
+#include "agv/gain.h"
 
 #define IDENT_LEVELS 3
 #define IDENT_PASSES 6
@@ -158,8 +159,8 @@ typedef struct {
 
 extern all_result_t agv_all;
 
-/* 스윕 목록. 기본은 조향 스위치 셋(QUIRK_STEER_20MS, QUIRK_DAMP_SIGN_OLD, QUIRK_NO_WB_GAIN)의
- * 8 조합. 예전 OPT 값 0,1,2,3,16,17,18,19 의 조향과 같은 차례다(v0.48.0 까지의 OPT b3 칸 8~11·24~27 은 0~3·16~19 와
+/* 스윕 목록. 기본은 조향 스위치 둘(QUIRK_STEER_20MS, QUIRK_DAMP_SIGN_OLD, 휠 간격 비트는 v0.57.0 에 빠졌다)의
+ * 8 칸(0~3 과 16~19 가 같다). 예전 OPT 값 0,1,2,3,16,17,18,19 의 조향과 같은 차례다(v0.48.0 까지의 OPT b3 칸 8~11·24~27 은 0~3·16~19 와
  * 같아 v0.49.0 에 뺐다). 위치 소스는 시작 때 값.
  * 사이트가 바꿀 때 부팅 때 한 번 부른다. n 은 SWEEP_MAX 에서 자른다. LG 한계 밖의 칸은 건너뛴다 */
 void ident_sweep_set(const sweep_cand_t *c, uint16_t n);
@@ -265,6 +266,11 @@ void  ident_speed(int16_t v, int ramp);   /* 주행 지령. ramp 0 = 바로 */
  *          (재시험 합격이면 합격). 합격은 한 번으로 인정. DCC 찾기도 같다. 판정마다 agv_build.acc_hist·dcc_hist 에 남긴다. 정지 단계는 시작 때 ACC. 12번 추천 = min(깨끗한 가장 큰 값, acc_cap). 끝나면 12번 RAM 을 되돌린다.
  *  6 편차: 지금 설정(LG 그대로)으로 직진 BLD_DEV_PASSES 회. 통합 시험 단계 2 의 한 회와 같다(최고 속도의 2/3,
  *          앞 단계에서 RAM 에 넣은 1번 추천 기준). 정속 편차 RMS × 10 이 se_x10(기준값 125 아래 바이트, t2 판정)이다.
+ *  7 조향 이득(t1, BLD_GAIN): 1 기구 바로 뒤, 2 rpm 앞에 한다(단계 번호 1~6 의 뜻은 그대로). 속도 min(20 m/min, DRS × 2/3)로 직진하며
+ *          후보 K_P·K_I(60·5, 50·4, 40·3, 30·3, 25·2, 20·2)를 RAM 에 넣어 정속 창(3~4 s)을 판정(gain.h)한다. 60 부터 내려가며 처음
+ *          깨끗한 값에서 멈춘다. 창이 3 s 보다 짧으면 같은 후보를 한 번 더 하고 그래도 안 되면 실패(7xxx). 모두 탈락이면 20·2 를 추천(kp_ng).
+ *          뒤 단계는 찾은 값(RAM)으로 달리고 끝·실패·끊김 때 시작 값으로 돌린다. 저장은 결과 쪽 채택(60 이면 0).
+ *          결과는 agv_build.kp_rec·ki_rec·kp_ng·kp_log, 진행은 gain_state·gain_fail·gain_pass·gain_phase(agv_all.stage 7)
  *  후진 점검(t1, TFB 일의 자리 > 0): 편차 단계 전진 회 뒤 그 자리에서 회전 대신 방향 전환(run_dir_change, 0도 회전과 같다)을 하고
  *          같은 회를 후진으로 한 번 더 한다. 결과는 agv_all.sw[0].lv[1](전진은 lv[0] 그대로), 판정은 agv_build.bk_*.
  *          뒤가 모자라면(최저 속도 0.5 m + 편차 회 길이) 안 한다. 출발 뒤 0.5 m 는 최저 속도(SPN)로 가며 편차가 ±10칸(wide ±20칸)에
@@ -285,6 +291,7 @@ void  ident_speed(int16_t v, int ramp);   /* 주행 지령. ramp 0 = 바로 */
 #define BLD_MIN    0x0200u
 #define BLD_GA     0x0400u
 #define BLD_CHECK  0x0800u
+#define BLD_GAIN   0x1000u   /* 단계 7: 조향 이득 찾기. 기구(1) 바로 뒤, rpm(2) 앞에 한다. 단계 번호 1~6 은 그대로 */
 #define BLD_STAGES 6
 #define BLD_COAST_PASSES 10  /* 가감속 찾기 회 상한. 탈락 재확인으로 판정이 늘어 8 → 10 */
 #define BLD_OVER_OK_MM 10
@@ -335,6 +342,12 @@ typedef struct {
     srch_hist_t acc_hist;    /* ACC·DCC 찾기 판정 이력. 뒤에 붙여 앞 필드 주소를 옮기지 않는다 */
     srch_hist_t dcc_hist;
     int16_t bk_why;          /* 후진 점검 판정 3 사유: 1 문턱 도달, 2 계속 증가, 3 선 잃음(0.1 s), 4 정착 구간(1 s·100 mm) 안 정상 응답 없음. 0 = 아님 */
+    /* 조향 이득 찾기(단계 7). 뒤에 붙여 앞 필드 주소를 옮기지 않는다 */
+    int16_t cfg_kp, cfg_ki;  /* 시작 때 20·21번(끝·실패·끊김 때 RAM 을 이 값으로 돌린다) */
+    int16_t kp_rec, ki_rec;  /* 추천 K_P·K_I(60 이면 저장값은 0). -1 = 안 찾음 */
+    int16_t kp_ng;           /* 1 = 후보 6개 모두 탈락(20·2 를 추천) */
+    int16_t gain_state, gain_fail, gain_pass, gain_phase;   /* 단계 7 진행 칸. 회 = 시도(재시험 빼고), 순서는 식별 시험과 같다 */
+    gain_log_t kp_log[GAIN_CANDS];   /* 후보별(60, 50, 40, 30, 25, 20): 정속 RMS mm × 10, 봉우리 평균 단위 × 10, 부호 바뀜 수, 판정(GAIN_V_*). 안 돈 후보는 0 */
 } build_result_t;
 
 extern build_result_t agv_build;

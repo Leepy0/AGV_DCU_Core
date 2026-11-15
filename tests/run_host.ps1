@@ -24,6 +24,9 @@ foreach ($n in 'MAN_SETCLR', 'MAN_BELT_NODIR', 'MAN_PROFILE_0', 'MAN_PROFILE_RAN
 }
 
 # Both builds: with the tuning t3 dev tests (default) and without (AGV_DEV_TESTS=0, site images)
+# t1 steering gain search: judge and candidate order (gain.c only)
+& gcc -std=c99 -Wall -DAGV_HOST_BUILD -Iinclude tests/test_gain.c src/gain.c -o build/t/test_gain.exe -lm
+if ($LASTEXITCODE -ne 0) { Write-Output 'BUILD FAIL gain'; $failed++ } else { & build/t/test_gain.exe; if ($LASTEXITCODE -ne 0) { Write-Output 'FAIL gain'; $failed++ } }
 foreach ($dv in 1, 0) {
     $dev = "-DAGV_DEV_TESTS=$dv"
     $sfx = if ($dv -eq 0) { '_dev0' } else { '' }

@@ -183,7 +183,7 @@ int main(void)
     assert(param_set(P_LEGACY_QUIRKS, 4096) == -1 && param_set(P_LEGACY_QUIRKS, 4095) == 0 && param_quirk(QUIRK_SRC_A) && param_quirk(QUIRK_LOW_ACC)
            && param_quirk(0x800u));
     assert(param_set(P_LEGACY_QUIRKS, QUIRK_STEER_LEGACY | 0x0F) == 0);
-    assert(param_get(P_LEGACY_QUIRKS) == 383 && param_quirk(QUIRK_STEER_20MS) && param_quirk(QUIRK_NO_WB_GAIN));
+    assert(param_get(P_LEGACY_QUIRKS) == 319 && param_quirk(QUIRK_STEER_20MS));
     assert(param_set(P_LEGACY_QUIRKS, 5) == 0);
 
     /* 도중 전원 차단: 어느 쓰기에서 끊겨도 표시가 안 찍히고 다음 부팅에 끝난다 */

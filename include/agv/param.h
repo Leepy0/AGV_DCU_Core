@@ -46,7 +46,7 @@ enum {
     P_EMPTY_DCC,            /* 57 EDC: 공차 감속 (적재 13번) */
     P_LOAD_DETECT,          /* 58 LDS: 적재 감지 사용. 0 = 늘 적재(예전과 같다) */
 #if AGV_DEV_TESTS
-    P_DEV_TEST,             /* 59 TST: 임시 시험 고르기 0·2(param_tst_apply, param.c s_tst). 체크섬 밖 EEPROM 82(KEEP 빈 칸). 개발 이미지에만 */
+    P_DEV_TEST,             /* 59 TST: 임시 시험 고르기 0~3(param_tst_apply, param.c). 체크섬 밖 EEPROM 82(KEEP 빈 칸). 개발 이미지에만 */
 #endif
     P_COUNT
 };
@@ -60,13 +60,13 @@ enum {
 /* b4~b6: 기본이 된 조향 개선(예전 P_OPT_FLAGS b0·b1·b4)을 하나씩 끈다. 셋 다 켜면 예전 OPT 0 조향 */
 #define QUIRK_STEER_20MS    0x10u  /* b4 조향을 20 ms 마다 돌린다 (기본 10 ms, 칼만 dt 0.01, 적분 이득 1/2) */
 #define QUIRK_DAMP_SIGN_OLD 0x20u  /* b5 변화율 항을 예전 부호로 더한다 (기본은 감쇠) */
-#define QUIRK_NO_WB_GAIN    0x40u  /* b6 조향 이득을 휠 간격에 비례시키지 않는다 (기본 60 cm 기준 비례) */
+/* b6(64) 안 씀. 조향 이득을 휠 간격에 비례시키지 않던 스위치는 비례 자체를 버려(v0.57.0) 뜻이 없다. 값이 남아 있어도 무시한다 */
 #define QUIRK_STEER_STEP     0x100u /* b8 예전 조향을 되살린다: 속도 연동 불감대(안쪽 0, 선형 구간 안에서만 폭을 뺀다), 편차 문턱에서 Kp 가 한 번에 최대가 된다 */
 #define QUIRK_SRC_A         0x200u /* b9 위치 소스를 예전 'a' 로 되살린다(기본 'h' 전용). 조향 비트와 별개 */
 #define QUIRK_LOW_ACC       0x400u /* b10 저속 구간(llow 아래) 가속 한계를 예전 5 로 둔다(기본 max(5, ACC/2)) */
 /* b11(2048) 안 씀. 예전 저속(정지 바닥 350, 멈춤 판단 10틱, SPN 4 미만 6, 회전 끝·회전 감속 DCC/4, 예전 저크·정지 끝 계단)은
  * 버렸다(v0.40.0·v0.46.0). 값이 남아 있어도 무시한다. 한계 4095 는 그대로(저장값이 한계 위반이 되지 않게) */
-#define QUIRK_STEER_LEGACY  (QUIRK_STEER_20MS | QUIRK_DAMP_SIGN_OLD | QUIRK_NO_WB_GAIN | QUIRK_STEER_STEP)
+#define QUIRK_STEER_LEGACY  (QUIRK_STEER_20MS | QUIRK_DAMP_SIGN_OLD | QUIRK_STEER_STEP)
 /* b7(128) 안 씀. 일시정지(장애물·PAUSE) 감속 중 원인이 풀려도 0 까지 서고 다시 출발하던 예전 동작은 버렸다(v0.49.0).
  * 값이 남아 있어도 무시한다 */
 
@@ -148,13 +148,16 @@ int16_t  param_gain(uint16_t idx);
 /* TST(P_DEV_TEST) 임시 시험. 원래 값(K_P·K_I·FF)은 두고 RAM 에서만 덮는다.
  *  0 기본: 속도 루프 1표본 Kp 0.8 Ki 0.16 FF 0.999 고정(motor.h MOTOR_SPEED_*), 곡선 끝 부호 기준 + 빠른 접근(steer.c STEER_I_FLIP_*),
  *    속도 비례 적분, K_P·K_I 0 = 권장값 60·5(param_gain). 현장 이미지(AGV_DEV_TESTS 0)와 같다.
- *  1 비었다(받지 않는다). 2 예전(53차 TST 0, param_tst_old 1): 37차 자동 이득, 예전 끝 감쇠, 속도 비례 없음,
- *    예전 속도 루프(6표본 Kp 2.2 Ki 0.2, FF 파라미터).
- * param_tst_old 와 D.p_kp·D.p_ki 는 이 함수가 맞춘다: 부팅·TST 저장 때, 주행 시작 때(TST 0 이 아니면) */
-extern int16_t param_tst_old;
+ *  1 새 조향 + 예전 속도 루프(param_tst_speed_old 1): 6표본 Kp 2.2 Ki 0.2, FF 파라미터. 조향은 0 과 같다.
+ *  2 예전(53차 TST 0): 예전 조향(param_tst_steer_old 1: 37차 자동 이득, 예전 끝 감쇠, 속도 비례 없음) + 예전 속도 루프.
+ *  3 예전 조향 + 새 속도 루프. 1·3 은 원인 가르기용으로 기존 경로를 고르기만 한다(v0.57.0).
+ * 두 깃발과 D.p_kp·D.p_ki 는 이 함수가 맞춘다: 부팅·TST 저장 때, 주행 시작 때(TST 0 이 아니면) */
+extern int16_t param_tst_steer_old;
+extern int16_t param_tst_speed_old;
 void     param_tst_apply(void);
 #else
-#define param_tst_old 0          /* 현장 이미지는 기본 동작 고정 */
+#define param_tst_steer_old 0    /* 현장 이미지는 기본 동작 고정 */
+#define param_tst_speed_old 0
 #endif
 
 #endif /* AGV_PARAM_H */

@@ -3,9 +3,8 @@
  * 여기는 선 찾기 중 'a' 와 'h' 를 번갈아 받아 교차선 수, 가이드 부호·배율, 직진 편차도 잰다.
  * 저장 구분:
  *  바로 저장    입력 확정(t1 파라미터 칸, L, ACC·DCC 상한 AU), 연속 시험 중 22·28번·회전 보정비·'h' 부호·배율(ident.c), 점검 GA 확정(50번)
- *  채택 저장    결과 쪽 1·13·35번(점검은 28·1·13번). SET 채택, RESET 건너뛰기, SAVE 에서 쓴다
- *  기준값       t1 SAVE 때 EEPROM 110~114·119·125. t2 가 견준다
- *  안 건드림    20·21번(KP·KI) */
+ *  채택 저장    결과 쪽 1·13·35·12번과 t1 은 20·21번(K_P·K_I. 60 은 저장 0 = 권장값. 점검은 28·1·13번). SET 채택, RESET 건너뛰기, SAVE 에서 쓴다
+ *  기준값       t1 SAVE 때 EEPROM 110~114·119·125. t2 가 견준다 */
 #include <math.h>
 #include "agv/tune.h"
 #include "agv/drive.h"
@@ -29,7 +28,7 @@
 #define GUIDE_SCALE_MIN   0.5f
 #define GUIDE_SCALE_MAX   2.0f
 #define GUIDE_MARK        0x7E57
-#define PAGE_MAX          20
+#define PAGE_MAX          22
 #define ALT_TICKS         100      /* 채택 쪽: 1 s 지금 값, 1 s 새 값 */
 #define SPLASH_TICKS      100      /* 켠 뒤 칩 크기 EE128·EE256 를 보이는 시간 */
 
@@ -53,7 +52,7 @@ static const int16_t s_t1[] = {
 };
 #define T1_INPUTS ((uint16_t)(sizeof(s_t1) / sizeof(s_t1[0])))
 
-#define T1_MASK (BLD_MECH | BLD_DIA | BLD_WB | BLD_GUIDE | BLD_RPM | BLD_MIN | BLD_TOP | BLD_COAST | BLD_STOPT | BLD_STEER)
+#define T1_MASK (BLD_MECH | BLD_DIA | BLD_WB | BLD_GUIDE | BLD_GAIN | BLD_RPM | BLD_MIN | BLD_TOP | BLD_COAST | BLD_STOPT | BLD_STEER)
 static const struct { char tag[2]; uint16_t mask; } s_check[] = {
     { {'C', 'H'}, BLD_MECH | BLD_DIA | BLD_TOP | BLD_COAST | BLD_STOPT | BLD_STEER | BLD_CHECK },            /* t2.1 빠른 점검 */
     { {'W', 'H'}, BLD_MECH | BLD_DIA | BLD_WB | BLD_TOP | BLD_COAST | BLD_STOPT | BLD_STEER | BLD_CHECK },   /* t2.2 바퀴 교체 */
@@ -88,10 +87,10 @@ static const struct { char tag[2]; void (*start)(void); uint16_t run; } s_dev[] 
 /* 결과 쪽. PK_SET 채택(파라미터 화면과 같은 이름·자릿수), PK_PAR 파라미터 값(같은 이름, 채택 없음), PK_VAL 잰 값.
  * 잰 값 이름은 파라미터 화면 이름(ui.c s_view)과 겹치지 않는다 */
 enum { PK_SET = 0, PK_VAL, PK_PAR, PK_GA, PK_SAVE };
-enum { N_G = 0, N_TP, N_DM, N_FR, N_OS, N_SE, N_LR, N_OV, N_A, N_AM, N_RT, N_BK };
+enum { N_G = 0, N_TP, N_DM, N_FR, N_OS, N_SE, N_LR, N_OV, N_A, N_AM, N_RT, N_BK, N_KP };
 static const char s_name[][2] = {
     {'G', ' '}, {'T', 'P'}, {'D', 'M'}, {'F', 'R'}, {'O', 'S'}, {'S', 'E'}, {'L', 'R'}, {'O', 'V'}, {'A', ' '}, {'A', 'M'},
-    {'R', 'T'}, {'B', 'K'}
+    {'R', 'T'}, {'B', 'K'}, {'K', 'P'}
 };
 typedef struct { int16_t kind, id, v, old, flag; } page_t;   /* flag: PK_SET 채택, PK_VAL NG. PK_VAL old 1 = 이름 한 글자 + 네 자리 */
 
@@ -421,9 +420,15 @@ static void build_pages(void)
     add_set(P_DCC, b->dcc_rec);
     add_set(P_CROSS_IN_CM, b->cid_rec);
     add_set(P_ACC, b->acc_rec);
+    if ((m & BLD_GAIN) && (b->kp_rec >= 0)) {   /* 60 이면 저장값 0(= 권장값). 지금 저장값과 같으면 항목을 만들지 않는다 */
+        int16_t kp = (b->kp_rec == 60) ? 0 : b->kp_rec, ki = (b->kp_rec == 60) ? 0 : b->ki_rec;
+        if (kp != param_get(P_STEER_KP)) { add_set(P_STEER_KP, kp); }
+        if (ki != param_get(P_STEER_KI)) { add_set(P_STEER_KI, ki); }
+    }
     if (b->dia_new > 0)  { add(PK_PAR, P_WHEEL_DIA_MM, b->dia_new, 0, 0); }
     if (m & BLD_WB)      { add(PK_VAL, N_RT, (b->turn_x1000 > 0) ? b->turn_x1000 : TUNE_NO_DATA, 1, 0); }   /* R1110 = 1.110 */
     if (m & BLD_GUIDE)   { add(PK_VAL, N_G, b->guide_k100, 0, 0); }
+    if (m & BLD_GAIN)    { add(PK_VAL, N_KP, (b->kp_rec >= 0) ? b->kp_rec : TUNE_NO_DATA, 0, b->kp_ng); }   /* KP060. 후보 모두 탈락이면 NG(깜박임) */
     if (m & BLD_MIN)     { add(PK_PAR, P_SPEED_MIN, b->min_rec, 0, 0); }
     if (m & BLD_TOP)     { add_cmp(N_TP, b->top_rpm, TUNE_BASE_TOP, TUNE_NG_TOP_PCT); }
     if (m & BLD_COAST)   {

@@ -868,8 +868,8 @@ int main(void)
 #if AGV_DEV_TESTS
     /* 예전 속도 루프(TST 2)의 피드포워드 = FF 파라미터: 오차 0 이어도 지령에 비례한 토크. 기본 루프는 FF 파라미터를 쓰지 않는다 */
     setup();
-    assert(!param_tst_old && motor_speed_ff() == MOTOR_SPEED_FF);
-    param_tst_old = 1;
+    assert(!param_tst_speed_old && motor_speed_ff() == MOTOR_SPEED_FF);
+    param_tst_speed_old = 1;
     D.control = RUN_TURN;
     D.rpm_avg[0] = D.rpm_avg[1] = 1000;
     motor_speed_pi(1000);
@@ -878,7 +878,7 @@ int main(void)
     motor_speed_pi(1000);
     assert(D.tq_cmd[0] == 100 && D.tq_cmd[1] == 100);
     (void)param_set(P_SPEED_FF, 0);
-    param_tst_old = 0;
+    param_tst_speed_old = 0;
 #endif
 
     /* 속도 루프: 폐루프 수열을 참조 식과 한 비트까지 맞춘다. 줄 0 = 예전(TST 2, 53차 TST 0) 상수, 줄 1 = 기본(현장 이미지,
@@ -894,8 +894,8 @@ int main(void)
             setup();
             (void)param_set_ram(P_SPEED_FF, 250);
 #if AGV_DEV_TESTS
-            assert(!param_tst_old);                   /* 기본 */
-            param_tst_old = (int16_t)(r == 0);
+            assert(!param_tst_speed_old);                   /* 기본 */
+            param_tst_speed_old = (int16_t)(r == 0);
             assert(motor_speed_ff() == ((r == 0) ? P.speed_ff : 0.999f));
 #else
             assert(motor_speed_ff() == 0.999f);
@@ -935,7 +935,7 @@ int main(void)
             (void)param_set_ram(P_SPEED_FF, 0);
         }
 #if AGV_DEV_TESTS
-        param_tst_old = 0;
+        param_tst_speed_old = 0;
 #endif
     }
 
