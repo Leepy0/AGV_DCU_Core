@@ -1263,6 +1263,9 @@ static void run_all(void)
     assert(seq_xcond(X_FORWARD, 0) && !seq_xcond(X_BACKWARD, 0));
     D.flag_stopping = 1;                         /* v0.58.0: X_STATION_RUNNING 은 X_STATION 과 같다(정지 중 무시는 tagact_run) */
     assert(seq_xcond(X_STATION(1, 42, 42), 0) && seq_xcond(X_STATION_RUNNING(1, 42, 42), 0));
+    assert(param_set(P_LEGACY_QUIRKS, QUIRK_TAG_WHILE_STOPPING) == 0);   /* 예전 동작 비트: 정지가 걸린 뒤에는 거짓(예전) */
+    assert(seq_xcond(X_STATION(1, 42, 42), 0) && !seq_xcond(X_STATION_RUNNING(1, 42, 42), 0));
+    assert(param_set(P_LEGACY_QUIRKS, 0) == 0);
     D.flag_stopping = 0;
     assert(seq_xcond(X_STATION_RUNNING(1, 42, 42), 0));
     D.cross_out_flag = 1;

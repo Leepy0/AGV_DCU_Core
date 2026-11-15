@@ -345,9 +345,11 @@ uint16_t seq_xcond(uint16_t c, uint16_t a, uint16_t b, uint16_t tag)
     case XC_LOW_BATTERY:     ok = (uint16_t)(param_get(P_BAT_DV) < LOW_BATTERY_DV); break;
     case XC_FORWARD:         ok = (uint16_t)(D.backward == 0); break;
     case XC_BACKWARD:        ok = (uint16_t)(D.backward != 0); break;
-    case XC_STATION_RUNNING:   /* v0.58.0: XC_STATION 과 같다. 정지 중 태그 무시는 tagact_run 이 모든 태그에 한다 */
+    case XC_STATION_RUNNING:   /* v0.58.0: XC_STATION 과 같다. 정지 중 태그 무시는 tagact_run 이 모든 태그에 한다.
+                                * 예전 동작 비트(QUIRK_TAG_WHILE_STOPPING)면 예전처럼 정지가 걸린 뒤에는 거짓 */
     case XC_STATION:
-        ok = (uint16_t)((st >= (int16_t)a) && (st <= (int16_t)b));
+        ok = (uint16_t)((st >= (int16_t)a) && (st <= (int16_t)b)
+                        && ((kind == XC_STATION) || !D.flag_stopping || !param_quirk(QUIRK_TAG_WHILE_STOPPING)));
         break;
     case XC_CROSS:
         if (slot & 1u) { ok = (uint16_t)(D.cross_out_on || (!(slot & 2u) && D.cross_out_flag)); }

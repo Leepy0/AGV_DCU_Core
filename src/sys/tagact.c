@@ -356,13 +356,14 @@ static uint16_t has_second_word(uint16_t code)
                       || (kind == TA_ACS_NUM) || (kind == TA_STATE) || (kind == TA_STOP_SENSOR));
 }
 
-/* 정지 계열(서게 하거나 서는 것을 거는 동작: 정지·자동 출발·시퀀스·교차선 정지·센서 정지)과 회전 계열.
- * 정지가 진행 중에 읽은 다른 태그에서는 이 동작들을 건너뛴다(v0.58.0). 보고·출력·속도·전후진·ACT·CALL 은 그대로 실행한다 */
+/* 정지 계열(서게 하는 동작: 정지·자동 출발·교차선 정지·센서 정지)과 회전 계열.
+ * 정지가 진행 중에 읽은 다른 태그에서는 이 동작들을 건너뛴다(v0.58.0). 보고·출력·속도·전후진·ACT·CALL·시퀀스 요청은 그대로 실행한다
+ * (TA_SEQ 는 정지 + 시퀀스 요청이라 정지는 이미 걸려 있어 할 일이 없고, 요청은 남긴다: 겹친 요청은 대응표 순서로 돈다) */
 static int is_stop_or_turn(uint16_t code)
 {
     switch ((uint16_t)(TA_KIND(code) << 8)) {
     case TA_STOP: case TA_STOP_AUTOSTART: case TA_STOP_CM: case TA_STOP_SENSOR: case TA_TAPE_STOP: case TA_TAPE_STOP_GD:
-    case TA_SEQ: case TA_TURN: case TA_TURN_ALIGN: case TA_TURN_TAPE:
+    case TA_TURN: case TA_TURN_ALIGN: case TA_TURN_TAPE:
         return 1;
     default:
         return 0;
@@ -597,8 +598,8 @@ int tagact_run(uint16_t tag)
     if (r != 0) {
         uint16_t act[4];                      /* 사용자 함수가 tagact_run 을 다시 불러도 s_hit 가 덮이지 않게 복사 */
         for (i = 0; i < 4u; i++) { act[i] = r->act[i]; }
-        cls = s_busy ? 0 : stop_class(act, &carg);   /* 분류 2·3·4 정지가 규칙 안 순서와 무관하게 이긴다 */
-        if ((cls >= 3) && tape_req_allowed()) { D.tape_autostart = 0; }   /* 새 분류 3·4 요청: 이 규칙의 자동 출발만(낡은 값을 잇지 않게) */
+        cls = stop_class(act, &carg);         /* 분류 2·3·4 정지가 규칙 안 순서와 무관하게 이긴다 */
+        if ((cls >= 3) && !s_busy && tape_req_allowed()) { D.tape_autostart = 0; }   /* 새 분류 3·4 요청: 이 규칙의 자동 출발만(낡은 값을 잇지 않게) */
         for (i = 0; (i < 4u) && (act[i] != 0u); i++) {
             uint16_t second = has_second_word(act[i]);
             uint16_t kind = (uint16_t)(TA_KIND(act[i]) << 8);
@@ -613,7 +614,7 @@ int tagact_run(uint16_t tag)
             i = (uint16_t)(i + second);
         }
     }
-    if ((cls >= 3) && tape_req_allowed()) {   /* 분류 3·4: 자동 주행 중이면 늘 받는다. 찾기·서기·다른 정지 중 보류는 run.c(tape_stop) */
+    if ((cls >= 3) && !s_busy && tape_req_allowed()) {   /* 분류 3·4: 자동 주행 중이면 늘 받는다. 정지가 진행 중이면 무시. 찾기·서기·다른 정지 중 보류는 run.c(tape_stop) */
         D.tape_stop_kind = cls;
         D.tape_stop_id = (int16_t)carg;
     }

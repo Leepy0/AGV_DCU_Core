@@ -2022,10 +2022,14 @@ static void test_tag_while_stopping(void)
     n0 = (int)acs_pending();
     (void)tagact_run(200);
     assert((D.stop_pulses == len) && !D.wait_start && ((int)acs_pending() == n0 + 1));
-    /* 시퀀스 요청도 정지 계열이라 건너뛴다 */
+    /* 시퀀스 요청은 건너뛰지 않는다(정지는 이미 걸려 있어 거리는 그대로, 겹친 요청은 대응표 순서로 돈다) */
     D.obs_use = 0;
     (void)tagact_run(203);
-    assert(!seq_request_flag[SEQ_LOAD] && (D.obs_use == 1));
+    assert(seq_request_flag[SEQ_LOAD] && (D.obs_use == 1) && (D.stop_pulses == len));
+    run_seq_init();
+    /* 교차선 정지 규칙(분류 4 + 시퀀스)은 정지가 진행 중이면 정지도 시퀀스도 받지 않는다 */
+    (void)tagact_run(40);
+    assert(!seq_request_flag[SEQ_LOAD] && (D.tape_stop_kind == 0) && (D.stop_pulses == len));
     /* 대기 보고: 보고·대기 번호·자동 재전송은 하고 정지 요청(급정지로 바꾸기)은 하지 않는다 */
     guide_reply(0);
     tick();
@@ -2042,8 +2046,10 @@ static void test_tag_while_stopping(void)
     D.wait_start = 0;
     (void)tagact_run(200);
     assert((D.stop_pulses == len) && D.wait_start);
-    (void)tagact_run(203);
-    assert(seq_request_flag[SEQ_LOAD]);
+    (void)tagact_run(40);
+    assert(D.tape_stop_kind == TA_STOP_KIND_TAPE_GD);               /* 예전: 교차선 정지 요청도 받는다 */
+    D.tape_stop_kind = 0;
+    D.tape_stop_id = 0;
     (void)tagact_run(202);
     guide_reply(0);
     tick();
