@@ -6,6 +6,9 @@
  *  - 시간 인자는 전부 1/100초. 300 = 3초.
  *  - ON·OFF·IN·L 같은 짧은 이름을 쓰므로 표 파일은 legacy_compat.h 와 함께 포함하지 않는다.
  *  - 컴파일 옵션 --c99 필요 (가변 인자 매크로).
+ *  - 조건 칸(WHEN·WAIT·WAIT_TO·WAIT_STABLE(_TO)·ERROR_HOLD·OUT_FLICKER_UNTIL_IN(_TO)·MAN·TAG_IF·TAG_RANGE_IF)은 IN( … ) 말고
+ *    AND( ON·OFF·ANY·상태 낱말 … ) 도 받는다(agv/dsl_and.h). AND 의 낱말은 매크로가 아니라서 사이트가 FORWARD·ID·KEY·PARAM 같은
+ *    이름의 매크로를 정의하면 깨진다. 칸에 안 들어가는 조합은 컴파일 오류다.
  */
 #ifndef AGV_SEQ_DSL_H
 #define AGV_SEQ_DSL_H
@@ -24,6 +27,7 @@
 #define DSL_NARG_(a, b, c, d, e, f, g, h, i, j, k, l, m, n_, o, p, n, ...) n
 #define DSL_NARG(...)    DSL_NARG_(__VA_ARGS__, 16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0)
 #define DSL_UNPAREN(...) __VA_ARGS__
+#include "agv/dsl_and.h"
 
 /* ID 가 0~31 또는 IO_NONE 이 아니면 컴파일 오류 (앰프 신호를 조건에 쓰는 경우 등) */
 #define DSL_ID_OK(x)     (0 * sizeof(char[(((x) < 32) || ((x) == IO_NONE)) ? 1 : -1]))
@@ -35,6 +39,7 @@
  * C 코드의 io_in( ) 에는 쓰지 않는다(논리 ID 를 쓴다) */
 #define DSL_ACTIVE_HIGH  0x100
 #define IN_ACTIVE_HIGH(x)  ((x) + DSL_ACTIVE_HIGH + DSL_ID_OK(x))
+#define IN_INVERTED(x)     IN_ACTIVE_HIGH(x)    /* 같은 뜻의 이름(v0.58.0) */
 #define DSL_HI(x)        (((x) & DSL_ACTIVE_HIGH) != 0)
 #define DSL_RAW(x)       ((x) & ~DSL_ACTIVE_HIGH)
 #define DSL_LBIT(x)      (DSL_HI(x) ? 0UL : DSL_BIT(DSL_RAW(x)))   /* 논리 1 활성(보통) */
@@ -63,7 +68,10 @@
 /* 조건은 64비트 상수 하나: 하위 32비트 must_on, 상위 32비트 must_off */
 typedef unsigned long long dsl_cond_t;
 #define DSL_COND_ON(c)   ((uint32_t)(c))
-#define DSL_COND_OFF(c)  ((uint32_t)((c) >> 32))
+/* 조건 칸 값은 64비트 식(ON·OFF·IN·NO_IN)이어야 한다. ANY2_ON 은 32비트(uint32_t)로 만들어 조건 칸에 들어오면(IN( ANY2_ON( … ) ) 등)
+ * 크기가 달라 컴파일 오류다. 정수 상수 같은 다른 크기의 값이 조건 칸에 들어와도 오류다 */
+#define DSL_COND64(c)    (0 * sizeof(char[(sizeof(c) == sizeof(dsl_cond_t)) ? 1 : -1]))
+#define DSL_COND_OFF(c)  ((uint32_t)((((dsl_cond_t)(c)) + DSL_COND64(c)) >> 32))
 /* 양쪽 절반에 같이 선 비트 = "그중 하나라도 ON". ANY_ON 만 그렇게 쓴다(아래 IN 이 겹침을 막는다) */
 
 #define DSL_STEP(kind, target, a0, a1, to, on, off, out)                                     \
@@ -72,8 +80,10 @@ typedef unsigned long long dsl_cond_t;
 #define DSL_STEP_C(kind, target, a0, a1, to, c, out)                                         \
     DSL_STEP(kind, target, a0, a1, to, DSL_COND_ON(c), DSL_COND_OFF(c), out)
 /* 확장 조건 스텝. x 는 X_* 세 값(코드, a, b)으로 펼쳐져 xk, xa, xb 로 들어온다. a, b 는 arg0, arg1 */
+/* 시퀀스에서는 태그 번호가 늘 0 이라 X_TAG_NUM(TAG_IS)은 뜻이 없다: 컴파일 오류 */
+#define DSL_NOTAGNUM(xk) (0 * sizeof(char[((((xk) & 0x7F) != XC_TAG_NUM)) ? 1 : -1]))
 #define DSL_STEP_X(kind, target, to, xk, xa, xb, c, any2)                                     \
-    { (uint16_t)(kind), (uint16_t)(target), (uint16_t)(xa), (uint16_t)(xb), (uint16_t)(to), (uint16_t)(xk), \
+    { (uint16_t)(kind), (uint16_t)(target), (uint16_t)(xa), (uint16_t)(xb), (uint16_t)(to), (uint16_t)((xk) + DSL_NOTAGNUM(xk)), \
       DSL_COND_ON(c), DSL_COND_OFF(c), (uint32_t)(any2) },
 
 /* ---- 조건 ----
@@ -88,19 +98,27 @@ typedef unsigned long long dsl_cond_t;
 /* 나열한 신호 중 하나라도 켜짐. 같은 마스크를 양쪽 절반에 넣는다. 예: IN( ANY_ON(S1, S2), OFF(S5) ) */
 #define ANY_ON(...)      (((dsl_cond_t)DSL_MASK(__VA_ARGS__)) | (((dsl_cond_t)DSL_MASK(__VA_ARGS__)) << 32))
 /* IN 인자마다 앞 인자들의 합 p 와 견준다: p 의 한 절반과 이 인자의 다른 절반이 겹치면 오류(ANY_ON 은 두 절반이라 어느 겹침이든 오류) */
-#define DSL_XK(p, c)     ((dsl_cond_t)(p) & (((dsl_cond_t)(c) >> 32) | ((dsl_cond_t)(c) << 32)))
-#define DSL_IN1(a)       (a)
-#define DSL_IN2(a, b)    (((a) | (b)) + DSL_NOX(DSL_XK(a, b)))
-#define DSL_IN3(a, b, c)             (((a) | (b) | (c)) + DSL_NOX(DSL_XK(a, b) | DSL_XK((a) | (b), c)))
-#define DSL_IN4(a, b, c, d)          (((a) | (b) | (c) | (d)) + DSL_NOX(DSL_XK(a, b) | DSL_XK((a) | (b), c) | DSL_XK((a) | (b) | (c), d)))
-#define DSL_IN5(a, b, c, d, e)       (((a) | (b) | (c) | (d) | (e)) + DSL_NOX(DSL_XK(a, b) | DSL_XK((a) | (b), c) \
+#define DSL_XK(p, c)     (((dsl_cond_t)(p) & (((dsl_cond_t)(c) >> 32) | ((dsl_cond_t)(c) << 32))) + DSL_COND64(c))   /* 겸해서 c 가 64비트 식인지 본다 */
+#define DSL_IN1(a)       ((a) + DSL_COND64(a))
+#define DSL_IN2(a, b)    (((a) | (b)) + DSL_COND64(a) + DSL_NOX(DSL_XK(a, b)))
+#define DSL_IN3(a, b, c)             (((a) | (b) | (c)) + DSL_COND64(a) + DSL_NOX(DSL_XK(a, b) | DSL_XK((a) | (b), c)))
+#define DSL_IN4(a, b, c, d)          (((a) | (b) | (c) | (d)) + DSL_COND64(a) + DSL_NOX(DSL_XK(a, b) | DSL_XK((a) | (b), c) | DSL_XK((a) | (b) | (c), d)))
+#define DSL_IN5(a, b, c, d, e)       (((a) | (b) | (c) | (d) | (e)) + DSL_COND64(a) + DSL_NOX(DSL_XK(a, b) | DSL_XK((a) | (b), c) \
                                       | DSL_XK((a) | (b) | (c), d) | DSL_XK((a) | (b) | (c) | (d), e)))
-#define DSL_IN6(a, b, c, d, e, f)    (((a) | (b) | (c) | (d) | (e) | (f)) + DSL_NOX(DSL_XK(a, b) | DSL_XK((a) | (b), c) \
+#define DSL_IN6(a, b, c, d, e, f)    (((a) | (b) | (c) | (d) | (e) | (f)) + DSL_COND64(a) + DSL_NOX(DSL_XK(a, b) | DSL_XK((a) | (b), c) \
                                       | DSL_XK((a) | (b) | (c), d) | DSL_XK((a) | (b) | (c) | (d), e) | DSL_XK((a) | (b) | (c) | (d) | (e), f)))
+/* 7·8 개는 AND 가 항목 7 개까지 받으며 안에서 쓴다 */
+#define DSL_IN7(a1, a2, a3, a4, a5, a6, a7) (((a1) | (a2) | (a3) | (a4) | (a5) | (a6) | (a7)) + DSL_COND64(a1) + DSL_NOX(DSL_XK(a1, a2) | DSL_XK((a1) | (a2), a3) \
+                                      | DSL_XK((a1) | (a2) | (a3), a4) | DSL_XK((a1) | (a2) | (a3) | (a4), a5) \
+                                      | DSL_XK((a1) | (a2) | (a3) | (a4) | (a5), a6) | DSL_XK((a1) | (a2) | (a3) | (a4) | (a5) | (a6), a7)))
+#define DSL_IN8(a1, a2, a3, a4, a5, a6, a7, a8) (((a1) | (a2) | (a3) | (a4) | (a5) | (a6) | (a7) | (a8)) + DSL_COND64(a1) + DSL_NOX(DSL_XK(a1, a2) | DSL_XK((a1) | (a2), a3) \
+                                      | DSL_XK((a1) | (a2) | (a3), a4) | DSL_XK((a1) | (a2) | (a3) | (a4), a5) \
+                                      | DSL_XK((a1) | (a2) | (a3) | (a4) | (a5), a6) | DSL_XK((a1) | (a2) | (a3) | (a4) | (a5) | (a6), a7) \
+                                      | DSL_XK((a1) | (a2) | (a3) | (a4) | (a5) | (a6) | (a7), a8)))
 #define IN(...)          DSL_CAT(DSL_IN, DSL_NARG(__VA_ARGS__))(__VA_ARGS__)
 #define NO_IN            ((dsl_cond_t)0)
-/* 두 번째 "하나라도 ON" 묶음: (a||b) && (c||d). WHEN_ANY2·WAIT_ANY2 의 둘째 인자 */
-#define ANY2_ON(...)     DSL_MASK(__VA_ARGS__)
+/* 두 번째 "하나라도 ON" 묶음: (a||b) && (c||d). WHEN_ANY2·WAIT_ANY2 의 둘째 인자. 32비트 값이라 조건 칸에 들어가면 DSL_COND64 가 컴파일 오류로 막는다 */
+#define ANY2_ON(...)     ((uint32_t)DSL_MASK(__VA_ARGS__))
 
 /* ---- 확장 조건 (입력이 아닌 조건). X_* 는 세 값 "코드, a, b" 로 펼쳐진다 ----
  * 시퀀스 WHEN_IF·WAIT_IF 와 태그 규칙 IF_X 가 같이 쓴다 */
@@ -150,7 +168,7 @@ typedef unsigned long long dsl_cond_t;
 #define DSL_PRM_TFB   P_TURN_FORBACK, 0
 #define DSL_PRM_TFB_1  P_TURN_FORBACK, 1
 #define DSL_PRM_TFB_10 P_TURN_FORBACK, 10
-#define DSL_PRM_SL    P_STOP_LEN_MM, 0
+#define DSL_PRM_SL    P_STOP_LEN_CM, 0
 #define DSL_PRM_K_P   P_STEER_KP, 0
 #define DSL_PRM_K_I   P_STEER_KI, 0
 #define DSL_PRM_WS    P_WHEEL_DIA_MM, 0
@@ -161,7 +179,7 @@ typedef unsigned long long dsl_cond_t;
 #define DSL_PRM_LO    P_LAMP_EXT_USE, 0
 #define DSL_PRM_SPN   P_SPEED_MIN, 0
 #define DSL_PRM_CML   P_COMM_LINK, 0
-#define DSL_PRM_FL    P_STOP_LEN_FWD_MM, 0
+#define DSL_PRM_FL    P_STOP_LEN_FWD_CM, 0
 #define DSL_PRM_ASS   P_ACS_STANDBY, 0
 #define DSL_PRM_BGO   P_BRANCH_OFFSET, 0
 #define DSL_PRM_CD    P_CROSS_IN_CM, 0
@@ -227,7 +245,10 @@ typedef unsigned long long dsl_cond_t;
 
 /* SELECT_BEGIN·SELECT_END 는 읽기 위한 표시이며 스텝을 만들지 않는다. 가지 수 제한 없음 */
 #define SELECT_BEGIN
-#define WHEN(c, label)               DSL_STEP_C(SK_WHEN, label, 0, 0, 0, c, 0)
+/* 조건 칸 c: IN( … ) 꼴 그대로(괄호로 시작) 또는 AND( … ) 기록(DSL_SQ_). AND 의 상태 낱말은 확장 조건 칸(xk, xa, xb)으로 간다 */
+#define WHEN(c, label)               DSL_CAT(DSL_WHEN_, DSL_IS_PAREN(c))(c, label)
+#define DSL_WHEN_1(c, label)         DSL_STEP_C(SK_WHEN, label, 0, 0, 0, c, 0)
+#define DSL_WHEN_0(c, label)         DSL_APPLY(DSL_STEP_X, SK_WHEN, label, 0, DSL_SQ_##c)
 #define WHEN_STATE(id, val, label)   DSL_STEP(SK_WHEN_STATE, label, id, val, 0, 0, 0, 0)
 #define WHEN_IF(x, label)            DSL_STEP_X(SK_WHEN, label, 0, x, NO_IN, 0)
 #define WHEN_IF_IN(x, c, label)      DSL_STEP_X(SK_WHEN, label, 0, x, c, 0)
@@ -236,7 +257,9 @@ typedef unsigned long long dsl_cond_t;
 #define WHEN_ID(lo, hi, label)       WHEN_IF(X_ID(lo, hi), label)
 #define OTHERWISE(label)             DSL_STEP(SK_WHEN, label, 0, 0, 0, 0, 0, 0)
 #define SELECT_END
-#define SELECT_END_TO(t, label)      DSL_STEP(SK_WHEN_TIMEOUT, label, 0, 0, t, 0, 0, 0)
+/* 제한 t 는 1~0x7FFF 틱(0 은 한 틱 뒤 바로 라벨로 가 고르기가 아니다. UNMATCHED 는 이 스텝에서 받지 않는다) */
+#define DSL_SELTO_OK(t)              (0 * sizeof(char[(((t) >= 1) && ((t) < 0x8000L)) ? 1 : -1]))
+#define SELECT_END_TO(t, label)      DSL_STEP(SK_WHEN_TIMEOUT, label, 0, 0, (t) + DSL_SELTO_OK(t), 0, 0, 0)
 
 /* ---- 출력 ---- */
 #define OUT_ON(...)      DSL_STEP(SK_OUT, SEQ_NO_LABEL, 0, 0, 0, DSL_MASK(__VA_ARGS__), 0, 0)
@@ -244,14 +267,25 @@ typedef unsigned long long dsl_cond_t;
 /* 켜는 시간, 끄는 시간, 횟수 */
 #define OUT_PULSE(o, on_t, off_t, n) \
     DSL_STEP(SK_OUT_PULSE, SEQ_NO_LABEL, on_t, off_t, n, 0, 0, DSL_BIT(o))
-/* 접점 통신: 출력을 period 간격으로 점멸하다가 조건이 참이면 끄고 다음 스텝 */
+/* 접점 통신: 출력을 period 간격으로 점멸하다가 조건이 참이면 끄고 다음 스텝.
+ * 조건 칸은 IN( … ) 또는 AND( … ) 다. AND 에 상태 낱말이 있으면 점멸 스텝의 칸 배치가 달라진다(seq.c flk_cells: 주기·출력이 out 칸
+ * 하나로 들어간다). 그래서 AND 의 둘째 ANY 와 둘째 상태 낱말은 컴파일 오류다 */
+#define DSL_FLKB_OK(p)       (0 * sizeof(char[(((p) >= 0) && ((p) <= 0xFFFF)) ? 1 : -1]))
+#define DSL_FLKB(o, p)       ((((uint32_t)(p) + DSL_FLKB_OK(p)) << 8) | (uint32_t)(((o) == IO_NONE) ? 0 : (((o) & 31) + 1)))
+#define DSL_FLK(o, p, t, label, c)    DSL_CAT(DSL_FLK_, DSL_IS_PAREN(c))(o, p, t, label, c)
+#define DSL_FLK_1(o, p, t, label, c)  DSL_STEP_C(SK_OUT_FLICKER, label, p, 0, t, c, DSL_BIT(o))
+#define DSL_FLK_0(o, p, t, label, c)  DSL_APPLY(DSL_FLKX, o, p, t, label, DSL_FK_##c)
+#define DSL_FLKX(o, p, t, label, k1, a1, b1, c, chk) \
+    DSL_STEP_X(SK_OUT_FLICKER, label, t, k1, ((k1) ? (a1) : (p)), ((k1) ? (b1) : 0), c, \
+               ((k1) ? DSL_FLKB(o, p) : DSL_BIT(o)) + (chk))
 #define OUT_FLICKER_UNTIL_IN(o, period, c) \
-    DSL_STEP_C(SK_OUT_FLICKER, SEQ_NO_LABEL, period, 0, 0, c, DSL_BIT(o))
+    DSL_FLK(o, period, 0, SEQ_NO_LABEL, c)
 #define OUT_FLICKER_UNTIL_IN_TO(o, period, c, t, label) \
-    DSL_STEP_C(SK_OUT_FLICKER, label, period, 0, t, c, DSL_BIT(o))
-/* 출력 켬, 응답 켜짐 대기, 출력 끔, 응답 꺼짐 대기 */
+    DSL_FLK(o, period, (t) + DSL_TO_OK(t), label, c)
+/* 출력 켬, 응답 켜짐 대기, 응답이 켜지면 바로 다음 스텝(v0.58.0). 출력은 끄지 않는다(OUT_OFF 등으로 표가 끈다).
+ * 제한 t 를 넘으면 라벨로 가고 출력은 그대로다. 응답이 이미 켜져 있으면 바로 끝난다 */
 #define HANDSHAKE(o, in_ack, t, label) \
-    DSL_STEP(SK_HANDSHAKE, label, 0, 0, t, DSL_BIT(in_ack), 0, DSL_BIT(o))
+    DSL_STEP(SK_HANDSHAKE, label, 0, 0, (t) + DSL_TO_OK(t), DSL_BIT(in_ack), 0, DSL_BIT(o))
 
 /* ---- 벨트: 사이트 io_map.h 의 BELTn_CW, BELTn_CCW 출력 마스크를 쓴다 ----
  * 방향별로 출력 개수가 달라도 된다. 없는 방향은 마스크 0 이며, 켜면 컴파일 오류 */
@@ -287,10 +321,31 @@ typedef unsigned long long dsl_cond_t;
 #define WAIT_BELTS(...)  DSL_STEP(SK_WAIT_OUT, SEQ_NO_LABEL, 0, 0, 0, 0, DSL_BPASTE(DSL_WB, DSL_NARG(__VA_ARGS__))(__VA_ARGS__), 0)
 
 /* ---- 대기 ---- */
-#define WAIT(c)                     DSL_STEP_C(SK_WAIT, SEQ_NO_LABEL, 0, 0, 0, c, 0)
-#define WAIT_TO(c, t, label)        DSL_STEP_C(SK_WAIT, label, 0, 0, t, c, 0)
-#define WAIT_STABLE(c, s)           DSL_STEP_C(SK_WAIT_STABLE, SEQ_NO_LABEL, s, 0, 0, c, 0)
-#define WAIT_STABLE_TO(c, s, t, label)  DSL_STEP_C(SK_WAIT_STABLE, label, s, 0, t, c, 0)
+/* 조건 칸 c 는 WHEN 과 같다: IN( … ) 또는 AND( … ) */
+#define WAIT(c)                     DSL_CAT(DSL_WAIT_, DSL_IS_PAREN(c))(c)
+#define DSL_WAIT_1(c)               DSL_STEP_C(SK_WAIT, SEQ_NO_LABEL, 0, 0, 0, c, 0)
+#define DSL_WAIT_0(c)               DSL_APPLY(DSL_STEP_X, SK_WAIT, SEQ_NO_LABEL, 0, DSL_SQ_##c)
+/* WAIT_TO( 조건, 제한, 라벨 ): 제한은 틱 숫자(0 = 제한 없음, 0x8000 이상은 컴파일 오류, UNMATCHED 도 오류) 또는
+ * PARAM_TIME( FND 또는 P_…, TICK | DSEC | SEC | MIN )(옛 WAIT_TO_PARAM 과 같은 스텝). 파라미터 제한에는 입력 조건만 쓴다
+ * (상태 낱말·둘째 ANY 는 스텝 칸이 겹쳐 컴파일 오류). UNMATCHED 는 WAIT_STABLE_TO 에서만 받는다 */
+#define DSL_TO_OK(t)                (0 * sizeof(char[(((t) >= 0) && ((t) < 0x8000L)) ? 1 : -1]))
+#define PARAM_TIME(p, unit)         DSL_PTM(DSL_PTSEL(p), DSL_UNIT_##unit)
+#define DSL_PTSEL(p)                DSL_APPLY(DSL_PTSEL_X, DSL_NARG(DSL_PRM_##p), p, DSL_PRM_##p)
+#define DSL_PTSEL_X(n, p, ...)      DSL_CAT(DSL_PTSEL_, n)(p, __VA_ARGS__)
+#define DSL_PTSEL_1(p, x)           (p)
+#define DSL_PTSEL_2(p, a, b)        ((a) + (0 * sizeof(char[((b) == 0) ? 1 : -1])))
+#define DSL_PTMX_DSL_PTM(p, u)      p, u
+#define DSL_WTOW_DSL_PTM(p, u)      ~, DSL_WTOPARAM
+#define WAIT_TO(c, t, label)        DSL_CAT(DSL_WTOP_, DSL_IS_PAREN(t))(c, t, label)
+#define DSL_WTOP_1(c, t, label)     DSL_WTOC(c, t, label)
+#define DSL_WTOP_0(c, t, label)     DSL_ARG2(DSL_WTOW_##t, DSL_WTOC)(c, t, label)
+#define DSL_WTOC(c, t, label)       DSL_CAT(DSL_WAITTO_, DSL_IS_PAREN(c))(c, (t) + DSL_TO_OK(t), label)
+#define DSL_WAITTO_1(c, t, label)   DSL_STEP_C(SK_WAIT, label, 0, 0, t, c, 0)
+#define DSL_WAITTO_0(c, t, label)   DSL_APPLY(DSL_STEP_X, SK_WAIT, label, t, DSL_SQ_##c)
+#define DSL_WTOPARAM(c, t, label)   DSL_APPLY(DSL_WTOPARAM_, c, label, DSL_PTMX_##t)
+#define DSL_WTOPARAM_(c, label, p, u)  DSL_STEP_C(SK_WAIT_PARAM, label, (p) + DSL_PARAM_OK(p), u, 0, DSL_CN(c), 0)
+#define WAIT_STABLE(c, s)           DSL_STEP_C(SK_WAIT_STABLE, SEQ_NO_LABEL, s, 0, 0, DSL_CN(c), 0)
+#define WAIT_STABLE_TO(c, s, t, label)  DSL_STEP_C(SK_WAIT_STABLE, label, s, 0, t, DSL_CN(c), 0)
 #define WAIT_OUT(c)                 DSL_STEP_C(SK_WAIT_OUT, SEQ_NO_LABEL, 0, 0, 0, c, 0)
 #define DELAY(t)                    DSL_STEP(SK_DELAY, SEQ_NO_LABEL, t, 0, 0, 0, 0, 0)
 #define WAIT_IF(x)                  DSL_STEP_X(SK_WAIT, SEQ_NO_LABEL, 0, x, NO_IN, 0)
@@ -308,6 +363,10 @@ typedef unsigned long long dsl_cond_t;
 #define DELAY_PARAM(p, unit)        DSL_STEP(SK_DELAY_PARAM, SEQ_NO_LABEL, (p) + DSL_PARAM_OK(p), DSL_UNIT_##unit, 0, 0, 0, 0)
 #define WAIT_TO_PARAM(c, p, unit, label) \
     DSL_STEP_C(SK_WAIT_PARAM, label, (p) + DSL_PARAM_OK(p), DSL_UNIT_##unit, 0, c, 0)
+#define WAIT_PARAM_TO(c, p, unit, label)  WAIT_TO_PARAM(c, p, unit, label)   /* WAIT_TO( c, PARAM_TIME( p, unit ), label ) 의 옛 이름 쪽 별칭 */
+
+/* 켜기·끄기를 한 스텝에 (BELT_ON 과 같은 SK_OUT). 사이트가 같은 토큰열로 정의해 쓰던 것을 코어로 옮겼다(v0.58.0: 재정의 경고 없음) */
+#define OUT_SET( on, off )  DSL_STEP( SK_OUT, SEQ_NO_LABEL, 0, 0, 0, (on), (off), 0 )
 
 /* ---- ACS ---- */
 /* 보고 종류: 레거시 DA_ACS_<이름> 과 같은 이름. 값은 프레임 Info 글자 */
@@ -323,9 +382,12 @@ typedef unsigned long long dsl_cond_t;
  * 상수식이라 정적 표에 쓴다(ACS( 종류, STATION(k) ) 의 출처 자리에서는 이름으로 붙는다).
  * 스테이션 큐 식: STATION(k) ± n, MOD( STATION(k), m ), n + MOD( STATION(k), m ) 를 C 연산 그대로 쓴다(IF_TAG_NUM, 태그 ACS_SEND).
  * 값 = 표식 2^29 + k << 16 + m << 21 + n. n 은 -2048~2047(넘으면 비트 12~15 가 서서 컴파일 오류), m 1~255.
- * 시퀀스 ACS_SEND 는 STATION(k) 만 받는다(± n, MOD 는 컴파일 오류) */
+ * 시퀀스 ACS·ACS_SEND 는 STATION(k) 와 STATION(0) + 1 만 받는다(다른 ± n, MOD 는 컴파일 오류) */
 #define DSL_STATION_MARK       0x20000000L
-#define STATION(k)             (DSL_STATION_MARK + ((long)(k) << 16) + (0 * sizeof(char[(((k) >= 0) && ((k) < ACS_STATION_MAX)) ? 1 : -1])))
+/* STATION( k ) = 큐 값(위). STATION( k, lo, hi ) = AND 안의 상태 항목(스테이션[k] 가 lo 이상 hi 이하, 예전 X_STATION) */
+#define STATION(...)           DSL_CAT(DSL_STATION_, DSL_NARG(__VA_ARGS__))(__VA_ARGS__)
+#define DSL_STATION_1(k)       (DSL_STATION_MARK + ((long)(k) << 16) + (0 * sizeof(char[(((k) >= 0) && ((k) < ACS_STATION_MAX)) ? 1 : -1])))
+#define DSL_STATION_3(k, lo, hi)  DSL_STI(k, lo, hi)
 #define DSL_ST_T(v)            ((long)(v) - DSL_STATION_MARK + 0x800L)
 #define DSL_IS_STATION(v)      ((DSL_ST_T(v) >= 0L) && (DSL_ST_T(v) < (1L << 29)) && ((DSL_ST_T(v) & 0xF000L) == 0L))
 #define DSL_ST_K(v)            ((int)((DSL_ST_T(v) >> 16) & 0x1FL))
@@ -336,10 +398,29 @@ typedef unsigned long long dsl_cond_t;
 #define MOD(x, m)              ((x) + ((long)(m) << 21) + (0 * sizeof(char[(DSL_ST_PLAIN(x) && ((m) >= 1) && ((m) <= 255)) ? 1 : -1])))
 #define DSL_SEND_OK(n)         (0 * sizeof(char[((((n) >= 0) && ((n) < 0x10000L)) || DSL_ST_PLAIN(n)) ? 1 : -1]))
 #define DSL_SEND_SRC(n)        (DSL_IS_STATION(n) ? ((DSL_ST_K(n) == 0) ? SEQ_NUM_STATION0 : SEQ_NUM_STATION(DSL_ST_K(n))) : SEQ_NUM_CONST)
-#define ACS(info, src)         DSL_STEP(SK_ACS, SEQ_NO_LABEL, DSL_INFO_##info, SEQ_NUM_##src, 0, 0, 0, 0)
-/* 번호 상수 0~65535 또는 STATION(k). STATION(k) 는 ACS( 종류, STATION(k) ) 와 같은 스텝(k 0 은 STATION0) */
-#define ACS_SEND(info, num)    DSL_STEP(SK_ACS, SEQ_NO_LABEL, DSL_INFO_##info, DSL_SEND_SRC(num) + DSL_SEND_OK(num), \
-                                        DSL_IS_STATION(num) ? 0 : (num), 0, 0, 0)
+/* ACS( 종류, 번호 ): 번호 칸은 숫자 0~65535, STATION(k), STATION(0) + 1, AGV_ID. 펌웨어에 없는 조합(STATION(k) ± n 의 k 가 0 이 아닌 것,
+ * STATION(0) ± 1 말고 다른 n, MOD, 70000 같은 범위 밖 숫자)은 컴파일 오류다.
+ * 옛 출처 낱말 STATION0·STATION0_PLUS1·AGV_ID 는 같은 스텝의 별칭이다. CONST 는 늘 0 을 보고하는 낱말이라 컴파일 오류다(숫자 0 을 쓴다).
+ * 낱말은 x 를 펼치기 전에 붙여서 고른다(DSL_SACSW_##x). 그래서 사이트가 STATION0·AGV_ID 같은 이름의 매크로(#define AGV_ID 25)를 정의해도
+ * 낱말이 숫자로 바뀌지 않는다(예전 SEQ_NUM_##src 와 같다). 대신 번호 칸 첫 글자가 "(" 인 식(ACS( 종류, (70 + 7) ))은 붙일 수 없어 못 받는다:
+ * 괄호 없이 70 + 7, 또는 ACS_SEND( 종류, (70 + 7) ) 로 쓴다 */
+#define ACS(info, x)           DSL_ARG2(DSL_SACSW_##x, DSL_ACSN)(info, x)
+#define DSL_SACSW_CONST          ~, DSL_ACSV_CONST
+#define DSL_SACSW_STATION0       ~, DSL_ACSV_STATION0
+#define DSL_SACSW_STATION0_PLUS1 ~, DSL_ACSV_STATION0_PLUS1
+#define DSL_SACSW_AGV_ID         ~, DSL_ACSV_AGV_ID
+#define DSL_ACSV_CONST(info, x)          DSL_STEP(SK_ACS, SEQ_NO_LABEL, DSL_INFO_##info, ACS_CONST_ALWAYS_REPORTS_ZERO_USE_NUMBER_0, 0, 0, 0, 0)
+#define DSL_ACSV_STATION0(info, x)       DSL_STEP(SK_ACS, SEQ_NO_LABEL, DSL_INFO_##info, SEQ_NUM_STATION0, 0, 0, 0, 0)
+#define DSL_ACSV_STATION0_PLUS1(info, x) DSL_STEP(SK_ACS, SEQ_NO_LABEL, DSL_INFO_##info, SEQ_NUM_STATION0_PLUS1, 0, 0, 0, 0)
+#define DSL_ACSV_AGV_ID(info, x)         DSL_STEP(SK_ACS, SEQ_NO_LABEL, DSL_INFO_##info, SEQ_NUM_AGV_ID, 0, 0, 0, 0)
+/* STATION(0) + 1 만 STATION0_PLUS1, STATION(k) 는 큐[k]. k 가 0 이 아니면 n 은 0 이어야 한다 */
+#define DSL_NSRC(n)    (DSL_IS_STATION(n) ? ((DSL_ST_K(n) == 0) ? ((DSL_ST_N(n) == 0L) ? SEQ_NUM_STATION0 : SEQ_NUM_STATION0_PLUS1) \
+                                                                  : SEQ_NUM_STATION(DSL_ST_K(n))) : SEQ_NUM_CONST)
+#define DSL_NOK(n)     (0 * sizeof(char[((((n) >= 0) && ((n) < 0x10000L)) \
+                           || (DSL_IS_STATION(n) && (DSL_ST_M(n) == 0) && ((DSL_ST_N(n) == 0L) || ((DSL_ST_K(n) == 0) && (DSL_ST_N(n) == 1L))))) ? 1 : -1]))
+#define DSL_ACSN(info, x)      DSL_STEP(SK_ACS, SEQ_NO_LABEL, DSL_INFO_##info, DSL_NSRC(x) + DSL_NOK(x), DSL_IS_STATION(x) ? 0 : (x), 0, 0, 0)
+/* 옛 이름: ACS( 종류, 번호 ) 의 별칭(숫자·STATION(k) 만 쓰던 꼴이 그대로 된다) */
+#define ACS_SEND(info, num)    DSL_ACSN(info, num)
 #define ACS_WAIT_ACK(t, label) DSL_STEP(SK_ACS_WAIT_ACK, label, 0, 0, t, 0, 0, 0)
 #define ACS_STATION(idx, val, cnt)  DSL_STEP(SK_ACS_STATION, SEQ_NO_LABEL, idx, val, cnt, 0, 0, 0)
 #define STATION_RESET          DSL_STEP(SK_STATION_RESET, SEQ_NO_LABEL, 0, 0, 0, 0, 0, 0)
@@ -347,9 +428,16 @@ typedef unsigned long long dsl_cond_t;
 /* ---- 주행 관련 (ACT 에서 금지, seq_bind 가 부팅 때 거부) ----
  * 방식 옵션은 인자 맨 뒤에 적는다. 안 적으면 일반 동작이다. 정해 두지 않은 옵션·조합은 컴파일 오류다.
  * 태그 표(tag_dsl.h)와 뜻이 같은 동작은 같은 이름이다(AGV_SPEED·AGV_SPEED_MMIN·AGV_FORBACK·AGV_TURN) */
-#define AGV_SPEED(level)       DSL_STEP(SK_SPEED, SEQ_NO_LABEL, SEQ_SPD_##level, 0, 0, 0, 0, 0)
-/* m/min 4~255. 0~3 은 단계 번호와 겹쳐 받지 않는다(단계는 AGV_SPEED) */
+/* AGV_SPEED( HIGH | LOW | LLOW | MIN | m/min ): 단계 낱말 또는 m/min 4~255(숫자·식). 0~3 은 단계 번호와 겹쳐 받지 않는다.
+ * 낱말은 붙여서 고르므로 사이트가 HIGH 같은 이름의 매크로를 정의하면 깨진다. AGV_SPEED_MMIN 은 숫자만 받는 옛 이름(별칭) */
 #define DSL_MMIN_OK(v)         (0 * sizeof(char[(((v) >= 4) && ((v) <= 255)) ? 1 : -1]))
+#define DSL_SPW_HIGH           ~, SEQ_SPD_HIGH
+#define DSL_SPW_LOW            ~, SEQ_SPD_LOW
+#define DSL_SPW_LLOW           ~, SEQ_SPD_LLOW
+#define DSL_SPW_MIN            ~, SEQ_SPD_MIN
+/* 낱말은 x 를 펼치기 전에 붙여서 고른다(사이트의 #define HIGH 1 이 낱말을 덮지 않는다). 첫 글자가 "(" 인 식 AGV_SPEED( (20 + 10) ) 은 붙일 수 없어
+ * 못 받는다(gcc 붙이기 오류): AGV_SPEED( 20 + 10 ) 이나 AGV_SPEED_MMIN( (20 + 10) ) 으로 쓴다 */
+#define AGV_SPEED(x)           DSL_STEP(SK_SPEED, SEQ_NO_LABEL, DSL_ARG2(DSL_SPW_##x, ((x) + DSL_MMIN_OK(x))), 0, 0, 0, 0, 0)
 #define AGV_SPEED_MMIN(v)      DSL_STEP(SK_SPEED, SEQ_NO_LABEL, (v) + DSL_MMIN_OK(v), 0, 0, 0, 0, 0)
 #define AGV_FORBACK(dir)       DSL_STEP(SK_FORBACK, SEQ_NO_LABEL, DIR_##dir, 0, 0, 0, 0, 0)
 /* AGV_TURN( 방향, 각도, 회전 뒤 방향, 자동 출발[, 속도[, 옵션…]] ). 옵션을 쓰려면 속도 칸(0 = 자동)을 적는다.
@@ -395,7 +483,7 @@ typedef unsigned long long dsl_cond_t;
 #define DSL_MOVE_TAPE(cm)      DSL_STEP(SK_MOVE_TAPE, SEQ_NO_LABEL, DSL_CM2MM(cm), 0, 0, 0, 0, 0)
 #define DSL_MOVE_TAPE_GD(cm)   DSL_STEP(SK_MOVE_TAPE, SEQ_NO_LABEL, DSL_CM2MM(cm), 4, 0, 0, 0, 0)
 #define AGV_MOVE(...)          DSL_CAT(DSL_MOVE, DSL_NARG(__VA_ARGS__))(__VA_ARGS__)
-#define ERROR_HOLD(code, c, label)  DSL_STEP_C(SK_ERROR_HOLD, label, code, 0, 0, c, 0)
+#define ERROR_HOLD(code, c, label)  DSL_STEP_C(SK_ERROR_HOLD, label, code, 0, 0, DSL_CN(c), 0)   /* 조건은 입력만(상태·둘째 ANY 는 오류) */
 #define END_RESTART            DSL_STEP(SK_END_RESTART, SEQ_NO_LABEL, 0, 0, 0, 0, 0, 0)
 
 /* ---- 공통 ---- */
@@ -416,7 +504,8 @@ typedef unsigned long long dsl_cond_t;
  * 프로파일: 사이트 프로파일 상수 그대로(1~63, 0·범위 밖은 컴파일 오류). 지금 프로파일(seq_profile())과 같은 줄만 맞는다(v0.54.0,
  * 예전 ID( 처음, 끝 ) 호기 범위). 여러 프로파일이 같은 동작이면 사슬을 프로파일마다 통째로 한 벌씩 적는다.
  * 모드: IDLE 자동 화면에서 대기(run_is_idle(), 준비 아님, STOP 아님), JOG 조그 화면이고 STOP 아님.
- * 조건: IN( ON(…), OFF(…) ), KEY( UP )(지금 눌린 키, 소비하지 않음), NO_IN(늘 참).
+ * 조건: IN( ON(…), OFF(…) ), KEY( UP )(지금 눌린 키, 소비하지 않음), NO_IN(늘 참), AND( ON·OFF·ANY… [, KEY( k )] )(키는 하나까지,
+ *   다른 상태 낱말·둘째 ANY 는 컴파일 오류. 줄은 키와 입력 조건이 둘 다 맞아야 한다).
  * 출력(여럿이면 모두): ON( 출력… ) 켬, OFF( 출력… ) 끔, BELT( n, CW | CCW | OFF ). 한 출력을 켜면서 끄면 컴파일 오류.
  *   BELT 는 사이트 BELTn_CW·BELTn_CCW 마스크로 그 방향 마스크를 켜고 그 벨트의 나머지 출력을 끈다(BELT_ON 스텝과 같은 값).
  * MAN_FB_SW( 프로파일, 입력 ): 수동 방향 전환 스위치 입력(맞는 줄이 없으면 IN_IF_5). MAN_OBS_B( 프로파일, 입력 ): 매 틱
@@ -453,19 +542,29 @@ typedef unsigned long long dsl_cond_t;
 #define TAG_TABLE_END          };
 #define ANY_PROFILE            0
 /* 위에서 아래로 첫 번째로 맞는 규칙 하나만 실행. 액션은 최대 4칸 */
-#define TAG(tag, profile, ...)  { (uint16_t)(tag), (uint16_t)(profile), TAG_COND_NONE, 0, 0, { __VA_ARGS__ } },
-/* cond 는 IF_* 하나. 확장 조건 둘과 입력 조건 하나를 AND 한다 */
-#define TAG_IF(tag, profile, cond, ...)  DSL_TAG_(tag, profile, cond, (__VA_ARGS__))
+/* 동작 칸은 값이 4 개까지다(AGV_TURN·ACS_SEND 는 2 칸, 값 개수를 센다). 넘으면 컴파일 오류(검사값은 태그 번호 칸에 더한다) */
+#define DSL_ACTS_OK(acts)      (0 * sizeof(char[(DSL_NARG(DSL_UNPAREN acts) <= 4) ? 1 : -1]))
+#define TAG(tag, profile, ...)  { (uint16_t)((tag) + DSL_ACTS_OK((__VA_ARGS__))), (uint16_t)(profile), TAG_COND_NONE, 0, 0, { __VA_ARGS__ } },
+/* cond: AND( … ) 하나(기록 1값), 또는 IF_* 하나(확장 조건 둘과 입력 조건 하나를 AND 한다, 8값). 값 개수로 가린다.
+ * 맨 X_…(3값)는 받지 않는다: 둘째 X_ 가 동작 칸으로 들어가 실행되는 조용한 오류가 된다(상태 조건 하나는 AND( BACKWARD ) 나 IF_X( X_… )).
+ * 다른 개수는 DSL_TAGC? 가 없어 컴파일 오류 */
+#define TAG_IF(tag, profile, cond, ...)  DSL_TAGIF_(tag, profile, (__VA_ARGS__), cond)
+#define DSL_TAGIF_(t, p, acts, ...)      DSL_BPASTE(DSL_TAGC, DSL_NARG(__VA_ARGS__))(t, p, acts, __VA_ARGS__)
+#define DSL_TAGC1(t, p, acts, rec)       DSL_APPLY(DSL_TAG_, t, p, DSL_TG_##rec, acts)
+#define DSL_TAGC8(t, p, acts, ...)       DSL_TAG_(t, p, __VA_ARGS__, acts)
 #define DSL_TAG_(t, p, k1, a1, b1, k2, a2, b2, on, off, acts)                                         \
-    { (uint16_t)(t), (uint16_t)(p), (uint16_t)(k1), (uint16_t)(a1), (uint16_t)(b1), { DSL_UNPAREN acts }, \
+    { (uint16_t)((t) + DSL_ACTS_OK(acts)), (uint16_t)(p), (uint16_t)(k1), (uint16_t)(a1), (uint16_t)(b1), { DSL_UNPAREN acts }, \
       (uint16_t)(k2), (uint16_t)(a2), (uint16_t)(b2), (uint32_t)(on), (uint32_t)(off) },
 /* 범위 규칙: 한 규칙이 태그 lo~hi 를 받는다(lo <= hi <= 1023). 고르는 순서는 다른 규칙과 같다(표에 적힌 순서, 먼저 맞는 하나) */
 #define DSL_TRANGE_OK(lo, hi)  (0 * sizeof(char[(((lo) >= 0) && ((lo) <= (hi)) && ((hi) <= 1023)) ? 1 : -1]))
 #define TAG_RANGE(lo, hi, profile, ...)  \
-    { (uint16_t)(lo), (uint16_t)(profile), TAG_COND_NONE, 0, 0, { __VA_ARGS__ }, 0, 0, 0, 0UL, 0UL, (uint16_t)((hi) + DSL_TRANGE_OK(lo, hi)) },
-#define TAG_RANGE_IF(lo, hi, profile, cond, ...)  DSL_TAGR_(lo, hi, profile, cond, (__VA_ARGS__))
+    { (uint16_t)((lo) + DSL_ACTS_OK((__VA_ARGS__))), (uint16_t)(profile), TAG_COND_NONE, 0, 0, { __VA_ARGS__ }, 0, 0, 0, 0UL, 0UL, (uint16_t)((hi) + DSL_TRANGE_OK(lo, hi)) },
+#define TAG_RANGE_IF(lo, hi, profile, cond, ...)  DSL_TAGRIF_(lo, hi, profile, (__VA_ARGS__), cond)
+#define DSL_TAGRIF_(lo, hi, p, acts, ...)    DSL_BPASTE(DSL_TAGRC, DSL_NARG(__VA_ARGS__))(lo, hi, p, acts, __VA_ARGS__)
+#define DSL_TAGRC1(lo, hi, p, acts, rec)     DSL_APPLY(DSL_TAGR_, lo, hi, p, DSL_TG_##rec, acts)
+#define DSL_TAGRC8(lo, hi, p, acts, ...)     DSL_TAGR_(lo, hi, p, __VA_ARGS__, acts)
 #define DSL_TAGR_(lo, hi, p, k1, a1, b1, k2, a2, b2, on, off, acts)                                    \
-    { (uint16_t)(lo), (uint16_t)(p), (uint16_t)(k1), (uint16_t)(a1), (uint16_t)(b1), { DSL_UNPAREN acts }, \
+    { (uint16_t)((lo) + DSL_ACTS_OK(acts)), (uint16_t)(p), (uint16_t)(k1), (uint16_t)(a1), (uint16_t)(b1), { DSL_UNPAREN acts }, \
       (uint16_t)(k2), (uint16_t)(a2), (uint16_t)(b2), (uint32_t)(on), (uint32_t)(off), (uint16_t)((hi) + DSL_TRANGE_OK(lo, hi)) },
 
 /* 압축 표 (생성기용, tagact.h tag_packed_t). 번호 0 칸(없음)은 BEGIN 이 넣는다.
