@@ -84,6 +84,11 @@ SEQ_BEGIN( s_sb_restart )
     DELAY( 300 )
     END_RESTART
 SEQ_END
+/* 시퀀스 스텝이 거는 출발 대기: 회전 모드 2 의 AGV_TURN 자동 출발 */
+SEQ_BEGIN( s_sb_turn )
+    DSL_STURN3( TURN_CW, 90, 0, 1 )
+    END_STOP
+SEQ_END
 #include "agv/tag_dsl.h"   /* 여기부터 태그 표 */
 
 static const seq_def_t s_seqs[] = {
@@ -91,7 +96,8 @@ static const seq_def_t s_seqs[] = {
     { 0, SEQ_UNLOAD, s_turn15_steps, sizeof(s_turn15_steps) / sizeof(s_turn15_steps[0]) },
     { 0, SEQ_BOX_LOAD, s_turn0_steps, sizeof(s_turn0_steps) / sizeof(s_turn0_steps[0]) },
     { 0, SEQ_BOX_UNLOAD, s_sb_stop_steps, sizeof(s_sb_stop_steps) / sizeof(s_sb_stop_steps[0]) },
-    { 0, SEQ_UNLOAD_FINISH, s_sb_restart_steps, sizeof(s_sb_restart_steps) / sizeof(s_sb_restart_steps[0]) }
+    { 0, SEQ_UNLOAD_FINISH, s_sb_restart_steps, sizeof(s_sb_restart_steps) / sizeof(s_sb_restart_steps[0]) },
+    { 0, SEQ_UNLOAD_PART, s_sb_turn_steps, sizeof(s_sb_turn_steps) / sizeof(s_sb_turn_steps[0]) }
 };
 static const seq_def_t s_acts[] = { { 0, ACT_HOLD, a_hold_steps, sizeof(a_hold_steps) / sizeof(a_hold_steps[0]) } };
 static int stop_len_call(seq_ctx_t *c) { (void)c; tagact_stop_length(); return 1; }
@@ -2162,7 +2168,7 @@ static void seq_standby_run(uint16_t id, int restart)
     sprintf(f, "N1B%02d101000000000", AGV_ID);                 /* 스테이션 명령 */
     send_frame(f, 0);
     run_scan(2);
-    assert(acs_station_get(0) == 101);                      /* 값은 큐에 받는다 */
+    assert(acs_station_get(0) == 101);                      /* 값은 큐에 받는다. 출발은 시퀀스가 끝난 뒤 */
     assert(seq_is_active() && !D.wait_start && !D.run_restart && !D.flag_ready && !D.flag_run);
     sprintf(f, "C1B%02dC00%c", AGV_ID, '1');                /* 출발 명령 */
     send_frame(f, 0);
@@ -2175,21 +2181,17 @@ static void seq_standby_run(uint16_t id, int restart)
     assert(seq_is_active() && !D.wait_start && !D.run_restart && !D.flag_ready && !D.flag_run);
     for (i = 0; (i < 400) && seq_is_active(); i++) { guide_reply(0); tick(); }   /* 시퀀스가 제 길로 끝난다 */
     assert(!seq_is_active() && (i > 250));
-    if (restart) {                                           /* END_RESTART: 시퀀스 규칙대로 출발한다 */
-        for (i = 0; (i < 3000) && !D.flag_ready && !D.flag_run; i++) { guide_reply(0); tick(); }
-        assert(D.flag_ready || D.flag_run);
-        assert(run_standby_num() == 0);                      /* 출발하면 대기 번호가 정리된다 */
-    }
-    else {                                                   /* END_STOP: 보류한 명령은 남지 않아 서 있다 */
-        ticks(500);
-        assert(!D.flag_ready && !D.flag_run && !D.run_restart && !D.wait_start);
-        assert(io_out_mask() & (1UL << O_X));
-    }
+    /* 시퀀스 중에 받은 ACS 출발(C 1·N·교통 출발)은 기억해 두었다가 끝이 END_STOP 이든 END_RESTART 든 시퀀스가 끝난 뒤 출발한다(master 와 같은 결과) */
+    (void)restart;
+    for (i = 0; (i < 3000) && !D.flag_ready && !D.flag_run; i++) { guide_reply(0); tick(); }
+    assert(D.flag_ready || D.flag_run);
+    assert(run_standby_num() == 0);                          /* 출발하면 대기 번호가 정리된다 */
 }
 
 static void test_seq_standby_hold(void)
 {
     char f[40];
+    int i;
 
     seq_standby_run(SEQ_BOX_UNLOAD, 0);
     seq_standby_run(SEQ_UNLOAD_FINISH, 1);
@@ -2239,6 +2241,59 @@ static void test_seq_standby_hold(void)
     seq_abort_all();
     run_standby_clear(0);
     acs_station_reset();
+
+    /* 시퀀스 중 C 1 → 시퀀스 끝 → 출발. 시퀀스가 도는 동안은 움직이지 않는다 */
+    boot();
+    seq_request(SEQ_BOX_UNLOAD);
+    ticks(3);
+    sprintf(f, "C1B%02dC00%c", AGV_ID, '1');
+    send_frame(f, 0);
+    run_scan(2);
+    assert(seq_is_active() && !D.flag_ready && !D.flag_run && !D.run_restart);
+    ticks(100);
+    assert(seq_is_active() && !D.flag_ready && !D.flag_run);
+    for (i = 0; (i < 400) && seq_is_active(); i++) { guide_reply(0); tick(); }
+    assert(!seq_is_active());
+    for (i = 0; (i < 3000) && !D.flag_ready && !D.flag_run; i++) { guide_reply(0); tick(); }
+    assert(D.flag_ready || D.flag_run);
+
+    /* 시퀀스 중 C 1 → C 3(정지) → 기억해 둔 출발은 지워져 시퀀스가 끝나도 출발하지 않는다 */
+    boot();
+    seq_request(SEQ_BOX_UNLOAD);
+    ticks(3);
+    sprintf(f, "C1B%02dC00%c", AGV_ID, '1');
+    send_frame(f, 0);
+    run_scan(2);
+    sprintf(f, "C1B%02dC00%c", AGV_ID, '3');
+    send_frame(f, 0);
+    run_scan(2);
+    assert(!seq_is_active());
+    for (i = 0; i < 1500; i++) { guide_reply(0); tick(); }
+    assert(!D.flag_ready && !D.flag_run && !D.run_restart && !D.wait_start);
+    /* STOP 스위치도 지운다 */
+    boot();
+    seq_request(SEQ_BOX_UNLOAD);
+    ticks(3);
+    sprintf(f, "C1B%02dC00%c", AGV_ID, '1');
+    send_frame(f, 0);
+    run_scan(2);
+    raw_a(RAW_STOP, 0);
+    ticks(2);
+    raw_a(0, RAW_STOP);
+    ticks(2);
+    assert(!seq_is_active());
+    for (i = 0; i < 1500; i++) { guide_reply(0); tick(); }
+    assert(!D.flag_ready && !D.flag_run && !D.run_restart && !D.wait_start);
+
+    /* 시퀀스 스텝이 건 출발 대기(회전 모드 2 의 AGV_TURN 자동 출발)는 지우지 않는다 */
+    boot();
+    (void)param_set(P_TURN_FORBACK, 20);
+    seq_request(SEQ_UNLOAD_PART);
+    ticks(3);
+    assert(seq_is_active() && D.wait_start && (D.turn_pulses > 0));
+    ticks(5);
+    assert(seq_is_active() && D.wait_start);
+    seq_abort_all();
     boot();
     printf("  seq standby hold ok\n");
 }

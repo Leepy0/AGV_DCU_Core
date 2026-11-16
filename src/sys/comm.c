@@ -302,16 +302,16 @@ static void on_event(const rx_item_t *it)
 
 /* ---- 'W' ---- */
 
-/* 시퀀스가 도는 동안(STANDBY 중이든 아니든)은 출발 명령·스테이션 명령이 출발(출발 대기·재출발 예약)을 걸지 않는다. 걸면 시퀀스 스캔이 멈추고
- * 시퀀스가 끝난 뒤 저절로 출발한다. 스테이션 값은 큐에 받는다. 정지·리셋(취소) 명령과 비상 정지는 그대로 먹는다(v0.58.0) */
+/* 시퀀스가 도는 동안(STANDBY 중이든 아니든)은 ACS 출발 명령·스테이션 명령이 차를 움직이지 않는다. run_acs_restart·run_acs_wait 가 기억해 두었다가
+ * 시퀀스가 끝난 뒤 건다(master 와 같은 결과). 정지·리셋(취소) 명령과 비상 정지는 그대로 먹고 기억해 둔 출발을 지운다(run_seq_init, v0.58.0) */
 static void traffic_start(int16_t cross_id)
 {
     if (acs_cross_num(ACS_CROSS_IN) > 0) {
         acs_cross_release(ACS_CROSS_IN);   /* 교통 허가는 그대로 푼다 */
-        if ((cross_id == 0) && (D.flag_stopping || !D.flag_run) && !run_seq_hold()) { run_wait_start(); }
+        if ((cross_id == 0) && (D.flag_stopping || !D.flag_run)) { run_acs_wait(); }
     }
     else if ((cross_id == 0) && (D.vin_out == 0) && !seq_is_active() && (run_standby_num() == 0)) {
-        run_wait_start();
+        run_acs_wait();
     }
 }
 
@@ -367,7 +367,7 @@ static void on_next(const uint16_t *b)
     }
     acs_call_ack(b[3]);
     acs_report_slot(ACS_SLOT_NEXT, acs_station_get(0));
-    if (!run_seq_hold()) { run_wait_start(); }
+    run_acs_wait();
     run_standby_auto_off();
     acs_slot_clear(ACS_SLOT_STANDBY);
 }
@@ -381,8 +381,7 @@ static void on_command(const uint16_t *b)
     if (b[6] != 'C') { return; }
     switch (b[9]) {
     case '1':
-        if (run_seq_hold()) { break; }   /* 시퀀스가 도는 동안은 출발하지 않는다(받은 것으로 치지 않아 시퀀스 뒤에 남기지도 않는다) */
-        run_restart_now();
+        run_acs_restart();
         run_report_start();
         break;
     case '2':
@@ -396,8 +395,8 @@ static void on_command(const uint16_t *b)
     case '4':
         if (P.forback_mode > 0) {
             tagact_forback(DIR_TOGGLE);
-            if ((P.forback_mode == 2) && !run_seq_hold()) {
-                run_wait_start();
+            if (P.forback_mode == 2) {
+                run_acs_wait();
                 run_report_start();
             }
         }

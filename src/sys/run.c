@@ -58,6 +58,7 @@ static struct {
     int16_t start_prev, stop_prev, fb_prev;
     int16_t stop_hold;        /* Cnt_Stop_SW_1sec_Flag */
     int16_t bumper_run, bumper_cnt;
+    int16_t start_hold;       /* 시퀀스 중에 받은 ACS 출발(b0 run_restart, b1 wait_start) */
     int16_t standby, standby_auto, standby_cnt, standby_seq;   /* standby_seq: 시퀀스가 낸 대기 보고. 출발하면 정리한다 */
     int16_t status_cnt;
     int16_t bat_low_cnt;
@@ -90,6 +91,7 @@ void run_reset(void)
     s_run.stop_hold = 0;
     s_run.bumper_run = s_run.bumper_cnt = 0;
     s_run.standby = s_run.standby_auto = s_run.standby_cnt = s_run.standby_seq = 0;
+    s_run.start_hold = 0;
     s_run.status_cnt = 0;
     s_run.bat_low_cnt = 0;
     s_run.bat_filtered = BAT_ADC_INIT;
@@ -127,7 +129,10 @@ void     run_remote_pause(uint16_t on)  { s_remote_pause = on; }
 void     run_restart_now(void)      { D.run_restart = 1; }
 void     run_dir_change(int16_t c)  { s_run.dir_change = c; }
 int16_t  run_standby_num(void)      { return s_run.standby; }
-int16_t  run_seq_hold(void)         { return (int16_t)(seq_is_active() != 0); }
+/* 시퀀스가 도는 동안 받은 ACS 출발은 기억해 둔다(b0 재출발, b1 출발 대기). 시퀀스가 끝나면 input_filter 가 건다. 시퀀스를 끝내는 정지·취소·STOP·비상 정지·오류
+ * (run_seq_init)는 지운다. 시퀀스 스텝이 건 출발 대기(AGV_TURN 자동 출발, AGV_WAIT_START)는 여기 오지 않고 그대로 선다 */
+void     run_acs_restart(void)      { if (seq_is_active()) { s_run.start_hold |= 1; } else { D.run_restart = 1; } }
+void     run_acs_wait(void)         { if (seq_is_active()) { s_run.start_hold |= 2; } else { run_wait_start(); } }
 void     run_standby_auto_off(void) { s_run.standby = 0; s_run.standby_auto = 0; }
 
 /* 0 이면 P_AUTO_START_SEC */
@@ -249,6 +254,7 @@ static void seq_init_keep_tape(void)
 
 void run_seq_init(void)
 {
+    s_run.start_hold = 0;               /* 정지·취소·STOP·비상 정지·오류: 기억해 둔 ACS 출발도 지운다 */
     seq_init_keep_tape();
     run_tape_req_clear();
     tagact_fs_clear();                  /* 센서 정지 요청도: ACS 작업 취소 뒤 다시 출발해 감지 자리에서 서지 않게 */
@@ -597,9 +603,14 @@ static void input_filter(void)
     s_run.start_prev = start_on;
     s_run.stop_prev = stop_on;
 
-    /* 시퀀스가 도는 동안은 STANDBY 중이라도 차가 출발하지 않는다. START 스위치·출발 대기·재출발 예약이 어디서 왔든 여기서 걸러
-     * start_run 으로 가지 못하게 한다(시퀀스 스텝 자신의 출발 AGV_MOVE 는 아래 auto_run 에서 따로 부르고, END_RESTART 는 시퀀스가 끝난 뒤다) */
-    if (seq_is_active()) { start_edge = 0; D.wait_start = 0; D.run_restart = 0; }
+    /* 시퀀스가 도는 동안은 STANDBY 중이라도 START 스위치로 출발하지 않는다(눌러도 잊는다). ACS 출발(C 1·N·C 4)은 comm.c 가 run_acs_* 로 기억해 두었다가
+     * 시퀀스가 끝난 뒤 여기서 건다. 시퀀스 스텝이 건 출발 대기·재출발은 그대로 둔다(시퀀스 스텝 자신의 출발 AGV_MOVE 는 auto_run 에서 따로 부른다) */
+    if (seq_is_active()) { start_edge = 0; }
+    else if (s_run.start_hold) {
+        if (s_run.start_hold & 1) { D.run_restart = 1; }
+        if (s_run.start_hold & 2) { run_wait_start(); }
+        s_run.start_hold = 0;
+    }
 
     if (s_remote_pause) {
         if (io_in(IN_REMOTE_START)) { D.pause_stop = 0; }
