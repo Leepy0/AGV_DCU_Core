@@ -127,6 +127,7 @@ void     run_remote_pause(uint16_t on)  { s_remote_pause = on; }
 void     run_restart_now(void)      { D.run_restart = 1; }
 void     run_dir_change(int16_t c)  { s_run.dir_change = c; }
 int16_t  run_standby_num(void)      { return s_run.standby; }
+int16_t  run_seq_hold(void)         { return (int16_t)(seq_is_active() != 0); }
 void     run_standby_auto_off(void) { s_run.standby = 0; s_run.standby_auto = 0; }
 
 /* 0 이면 P_AUTO_START_SEC */
@@ -134,6 +135,7 @@ int16_t run_wait_left(void) { return D.wait_start ? s_run.wait_sec : -1; }
 
 void run_request_restart(uint16_t sec)
 {
+    if (seq_is_active()) { return; }   /* 시퀀스가 도는 동안은 재출발 예약을 받지 않는다(시퀀스가 직접 낸 END_RESTART 는 시퀀스가 끝난 뒤 부른다) */
     D.wait_start = 1;
     s_run.wait_sec = (int16_t)sec;
     s_run.wait_ticks = 0;
@@ -594,6 +596,10 @@ static void input_filter(void)
 
     s_run.start_prev = start_on;
     s_run.stop_prev = stop_on;
+
+    /* 시퀀스가 도는 동안은 STANDBY 중이라도 차가 출발하지 않는다. START 스위치·출발 대기·재출발 예약이 어디서 왔든 여기서 걸러
+     * start_run 으로 가지 못하게 한다(시퀀스 스텝 자신의 출발 AGV_MOVE 는 아래 auto_run 에서 따로 부르고, END_RESTART 는 시퀀스가 끝난 뒤다) */
+    if (seq_is_active()) { start_edge = 0; D.wait_start = 0; D.run_restart = 0; }
 
     if (s_remote_pause) {
         if (io_in(IN_REMOTE_START)) { D.pause_stop = 0; }

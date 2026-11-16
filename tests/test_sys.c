@@ -72,12 +72,26 @@ SEQ_BEGIN( s_turn0 )
     DSL_STURN3( TURN_CW, 90, 0, 0 )
     END_STOP
 SEQ_END
+/* 대기 보고를 낸 채 3 초 도는 시퀀스: 끝은 END_STOP, END_RESTART 두 가지 */
+SEQ_BEGIN( s_sb_stop )
+    ACS( STANDBY, 7 )
+    DELAY( 300 )
+    OUT_ON( O_X )
+    END_STOP
+SEQ_END
+SEQ_BEGIN( s_sb_restart )
+    ACS( STANDBY, 7 )
+    DELAY( 300 )
+    END_RESTART
+SEQ_END
 #include "agv/tag_dsl.h"   /* 여기부터 태그 표 */
 
 static const seq_def_t s_seqs[] = {
     { 0, SEQ_LOAD, s_load_steps, sizeof(s_load_steps) / sizeof(s_load_steps[0]) },
     { 0, SEQ_UNLOAD, s_turn15_steps, sizeof(s_turn15_steps) / sizeof(s_turn15_steps[0]) },
-    { 0, SEQ_BOX_LOAD, s_turn0_steps, sizeof(s_turn0_steps) / sizeof(s_turn0_steps[0]) }
+    { 0, SEQ_BOX_LOAD, s_turn0_steps, sizeof(s_turn0_steps) / sizeof(s_turn0_steps[0]) },
+    { 0, SEQ_BOX_UNLOAD, s_sb_stop_steps, sizeof(s_sb_stop_steps) / sizeof(s_sb_stop_steps[0]) },
+    { 0, SEQ_UNLOAD_FINISH, s_sb_restart_steps, sizeof(s_sb_restart_steps) / sizeof(s_sb_restart_steps[0]) }
 };
 static const seq_def_t s_acts[] = { { 0, ACT_HOLD, a_hold_steps, sizeof(a_hold_steps) / sizeof(a_hold_steps[0]) } };
 static int stop_len_call(seq_ctx_t *c) { (void)c; tagact_stop_length(); return 1; }
@@ -1715,7 +1729,6 @@ static void tag_turn_start(uint16_t tag)
 {
     D.vin_out = 50;
     D.flag_run = 0;
-    D.flag_stopping = 0;                 /* 앞 회전·정지가 남긴 정지 표시(실기는 서고 한 틱 뒤 모터 리셋이 지운다). 정지 중 태그는 무시되므로 비운다 */
     (void)tagact_run(tag);
     assert(D.turn_pulses > 0);
     stop_reset();
@@ -1943,8 +1956,7 @@ static void test_tag_stop_class(void)
     tag_stop_rule(42);
     assert(!D.flag_stopping && (D.tape_stop_kind == TA_STOP_KIND_TAPE) && (D.tape_stop_id == SEQ_LOAD));
 
-    /* 정지가 진행 중이면(v0.58.0) 다른 태그의 교차선 정지 요청은 정지 계열이라 무시한다. 예전 동작 비트(QUIRK_TAG_WHILE_STOPPING)를 켜면
-     * AGV_STOP 처럼 받는다(정지 거리는 그대로. 보류는 run.c) */
+    /* 진행 중인 정지가 있어도 교차선 정지 요청은 AGV_STOP 처럼 받는다(정지 거리는 그대로. 보류는 run.c) */
     boot();
     drive_up();
     run_scan(20);
@@ -1954,11 +1966,7 @@ static void test_tag_stop_class(void)
     {
         int16_t len = D.stop_pulses;
         (void)tagact_run(41);
-        assert((D.tape_stop_kind == 0) && (D.tape_stop_id == 0) && (D.stop_pulses == len));
-        assert(param_set(P_LEGACY_QUIRKS, QUIRK_TAG_WHILE_STOPPING) == 0);
-        (void)tagact_run(41);
         assert((D.tape_stop_kind == TA_STOP_KIND_TAPE_GD) && (D.tape_stop_id == SEQ_LOAD) && (D.stop_pulses == len));
-        assert(param_set(P_LEGACY_QUIRKS, 0) == 0);
     }
     D.tape_stop_kind = 0;
     D.tape_stop_id = 0;
@@ -2003,8 +2011,8 @@ static void test_tag_stop_class(void)
     printf("  tag stop class ok\n");
 }
 
-/* v0.58.0: 정지(감속·정지 진행 중, D.flag_stopping)가 진행 중에 읽은 다른 태그의 정지·회전 계열은 모든 태그에서 건너뛴다.
- * 출력·보고(OBS_ON, ACS_SEND)는 그대로 하고, 대기 보고는 보고·재전송만 하고 정지는 걸지 않는다. 예전 동작 비트로 되살린다 */
+/* v0.58.0: 정지(감속·정지 진행 중, D.flag_stopping)가 진행 중에 읽은 다른 태그의 **단순 정지**(AGV_STOP·AGV_STOP( cm )·AGV_AUTOSTART·대기 보고의 정지)만
+ * 건너뛴다. 회전·교차선 정지 요청·센서 정지·시퀀스 요청·보고·출력은 master 처럼 받는다. 예전 동작 비트(LG b11)를 켜면 단순 정지도 master 처럼 실행한다 */
 static void test_tag_while_stopping(void)
 {
     int len, n0;
@@ -2022,14 +2030,17 @@ static void test_tag_while_stopping(void)
     n0 = (int)acs_pending();
     (void)tagact_run(200);
     assert((D.stop_pulses == len) && !D.wait_start && ((int)acs_pending() == n0 + 1));
-    /* 시퀀스 요청은 건너뛰지 않는다(정지는 이미 걸려 있어 거리는 그대로, 겹친 요청은 대응표 순서로 돈다) */
+    /* 시퀀스 요청·교차선 정지 요청은 받는다(정지는 이미 걸려 있어 거리는 그대로, 겹친 요청은 대응표 순서로 돈다) */
     D.obs_use = 0;
     (void)tagact_run(203);
     assert(seq_request_flag[SEQ_LOAD] && (D.obs_use == 1) && (D.stop_pulses == len));
     run_seq_init();
-    /* 교차선 정지 규칙(분류 4 + 시퀀스)은 정지가 진행 중이면 정지도 시퀀스도 받지 않는다 */
-    (void)tagact_run(40);
-    assert(!seq_request_flag[SEQ_LOAD] && (D.tape_stop_kind == 0) && (D.stop_pulses == len));
+    (void)tagact_run(40);                         /* SEQ_START( LOAD ), STANDBY, AGV_STOP( TAPE_GD ): 교차선 정지 요청 */
+    assert((D.tape_stop_kind == TA_STOP_KIND_TAPE_GD) && (D.stop_pulses == len));
+    D.tape_stop_kind = 0;
+    D.tape_stop_id = 0;
+    run_standby_clear(0);
+    run_seq_init();
     /* 대기 보고: 보고·대기 번호·자동 재전송은 하고 정지 요청(급정지로 바꾸기)은 하지 않는다 */
     guide_reply(0);
     tick();
@@ -2041,37 +2052,28 @@ static void test_tag_while_stopping(void)
     assert(stop_is_position(stop_reason()) && D.flag_stopping);
     run_standby_clear(0);
 
-    /* 예전 동작 비트: 모두 실행한다(정지 거리는 이미 걸려 그대로, 자동 출발·시퀀스·대기 정지는 걸린다) */
+    /* 예전 동작 비트: 단순 정지도 master 처럼 모두 실행한다(자동 출발이 걸리고 대기 보고의 급정지가 위치 정지를 덮는다) */
     assert(param_set(P_LEGACY_QUIRKS, QUIRK_TAG_WHILE_STOPPING) == 0);
     D.wait_start = 0;
     (void)tagact_run(200);
     assert((D.stop_pulses == len) && D.wait_start);
-    (void)tagact_run(40);
-    assert(D.tape_stop_kind == TA_STOP_KIND_TAPE_GD);               /* 예전: 교차선 정지 요청도 받는다 */
-    D.tape_stop_kind = 0;
-    D.tape_stop_id = 0;
     (void)tagact_run(202);
     guide_reply(0);
     tick();
-    assert(!stop_is_position(stop_reason()));    /* 대기 보고의 급정지가 위치 정지를 덮는다(예전) */
+    assert(!stop_is_position(stop_reason()));
     run_standby_clear(0);
     run_seq_init();
     assert(param_set(P_LEGACY_QUIRKS, 0) == 0);
 
-    /* 거리 없는 정지(명령 정지) 감속 중 회전 태그: 건너뛴다. 예전 동작 비트면 회전이 걸린다 */
+    /* 거리 없는 정지(명령 정지) 감속 중 회전 태그: master 처럼 회전이 걸린다 */
     boot();
     (void)param_set(P_TURN_FORBACK, 10);
     drive_up();
     run_scan(20);
     run_command_stop();
     assert(D.flag_stopping && (D.stop_pulses == 0));
-    D.obs_use = 0;
-    (void)tagact_run(201);
-    assert((D.turn_pulses == 0) && (D.obs_use == 1));
-    assert(param_set(P_LEGACY_QUIRKS, QUIRK_TAG_WHILE_STOPPING) == 0);
     (void)tagact_run(201);
     assert(D.turn_pulses > 0);
-    assert(param_set(P_LEGACY_QUIRKS, 0) == 0);
 
     /* 서지 않는 중이면 이전처럼 모두 실행한다 */
     boot();
@@ -2145,6 +2147,102 @@ static void test_seq_standby_cleanup(void)
     printf("  seq standby cleanup ok\n");
 }
 
+/* v0.58.0 시퀀스 안 ACS( STANDBY, n ): 보고·대기 번호·재전송만 하고 정지도 시퀀스 종료도 없다. 대기 번호가 있는 채 시퀀스가 도는 동안은
+ * ACS 의 스테이션 명령(N)·출발 명령(C 1, W 1, C 4)이 출발하지도(출발 대기·재출발 예약) 시퀀스를 멈추게 하지도 않는다. 스테이션 값은 큐에 받는다.
+ * 정지(C 3)·취소(W 2)·비상 정지는 그대로 먹는다. 시퀀스가 끝난 뒤는 시퀀스 규칙대로(END_STOP 은 서 있고 END_RESTART 는 출발) */
+static void seq_standby_run(uint16_t id, int restart)
+{
+    char f[40];
+    int i;
+
+    boot();
+    seq_request(id);
+    ticks(3);
+    assert(seq_is_active() && (run_standby_num() == 7) && !D.flag_stopping && !D.flag_run);   /* 보고·대기 번호, 정지 없음, 시퀀스는 계속 */
+    sprintf(f, "N1B%02d101000000000", AGV_ID);                 /* 스테이션 명령 */
+    send_frame(f, 0);
+    run_scan(2);
+    assert(acs_station_get(0) == 101);                      /* 값은 큐에 받는다 */
+    assert(seq_is_active() && !D.wait_start && !D.run_restart && !D.flag_ready && !D.flag_run);
+    sprintf(f, "C1B%02dC00%c", AGV_ID, '1');                /* 출발 명령 */
+    send_frame(f, 0);
+    run_scan(2);
+    assert(seq_is_active() && !D.wait_start && !D.run_restart && !D.flag_ready && !D.flag_run);
+    sprintf(f, "W1B%02dC00000000001", AGV_ID);              /* 교통 출발 */
+    f[8] = '1';
+    send_frame(f, 0);
+    run_scan(2);
+    assert(seq_is_active() && !D.wait_start && !D.run_restart && !D.flag_ready && !D.flag_run);
+    for (i = 0; (i < 400) && seq_is_active(); i++) { guide_reply(0); tick(); }   /* 시퀀스가 제 길로 끝난다 */
+    assert(!seq_is_active() && (i > 250));
+    if (restart) {                                           /* END_RESTART: 시퀀스 규칙대로 출발한다 */
+        for (i = 0; (i < 3000) && !D.flag_ready && !D.flag_run; i++) { guide_reply(0); tick(); }
+        assert(D.flag_ready || D.flag_run);
+        assert(run_standby_num() == 0);                      /* 출발하면 대기 번호가 정리된다 */
+    }
+    else {                                                   /* END_STOP: 보류한 명령은 남지 않아 서 있다 */
+        ticks(500);
+        assert(!D.flag_ready && !D.flag_run && !D.run_restart && !D.wait_start);
+        assert(io_out_mask() & (1UL << O_X));
+    }
+}
+
+static void test_seq_standby_hold(void)
+{
+    char f[40];
+
+    seq_standby_run(SEQ_BOX_UNLOAD, 0);
+    seq_standby_run(SEQ_UNLOAD_FINISH, 1);
+
+    /* 정지·취소 명령은 시퀀스를 끝낸다(안전·취소 명령은 막지 않는다) */
+    boot();
+    seq_request(SEQ_BOX_UNLOAD);
+    ticks(3);
+    assert(seq_is_active() && (run_standby_num() == 7));
+    sprintf(f, "C1B%02dC00%c", AGV_ID, '3');
+    send_frame(f, 0);
+    run_scan(2);
+    assert(!seq_is_active());   /* 정지 명령(C 3) 은 시퀀스를 끝낸다 */
+    boot();
+    seq_request(SEQ_BOX_UNLOAD);
+    ticks(3);
+    sprintf(f, "W1B%02dC00000000002", AGV_ID);
+    f[8] = '2';
+    send_frame(f, 0);
+    run_scan(2);
+    assert(!seq_is_active());                                /* W 2 취소 */
+    boot();
+    seq_request(SEQ_BOX_UNLOAD);
+    ticks(3);
+    raw_a(RAW_STOP, 0);                                      /* STOP 스위치 */
+    tick();
+    assert(!seq_is_active());
+    raw_a(0, RAW_STOP);
+
+    /* 대기 보고가 없는 시퀀스도 같다(시퀀스가 도는 동안은 어떤 ACS 출발 명령도 출발·시퀀스 정지를 걸지 않는다) */
+    boot();
+    seq_request(SEQ_LOAD);
+    ticks(2);
+    assert(seq_is_active() && (run_standby_num() == 0));
+    sprintf(f, "N1B%02d101000000000", AGV_ID);
+    send_frame(f, 0);
+    run_scan(2);
+    assert(seq_is_active() && !D.wait_start && !D.run_restart && (acs_station_get(0) == 101));
+    /* 시퀀스가 아닌 쪽의 재출발 예약(AGV_AUTOSTART)도 시퀀스가 도는 동안은 받지 않는다 */
+    run_request_restart(1);
+    assert(!D.wait_start);
+    ticks(2);
+    assert(seq_is_active() && !D.flag_ready && !D.flag_run);
+    press_start();                                           /* START 스위치도 시퀀스가 도는 동안은 출발시키지 않는다 */
+    ticks(2);
+    assert(seq_is_active() && !D.flag_ready && !D.flag_run && !D.wait_start && !D.run_restart);
+    seq_abort_all();
+    run_standby_clear(0);
+    acs_station_reset();
+    boot();
+    printf("  seq standby hold ok\n");
+}
+
 /* 교차선 회전 요청: 일반 회전을 걸지 않는 상황(거리 정지 진행 중, 서 있음, 회전 모드 0)이면 아무 일도 없다.
  * 거리 없는 감속(명령 정지) 중에는 건다. 요청이 걸려 교차선을 찾는 동안 읽은 태그는 회전 중과 같이 ACK 없이 버린다 */
 static void test_tape_turn_request(void)
@@ -2157,13 +2255,9 @@ static void test_tape_turn_request(void)
     D.flag_stopping = 1;                         /* 거리 정지 진행 중 */
     (void)tagact_run(43);
     assert(D.tape_turn_dir == 0);
-    D.stop_pulses = 0;                           /* 거리 없는 감속(명령 정지) 중: v0.58.0 부터 정지·회전은 무시(모든 태그) */
-    (void)tagact_run(43);
-    assert((D.tape_turn_dir == 0) && (D.stop_pulses == 0));
-    assert(param_set(P_LEGACY_QUIRKS, QUIRK_TAG_WHILE_STOPPING) == 0);   /* 예전 동작 비트: 건다(레거시는 SL 정지 뒤 회전) */
+    D.stop_pulses = 0;                           /* 거리 없는 감속(명령 정지) 중: 건다(레거시는 SL 정지 뒤 회전) */
     (void)tagact_run(43);
     assert((D.tape_turn_dir == TURN_CW) && (D.stop_pulses == 0));
-    assert(param_set(P_LEGACY_QUIRKS, 0) == 0);
     D.tape_turn_dir = 0;
 
     boot();                                      /* 서 있음 */
@@ -4638,6 +4732,7 @@ int main(void)
     test_tag_while_stopping();
     test_acs_report_retransmit();
     test_seq_standby_cleanup();
+    test_seq_standby_hold();
     test_tape_turn_request();
     test_move_cross_tag();
     test_tune_entry();

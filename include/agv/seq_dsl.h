@@ -284,8 +284,8 @@ typedef unsigned long long dsl_cond_t;
     DSL_FLK(o, period, 0, SEQ_NO_LABEL, c)
 #define OUT_FLICKER_UNTIL_IN_TO(o, period, c, t, label) \
     DSL_FLK(o, period, (t) + DSL_TO_OK(t), label, c)
-/* 출력 켬, 응답 켜짐 대기, 출력 끔, 바로 다음 스텝(v0.58.0: 예전의 응답 꺼짐 대기는 없앴다).
- * 제한 t 와 라벨은 응답 켜짐 대기에만 적용한다 */
+/* 출력 켬, 응답 켜짐 대기, 응답이 켜지면 바로 다음 스텝(v0.58.0). 출력은 끄지 않는다(OUT_OFF 등으로 표가 끈다).
+ * 제한 t 를 넘으면 라벨로 가고 출력은 그대로다. 응답이 이미 켜져 있으면 바로 끝난다 */
 #define HANDSHAKE(o, in_ack, t, label) \
     DSL_STEP(SK_HANDSHAKE, label, 0, 0, (t) + DSL_TO_OK(t), DSL_BIT(in_ack), 0, DSL_BIT(o))
 

@@ -880,24 +880,28 @@ static void run_all(void)
     seq_run();
     assert((fake_out & BIT(O_A)) == 0 && fake_out == BIT(O_C));
 
-    /* 핸드셰이크(v0.58.0): 출력 켬, 응답 켜짐 대기, 출력 끔, 바로 다음 스텝. 응답이 꺼지기를 기다리지 않는다 */
+    /* 핸드셰이크(v0.58.0): 출력 켬, 응답 켜짐 대기, 켜지면 바로 다음 스텝. 출력은 끄지 않는다(표가 끈다) */
     start(S_HANDSHAKE);
     seq_run();
     assert(fake_out == BIT(O_A) && seq_is_active());
     seq_run();
     assert(fake_out == BIT(O_A) && seq_is_active());       /* 응답 전: 출력을 켠 채 기다린다 */
     fake_in = BIT(SEN_A);
-    seq_run();                                              /* 응답 켜짐: 출력 끄고 같은 스캔에 다음 스텝(O_B)까지 */
-    assert(fake_out == BIT(O_B) && !seq_is_active());       /* 응답은 아직 켜진 채다. 꺼짐 대기 없음 */
+    seq_run();                                              /* 응답 켜짐: 같은 스캔에 다음 스텝(O_B)까지. O_A 는 그대로 켜져 있다 */
+    assert(fake_out == (BIT(O_A) | BIT(O_B)) && !seq_is_active());
     fake_in = 0;
-    start(S_HANDSHAKE);                                     /* 제한 5 틱은 응답 켜짐 대기에만 적용: 응답이 없으면 라벨로 */
+    start(S_HANDSHAKE);                                     /* 제한 5 틱은 응답 켜짐 대기에 적용: 응답이 없으면 라벨로, 출력은 그대로 */
     for (int i = 0; i < 6; i++) { seq_run(); }
-    assert(fake_out == BIT(O_C));
+    assert(fake_out == (BIT(O_A) | BIT(O_C)));
     start(S_HANDSHAKE);
     for (int i = 0; i < 3; i++) { seq_run(); }
     fake_in = BIT(SEN_A);                                   /* 제한 안에 응답 */
     seq_run();
-    assert(fake_out == BIT(O_B));
+    assert(fake_out == (BIT(O_A) | BIT(O_B)));
+    start(S_HANDSHAKE);                                     /* 응답이 이미 켜져 있으면 켠 틱에 끝난다(따로 막지 않는다) */
+    fake_in = BIT(SEN_A);
+    seq_run();
+    assert(fake_out == (BIT(O_A) | BIT(O_B)) && !seq_is_active());
     fake_in = 0;
 
     /* 점멸 끝 조건에 AND 상태 낱말: 방향이 맞아야 끝난다. 칸 배치(xc != 0)는 주기·출력을 out 한 칸에 넣는다 */

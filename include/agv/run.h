@@ -58,6 +58,7 @@ void     run_standby(int16_t id, int16_t reset);   /* reset: RUN_STANDBY_* 비�
 #define  RUN_STANDBY_NOSTOP 4   /* 정지는 걸지 않는다(같은 태그 규칙의 정지 분류 2·3·4 가 선다). 보고·자동 재전송은 같다 */
 #define  RUN_STANDBY_SEQ    8   /* 시퀀스·ACT 의 대기 보고(v0.58.0): 출발 대기(wait_start)를 지우지 않고, 다음 출발(start_run)이 대기 번호·자동 재전송을 정리한다 */
 void     run_standby_clear(int16_t id);
+int16_t  run_seq_hold(void);         /* 1 = 시퀀스가 돌고 있다(대기 보고 중이든 아니든): ACS 의 출발·스테이션 명령은 출발 대기·재출발을 걸지 않는다(comm.c, v0.58.0) */
 int16_t  run_standby_num(void);
 void     run_standby_auto_off(void);
 #endif

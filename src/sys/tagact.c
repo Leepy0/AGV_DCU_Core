@@ -356,15 +356,15 @@ static uint16_t has_second_word(uint16_t code)
                       || (kind == TA_ACS_NUM) || (kind == TA_STATE) || (kind == TA_STOP_SENSOR));
 }
 
-/* 정지 계열(서게 하는 동작: 정지·자동 출발·교차선 정지·센서 정지)과 회전 계열.
- * 정지가 진행 중에 읽은 다른 태그에서는 이 동작들을 건너뛴다(v0.58.0). 보고·출력·속도·전후진·ACT·CALL·시퀀스 요청은 그대로 실행한다
- * (TA_SEQ 는 정지 + 시퀀스 요청이라 정지는 이미 걸려 있어 할 일이 없고, 요청은 남긴다: 겹친 요청은 대응표 순서로 돈다) */
-static int is_stop_or_turn(uint16_t code)
+/* 단순 정지(v0.58.0): 정지가 진행 중에 읽은 다른 태그에서는 이것만 건너뛴다. AGV_STOP·AGV_STOP( cm )·AGV_AUTOSTART(교차선 정지 규칙의 자동 출발은 아님)
+ * 와 대기 보고의 정지 부분(tag_acs). 회전·교차선 정지 요청·센서 정지·시퀀스 요청·보고·출력·속도·전후진은 master 처럼 그대로 받는다 */
+static int is_simple_stop(uint16_t code, int16_t cls)
 {
     switch ((uint16_t)(TA_KIND(code) << 8)) {
-    case TA_STOP: case TA_STOP_AUTOSTART: case TA_STOP_CM: case TA_STOP_SENSOR: case TA_TAPE_STOP: case TA_TAPE_STOP_GD:
-    case TA_TURN: case TA_TURN_ALIGN: case TA_TURN_TAPE:
+    case TA_STOP: case TA_STOP_CM:
         return 1;
+    case TA_STOP_AUTOSTART:
+        return (int)(cls < 3);
     default:
         return 0;
     }
@@ -464,9 +464,9 @@ static void act_exec(uint16_t code, uint16_t next, int16_t cls)
     case TA_TURN_ALIGN:
         tagact_turn_align((turn_dir_t)(arg & 3u), TA_TURN_DEG(arg), next);
         break;
-    /* TODO(정지 중 태그 무시 결정 뒤): 아래 주석 "명령 정지 감속 중에는 건다"는 v0.58.0 에서 틀렸다(정지가 진행 중이면 tagact_run 이 건너뛴다. 예전 동작 비트면 맞다) */
     case TA_TURN_TAPE:      /* 일반 회전을 걸지 않는 상황(거리 정지 진행 중 포함)에만 요청하지 않는다. 명령 정지 감속 중에는
-                             * 건다(레거시는 SL 정지를 다시 걸고 돈다). 다른 정지 중의 보류는 run.c(tape_stop) */
+                             * 건다(레거시는 SL 정지를 다시 걸고 돈다). 다른 정지 중의 보류는 run.c(tape_stop).
+                             * v0.58.0 의 정지 중 태그 무시(is_simple_stop)는 이 요청을 막지 않는다 */
         if (!turn_refused() && tape_req_allowed() && !turn_noop(TA_TURN_DEG(arg), (uint16_t)(next & 0xFu))) {
             D.tape_turn_dir = (int16_t)(arg & 3u);
             D.tape_turn_deg = (int16_t)TA_TURN_DEG(arg);
@@ -591,8 +591,8 @@ int tagact_run(uint16_t tag)
     if (tune_active()) { return 0; }         /* 튜닝 주행은 태그를 쓰지 않는다 */
     if (s_depth++ == 0) { s_len_set = 0; }
     s_tag = tag;
-    /* 정지(감속·정지 진행 중: D.flag_stopping)가 진행 중에 읽은 태그는 정지·회전 동작을 건너뛴다. 지금 서는 정지가 이미 정해졌다.
-     * 레거시 비트(QUIRK_TAG_WHILE_STOPPING)를 켜면 예전처럼 모두 실행한다. 사용자 함수가 다시 부른 안쪽 호출은 바깥 호출의 판정을 따른다
+    /* 정지(감속·정지 진행 중: D.flag_stopping)가 진행 중에 읽은 태그는 단순 정지(AGV_STOP·AGV_AUTOSTART·대기 보고의 정지)만 건너뛴다.
+     * 지금 서는 정지가 이미 정해졌다. 레거시 비트(QUIRK_TAG_WHILE_STOPPING)를 켜면 master 처럼 모두 실행한다. 사용자 함수가 다시 부른 안쪽 호출은 바깥 호출의 판정을 따른다
      * (바깥 규칙이 방금 건 정지를 안쪽 규칙이 "진행 중"으로 보지 않게) */
     s_busy = (int16_t)((s_depth > 1) ? prev_busy : (was_stopping && !param_quirk(QUIRK_TAG_WHILE_STOPPING)));
     r = rule_find(tag);
@@ -600,14 +600,11 @@ int tagact_run(uint16_t tag)
         uint16_t act[4];                      /* 사용자 함수가 tagact_run 을 다시 불러도 s_hit 가 덮이지 않게 복사 */
         for (i = 0; i < 4u; i++) { act[i] = r->act[i]; }
         cls = stop_class(act, &carg);         /* 분류 2·3·4 정지가 규칙 안 순서와 무관하게 이긴다 */
-        if ((cls >= 3) && !s_busy && tape_req_allowed()) { D.tape_autostart = 0; }   /* 새 분류 3·4 요청: 이 규칙의 자동 출발만(낡은 값을 잇지 않게) */
+        if ((cls >= 3) && tape_req_allowed()) { D.tape_autostart = 0; }   /* 새 분류 3·4 요청: 이 규칙의 자동 출발만(낡은 값을 잇지 않게) */
         for (i = 0; (i < 4u) && (act[i] != 0u); i++) {
             uint16_t second = has_second_word(act[i]);
-            uint16_t kind = (uint16_t)(TA_KIND(act[i]) << 8);
-            if (s_busy && is_stop_or_turn(act[i])) {
-                if (kind == TA_STOP_SENSOR) { break; }   /* 뒤 칸은 그 센서 정지가 확정할 때 실행하는 동작이다 */
-            }
-            else if (kind == TA_STOP_SENSOR) {   /* 뒤 칸은 확정 때(tagact_tick) */
+            if (s_busy && is_simple_stop(act[i], cls)) { /* 이미 서는 중: 건너뛴다 */ }
+            else if ((uint16_t)(TA_KIND(act[i]) << 8) == TA_STOP_SENSOR) {   /* 뒤 칸은 확정 때(tagact_tick) */
                 fs_arm(act, i, cls);
                 break;
             }
@@ -615,7 +612,7 @@ int tagact_run(uint16_t tag)
             i = (uint16_t)(i + second);
         }
     }
-    if ((cls >= 3) && !s_busy && tape_req_allowed()) {   /* 분류 3·4: 자동 주행 중이면 늘 받는다. 정지가 진행 중이면 무시. 찾기·서기·다른 정지 중 보류는 run.c(tape_stop) */
+    if ((cls >= 3) && tape_req_allowed()) {   /* 분류 3·4: 자동 주행 중이면 늘 받는다. 찾기·서기·다른 정지 중 보류는 run.c(tape_stop) */
         D.tape_stop_kind = cls;
         D.tape_stop_id = (int16_t)carg;
     }

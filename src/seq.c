@@ -540,8 +540,9 @@ static uint16_t eval_flicker(seq_runner_t *r, const seq_step_t *s)
     return R_WAIT;
 }
 
-/* 출력 켬, 응답 켜짐 대기, 출력 끔, 바로 다음 스텝(v0.58.0: 응답 꺼짐 대기를 없앴다).
- * 제한 시간·라벨은 응답 켜짐 대기에만 적용한다 */
+/* 출력 켬, 응답 켜짐 대기, 응답이 켜지면 바로 다음 스텝(v0.58.0). 출력은 끄지 않는다: 끄는 것은 표가 정한다(OUT_OFF 등).
+ * 제한 시간·라벨은 응답 켜짐 대기에 적용하고, 제한을 넘어도 출력은 그대로 둔다(라벨 쪽 스텝이 정한다).
+ * 응답이 이미 켜져 있으면 켠 같은 틱에 끝난다 */
 static uint16_t eval_handshake(seq_runner_t *r, const seq_step_t *s)
 {
     tick(r);
@@ -549,14 +550,8 @@ static uint16_t eval_handshake(seq_runner_t *r, const seq_step_t *s)
         out_apply(r, s->out, 0);
         r->a = 1;
     }
-    if ((io_in_mask() & s->on) == s->on) {
-        out_apply(r, 0, s->out);
-        return R_NEXT;
-    }
-    if (timed_out(r, s)) {
-        out_apply(r, 0, s->out);
-        return jump(r, s->target);
-    }
+    if ((io_in_mask() & s->on) == s->on) { return R_NEXT; }
+    if (timed_out(r, s)) { return jump(r, s->target); }
     return R_WAIT;
 }
 

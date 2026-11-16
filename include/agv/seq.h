@@ -48,7 +48,7 @@ typedef enum {
     SK_DELAY,             /* arg0 틱 대기 */
     SK_OUT_PULSE,         /* out 을 arg0 틱 켜고 arg1 틱 끄기를 timeout 회 반복 */
     SK_OUT_FLICKER,       /* out 을 arg0 틱 간격으로 토글, 조건 참이면 끄고 다음. timeout 있으면 target */
-    SK_HANDSHAKE,         /* out 켬, 입력 켜짐 대기, out 끔, 입력 꺼짐 대기. timeout 있으면 target */
+    SK_HANDSHAKE,         /* out 켬, 입력 켜짐 대기, 켜지면 바로 다음(out 은 안 끈다). timeout 넘으면 target(out 그대로) */
     SK_ACS,               /* arg0 = Info 문자, arg1 = 번호 출처 SEQ_NUM_*, timeout = 상수 번호 */
     SK_ACS_WAIT_ACK,      /* 미확인 슬롯이 없을 때까지 대기 */
     SK_ACS_STATION,       /* arg0 = 큐 칸, arg1 = 값, timeout = 큐 길이 */
