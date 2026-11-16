@@ -39,9 +39,9 @@
  * 종류는 seq_dsl.h DSL_INFO_* 이름(LOADING UNLOADING NEXT ARRIVE FINISH PROCESSING STANDBY CALL).
  * 시퀀스 표의 ACS( STANDBY, … ) 도 보고 + 자동 재전송을 하지만 정지는 걸지 않는다(시퀀스는 이미 선 뒤에 돈다).
  *
- * 정지가 진행 중(감속·정지 진행 중, D.flag_stopping)에 읽은 다른 태그의 정지 계열(AGV_STOP·AGV_AUTOSTART·SEQ_START·교차선 정지·센서 정지)과
- * 회전 계열(AGV_TURN)은 모든 태그에서 건너뛴다(v0.58.0, tagact_run). 보고·출력·속도·전후진·ACT·CALL 은 그대로 실행한다.
- * 예전 동작은 P_LEGACY_QUIRKS b11(QUIRK_TAG_WHILE_STOPPING).
+ * 정지가 진행 중(감속·정지 진행 중, D.flag_stopping)에 읽은 다른 태그의 단순 정지(AGV_STOP·AGV_STOP( cm )·AGV_AUTOSTART, 대기 보고의 정지 부분)만
+ * 모든 태그에서 건너뛴다(v0.58.0, tagact_run). 회전·교차선·SEQ_START·센서 정지·보고·출력·속도·전후진·ACT·CALL 은 그대로 실행한다.
+ * P_LEGACY_QUIRKS b11(QUIRK_TAG_WHILE_STOPPING)을 켜면 이 무시를 끈다(예전 동작).
  * 태그 표 파일은 시퀀스 스텝 이름(WHEN·WAIT·L·GOTO·OUT_ON·DELAY·HANDSHAKE …)을 쓸 수 없다(아래 SEQ_STEP_NOT_ALLOWED_IN_TAG_TABLE 오류).
  */
 #ifndef AGV_TAG_DSL_H

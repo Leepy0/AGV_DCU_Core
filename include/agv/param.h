@@ -70,7 +70,7 @@ enum {
 /* b11(2048): 예전 저속(정지 바닥 350, 멈춤 판단 10틱, SPN 4 미만 6, 회전 끝·회전 감속 DCC/4, 예전 저크·정지 끝 계단)은
  * 버렸다(v0.40.0·v0.46.0). v0.58.0 부터 이 자리를 QUIRK_TAG_WHILE_STOPPING 이 쓴다(아래). 한계 4095 는 그대로(저장값이 한계 위반이 되지 않게) */
 #define QUIRK_STEER_LEGACY  (QUIRK_STEER_20MS | QUIRK_DAMP_SIGN_OLD | QUIRK_STEER_STEP)
-/* b11(2048) 정지 진행 중 읽은 태그의 정지·회전 동작을 건너뛰지 않고 예전처럼 모두 실행한다(v0.58.0, tagact.c. 뜻은 결정 대기).
+/* b11(2048) 정지 진행 중 읽은 태그의 단순 정지(AGV_STOP·AGV_AUTOSTART·대기 보고의 정지) 무시를 끄고 예전처럼 모두 실행한다(v0.58.0, tagact.c).
  * LG 는 EEPROM 체크섬 안이라 한계를 올리면 v0.57 이하로 되돌려 구울 때 한계 위반으로 파라미터 전체가 지워진다. 그래서 한계는 4095 그대로 두고
  * 오래전에 버린 b11 을 다시 쓴다. 옛 저장값(2048)이 이 동작을 켜지 않게 첫 부팅에 한 번 b11 을 지운다(PARAM_QUIRK_MIGRATE_ADDR) */
 #define QUIRK_TAG_WHILE_STOPPING 0x800u
