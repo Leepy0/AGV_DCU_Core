@@ -37,7 +37,7 @@
 | | `OUT_PULSE( o, 켬, 끔, 횟수 )` | 펄스 반복 | `if (cnt>0 && cnt<50) …` |
 | | `OUT_FLICKER_UNTIL_IN( o, 간격, 조건 )` | **접점 통신.** 출력을 점멸하다가 조건이 참이면 끄고 다음. 조건은 `IN( … )` 또는 `AND( … )`(상태 낱말 가능, 3.3.3) | `Out = g1sec_Pulse_Flag; if (In == nON) …` |
 | | `OUT_FLICKER_UNTIL_IN_TO( o, 간격, 조건, 제한, 라벨 )` | 위 + 시간 제한 | |
-| | `HANDSHAKE( o, 응답입력, 제한, 라벨 )` | 출력 켬, 응답 켜짐 대기, 출력 끔, **바로 다음 스텝**(v0.58.0: 응답 꺼짐 대기는 없앴다). 제한·라벨은 응답 켜짐 대기에만 | 설비 연동 4\~6 `case` |
+| | `HANDSHAKE( o, 응답입력, 제한, 라벨 )` | 출력 켬, 응답 켜짐 대기, **바로 다음 스텝**(v0.58.0: 출력은 끄지 않는다, 응답 꺼짐 대기도 없다. 응답이 이미 켜져 있으면 바로 끝난다). 제한·라벨은 응답 켜짐 대기에만(제한이 지나도 출력은 켜 둔다) | 설비 연동 4\~6 `case` |
 | 벨트 | `BELT_ON( n, CW )` / `BELT_ON( n, CCW )` / `BELT_OFF( n )` | 3.5절 | `*_Belt_On_Off_Process` |
 | | `BELT_ON( n, 방향, UNTIL( 조건 ) )` / `WAIT_BELTS( n, … )` | 켜고 그 벨트의 정지 조건을 건다(기다리지 않음). 적은 벨트가 모두 꺼질 때까지 대기. 3.5절 | `if (In_3 == nON) First_Belt_On_Off_Process(0,0);` |
 | 대기 | `WAIT( 조건 )` | 조건 참까지 대기 | `if (In == nON) step = n;` |
@@ -197,7 +197,7 @@ WAIT_ANY2( IN( ANY_ON( SEN_1, SEN_2 ), OFF( SEN_5 ) ),  ANY2_ON( SEN_3, SEN_4 ) 
 | `X_ID( lo, hi )` | lo <= `P_AGV_ID` <= hi | `set[AGV_ID] == N` |
 | `X_KEY( UP )` | 지금 눌린 키 값 == `KEY_UP`. `ui_key()`만 읽고 키를 소비하지 않는다. `UP DOWN SET RESET MODE SHIFT` | `Read_Key_buffer == UP_KEY` |
 | `X_FORBACK_MODE` / `X_LOW_BATTERY` | 방향 전환 모드 > 0 / 저전압 | |
-| `X_STATION( k, lo, hi )` / `X_STATION_RUNNING( k, lo, hi )` | lo <= 큐[k] <= hi. `X_STATION_RUNNING` 은 v0.58.0 부터 같은 뜻의 별칭(예전: 정지가 걸리기 전에만. 지금은 모든 태그가 정지 중 정지·회전을 건너뛴다, 5.5절. 표 바이트는 예전 그대로 `XC_STATION_RUNNING` 이고 해석기가 `XC_STATION` 과 같게 본다) | `ACS_Station_Call_Num[k] == N` |
+| `X_STATION( k, lo, hi )` / `X_STATION_RUNNING( k, lo, hi )` | lo <= 큐[k] <= hi. `X_STATION_RUNNING` 은 정지가 걸리기 전에만 | `ACS_Station_Call_Num[k] == N` |
 | `X_STATION_MOD( k, n, m )` / `X_STATION_DIV( k, n, m )` | 큐[k] `%` n == m / 큐[k] `/` n == m. n = 0 은 컴파일 오류 | `ACS_Station_Call_Num[k] % N == M` |
 | `X_TAG_NUM( 식 )` | 지금 태그 번호 == 식(v0.53.0). 식 `STATION(k)`, `STATION(k) ± n`, `MOD( STATION(k), m )`, `n + MOD( STATION(k), m )`(덧셈 순서 자유). **태그 표 전용** | `ACS_Station_Call_Num[k] == Tag_Num - N` 은 `X_TAG_NUM( STATION(k) + N )` |
 | `X_PARAM( 이름, v )` | 파라미터 == v. 이름은 FND 이름(`DRS`·`AS`·`TFB` …). 자릿수 파라미터의 한 자리는 `이름_자리`(`TFB_1` 전후진 모드, `TFB_10` 회전 모드)(v0.53.0) | `ForBack_Mode == 2` 는 `X_PARAM( TFB_1, 2 )` |
@@ -539,7 +539,7 @@ TAG_TABLE_END
 | `IF_IN( 조건 )` | 입력 조건. 시퀀스와 같은 `IN`·`ON`·`OFF`·`ANY_ON` |
 | `IF_X_IN( x, 조건 )` / `IF_X2_IN( x1, x2, 조건 )` | 확장 조건 + 입력 조건 |
 | `IF_FORBACK_MODE`, `IF_LOW_BATTERY`, `IF_FORWARD`, `IF_BACKWARD` | `IF_X( X_… )` 줄임 |
-| `IF_STATION( 칸, 하한, 상한 )`, `IF_STATION_RUNNING( … )` | 큐 범위. `IF_STATION_RUNNING` 은 v0.58.0 부터 같은 뜻의 별칭 |
+| `IF_STATION( 칸, 하한, 상한 )`, `IF_STATION_RUNNING( … )` | 큐 범위. `IF_STATION_RUNNING` 은 정지가 걸리기 전에만 |
 | `IF_ID( lo, hi )` | 프로파일 안 일부 호기 |
 | `IF_STATION_MOD( k, n, m )`, `IF_STATION_DIV( k, n, m )` | 큐[k] % n == m, 큐[k] / n == m |
 | `IF_TAG_NUM( 식 )` | 지금 태그 번호 == 식(`X_TAG_NUM`, v0.53.0) |
@@ -706,17 +706,18 @@ PROFILE_TABLE_END
 
 ### 5.5 정지 중 태그와 ACS 보고 (v0.58.0)
 
-**정지 중 읽은 다른 태그의 정지·회전은 무시한다(모든 태그).** RFID 리더가 같은 태그를 연달아 읽으면 한 번만 보내는 것과 별개로, 정지 명령을 수행하는 동안(`D.flag_stopping`: 태그 정지가 걸린 때부터 감속·정지가 끝나 모터 리셋이 지울 때까지, 일시정지(장애물·PAUSE·교통)는 아니다) 읽은 다른 태그에서 다음 동작은 건너뛴다.
+**정지 중 읽은 다른 태그의 단순 정지는 무시한다(모든 태그).** RFID 리더가 같은 태그를 연달아 읽으면 한 번만 보내는 것과 별개로, 정지 명령을 수행하는 동안(`D.flag_stopping`: 태그 정지가 걸린 때부터 감속·정지가 끝나 모터 리셋이 지울 때까지, 일시정지(장애물·PAUSE·교통)는 아니다) 읽은 다른 태그에서 다음 동작만 건너뛴다.
 
-- 건너뛴다(정지 계열): `AGV_STOP`(전부), `AGV_AUTOSTART`, 교차선 정지(`SEQ_START( TAPE·TAPE_GD, … )`·`AGV_STOP( TAPE… )`, 그 정지에 딸린 시퀀스 포함), `FROM_SENSOR` 센서 정지(뒤 동작 포함). 회전 계열: `AGV_TURN`(일반·`ALIGN`·`TAPE`).
-- 그대로 실행한다: `AGV_SPEED`·`AGV_FORBACK`·`AGV_BRANCH`·`OBS_*`·`ACS`·`ACS_SEND`·`STATION_RESET`·`CALL`·`ACT_START`·`AGV_WAIT_*`·상태 변경, 그리고 `SEQ_START( 시퀀스 )`·`SEQ_START( cm, 시퀀스 )` 의 시퀀스 요청(정지는 이미 걸려 있다. 정지 거리는 처음 정지를 건 태그 것이고, 겹친 요청은 대응표 순서로 돈다). 대기 보고(`STANDBY`)는 보고·대기 번호·자동 재전송은 하고 정지 요청(급정지로 바꾸기)만 건너뛴다.
-- 이전에도 같았던 것: 정지 거리는 처음 정지를 건 태그가 정한다(`started` 만 거리를 건다). 회전은 `stop_pulses` 가 0 이 아니면 이미 거부했다. 달라진 것은 거리 없는 정지(명령 정지 감속)·교차선 회전 요청·`AGV_AUTOSTART`·`SEQ_START` 의 시퀀스 요청·대기 보고의 급정지가 이제 건너뛰는 쪽이라는 점이다.
+- 건너뛴다(단순 정지만): `AGV_STOP( )`·`AGV_STOP( cm )`(`TA_STOP`·`TA_STOP_CM`), `AGV_AUTOSTART`, 대기 보고 `ACS( STANDBY… )` 의 정지 부분(보고·대기 번호·자동 재전송은 한다).
+- 마스터와 같다(건너뛰지 않는다): 회전 `AGV_TURN`(일반·`ALIGN`·`TAPE`)과 그 거부 처리, 교차선 정지·교차선 회전 요청, `SEQ_START` 의 시퀀스 요청(정지 거리 `SEQ_START( cm, … )` 포함), `FROM_SENSOR` 센서 정지와 뒤 칸 동작, `AGV_SPEED`·`AGV_FORBACK`·`AGV_BRANCH`·`OBS_*`·`ACS`·`ACS_SEND`·`STATION_RESET`·`CALL`·`ACT_START`·`AGV_WAIT_*`·상태 변경. 정지 거리는 처음 정지를 건 태그가 정한다(`started` 만 거리를 건다).
 - 사용자 함수가 `tagact_run` 을 다시 부르면(번호 변환 별칭) 안쪽 호출은 바깥 호출의 판정을 따른다(바깥 규칙이 방금 건 정지를 안쪽 규칙이 "진행 중" 으로 보지 않게).
-- `X_STATION_RUNNING`·`IF_STATION_RUNNING` 은 `X_STATION`·`IF_STATION` 과 같은 뜻의 별칭이다. 전에는 정지가 걸린 뒤에는 규칙이 안 맞아 뒤 규칙으로 넘어갔지만 이제는 규칙이 맞고 그 규칙의 정지·회전만 건너뛴다.
-- 예전 동작: `P_LEGACY_QUIRKS` b11(2048, `QUIRK_TAG_WHILE_STOPPING`, 뜻은 결정 대기)을 켜면 정지 중에도 모두 실행하고, `X_STATION_RUNNING` 도 예전처럼 정지가 걸린 뒤에는 거짓이다. 한계는 4095 그대로(b11 은 v0.46.0 에 버린 비트를 다시 쓴 것이라 첫 부팅에 한 번 지운다, `02_네이밍_표준.md`).
+- `X_STATION_RUNNING`·`IF_STATION_RUNNING` 은 예전 그대로다(정지가 걸린 뒤에는 거짓).
+- 예전 동작: `P_LEGACY_QUIRKS` b11(2048, `QUIRK_TAG_WHILE_STOPPING`)을 켜면 단순 정지 무시를 끈다(정지 중에도 모두 실행). 한계는 4095 그대로(b11 은 v0.46.0 에 버린 비트를 다시 쓴 것이라 첫 부팅에 한 번 지운다, `02_네이밍_표준.md`).
 - 판정은 `D.flag_stopping` 이다. `stop_phase()`·`stop_is_braking()` 은 정지 제어의 단계(`stop_is_braking()` 은 감속 이후만, 거리 정지의 순항 구간은 아니다)라 쓰지 않는다. 일반 태그 정지(`tagact_stop`·`tagact_stop_length`·`rule_stop`)는 이 플래그를 바로 세운다(정지 제어가 다음 틱에 단계를 시작한다).
 
-**ACS 보고 재전송.** 모든 보고는 슬롯 큐(`acs.c`)에 들어가 ACK(같은 Info)가 올 때까지 `CT`(`P_ACS_RETRY_SEC` 초, 0 이면 `WRT`(`P_ACS_RETRY_LEGACY`) × 0.1 초) 간격 + 지터로 다시 보낸다. 같은 종류 보고는 슬롯을 덮고 횟수를 0 으로 되돌린다. 10번마다 MsgID 를 새로 받고, 99번을 보내면 포기한다(`LOG_ACS_GIVE_UP`). 이것은 v0.58.0 에서 바꾸지 않았다. `STANDBY` 만 정지를 건다(태그: `run_standby`, 번호 > 0 이면 ACK 와 상관없이 60초마다 자동 재전송을 계속, 'C' 해제·출발·정지로 끈다). 나머지 보고(`LOADING` `UNLOADING` `NEXT` `ARRIVE` `FINISH` `PROCESSING` `CALL`)는 정지하지 않고 ACK 까지 재전송만 한다. 시퀀스 표의 `ACS( STANDBY, n )` 는 이제 태그와 같은 보고 + 자동 재전송 + 대기 번호(`run_standby`)를 하되 정지는 걸지 않는다: 시퀀스는 이미 선 뒤에만 돌고(`run_seq` 는 주행·정지 중이 아닐 때 부른다), 정지를 걸면 시퀀스를 돌리는 스캔만 멈춘다. ACT 는 주행을 멈추지 않는 동작이라 같다. 시퀀스 경로(`RUN_STANDBY_SEQ`)는 출발 대기(`wait_start`)를 지우지 않고, 다음 출발(`start_run`, `END_RESTART` 의 재출발 포함)이 대기 번호와 자동 재전송을 정리한다(안 그러면 출발 뒤에도 STB 가 남고 `comm.c` 의 출발 조건 `run_standby_num() == 0` 이 막는다). 태그의 대기 보고는 예전 그대로다. 시퀀스 경로(`RUN_STANDBY_SEQ`)는 출발 대기(`wait_start`)를 지우지 않고, 다음 출발(`start_run`, `END_RESTART` 의 재출발 포함)이 대기 번호와 자동 재전송을 정리한다(안 그러면 출발 뒤에도 STB 가 남고 `comm.c` 의 출발 조건 `run_standby_num() == 0` 이 막는다). 태그의 대기 보고는 예전 그대로다.
+**ACS 보고 재전송.** 모든 보고는 슬롯 큐(`acs.c`)에 들어가 ACK(같은 Info)가 올 때까지 `CT`(`P_ACS_RETRY_SEC` 초, 0 이면 `WRT`(`P_ACS_RETRY_LEGACY`) × 0.1 초) 간격 + 지터로 다시 보낸다. 같은 종류 보고는 슬롯을 덮고 횟수를 0 으로 되돌린다. 10번마다 MsgID 를 새로 받고, 99번을 보내면 포기한다(`LOG_ACS_GIVE_UP`). 이것은 v0.58.0 에서 바꾸지 않았다. `STANDBY` 만 정지를 건다(태그: `run_standby`, 번호 > 0 이면 ACK 와 상관없이 60초마다 자동 재전송을 계속, 'C' 해제·출발·정지로 끈다). 나머지 보고(`LOADING` `UNLOADING` `NEXT` `ARRIVE` `FINISH` `PROCESSING` `CALL`)는 정지하지 않고 ACK 까지 재전송만 한다. 시퀀스 표의 `ACS( STANDBY, n )` 는 보고 + 대기 번호 + 자동 재전송만 하고 정지는 걸지 않으며 시퀀스는 계속 돈다(`run_standby( AUTO | NOSTOP | SEQ )`). 시퀀스는 이미 선 뒤에만 돌고, 정지를 걸면 시퀀스를 돌리는 스캔만 멈춘다. ACT 는 주행을 멈추지 않는 동작이라 같다. 시퀀스 경로(`RUN_STANDBY_SEQ`)는 출발 대기(`wait_start`)를 지우지 않고, 시퀀스가 낸 다음 출발(`start_run`, `END_RESTART` 의 재출발 포함)이 대기 번호와 자동 재전송을 정리한다. 태그의 대기 보고는 예전 그대로다.
+
+**시퀀스 중 출발 막기.** 시퀀스가 도는 동안(`seq_is_active()`)에는 STANDBY 중이라도 차가 움직이지 않는다. 막는 길: (1) `run.c` `input_filter` 에서 한 번에: START 스위치 에지와 그 출발 보고, 출발 대기(`wait_start`)·재출발 예약(`run_restart`)을 이 스캔에서 지워 `start_run` 으로 가지 못하게 한다. (2) 들어오는 쪽: ACS 출발 명령 `C 1`, 스테이션 명령 `N`(`on_next`·`traffic_start` 의 출발 대기), `C 4` 의 출발 대기·출발 보고는 출발을 걸지 않고(스테이션 값은 큐에 받는다. 교통 허가 해제는 그대로), `run_request_restart`(`AGV_AUTOSTART`·태그)는 받지 않는다. STANDBY 60초 자동 재전송(`run.c`)은 보고만 하고 출발과 관계가 없다. 정지(`C 3`)·`W 2` 취소·STOP 스위치·긴급 정지는 그대로 동작해 시퀀스를 끝낸다. 막지 않는 것: 시퀀스 스텝이 직접 내는 출발(`AGV_MOVE` 의 `start_run`, `END_RESTART` 는 시퀀스를 끝낸 뒤 재출발을 건다). 막은 출발 명령은 쌓아 두지 않는다(시퀀스가 끝난 뒤 저절로 출발하지 않는다).
 
 ## 6. 도구
 
