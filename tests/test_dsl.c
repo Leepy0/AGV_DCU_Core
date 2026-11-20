@@ -124,6 +124,9 @@ SEQ_BEGIN( ext )
     AGV_TURN( CW, 180, 0, 0, 0, OBS, ALIGN )                                 /* 26 정렬 회전 */
     AGV_MOVE( 150, TAPE )                                                    /* 27 교차선까지 */
     AGV_MOVE( 80, TAPE_GD )                                                  /* 28 교차선 뒤 GD */
+    ACS( IDLE, STATION(1) )                                                  /* 29 IDLE 보고(Info 'X', v0.59.0) */
+    ACS_SEND( IDLE, 7 )                                                      /* 30 */
+    ACS( IDLE, STATION0 )                                                    /* 31 */
 #ifdef NEG_MOVE_LIMIT
     AGV_MOVE( 0, TAPE )                                                      /* 한계 1~3276 cm */
 #endif
@@ -241,6 +244,8 @@ TAG_TABLE_BEGIN( site_tags )
 #endif
     TAG( 56, 1, AGV_STOP( FL, FROM_SENSOR( IN_EXT_4, 100 ) ), SEQ_START( LOAD ), AGV_FORBACK( TOGGLE ) )   /* 30 센서 정지 */
     TAG( 57, 1, AGV_STOP( 255, FROM_SENSOR( IN_AMP_R_OVERLOAD, 511 ) ), AGV_STOP( 0 ) )                    /* 31 */
+    TAG( 58, 1, ACS( IDLE, STATION0 ), ACS( IDLE, 200 ) )                                                  /* 32 IDLE 보고(v0.59.0) */
+    TAG( 59, 1, ACS_SEND( IDLE, TAG_NUM + 3 ), ACS( IDLE, STATION(2) - 1 ) )                               /* 33 */
 #ifdef NEG_FS_TICKS
     TAG( 39, 1, AGV_STOP( FL, FROM_SENSOR( IN_EXT_4, 512 ) ) )      /* 유지틱 1~511 */
 #endif
@@ -454,6 +459,9 @@ int main(void)
            && site_tags[30].act[2] == (TA_SEQ | SEQ_LOAD) && site_tags[30].act[3] == (TA_FORBACK | DIR_TOGGLE));
     assert(site_tags[31].act[0] == (TA_STOP_SENSOR | 255) && site_tags[31].act[1] == ((511u << TA_FS_TICKS_SHIFT) | IN_AMP_R_OVERLOAD)
            && site_tags[31].act[2] == TA_STOP_CM);
+    assert(site_tags[32].act[0] == (TA_ACS | 'X') && site_tags[32].act[1] == (TA_ACS_NUM | 200) && site_tags[32].act[2] == 'X');
+    assert(site_tags[33].act[0] == (TA_ACS_NUM | 3) && site_tags[33].act[1] == ('X' | TA_ACS_TAG_NUM)
+           && site_tags[33].act[2] == (TA_ACS_NUM | 0xFF) && site_tags[33].act[3] == ('X' | TA_ACS_STATION | (2u << TA_ACS_K_SHIFT)));
     {   /* 시퀀스 회전 옵션: 셋째 칸 b8 = OBS, 차례 자유 */
         const seq_step_t *e = ext_steps;
         assert(e[21].kind == SK_TURN_NOWAIT && e[21].arg0 == TURN_CW && e[21].arg1 == 180 && e[21].timeout == (1 << 8));
@@ -463,6 +471,9 @@ int main(void)
         assert(e[26].kind == SK_TURN_ALIGN && e[26].arg0 == TURN_CW && e[26].arg1 == 180 && e[26].timeout == (1 << 8));
         assert(e[27].kind == SK_MOVE_TAPE && e[27].arg0 == 1500 && e[27].arg1 == 0);
         assert(e[28].kind == SK_MOVE_TAPE && e[28].arg0 == 800 && e[28].arg1 == 4);
+        assert(e[29].kind == SK_ACS && e[29].arg0 == 'X' && e[29].arg1 == SEQ_NUM_STATION(1));
+        assert(e[30].kind == SK_ACS && e[30].arg0 == 'X' && e[30].arg1 == SEQ_NUM_CONST && e[30].timeout == 7);
+        assert(e[31].kind == SK_ACS && e[31].arg0 == 'X' && e[31].arg1 == SEQ_NUM_STATION0);
         assert(demo_steps[17].kind == SK_TURN);
     }
 

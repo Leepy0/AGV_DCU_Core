@@ -217,6 +217,8 @@ static const tag_rule_t s_rules[] = {
     TAG( 202, 0, ACS_SEND( STANDBY, 6 ), OBS_ON )
     TAG( 203, 0, SEQ_START( LOAD ), OBS_ON )
     TAG( 204, 0, ACS_SEND( NEXT, 9 ) )                         /* 보고만: 서지 않고 ACK 까지 재전송 */
+    TAG( 205, 0, ACS_SEND( IDLE, 9 ) )                         /* v0.59.0 IDLE 보고: Info 'X', 서지 않고 ACK 까지 재전송 */
+    TAG( 206, 0, ACS( IDLE, STATION0 ) )                       /* 1칸 형식 */
 };
 
 /* 위 20~23 과 같은 규칙의 압축 표. 앞 줄은 다른 프로파일이라 건너뛴다 */
@@ -2110,6 +2112,20 @@ static void test_acs_report_retransmit(void)
     sent = 0;
     for (t = 0; t < 400; t++) { host.sci[HAL_SCI_A].tx_len = 0; guide_reply(0); tick(); sent += tx_has('E', 'N'); }
     assert((sent == 0) && !D.flag_stopping);                 /* ACK 뒤에는 다시 보내지 않는다 */
+
+    /* IDLE 보고(v0.59.0): 2칸·1칸 형식 모두 Info 'X' 한 슬롯. 정지 없이 ACK 까지 재전송하고 ACK 하나에 풀린다 */
+    boot();
+    drive_up();
+    run_scan(20);
+    (void)param_set_ram(P_ACS_RETRY_SEC, 1);
+    (void)tagact_run(205);                                   /* ACS_SEND( IDLE, 9 ) */
+    assert(!D.flag_stopping && (acs_pending() >= 1u) && (run_standby_num() == 0));
+    for (t = 0, sent = 0; t < 250; t++) { host.sci[HAL_SCI_A].tx_len = 0; guide_reply(0); tick(); sent += tx_has('E', 'X'); }
+    assert((sent >= 2) && !D.flag_stopping);                 /* 오류가 서 있는 부팅이라 자동 'X'(오류 5초 = 500틱)가 끼지 않게 총 틱을 500 아래로 */
+    (void)tagact_run(206);                                   /* ACS( IDLE, STATION0 ): 같은 슬롯을 덮는다 */
+    acs_on_ack('X', '0');                                    /* ACK 하나로 풀린다 */
+    for (t = 0, sent = 0; t < 150; t++) { host.sci[HAL_SCI_A].tx_len = 0; guide_reply(0); tick(); sent += tx_has('E', 'X'); }
+    assert((sent == 0) && !D.flag_stopping);
 
     boot();
     drive_up();

@@ -5,6 +5,7 @@
 #define OLD_ACS_SEND(info, num)  DSL_STEP(SK_ACS, SEQ_NO_LABEL, DSL_INFO_##info, DSL_SEND_SRC(num) + DSL_SEND_OK(num), \
                                           DSL_IS_STATION(num) ? 0 : (num), 0, 0, 0)
 #define MY_NO 77
+#define DSL_INFO_RAWX 'X'   /* IDLE(v0.59.0)를 글자 'X' 로 직접 적은 옛 꼴 */
 #ifndef NEG
 SEQ_BEGIN( s_new )
     ACS( LOADING, STATION(0) )
@@ -22,6 +23,11 @@ SEQ_BEGIN( s_new )
     ACS( STANDBY, AGV_ID )
     ACS_SEND( STANDBY, STATION(3) )
     ACS_SEND( NEXT, 12 )
+    ACS( IDLE, STATION0 )
+    ACS( IDLE, 77 )
+    ACS( IDLE, STATION(0) + 1 )
+    ACS( IDLE, AGV_ID )
+    ACS_SEND( IDLE, STATION(2) )
 SEQ_END
 SEQ_BEGIN( s_old )
     OLD_ACS( LOADING, STATION0 )
@@ -39,6 +45,11 @@ SEQ_BEGIN( s_old )
     OLD_ACS( STANDBY, AGV_ID )
     OLD_ACS( STANDBY, STATION(3) )
     OLD_ACS_SEND( NEXT, 12 )
+    OLD_ACS( RAWX, STATION0 )
+    OLD_ACS_SEND( RAWX, 77 )
+    OLD_ACS( RAWX, STATION0_PLUS1 )
+    OLD_ACS( RAWX, AGV_ID )
+    OLD_ACS_SEND( RAWX, STATION(2) )
 SEQ_END
 MAIN_BEGIN
     SAME(s_new_steps, s_old_steps);

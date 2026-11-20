@@ -91,6 +91,7 @@ SEQ_BEGIN( s_acs )
     ACS( UNLOADING, STATION0_PLUS1 )
     ACS( ARRIVE, AGV_ID )
     ACS_SEND( FINISH, 87 )
+    ACS( IDLE, 55 )
     ACS_WAIT_ACK( 5, L_ERR )
     OUT_ON( O_A )
     STATION_RESET
@@ -808,10 +809,13 @@ static void run_all(void)
     (void)acs_station_push(10);
     start(S_ACS);
     seq_run();
-    assert(acs_pending() == 4);
+    assert(acs_pending() == 5);
+    fake_tx_count = 0;                                      /* IDLE 보고(v0.59.0): Info 'X', 번호 055, 슬롯 하나 */
+    for (int i = 0; i < 5; i++) { acs_schedule(); }
+    assert(fake_tx_count == 5 && fake_tx[4][6] == 'X' && fake_tx[4][7] == '0' && fake_tx[4][8] == '5' && fake_tx[4][9] == '5');
     seq_run();
     assert(fake_out == 0);
-    acs_on_ack('L', '0'); acs_on_ack('U', '0'); acs_on_ack('A', '0'); acs_on_ack('F', '0');
+    acs_on_ack('L', '0'); acs_on_ack('U', '0'); acs_on_ack('A', '0'); acs_on_ack('F', '0'); acs_on_ack('X', '0');
     seq_run();
     assert(fake_out == BIT(O_A) && acs_station_get(1) == 42 && acs_station_count() == 2 && acs_station_get(0) == 0);
     /* ACK 시간 제한 */

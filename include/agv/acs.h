@@ -37,7 +37,7 @@ void     acs_reset(void);
 void     acs_schedule(void);                   /* 10 ms. 호출당 프레임 최대 1개 */
 
 /* 보고. 슬롯을 만들고 다음 acs_schedule 에서 처음 보낸다 */
-void     acs_report(uint16_t info, int16_t num);        /* 'L' 'U' 'N' 'A' 'F' 'P' 'B' 'C' ... */
+void     acs_report(uint16_t info, int16_t num);        /* 'L' 'U' 'N' 'A' 'F' 'P' 'B' 'C' 'X'(IDLE, 자동 'X' 와 같은 슬롯) ... */
 void     acs_report_slot(uint16_t slot, int16_t num);   /* 같은 Info 가 여럿인 슬롯용 */
 void     acs_call_ack(uint16_t rx_msgid);               /* 'N' 수신 응답. 1회 송신 */
 void     acs_slot_clear(uint16_t slot);

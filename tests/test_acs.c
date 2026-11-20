@@ -446,6 +446,45 @@ int main(void)
     assert(acs_station_push(5) == 1 && acs_station_push(5) == 0 && acs_station_push(0) == 0);
     assert(acs_station_get(0) == 5);
 
+    /* IDLE 보고(v0.59.0): 시퀀스·태그의 ACS( IDLE, n ) = acs_report( 'X', n ). 오류 5초 뒤 자동 'X' 와 같은 슬롯(ACS_SLOT_IDLE_X)이다 */
+    setup(1, 5, 0);
+    acs_report('X', 9);
+    assert(acs_pending() == 1);
+    ticks(1);
+    assert(fake_tx_count == 1 && fake_tx[0][1] == 'E' && fake_tx[0][6] == 'X' && fake_tx[0][7] == '0' && fake_tx[0][8] == '0' && fake_tx[0][9] == '9');
+    ticks(250);
+    assert(sent_info('X') >= 3);                                /* ACK 까지 재전송만 한다 */
+    acs_on_ack('X', '0');
+    assert(acs_pending() == 0);
+    { int n = sent_info('X'); ticks(300); assert(sent_info('X') == n); }
+    setup(1, 0, 0);
+    acs_report('X', 9);                                         /* ACS 미사용이면 만들지 않는다 */
+    assert(acs_pending() == 0);
+
+    /* 자동 'X' 와 겹침: 같은 슬롯이라 나중 것으로 바뀌고 슬롯은 하나, ACK 하나에 풀린다 */
+    setup(1, 5, 0);
+    (void)param_set(P_ERR_REPORT_MIN, 10);
+    acs_report('X', 9);
+    D.stop_err = 277;
+    for (long i = 0; i < 500; i++) { acs_error_tick(); }        /* 5초 뒤 자동 'X'(오류 번호 277) */
+    assert(acs_pending() == 1);
+    ticks(1);
+    assert(fake_tx_count == 1 && fake_tx[0][6] == 'X' && fake_tx[0][7] == '2' && fake_tx[0][8] == '7' && fake_tx[0][9] == '7');
+    acs_on_ack('X', '0');
+    assert(acs_pending() == 0);
+    setup(1, 5, 0);
+    (void)param_set(P_ERR_REPORT_MIN, 10);
+    D.stop_err = 277;
+    for (long i = 0; i < 500; i++) { acs_error_tick(); }
+    acs_report('X', 9);                                         /* 자동 보고 뒤 사용자 보고: 번호 009 로 바뀐다 */
+    assert(acs_pending() == 1);
+    ticks(1);
+    assert(fake_tx_count == 1 && fake_tx[0][6] == 'X' && fake_tx[0][7] == '0' && fake_tx[0][8] == '0' && fake_tx[0][9] == '9');
+    acs_on_ack('X', '0');
+    assert(acs_pending() == 0);
+    for (long i = 0; i < 300; i++) { acs_error_tick(); }        /* 자동 'X' 는 오류당 한 번 */
+    assert(acs_pending() == 0);
+
     /* 오류 보고: set[40]=10 은 16비트 곱이면 영구 미송신이었다 */
     setup(1, 5, 0);
     (void)param_set(P_ERR_REPORT_MIN, 10);
