@@ -17,15 +17,16 @@ typedef struct {
     uint16_t profile;     /* 프로파일 번호 1~63(seq_profile() 과 같으면 맞는다) */
     uint16_t kind;        /* 하위 4비트 MAN_K_*, MAN_F_ELSE, 상위 8비트 키(0 = 키 조건 없음) */
     uint32_t on, off;     /* 입력 조건 (seq_mask_true) */
-    uint32_t set, clr;    /* 출력: clr 끄고 set 켬. MAN_K_FB_SW·MAN_K_OBS_B 는 set 이 입력 ID */
+    uint32_t set, clr;    /* 출력: clr 끄고 set 켬. MAN_K_FB_SW·MAN_K_OBS_B·MAN_K_START_SW 는 set 이 입력 ID */
 } man_row_t;
 
-enum { MAN_K_IDLE = 0, MAN_K_JOG, MAN_K_FB_SW, MAN_K_OBS_B };
+enum { MAN_K_IDLE = 0, MAN_K_JOG, MAN_K_FB_SW, MAN_K_OBS_B, MAN_K_START_SW };
 #define MAN_F_ELSE  0x10u
 
 /* 표와 프로파일 표를 넘긴다(적재 조건은 프로파일 표의 PROFILE_LOAD_IF 칸) */
 void    manual_bind(const man_row_t *rows, uint16_t n, const profile_row_t *prof, uint16_t nprof);
 void    manual_tick(void);      /* 10 ms. site_manual 이 부른다 */
 int16_t manual_load(void);      /* seq_site_t.load_fn 에 넣는다. 1 적재, 0 공차, -1 이 프로파일은 적재 조건 없음 */
+uint16_t manual_start_sw(void);  /* 지금 프로파일의 MAN_START_SW 입력이 하나라도 켜져 있으면 1(run.c 가 START 스위치와 OR). 매 틱 표를 훑는다 */
 
 #endif /* AGV_MANUAL_H */

@@ -682,6 +682,7 @@ MANUAL_BEGIN( site_manual_rows )
     MAN_OBS_B( PF_LIFT, IN_EXT_6 )         /* 매 틱 agv_drive.obs_b_ext = 입력 */
     MAN_FB_SW( PF_BOX_A, IN_EXT_7 )        /* 수동 방향 전환 스위치 입력. 맞는 줄이 없으면 IN_IF_5 */
     MAN_FB_SW( PF_BOX_B, IN_EXT_7 )
+    MAN_START_SW( PF_BOX_A, IN_EXT_8 )     /* 이 입력이 켜져 있으면 START 스위치가 눌린 것과 같다(본체 START 와 OR) */
 MANUAL_END
 ```
 
@@ -691,6 +692,7 @@ MANUAL_END
 - 프로파일은 사이트 프로파일 상수 그대로(1\~63, 압축 태그 표의 프로파일 칸과 같은 범위). 0·범위 밖은 컴파일 오류. 모드 `IDLE` = 자동 화면에서 대기(`run_is_idle()`, 준비 아님, STOP 아님), `JOG` = 조그 화면이고 STOP 아님.
 - 조건 `IN( ON(…), OFF(…) )`(3.3절과 같다), `KEY( UP )`(지금 눌린 키, 소비하지 않음), `NO_IN`(늘 참). `AND( … )` 로 쓰면 상태는 `KEY( k )` 하나뿐이다. KEY 가 아닌 상태나 둘째 상태(`AND( KEY( UP ), FORWARD )`, `AND( KEY( UP ), KEY( DOWN ) )`)는 컴파일 오류다(v0.59.0, 전에는 둘째 상태가 오류 없이 버려졌다).
 - 출력 `ON( … )`·`OFF( … )`·`BELT( n, CW | CCW | OFF )`, 여럿이면 모두. `BELT` 는 3.5절 `BELTn_CW`·`BELTn_CCW` 마스크로 그 방향 마스크를 켜고 그 벨트의 나머지 출력을 끈다(`BELT_ON` 스텝과 같은 값). 한 출력을 켜면서 끄면 컴파일 오류.
+- `MAN_START_SW( 프로파일, 입력 )`(v0.60.0): 지금 프로파일의 줄의 입력이 켜져 있으면 START 스위치가 눌린 것과 똑같이 다룬다(출발·재출발·길게 누름, 본체 START 와 OR, 줄이 여럿이면 모두 OR). 시퀀스가 도는 동안 START 를 무시하는 규칙도 같이 걸린다. 모드와 상관없고, 줄이 없으면 동작이 그대로다. 입력은 0\~31(`IN_EXT_1..16`·`IN_IF_1..5` 등), 프로파일 0·범위 밖·입력 범위 밖은 컴파일 오류.
 - 넘기기: `manual_bind( 표, 줄 수, 프로파일 표, 행 수 )`, `site_manual()` 에서 `manual_tick()`. 줄 하나 10워드(C28x).
 - 표로 쓰지 않는 것(상태기계·주행 명령·오류 값 비교)은 `site_manual()` C 에 남긴다.
 

@@ -8,6 +8,7 @@
 #include "agv/io.h"
 #include "agv/ioport.h"
 #include "agv/link.h"
+#include "agv/manual.h"
 #include "agv/motor.h"
 #include "agv/param.h"
 #include "agv/seq.h"
@@ -591,9 +592,15 @@ static void manual_forback(int16_t start_edge)
     }
 }
 
+/* 본체 START 스위치 또는 지금 프로파일의 MAN_START_SW 입력 */
+static int16_t start_input(void)
+{
+    return (int16_t)(io_in(IN_START_SW) || manual_start_sw());
+}
+
 static void input_filter(void)
 {
-    int16_t start_on = (int16_t)io_in(IN_START_SW);
+    int16_t start_on = start_input();
     int16_t stop_on = (int16_t)io_in(IN_STOP_SW);
     /* 원본은 원시 값의 상승 에지다. 스위치가 저활성이라 "놓는 순간"이다 */
     int16_t start_edge = (int16_t)(s_run.start_prev && !start_on);
@@ -825,8 +832,8 @@ static void start_low_speed(void)
 static void start_switch_high(void)
 {
     if (s_run.drive_started || (s_run.init_step != START_LOW_DONE)) { return; }
-    if (io_in(IN_START_SW)) { D.drive_start_cnt++; }
-    else                    { D.drive_start_cnt = 0; }
+    if (start_input()) { D.drive_start_cnt++; }
+    else               { D.drive_start_cnt = 0; }
     if (D.drive_start_cnt >= START_HOLD_TICKS) {
         D.speed_cmd = P.target_speed;
         D.step = DRIVE_CHANGE_SPEED;

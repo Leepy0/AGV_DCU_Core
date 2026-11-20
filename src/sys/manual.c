@@ -41,7 +41,7 @@ void manual_tick(void)
         else if (k == MAN_K_OBS_B) {
             if (hit) { agv_drive.obs_b_ext = (int16_t)io_in((uint16_t)r->set); }
         }
-        else {
+        else if (k != MAN_K_START_SW) {     /* START 입력은 manual_start_sw 가 따로 훑는다 */
             if (hit && !done && mode_ok[k] && ((key == 0u) || (ui_key() == key)) && seq_mask_true(in, r->on, r->off)) {
                 io_out_masks(r->set, r->clr);
                 done = 1;
@@ -50,6 +50,18 @@ void manual_tick(void)
         }
     }
     run_forback_input(fb);
+}
+
+uint16_t manual_start_sw(void)
+{
+    uint16_t pf = seq_profile();
+    uint16_t i;
+
+    for (i = 0; (pf != 0u) && (i < s_nrows); i++) {
+        const man_row_t *r = &s_rows[i];
+        if (((r->kind & 0x0Fu) == MAN_K_START_SW) && (r->profile == pf) && io_in((uint16_t)r->set)) { return 1; }
+    }
+    return 0;
 }
 
 /* seq_pick_profile 과 같은 행을 고른다 */

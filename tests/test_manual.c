@@ -38,6 +38,9 @@ MANUAL_BEGIN( s_tab )
     MAN_ELSE( PF_B, JOG,                             NO_OUT )
     MAN_FB_SW( PF_C, IN_IF_3 )
     MAN_OBS_B( PF_A, IN_IF_4 )
+    MAN_START_SW( PF_A, IN_IF_5 )                                                   /* 시작 입력: 같은 프로파일 둘은 OR */
+    MAN_START_SW( PF_A, IN_IF_4 )
+    MAN_START_SW( PF_B, IN_IF_2 )
 MANUAL_END
 
 LOAD_IF( s_lif_4, IN( ON(IN_IF_1) ), IN( OFF(IN_IF_2), ON(IN_IF_3) ) )
@@ -60,6 +63,15 @@ MANUAL_BEGIN( s_neg )  MAN_ELSE( 0, JOG, NO_OUT )  MANUAL_END                   
 #endif
 #ifdef NEG_MAN_PROFILE_RANGE
 MANUAL_BEGIN( s_neg )  MAN_FB_SW( 64, IN_IF_3 )  MANUAL_END                                      /* 6비트 밖 */
+#endif
+#ifdef NEG_MAN_START_PROFILE_0
+MANUAL_BEGIN( s_neg )  MAN_START_SW( 0, IN_IF_3 )  MANUAL_END                                       /* 프로파일 없음 */
+#endif
+#ifdef NEG_MAN_START_PROFILE_RANGE
+MANUAL_BEGIN( s_neg )  MAN_START_SW( 64, IN_IF_3 )  MANUAL_END                                      /* 6비트 밖 */
+#endif
+#ifdef NEG_MAN_START_ID
+MANUAL_BEGIN( s_neg )  MAN_START_SW( PF_A, IN_AMP_L_OVERLOAD )  MANUAL_END                          /* 0~31 밖 입력 */
 #endif
 #ifdef NEG_MAN_LOAD_EMPTY
 LOAD_IF( s_neg_if, NO_IN )                                                                        /* 늘 참인 적재 조건 */
@@ -157,6 +169,25 @@ int main(void)
     assert(o == (OUTB(OUT_EXT_3) | OUTB(OUT_EXT_11)));
 
     assert(s_tab[16].kind == MAN_K_FB_SW && s_tab[16].set == IN_IF_3);  /* 방향 전환 입력은 앱 대조 시험이 본다 */
+
+    /* 시작 입력: 지금 프로파일의 줄만, 줄이 여럿이면 OR. 다른 줄(사슬·방향 전환·추가 장애물)과 서로 영향이 없다 */
+    assert(s_tab[18].kind == MAN_K_START_SW && s_tab[18].profile == PF_A && s_tab[18].set == IN_IF_5 && s_tab[18].on == 0UL && s_tab[18].clr == 0UL);
+    set_id(4);
+    (void)run_tick(0u);   assert(manual_start_sw() == 0);
+    (void)run_tick(16u);  assert(manual_start_sw() == 1);
+    (void)run_tick(8u);   assert(manual_start_sw() == 1);     /* 둘째 줄 */
+    (void)run_tick(2u);   assert(manual_start_sw() == 0);     /* 프로파일 B 의 입력 */
+    set_id(6);
+    (void)run_tick(2u);   assert(manual_start_sw() == 1);
+    (void)run_tick(16u | 8u); assert(manual_start_sw() == 0);
+    set_id(5);                                              /* 줄이 없는 프로파일 */
+    (void)run_tick(31u);  assert(manual_start_sw() == 0);
+    set_id(7);                                              /* 프로파일 없음 */
+    (void)run_tick(31u);  assert(manual_start_sw() == 0);
+    manual_bind(s_tab, 0, s_prof, (uint16_t)(sizeof(s_prof) / sizeof(s_prof[0])));   /* 표 없음 */
+    set_id(4);
+    (void)run_tick(31u);  assert(manual_start_sw() == 0);
+    manual_bind(s_tab, (uint16_t)(sizeof(s_tab) / sizeof(s_tab[0])), s_prof, (uint16_t)(sizeof(s_prof) / sizeof(s_prof[0])));
 
     /* 적재: 호기 4 조건 둘, 6 조건 하나, 5 는 센서 묶음(-1), 그 밖 없음(-1) */
     set_id(4);

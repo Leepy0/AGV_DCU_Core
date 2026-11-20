@@ -17,6 +17,7 @@
 #include "agv/ioport.h"
 #include "agv/link.h"
 #include "agv/log.h"
+#include "agv/manual.h"
 #include "agv/motor.h"
 #include "agv/ident.h"
 #include "agv/param.h"
@@ -140,6 +141,11 @@ static const seq_call_fn s_calls[] = { stop_len_call, alias_call, ref_arm };
 PROFILE_TABLE_BEGIN( s_profiles )
     PROFILE_LOAD( 1, 0, 77, 77, LOAD_SENSORS(IN_EXT_1, IN_EXT_2) )
 PROFILE_TABLE_END
+/* 수동 표의 시작 입력 시험용(호기 77 = 프로파일 1) */
+MANUAL_BEGIN( s_man_start )
+    MAN_START_SW( 2, IN_IF_2 )
+    MAN_START_SW( 1, IN_IF_1 )
+MANUAL_END
 /* 현장 적재 판정 시험용. 음수 = 판정 없음(센서 묶음을 쓴다) */
 static int16_t s_load_site = -1;
 static int16_t site_load(void) { return s_load_site; }
@@ -2202,6 +2208,98 @@ static void seq_standby_run(uint16_t id, int restart)
     for (i = 0; (i < 3000) && !D.flag_ready && !D.flag_run; i++) { guide_reply(0); tick(); }
     assert(D.flag_ready || D.flag_run);
     assert(run_standby_num() == 0);                          /* 출발하면 대기 번호가 정리된다 */
+}
+
+/* 수동 표 MAN_START_SW: 지금 프로파일의 줄의 입력이 켜져 있으면 START 스위치와 똑같다(OR). 다른 프로파일의 줄은 무시, 줄이 없으면 그대로,
+ * 시퀀스가 도는 동안은 START 와 같이 무시, 길게 누르면 목표 속도 복귀 */
+static void if_in(uint16_t id, int on)
+{
+    uint16_t *r = &host.bus_in[(id == IN_IF_1) ? BUS_IN_C : BUS_IN_D];
+    uint16_t m = (id == IN_IF_1) ? 0x80u : 0x01u;
+    *r = on ? (uint16_t)(*r & ~m) : (uint16_t)(*r | m);
+}
+
+static void man_start_boot(int rows)
+{
+    boot();
+    (void)param_set(P_AGV_ID, 77);
+    seq_pick_profile();
+    assert(seq_profile() == 1u);
+    manual_bind(s_man_start, (uint16_t)rows, s_profiles, 1);
+}
+
+static void test_man_start_sw(void)
+{
+    int i, held;
+
+    /* 본체 START 스위치로 출발한 모습(비교 기준) */
+    man_start_boot(2);
+    press_start();
+    assert(D.flag_ready == 1 && run_auto_started());
+
+    /* (가) 다른 프로파일의 줄(IN_IF_2)은 무시 */
+    man_start_boot(2);
+    if_in(IN_IF_2, 1);  tick();  assert(io_in(IN_IF_2));
+    if_in(IN_IF_2, 0);  ticks(3);
+    assert(!D.flag_ready && !D.flag_run && !run_auto_started());
+
+    /* (나) 줄의 입력을 켠 동안은 출발하지 않고, 놓는 순간 START 스위치와 같은 출발 */
+    man_start_boot(2);
+    if_in(IN_IF_1, 1);  tick();
+    assert(io_in(IN_IF_1) && !D.flag_ready);
+    if_in(IN_IF_1, 0);  tick();
+    assert(D.flag_ready == 1 && run_auto_started());
+    guide_reply(0);  tick();
+    assert(D.flag_run == 1 && D.control == RUN_DRIVE);
+    /* 본체 START 가 눌려 있는 동안 외부 입력을 놓아도 아직 출발하지 않는다(OR) */
+    man_start_boot(2);
+    raw_a(RAW_START, 0);  if_in(IN_IF_1, 1);  tick();
+    if_in(IN_IF_1, 0);  tick();
+    assert(!D.flag_ready);
+    raw_a(0, RAW_START);  tick();
+    assert(D.flag_ready == 1);
+
+    /* (다) 시퀀스가 도는 동안은 무시(START 스위치와 같다) */
+    man_start_boot(2);
+    seq_request(SEQ_LOAD);
+    ticks(2);
+    assert(seq_is_active());
+    if_in(IN_IF_1, 1);  tick();
+    if_in(IN_IF_1, 0);  ticks(2);
+    assert(seq_is_active() && !D.flag_ready && !D.flag_run && !D.wait_start && !D.run_restart);
+    seq_abort_all();
+    run_standby_clear(0);
+
+    /* (라) 줄이 없으면 기존 그대로: 입력은 무시, START 스위치는 출발 */
+    man_start_boot(0);
+    if_in(IN_IF_1, 1);  tick();
+    if_in(IN_IF_1, 0);  ticks(3);
+    assert(!D.flag_ready && !D.flag_run);
+    press_start();
+    assert(D.flag_ready == 1);
+
+    /* 길게 누름: 주행 중 쥐고 있는 틱 수를 센다. 외부 입력도 본체 START 와 같은 틱 수에서 같은 지령 속도가 된다 */
+    {
+        int16_t spd[2];
+        for (held = 0; held < 2; held++) {
+            int peak = 0;
+            man_start_boot(held ? 2 : 0);
+            drive_up();
+            for (i = 0; i < 40; i++) { run_scan(1); }
+            assert(D.drive_start_cnt == 0);
+            if (held) { if_in(IN_IF_1, 1); } else { raw_a(RAW_START, 0); }
+            for (i = 0; i < 300; i++) {
+                run_scan(1);
+                if (D.drive_start_cnt > peak) { peak = D.drive_start_cnt; }
+            }
+            assert(peak >= 100);
+            spd[held] = D.speed_cmd;
+        }
+        assert(spd[0] == spd[1]);
+    }
+    manual_bind(0, 0, 0, 0);
+    boot();
+    printf("  man start sw ok\n");
 }
 
 static void test_seq_standby_hold(void)
@@ -4804,6 +4902,7 @@ int main(void)
     test_acs_report_retransmit();
     test_seq_standby_cleanup();
     test_seq_standby_hold();
+    test_man_start_sw();
     test_tape_turn_request();
     test_move_cross_tag();
     test_tune_entry();

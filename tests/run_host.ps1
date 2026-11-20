@@ -45,7 +45,7 @@ foreach ($f in $dslNeg.Keys) {
         if ($LASTEXITCODE -eq 0) { Write-Output "dsl $f NEG_$n compiled"; $failed++ }
     }
 }
-foreach ($n in 'MAN_SETCLR', 'MAN_BELT_NODIR', 'MAN_PROFILE_0', 'MAN_PROFILE_RANGE', 'MAN_LOAD_EMPTY', 'MAN_LOAD_NAME') {
+foreach ($n in 'MAN_SETCLR', 'MAN_BELT_NODIR', 'MAN_PROFILE_0', 'MAN_PROFILE_RANGE', 'MAN_START_PROFILE_0', 'MAN_START_PROFILE_RANGE', 'MAN_START_ID', 'MAN_LOAD_EMPTY', 'MAN_LOAD_NAME') {
     & cmd /c "gcc -std=gnu99 -DAGV_HOST_BUILD -Iinclude -Ihal/host -DNEG_$n -fsyntax-only tests/test_manual.c >nul 2>nul"
     if ($LASTEXITCODE -eq 0) { Write-Output "NEG_$n compiled"; $failed++ }
 }
