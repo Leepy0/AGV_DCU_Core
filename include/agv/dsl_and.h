@@ -149,9 +149,9 @@
 #define DSL_CN(c)         DSL_CAT(DSL_CNP_, DSL_IS_PAREN(c))(c)
 #define DSL_CNP_1(c)      c
 #define DSL_CNP_0(c)      DSL_CN_##c
-/* 수동 표 조건 칸: 키(KEY 하나) + 입력 조건. 키 말고 다른 상태·둘째 ANY 는 오류. 칸 둘 "키, 입력 조건" */
+/* 수동 표 조건 칸: 키(KEY 하나) + 입력 조건. 키 말고 다른 상태·둘째 상태(KEY 둘 포함)·둘째 ANY 는 오류. 칸 둘 "키, 입력 조건" */
 #define DSL_MN_DSL_ANDREC(k1, a1, b1, k2, a2, b2, c, m2) \
-    ((k1) ? (a1) : 0) + (0 * sizeof(char[(((k1) == 0) || ((k1) == XC_KEY)) ? 1 : -1])), \
+    ((k1) ? (a1) : 0) + (0 * sizeof(char[((((k1) == 0) || ((k1) == XC_KEY)) && ((k2) == 0)) ? 1 : -1])), \
     ((c) + (0 * sizeof(char[((m2) == 0) ? 1 : -1])))
 #define DSL_MC_AND(...)   DSL_CAT(DSL_MN_, AND(__VA_ARGS__))
 /* 점멸(seq_dsl.h DSL_FLK_0): k1 이 0 이면 예전 칸 배치, 아니면 상태 인자가 arg0·arg1 을 쓰므로 주기·출력을 out 에 넣는다(seq.c flk_cells).

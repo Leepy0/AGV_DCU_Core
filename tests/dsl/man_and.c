@@ -20,6 +20,16 @@ MANUAL_BEGIN( m_neg )
     MAN( 5, JOG,  AND( FORWARD, KEY( UP ) ),    BELT( 1, CW ) )
 MANUAL_END
 #endif
+#ifdef NEG_MAN_STATE2
+MANUAL_BEGIN( m_neg )
+    MAN( 5, JOG,  AND( KEY( UP ), FORWARD ),    BELT( 1, CW ) )   /* 키 뒤의 둘째 상태가 조용히 버려지던 것 */
+MANUAL_END
+#endif
+#ifdef NEG_MAN_KEY2
+MANUAL_BEGIN( m_neg )
+    MAN( 5, JOG,  AND( KEY( UP ), KEY( DOWN ) ), BELT( 1, CW ) )  /* 둘째 KEY 도 오류 */
+MANUAL_END
+#endif
 #ifdef NEG_MAN_ANY2
 MANUAL_BEGIN( m_neg )
     MAN( 5, JOG,  AND( ANY(SEN_1, SEN_2), ANY(SEN_3, SEN_4) ), BELT( 1, CW ) )
