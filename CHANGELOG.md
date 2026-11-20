@@ -5,10 +5,10 @@
 표 형식은 **추가뿐**이다. 옛 표는 그대로 컴파일되고 같은 바이트를 낸다(`MAN_K_START_SW` 는 열거형 끝에 붙였다). `MAN_START_SW` 줄이 없는 사이트는 동작이 한 틱도 다르지 않다.
 
 - 수동 표 `MAN_START_SW( 프로파일, 입력 )`: 지금 프로파일(`seq_profile()`)과 같은 줄의 입력이 켜져 있으면 본체 START 스위치가 눌린 것과 똑같이 다룬다(OR). 줄이 여럿이면 모두 OR. 출발·재출발 에지와 주행 중 길게 누름(목표 속도 복귀)이 같은 길로 읽는다(`run.c` `start_input()`). 시퀀스가 도는 동안 START 를 무시하는 v0.58.0 규칙도 같이 걸린다. 프로파일 1\~63(0·범위 밖은 컴파일 오류), 입력 ID 0\~31(밖은 컴파일 오류). 줄 크기 10워드 그대로(`set` 칸이 입력 ID).
-- 읽는 방식: `manual_start_sw()`(`manual.c`)가 부를 때마다 표를 훑는다(`manual_tick`·`site_manual` 과 상관없고 한 틱 늦지 않는다). `manual_tick` 은 이 줄을 건너뛴다.
+- 읽는 방식: `manual_tick` 이 `MAN_FB_SW` 처럼 표를 훑으며 지금 프로파일의 `MAN_START_SW` 입력 OR 을 `run_start_ext_input( on )` 으로 넘기고, run.c 가 `start_input()` 에서 본체 START 와 OR 한다. 프로파일이 없거나 맞는 줄이 없으면 매 틱 0 을 넘긴다. `manual_tick` 이 넘기므로 외부 입력은 본체 START 보다 한 틱(10 ms) 늦다(`site_manual` 에서 `manual_tick` 을 부르는 사이트에만 해당). run.c 는 `manual.o` 를 참조하지 않아 수동 표를 안 쓰는 사이트의 크기가 늘지 않는다.
 - 바뀌지 않은 곳: `IN_START_SW` 를 읽는 UI·파라미터 메뉴·튜닝·키 스캔 코드는 그대로다(본체 스위치만 본다).
-- 시험: `test_manual.c`(`manual_start_sw` 프로파일별·OR·표 없음, 컴파일 오류 3종 `MAN_START_PROFILE_0`·`MAN_START_PROFILE_RANGE`·`MAN_START_ID`), `test_sys.c`(다른 프로파일 줄 무시, 입력을 켰다 떼면 START 와 같은 출발, 본체 START 와 OR, 시퀀스 중 무시, 줄 없음 그대로, 길게 누름 틱 수·지령 속도 같음).
-- 크기(`examples/empty_site` 코어 이미지, cl2000 18.12.2.LTS, v0.59.0 대비): `.text` +269 워드(0x10D), `.econst`·`.ebss`·`.cinit` ±0.
+- 시험: `test_manual.c`(표에 섞여도 사슬·방향 전환·추가 장애물이 그대로, 컴파일 오류 3종 `MAN_START_PROFILE_0`·`MAN_START_PROFILE_RANGE`·`MAN_START_ID`), `test_sys.c`(다른 프로파일 줄 무시, 입력을 켰다 떼면 START 와 같은 출발(한 틱 늦다), 본체 START 와 OR, 프로파일이 없어지면 값이 남지 않음, 시퀀스 중 무시, 줄 없음 그대로, 길게 누름 틱 수·지령 속도 같음).
+- 크기(`examples/empty_site` 코어 이미지, cl2000 18.12.2.LTS, v0.59.0 대비, `AGV_DEV_TESTS` 1·0 같다): `.text` +18 워드, `.econst`·`.ebss`·`.cinit` ±0. `run.o` 는 `manual.o` 심볼을 참조하지 않는다(`nm2000`).
 
 ## v0.59.0 (2026-11-20, ACS 보고 종류 IDLE, 수동 표 조건 구멍 막기)
 

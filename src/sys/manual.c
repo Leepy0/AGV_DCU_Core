@@ -24,6 +24,7 @@ void manual_tick(void)
     uint32_t in = io_in_mask();
     uint16_t mode_ok[2];
     uint16_t fb = IN_IF_5;           /* run.c 의 기본 입력 */
+    uint16_t start_ext = 0;          /* MAN_START_SW 입력의 OR */
     uint16_t done = 0, i;
 
     mode_ok[MAN_K_IDLE] = (uint16_t)(run_is_idle() && !agv_drive.flag_ready && !agv_drive.stop_sw);
@@ -41,7 +42,10 @@ void manual_tick(void)
         else if (k == MAN_K_OBS_B) {
             if (hit) { agv_drive.obs_b_ext = (int16_t)io_in((uint16_t)r->set); }
         }
-        else if (k != MAN_K_START_SW) {     /* START 입력은 manual_start_sw 가 따로 훑는다 */
+        else if (k == MAN_K_START_SW) {
+            if (hit && io_in((uint16_t)r->set)) { start_ext = 1; }
+        }
+        else {
             if (hit && !done && mode_ok[k] && ((key == 0u) || (ui_key() == key)) && seq_mask_true(in, r->on, r->off)) {
                 io_out_masks(r->set, r->clr);
                 done = 1;
@@ -50,18 +54,7 @@ void manual_tick(void)
         }
     }
     run_forback_input(fb);
-}
-
-uint16_t manual_start_sw(void)
-{
-    uint16_t pf = seq_profile();
-    uint16_t i;
-
-    for (i = 0; (pf != 0u) && (i < s_nrows); i++) {
-        const man_row_t *r = &s_rows[i];
-        if (((r->kind & 0x0Fu) == MAN_K_START_SW) && (r->profile == pf) && io_in((uint16_t)r->set)) { return 1; }
-    }
-    return 0;
+    run_start_ext_input(start_ext);
 }
 
 /* seq_pick_profile 과 같은 행을 고른다 */

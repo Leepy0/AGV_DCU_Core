@@ -8,7 +8,6 @@
 #include "agv/io.h"
 #include "agv/ioport.h"
 #include "agv/link.h"
-#include "agv/manual.h"
 #include "agv/motor.h"
 #include "agv/param.h"
 #include "agv/seq.h"
@@ -57,6 +56,7 @@ static struct {
     int16_t dir_change;       /* Dir_Change_Flag */
     int16_t wait_sec, wait_ticks;
     int16_t start_prev, stop_prev, fb_prev;
+    int16_t start_ext;        /* run_start_ext_input */
     int16_t stop_hold;        /* Cnt_Stop_SW_1sec_Flag */
     int16_t bumper_run, bumper_cnt;
     int16_t start_hold;       /* 시퀀스 중에 받은 ACS 출발(b0 run_restart, b1 wait_start) */
@@ -89,6 +89,7 @@ void run_reset(void)
     s_run.wait_sec = s_run.wait_ticks = 0;
     s_run.start_prev = s_run.stop_prev = 0;
     s_run.fb_prev = 0;
+    s_run.start_ext = 0;
     s_run.stop_hold = 0;
     s_run.bumper_run = s_run.bumper_cnt = 0;
     s_run.standby = s_run.standby_auto = s_run.standby_cnt = s_run.standby_seq = 0;
@@ -126,6 +127,7 @@ void     run_forback_input(uint16_t id)
         s_run.fb_prev = 0;
     }
 }
+void     run_start_ext_input(uint16_t on) { s_run.start_ext = (int16_t)on; }
 void     run_remote_pause(uint16_t on)  { s_remote_pause = on; }
 void     run_restart_now(void)      { D.run_restart = 1; }
 void     run_dir_change(int16_t c)  { s_run.dir_change = c; }
@@ -592,10 +594,10 @@ static void manual_forback(int16_t start_edge)
     }
 }
 
-/* 본체 START 스위치 또는 지금 프로파일의 MAN_START_SW 입력 */
+/* 본체 START 스위치 또는 수동 표의 MAN_START_SW 입력(manual_tick 이 넘긴 값, 한 틱 늦다) */
 static int16_t start_input(void)
 {
-    return (int16_t)(io_in(IN_START_SW) || manual_start_sw());
+    return (int16_t)(io_in(IN_START_SW) || s_run.start_ext);
 }
 
 static void input_filter(void)

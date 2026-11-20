@@ -170,24 +170,8 @@ int main(void)
 
     assert(s_tab[16].kind == MAN_K_FB_SW && s_tab[16].set == IN_IF_3);  /* 방향 전환 입력은 앱 대조 시험이 본다 */
 
-    /* 시작 입력: 지금 프로파일의 줄만, 줄이 여럿이면 OR. 다른 줄(사슬·방향 전환·추가 장애물)과 서로 영향이 없다 */
+    /* 시작 입력 줄: 사슬·방향 전환·추가 장애물과 섞여도 manual_tick 이 건너뛴다(위 시험이 그대로 통과). 입력 쪽 동작은 test_sys.c */
     assert(s_tab[18].kind == MAN_K_START_SW && s_tab[18].profile == PF_A && s_tab[18].set == IN_IF_5 && s_tab[18].on == 0UL && s_tab[18].clr == 0UL);
-    set_id(4);
-    (void)run_tick(0u);   assert(manual_start_sw() == 0);
-    (void)run_tick(16u);  assert(manual_start_sw() == 1);
-    (void)run_tick(8u);   assert(manual_start_sw() == 1);     /* 둘째 줄 */
-    (void)run_tick(2u);   assert(manual_start_sw() == 0);     /* 프로파일 B 의 입력 */
-    set_id(6);
-    (void)run_tick(2u);   assert(manual_start_sw() == 1);
-    (void)run_tick(16u | 8u); assert(manual_start_sw() == 0);
-    set_id(5);                                              /* 줄이 없는 프로파일 */
-    (void)run_tick(31u);  assert(manual_start_sw() == 0);
-    set_id(7);                                              /* 프로파일 없음 */
-    (void)run_tick(31u);  assert(manual_start_sw() == 0);
-    manual_bind(s_tab, 0, s_prof, (uint16_t)(sizeof(s_prof) / sizeof(s_prof[0])));   /* 표 없음 */
-    set_id(4);
-    (void)run_tick(31u);  assert(manual_start_sw() == 0);
-    manual_bind(s_tab, (uint16_t)(sizeof(s_tab) / sizeof(s_tab[0])), s_prof, (uint16_t)(sizeof(s_prof) / sizeof(s_prof[0])));
 
     /* 적재: 호기 4 조건 둘, 6 조건 하나, 5 는 센서 묶음(-1), 그 밖 없음(-1) */
     set_id(4);

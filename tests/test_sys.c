@@ -292,13 +292,14 @@ TAG_POOL_END
 TAG_PACKED_R( s_tag_pk, s_prules, s_px, s_pin, s_pact, s_prange )
 
 static int s_manual_count;
+static int s_man_tick;            /* 1 = site_manual 이 manual_tick 을 부른다(MAN_START_SW 시험) */
 void site_register(void)
 {
     param_default_type(0);
     (void)seq_bind(&s_site);
     tagact_bind(s_rules, sizeof(s_rules) / sizeof(s_rules[0]), 0);
 }
-void site_manual(void) { s_manual_count++; if (s_ref.on) { ref_tick(); } }
+void site_manual(void) { s_manual_count++; if (s_man_tick) { manual_tick(); } if (s_ref.on) { ref_tick(); } }
 
 /* ---- 도구 ---- */
 
@@ -2211,7 +2212,7 @@ static void seq_standby_run(uint16_t id, int restart)
 }
 
 /* 수동 표 MAN_START_SW: 지금 프로파일의 줄의 입력이 켜져 있으면 START 스위치와 똑같다(OR). 다른 프로파일의 줄은 무시, 줄이 없으면 그대로,
- * 시퀀스가 도는 동안은 START 와 같이 무시, 길게 누르면 목표 속도 복귀 */
+ * 시퀀스가 도는 동안은 START 와 같이 무시, 길게 누르면 목표 속도 복귀. manual_tick 이 넘기는 값이라 외부 입력은 본체 START 보다 한 틱 늦다 */
 static void if_in(uint16_t id, int on)
 {
     uint16_t *r = &host.bus_in[(id == IN_IF_1) ? BUS_IN_C : BUS_IN_D];
@@ -2226,6 +2227,7 @@ static void man_start_boot(int rows)
     seq_pick_profile();
     assert(seq_profile() == 1u);
     manual_bind(s_man_start, (uint16_t)rows, s_profiles, 1);
+    s_man_tick = 1;
 }
 
 static void test_man_start_sw(void)
@@ -2240,23 +2242,32 @@ static void test_man_start_sw(void)
     /* (가) 다른 프로파일의 줄(IN_IF_2)은 무시 */
     man_start_boot(2);
     if_in(IN_IF_2, 1);  tick();  assert(io_in(IN_IF_2));
-    if_in(IN_IF_2, 0);  ticks(3);
+    if_in(IN_IF_2, 0);  ticks(4);
     assert(!D.flag_ready && !D.flag_run && !run_auto_started());
 
     /* (나) 줄의 입력을 켠 동안은 출발하지 않고, 놓는 순간 START 스위치와 같은 출발 */
     man_start_boot(2);
-    if_in(IN_IF_1, 1);  tick();
+    if_in(IN_IF_1, 1);  ticks(3);
     assert(io_in(IN_IF_1) && !D.flag_ready);
-    if_in(IN_IF_1, 0);  tick();
+    if_in(IN_IF_1, 0);  ticks(2);                           /* 한 틱 늦다 */
     assert(D.flag_ready == 1 && run_auto_started());
     guide_reply(0);  tick();
     assert(D.flag_run == 1 && D.control == RUN_DRIVE);
     /* 본체 START 가 눌려 있는 동안 외부 입력을 놓아도 아직 출발하지 않는다(OR) */
     man_start_boot(2);
-    raw_a(RAW_START, 0);  if_in(IN_IF_1, 1);  tick();
-    if_in(IN_IF_1, 0);  tick();
+    raw_a(RAW_START, 0);  if_in(IN_IF_1, 1);  ticks(2);
+    if_in(IN_IF_1, 0);  ticks(3);
     assert(!D.flag_ready);
     raw_a(0, RAW_START);  tick();
+    assert(D.flag_ready == 1);
+
+    /* 프로파일이 없어지면(0) 켜져 있던 값이 남지 않는다: 매 틱 0 을 넘기므로 입력이 켜진 채여도 놓은 것으로 본다 */
+    man_start_boot(2);
+    if_in(IN_IF_1, 1);  ticks(3);
+    (void)param_set(P_AGV_ID, 5);
+    seq_pick_profile();
+    assert(seq_profile() == 0u);
+    ticks(2);
     assert(D.flag_ready == 1);
 
     /* (다) 시퀀스가 도는 동안은 무시(START 스위치와 같다) */
@@ -2264,16 +2275,16 @@ static void test_man_start_sw(void)
     seq_request(SEQ_LOAD);
     ticks(2);
     assert(seq_is_active());
-    if_in(IN_IF_1, 1);  tick();
-    if_in(IN_IF_1, 0);  ticks(2);
+    if_in(IN_IF_1, 1);  ticks(2);
+    if_in(IN_IF_1, 0);  ticks(3);
     assert(seq_is_active() && !D.flag_ready && !D.flag_run && !D.wait_start && !D.run_restart);
     seq_abort_all();
     run_standby_clear(0);
 
     /* (라) 줄이 없으면 기존 그대로: 입력은 무시, START 스위치는 출발 */
     man_start_boot(0);
-    if_in(IN_IF_1, 1);  tick();
-    if_in(IN_IF_1, 0);  ticks(3);
+    if_in(IN_IF_1, 1);  ticks(2);
+    if_in(IN_IF_1, 0);  ticks(4);
     assert(!D.flag_ready && !D.flag_run);
     press_start();
     assert(D.flag_ready == 1);
@@ -2297,6 +2308,7 @@ static void test_man_start_sw(void)
         }
         assert(spd[0] == spd[1]);
     }
+    s_man_tick = 0;
     manual_bind(0, 0, 0, 0);
     boot();
     printf("  man start sw ok\n");

@@ -27,6 +27,5 @@ enum { MAN_K_IDLE = 0, MAN_K_JOG, MAN_K_FB_SW, MAN_K_OBS_B, MAN_K_START_SW };
 void    manual_bind(const man_row_t *rows, uint16_t n, const profile_row_t *prof, uint16_t nprof);
 void    manual_tick(void);      /* 10 ms. site_manual 이 부른다 */
 int16_t manual_load(void);      /* seq_site_t.load_fn 에 넣는다. 1 적재, 0 공차, -1 이 프로파일은 적재 조건 없음 */
-uint16_t manual_start_sw(void);  /* 지금 프로파일의 MAN_START_SW 입력이 하나라도 켜져 있으면 1(run.c 가 START 스위치와 OR). 매 틱 표를 훑는다 */
 
 #endif /* AGV_MANUAL_H */
