@@ -8,7 +8,7 @@
 #ifndef AGV_VERSION_H
 #define AGV_VERSION_H
 
-#define AGV_CORE_VER           v0_59_0      /* 태그 이름의 점을 밑줄로. 릴리스마다 여기만 바꾼다 */
+#define AGV_CORE_VER           v0_60_0      /* 태그 이름의 점을 밑줄로. 릴리스마다 여기만 바꾼다 */
 
 #define AGV_VER_CAT2(a, b)     a##_##b
 #define AGV_VER_CAT(a, b)      AGV_VER_CAT2(a, b)

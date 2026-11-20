@@ -510,7 +510,8 @@ typedef unsigned long long dsl_cond_t;
  * 출력(여럿이면 모두): ON( 출력… ) 켬, OFF( 출력… ) 끔, BELT( n, CW | CCW | OFF ). 한 출력을 켜면서 끄면 컴파일 오류.
  *   BELT 는 사이트 BELTn_CW·BELTn_CCW 마스크로 그 방향 마스크를 켜고 그 벨트의 나머지 출력을 끈다(BELT_ON 스텝과 같은 값).
  * MAN_FB_SW( 프로파일, 입력 ): 수동 방향 전환 스위치 입력(맞는 줄이 없으면 IN_IF_5). MAN_OBS_B( 프로파일, 입력 ): 매 틱
- * agv_drive.obs_b_ext = 그 입력. 둘 다 모드와 상관없이 매 틱 */
+ * agv_drive.obs_b_ext = 그 입력. 둘 다 모드와 상관없이 매 틱.
+ * MAN_START_SW( 프로파일, 입력 ): 그 입력이 켜져 있으면 START 스위치가 눌린 것과 똑같이 본다(본체 START 와 OR, 줄이 여럿이면 모두 OR, manual_tick 이 넘겨 한 틱 늦다) */
 #define MANUAL_BEGIN(name)  const man_row_t name[] = {
 #define MANUAL_END          };
 /* 프로파일 1~63(압축 태그 표의 프로파일 칸 6비트와 같은 범위) */
@@ -537,6 +538,7 @@ typedef unsigned long long dsl_cond_t;
 #define MAN_ELSE(pf, mode, ...)     DSL_MROW_(pf, DSL_MM_##mode | MAN_F_ELSE, 0, NO_IN, DSL_MW(__VA_ARGS__))
 #define MAN_FB_SW(pf, pin)   { DSL_MPF(pf), MAN_K_FB_SW, 0UL, 0UL, (uint32_t)(pin) + DSL_ID_OK(pin), 0UL },
 #define MAN_OBS_B(pf, pin)   { DSL_MPF(pf), MAN_K_OBS_B, 0UL, 0UL, (uint32_t)(pin) + DSL_ID_OK(pin), 0UL },
+#define MAN_START_SW(pf, pin) { DSL_MPF(pf), MAN_K_START_SW, 0UL, 0UL, (uint32_t)(pin) + DSL_ID_OK(pin), 0UL },
 
 /* ---- 태그 표 ---- */
 #define TAG_TABLE_BEGIN(name)  const tag_rule_t name[] = {
