@@ -21,6 +21,13 @@ SEQ_BEGIN( s_new )
     WHEN_STABLE( IN( ON(SEN_1), ANY_ON(SEN_2, SEN_3) ), 0, B )
     WHEN_ACCUM( AND( ON(SEN_1), OFF(SEN_2) ), PARAM_TIME( ST, SEC ), B )
     WHEN_ACCUM( IN( OFF(SEN_H) ), 65534, A )
+    WAIT( AND( ON(SEN_1), STATE( 3, 1 ) ) )
+    WHEN( AND( NOT( STATE( 15, 2, 9 ) ) ), A )
+    WAIT_TO( AND( STATE( 0, 1, 65535 ), OFF(SEN_2) ), 300, B )
+    WHEN_OUT( IN( ON(OUT_EXT_1), OFF(OUT_EXT_2) ), A )
+    WHEN_OUT( AND( ON(OUT_EXT_1) ), B )
+    ACS( DISPLAY, 13 )
+    OUT_FLICKER_UNTIL_IN( OUT_EXT_1, 50, AND( ON(SEN_1), STATE( 2, 7 ) ) )
 SEQ_END
 SEQ_BEGIN( s_ref )
     DSL_STEP_C( SK_WAIT_STABLE, SEQ_NO_LABEL, 200, 1, 0, IN( ON(SEN_1) ), 0 )
@@ -39,11 +46,18 @@ SEQ_BEGIN( s_ref )
     DSL_STEP_C( SK_WHEN_STABLE, B, 0, 0, 0, IN( ON(SEN_1), ANY_ON(SEN_2, SEN_3) ), 0 )
     DSL_STEP_C( SK_WHEN_STABLE, B, P_STATION_NO, (100u << 8) | 1u, 0, IN( ON(SEN_1), OFF(SEN_2) ), 0 )
     DSL_STEP_C( SK_WHEN_STABLE, A, 65534, 1, 0, IN( OFF(SEN_H) ), 0 )
+    DSL_STEP_X( SK_WAIT, SEQ_NO_LABEL, 0, XC_STATE | (3u << 8), 1, 1, IN( ON(SEN_1) ), 0 )
+    DSL_STEP_X( SK_WHEN, A, 0, XC_STATE | XC_NOT | (15u << 8), 2, 9, NO_IN, 0 )
+    DSL_STEP_X( SK_WAIT, B, 300, XC_STATE, 1, 65535u, IN( OFF(SEN_2) ), 0 )
+    DSL_STEP_C( SK_WHEN_OUT, A, 0, 0, 0, IN( ON(OUT_EXT_1), OFF(OUT_EXT_2) ), 0 )
+    DSL_STEP_C( SK_WHEN_OUT, B, 0, 0, 0, IN( ON(OUT_EXT_1) ), 0 )
+    DSL_STEP( SK_ACS, SEQ_NO_LABEL, 'D', SEQ_NUM_CONST, 13, 0, 0, 0 )
+    DSL_STEP_X( SK_OUT_FLICKER, SEQ_NO_LABEL, 0, XC_STATE | (2u << 8), 7, 7, IN( ON(SEN_1) ), (50UL << 8) | (OUT_EXT_1 + 1) )
 SEQ_END
 MAIN_BEGIN
     SAME(s_new_steps, s_ref_steps);
 MAIN_END
-#elif defined(NEG_TAG_ACCUM) || defined(NEG_TAG_ACCUM_TO) || defined(NEG_TAG_WHEN_STABLE) || defined(NEG_TAG_WHEN_ACCUM)
+#elif defined(NEG_TAG_ACCUM) || defined(NEG_TAG_ACCUM_TO) || defined(NEG_TAG_WHEN_STABLE) || defined(NEG_TAG_WHEN_ACCUM) || defined(NEG_TAG_WHEN_OUT)
 #include "agv/tag_dsl.h"
 TAG_TABLE_BEGIN( n )
 #if defined(NEG_TAG_ACCUM)
@@ -52,8 +66,10 @@ TAG_TABLE_BEGIN( n )
     TAG( 1, 0, WAIT_ACCUM_TO( IN( ON(SEN_1) ), 10, 100, 1 ) )
 #elif defined(NEG_TAG_WHEN_STABLE)
     TAG( 1, 0, WHEN_STABLE( IN( ON(SEN_1) ), 10, 1 ) )
-#else
+#elif defined(NEG_TAG_WHEN_ACCUM)
     TAG( 1, 0, WHEN_ACCUM( IN( ON(SEN_1) ), 10, 1 ) )
+#else
+    TAG( 1, 0, WHEN_OUT( IN( ON(OUT_EXT_1) ), 1 ) )
 #endif
 TAG_TABLE_END
 #else
@@ -85,6 +101,29 @@ SEQ_BEGIN( n )
     WHEN_STABLE( IN( ON(SEN_1) ), 65535, A )
 #elif defined(NEG_WHENHOLD_MIN)
     WHEN_ACCUM( IN( ON(SEN_1) ), PARAM_TIME( AS, MIN ), A )
+#elif defined(NEG_WHENOUT_STATE)
+    WHEN_OUT( AND( ON(OUT_EXT_1), FORWARD ), A )
+#elif defined(NEG_STATE_SLOT)
+    WAIT( AND( STATE( 16, 1 ) ) )
+#elif defined(NEG_STATE_ORDER)
+    WAIT( AND( STATE( 1, 9, 2 ) ) )
+#elif defined(NEG_STATE_BIG)
+    WAIT( AND( STATE( 1, 0, 65536 ) ) )
+#elif defined(NEG_STATE_NEG)
+    WAIT( AND( STATE( 1, (0 - 1) ) ) )
+#elif defined(NEG_STATE_TWO)
+    WAIT( AND( STATE( 1, 1 ), FORWARD ) )
+#elif defined(NEG_STATE_ARITY)
+    WAIT( AND( STATE( 1 ) ) )
+#elif defined(NEG_STATE_STABLE)
+    WAIT_STABLE( AND( ON(SEN_1), STATE( 1, 1 ) ), 10 )
+#elif defined(NEG_STATE_MAN)
+SEQ_END
+MANUAL_BEGIN( m )
+    MAN( 1, IDLE, AND( ON(SEN_1), STATE( 1, 1 ) ), ON( OUT_EXT_1 ) )
+    MAN_ELSE( 1, IDLE, NO_OUT )
+MANUAL_END
+SEQ_BEGIN( n2 )
 #endif
 SEQ_END
 #endif

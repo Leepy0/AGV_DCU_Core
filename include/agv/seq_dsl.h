@@ -375,6 +375,9 @@ typedef unsigned long long dsl_cond_t;
 #define WAIT_ACCUM(c, s)            DSL_WHOLD(c, s, SEQ_HOLD_ACCUM, 0, SEQ_NO_LABEL, DSL_HOLD_OK)
 #define WAIT_ACCUM_TO(c, s, t, label)   DSL_WHOLD(c, s, SEQ_HOLD_ACCUM, t, label, DSL_HOLD_OK)
 #define WAIT_OUT(c)                 DSL_STEP_C(SK_WAIT_OUT, SEQ_NO_LABEL, 0, 0, 0, c, 0)
+/* WHEN_OUT( 출력 조건, 라벨 )(v0.61.0): WHEN 묶음의 가지. 출력 래치가 조건(WAIT_OUT 과 같다: IN( ON( 출력… ), OFF( … ) ))이면 라벨로.
+ * AND 는 입력 항목만(상태 낱말·둘째 ANY 는 오류) */
+#define WHEN_OUT(c, label)          DSL_STEP_C(SK_WHEN_OUT, label, 0, 0, 0, DSL_CN(c), 0)
 #define DELAY(t)                    DSL_STEP(SK_DELAY, SEQ_NO_LABEL, t, 0, 0, 0, 0, 0)
 #define WAIT_IF(x)                  DSL_STEP_X(SK_WAIT, SEQ_NO_LABEL, 0, x, NO_IN, 0)
 #define WAIT_IF_TO(x, t, label)     DSL_STEP_X(SK_WAIT, label, t, x, NO_IN, 0)
@@ -406,6 +409,7 @@ typedef unsigned long long dsl_cond_t;
 #define DSL_INFO_PROCESSING 'P'
 #define DSL_INFO_STANDBY    'B'
 #define DSL_INFO_CALL       'C'
+#define DSL_INFO_DISPLAY    'D'   /* 표시 번호(v0.61.0). 번호 0 이하는 보내지 않는다(acs.c) */
 #define DSL_INFO_IDLE       'X'   /* 오류 5초 뒤 자동 보고(acs.c)와 같은 Info·같은 슬롯. 같은 슬롯이라 둘이 겹치면 나중 것으로 바뀌고 ACK 하나로 풀린다 */
 /* 번호 자리의 스테이션 큐 번호: ACS_SEND( NEXT, STATION(1) ) = 레거시 DA_ACS_Next( ACS_Station_Call_Num[1] ). k 0~23.
  * 상수식이라 정적 표에 쓴다(ACS( 종류, STATION(k) ) 의 출처 자리에서는 이름으로 붙는다).

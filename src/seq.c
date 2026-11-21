@@ -39,7 +39,7 @@ static uint16_t      s_profile;
 static uint32_t      s_load_mask;
 static seq_runner_t  s_seq;
 static seq_runner_t  s_act[ACT_SLOTS];
-static uint16_t      s_state[SEQ_STATE_COUNT];
+uint16_t             seq_state[SEQ_STATE_COUNT];
 static uint16_t      s_belt[SEQ_BELTS];   /* 건 벨트 정지 조건: 시퀀스 표의 SK_BELT_UNTIL 스텝 번호(압축 표는 머리 자리) + 1, 0 빈 칸 */
 static seq_step_t    s_buf;               /* 압축 표에서 푼 스텝. 한 번에 하나: 평가 중인 스텝, WHEN 묶음 훑기, 벨트 조건 */
 
@@ -49,8 +49,8 @@ int16_t  seq_load_site(void)    { return ((s_site != 0) && (s_site->load_fn != 0
 int      seq_is_active(void)    { return s_seq.active != 0; }
 uint16_t seq_active_id(void)    { return s_seq.active ? s_seq.c.id : (uint16_t)SEQ_NONE; }
 uint16_t seq_active_step(void)  { return s_seq.c.step; }
-uint16_t seq_state_get(uint16_t id)             { return (id < SEQ_STATE_COUNT) ? s_state[id] : 0; }
-void     seq_state_set(uint16_t id, uint16_t v) { if (id < SEQ_STATE_COUNT) { s_state[id] = v; } }
+uint16_t seq_state_get(uint16_t id)             { return (id < SEQ_STATE_COUNT) ? seq_state[id] : 0; }
+void     seq_state_set(uint16_t id, uint16_t v) { if (id < SEQ_STATE_COUNT) { seq_state[id] = v; } }
 
 /* ---- 표 읽기: 펼친 표(seq_def_t·seq_step_t)와 압축 표(site->packed, agv/seq.h)는 여기서만 가른다 ---- */
 
@@ -368,6 +368,7 @@ uint16_t seq_xcond(uint16_t c, uint16_t a, uint16_t b, uint16_t tag)
     case XC_STATION_MOD:     ok = (uint16_t)((a != 0u) && ((st % (int16_t)a) == (int16_t)b)); break;
     case XC_STATION_DIV:     ok = (uint16_t)((a != 0u) && ((st / (int16_t)a) == (int16_t)b)); break;
     case XC_TAG_NUM:         ok = (uint16_t)((int16_t)tag == (int16_t)(((b != 0u) ? (st % (int16_t)b) : st) + (int16_t)a)); break;
+    case XC_STATE:           ok = (uint16_t)((seq_state_get(slot) >= a) && (seq_state_get(slot) <= b)); break;
     default:                 return 0;
     }
     return (c & XC_NOT) ? (uint16_t)!ok : ok;
@@ -456,6 +457,9 @@ static uint16_t eval_when(seq_runner_t *r)
         at = step_next_at(at);
         if (s->kind == SK_WHEN) {
             if (cond_full(s)) { return jump(r, s->target); }
+        }
+        else if (s->kind == SK_WHEN_OUT) {
+            if (cond_out_true(s)) { return jump(r, s->target); }
         }
         else if (s->kind == SK_WHEN_STATE) {
             if (seq_state_get(s->arg0) == s->arg1) { return jump(r, s->target); }
@@ -748,6 +752,7 @@ static uint16_t eval_step(seq_runner_t *r, const seq_step_t *s)
     case SK_WHEN_STATE:
     case SK_WHEN_TIMEOUT:
     case SK_WHEN_STABLE:
+    case SK_WHEN_OUT:
         return eval_when(r);
     case SK_ERROR_HOLD:
         D.action_err = (int16_t)s->arg0;

@@ -80,6 +80,7 @@ typedef enum {
                            * 칸 SEQ_BELTS 개. ACT 금지 */
     SK_WHEN_STABLE,       /* WHEN 묶음의 유지 가지(v0.61.0): 입력 조건 on·off 가 arg0 틱 초과 이어서 참이면 target 으로. arg1 SEQ_HOLD_ACCUM 이면
                            * 참인 틱을 누적. 셈은 묶음 안 첫째 유지 가지 a, 둘째 b. 셋째는 표 오류 */
+    SK_WHEN_OUT,          /* WHEN 묶음의 출력 가지(v0.61.0): 출력 래치가 on·off 조건이면 target 으로(SK_WAIT_OUT 과 같은 조건) */
     SK_KIND_MAX
 } seq_kind_t;
 
@@ -107,7 +108,8 @@ enum {
     XC_KEY,               /* 지금 눌린 키 == a. 키를 소비하지 않는다 */
     XC_STATION_MOD,       /* 큐[칸] % a == b */
     XC_STATION_DIV,       /* 큐[칸] / a == b */
-    XC_TAG_NUM            /* 태그 == (b ? 큐[칸] % b : 큐[칸]) + a(a 부호 있음). 태그 표 전용(시퀀스는 태그 0) */
+    XC_TAG_NUM,           /* 태그 == (b ? 큐[칸] % b : 큐[칸]) + a(a 부호 있음). 태그 표 전용(시퀀스는 태그 0) */
+    XC_STATE              /* a <= 사이트 상태[칸] <= b(부호 없음, v0.61.0) */
 };
 #define XC_NOT  0x80u
 
@@ -211,7 +213,9 @@ uint16_t seq_xcond(uint16_t c, uint16_t a, uint16_t b, uint16_t tag);
 /* on·off 에 같이 선 비트는 "하나라도 ON", 나머지는 전부 ON / 전부 OFF */
 uint16_t seq_mask_true(uint32_t v, uint32_t on, uint32_t off);
 
-/* 사이트 상태 변수 (SET_STATE, WAIT_STATE, WHEN_STATE) */
+/* 사이트 상태 변수 (SET_STATE, WAIT_STATE, WHEN_STATE, 조건 낱말 STATE). 사이트 C 는 배열을 바로 읽고 써도 된다(v0.61.0):
+ * #define FL_check seq_state[ST_FL_CHECK]. 부팅 때 0, 시퀀스 끝·중단에도 지우지 않는다 */
+extern uint16_t seq_state[SEQ_STATE_COUNT];
 uint16_t seq_state_get(uint16_t id);
 void     seq_state_set(uint16_t id, uint16_t value);
 

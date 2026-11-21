@@ -231,6 +231,40 @@ SEQ_BEGIN( s_when_hold3 )
     END_STOP
 SEQ_END
 
+/* 상태 칸 조건 낱말(v0.61.0): 같음·범위·부정, 입력과 AND */
+SEQ_BEGIN( s_state_cond )
+    WAIT( AND( ON(SEN_A), STATE( 3, 1 ) ) )
+    OUT_ON( O_A )
+    SELECT_BEGIN
+        WHEN( AND( STATE( 4, 10, 20 ) ), L_A )
+        WHEN( AND( ON(SEN_A), NOT( STATE( 3, 1 ) ) ), L_B )
+    SELECT_END
+    L( L_A )
+    OUT_ON( O_B )
+    END_STOP
+    L( L_B )
+    OUT_ON( O_C )
+    END_STOP
+SEQ_END
+
+/* 출력 상태 가지(v0.61.0): 위에서부터, 입력 가지와 섞어 쓴다 */
+SEQ_BEGIN( s_when_out )
+    OUT_ON( O_A )
+    SELECT_BEGIN
+        WHEN_OUT( IN( ON(O_A, O_B) ), L_ERR )
+        WHEN( IN( ON(SEN_A) ), L_A )
+        WHEN_OUT( IN( OFF(O_A) ), L_B )
+    SELECT_END
+    L( L_A )
+    OUT_ON( O_C )
+    END_STOP
+    L( L_B )
+    OUT_ON( OUT_EXT_5 )
+    END_STOP
+    L( L_ERR )
+    END_ERROR( 291 )
+SEQ_END
+
 SEQ_BEGIN( s_standby )
     ACS( STANDBY, 7 )
     ACS( CALL, 9 )
@@ -475,7 +509,7 @@ enum {
     S_XWHEN, S_XWAIT, S_ANY2, S_DPARAM, S_TPARAM, S_NOWAIT, S_MOVE, S_ALIGN, S_MOVE_TAPE,
     S_BELTS, S_BELT_OFF, S_BELT_END, S_BELT_MANY, S_OBS_AUTO, S_HIGH
 };
-enum { S_FLICKER_ST = SEQ_UNLOAD_PART + 3, S_AND, S_STANDBY, S_ACCUM, S_HOLD_PARAM, S_WHEN_HOLD, S_WHEN_HOLD3 };   /* 사이트 ID 가 SEQ_MAX(64)를 넘지 않게 코어 ID 빈 자리를 쓴다 */
+enum { S_FLICKER_ST = SEQ_UNLOAD_PART + 3, S_AND, S_STANDBY, S_ACCUM, S_HOLD_PARAM, S_WHEN_HOLD, S_WHEN_HOLD3, S_STATE_COND, S_WHEN_OUT };   /* 사이트 ID 가 SEQ_MAX(64)를 넘지 않게 코어 ID 빈 자리를 쓴다 */
 
 SEQ_MAP_BEGIN( site_seqs )
     SEQ_MAP( 0, S_BRANCH, s_branch )
@@ -516,6 +550,8 @@ SEQ_MAP_BEGIN( site_seqs )
     SEQ_MAP( 0, S_HOLD_PARAM, s_hold_param )
     SEQ_MAP( 0, S_WHEN_HOLD, s_when_hold )
     SEQ_MAP( 0, S_WHEN_HOLD3, s_when_hold3 )
+    SEQ_MAP( 0, S_STATE_COND, s_state_cond )
+    SEQ_MAP( 0, S_WHEN_OUT, s_when_out )
     SEQ_MAP( 0, S_HIGH, s_high )
 SEQ_MAP_END
 
@@ -1151,6 +1187,50 @@ static void run_all(void)
     assert(!seq_is_active() && fake_out == 0 && D.action_err == SEQ_ERR_TABLE);
     D.action_err = 0;
     (void)param_set(P_STATION_NO, 0);
+    fake_in = 0;
+
+    /* 상태 칸 조건: 공개 배열과 seq_state_get·set 은 같은 칸 */
+    seq_state_set(3, 0);
+    seq_state[4] = 0;
+    start(S_STATE_COND);
+    fake_in = BIT(SEN_A);
+    seq_run();
+    assert(fake_out == 0);
+    seq_state[3] = 1;
+    seq_run();
+    assert(fake_out == BIT(O_A) && seq_state_get(3) == 1);  /* 묶음: 4 는 0(범위 밖), 3 이 1 이라 NOT 거짓 */
+    seq_state_set(4, 21);
+    seq_run();
+    assert(seq_is_active() && fake_out == BIT(O_A));
+    seq_state_set(4, 10);
+    seq_run();
+    assert(!seq_is_active() && fake_out == (BIT(O_A) | BIT(O_B)));
+    seq_state[4] = 0;
+    start(S_STATE_COND);
+    fake_in = BIT(SEN_A);
+    seq_run();
+    seq_state[3] = 2;                                       /* 첫 대기는 지났다. 3 != 1 → 둘째 */
+    seq_run();
+    assert(!seq_is_active() && fake_out == (BIT(O_A) | BIT(O_C)));
+    seq_state[3] = 0;
+    fake_in = 0;
+
+    /* 출력 상태 가지 */
+    start(S_WHEN_OUT);
+    seq_run();
+    assert(seq_is_active() && fake_out == BIT(O_A));
+    fake_out |= BIT(O_B);                                   /* 출력 둘 다 켜짐 → 첫 가지(오류) */
+    seq_run();
+    assert(!seq_is_active() && D.action_err == 291);
+    start(S_WHEN_OUT);
+    fake_in = BIT(SEN_A);
+    seq_run();
+    assert(!seq_is_active() && fake_out == (BIT(O_A) | BIT(O_C)));
+    start(S_WHEN_OUT);
+    seq_run();
+    fake_out = 0;                                           /* 밖에서 O_A 가 꺼졌다 → 셋째 */
+    seq_run();
+    assert(!seq_is_active() && fake_out == BIT(OUT_EXT_5) && D.action_err == 0);
     fake_in = 0;
 
     /* 시퀀스의 대기 보고(STANDBY)는 보고 + 자동 재전송(run_standby)이고 정지는 걸지 않는다. 다른 보고는 슬롯만 */

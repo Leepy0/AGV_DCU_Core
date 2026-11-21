@@ -20,7 +20,7 @@ foreach ($n in 'AMP_INPUT', 'NO_DIRECTION', 'PARAM_ZERO', 'MOD_ZERO', 'HIGH_ANY'
 }
 # DSL unification (v0.58.0, tests/dsl): new forms (AND, AGV_SPEED, ACS, WAIT_TO PARAM_TIME, TAG_IF) must give the same bytes as the old forms,
 # and each -DNEG_* case must fail to compile (calling the build twice: with and without the NEG guard)
-foreach ($n in 'and_seq', 'and_tag', 'tagif', 'speed_seq', 'speed_tag', 'acs_seq', 'acs_tag', 'wait_to', 'checks_seq', 'checks_tag', 'mix_seq', 'mix_tag', 'man_and', 'site_words_seq', 'site_words_tag', 'paren_gcc', 'and_neg_seq', 'and_neg_tag', 'and_neg_site', 'hold_seq') {
+foreach ($n in 'and_seq', 'and_tag', 'tagif', 'speed_seq', 'speed_tag', 'acs_seq', 'acs_tag', 'wait_to', 'checks_seq', 'checks_tag', 'mix_seq', 'mix_tag', 'man_and', 'site_words_seq', 'site_words_tag', 'paren_gcc', 'and_neg_seq', 'and_neg_tag', 'and_neg_site', 'hold_seq', 'hold_tag') {
     & cmd /c "gcc -std=c99 -DAGV_HOST_BUILD -Iinclude -Itests/dsl tests/dsl/$n.c -o build/t/dsl_$n.exe 2>nul"
     if ($LASTEXITCODE -ne 0) { Write-Output "BUILD FAIL dsl_$n"; $failed++ }
     else { & "build/t/dsl_$n.exe" | Out-Null; if ($LASTEXITCODE -ne 0) { Write-Output "FAIL dsl_$n"; $failed++ } }
@@ -38,7 +38,8 @@ $dslNeg = [ordered]@{
     'man_and' = 'MAN_STATE MAN_STATE2 MAN_KEY2 MAN_ANY2'
     'paren_gcc' = 'ACS_PAREN SPEED_PAREN'
     'wait_to' = 'UNMATCHED BIG NEG STATE_PARAM ANY2_PARAM UNIT PARAM0 FND PLACE PTM_ALONE PCOUNT UNMATCHED_AND'
-    'hold_seq' = 'TAG_ACCUM TAG_ACCUM_TO TAG_WHEN_STABLE TAG_WHEN_ACCUM ACCUM_STATE ACCUM_ANY2 ACCUM_BIG ACCUM_NEG HOLD_MIN HOLD_PLACE HOLD_PCOUNT HOLD_FND HOLD_STATE_PARAM WHENHOLD_STATE WHENHOLD_ANY2 WHENHOLD_BIG WHENHOLD_MIN'
+    'hold_seq' = 'TAG_ACCUM TAG_ACCUM_TO TAG_WHEN_STABLE TAG_WHEN_ACCUM TAG_WHEN_OUT ACCUM_STATE ACCUM_ANY2 ACCUM_BIG ACCUM_NEG HOLD_MIN HOLD_PLACE HOLD_PCOUNT HOLD_FND HOLD_STATE_PARAM WHENHOLD_STATE WHENHOLD_ANY2 WHENHOLD_BIG WHENHOLD_MIN WHENOUT_STATE STATE_SLOT STATE_ORDER STATE_BIG STATE_NEG STATE_TWO STATE_ARITY STATE_STABLE STATE_MAN'
+    'hold_tag' = 'TAG_STATE3 TAG_STATE_SLOT TAG_DISPLAY_BIG'
 }
 foreach ($f in $dslNeg.Keys) {
     foreach ($n in $dslNeg[$f] -split ' ') {
