@@ -124,7 +124,6 @@ typedef struct {
     int16_t stop_len, fwd_stop_len;                 /* gStop_length, gFoward_Stop_length */
     int16_t display_mode, turn_mode, forback_mode;
     int16_t auto_drive_mode, auto_slow_mode, agv_type_mode;
-    int16_t actuator_delay;
     int16_t for_bumper, back_bumper, for_obs, back_obs;
     int16_t acs_group, acs_standby;
 } param_dv_t;

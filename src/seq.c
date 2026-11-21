@@ -335,7 +335,7 @@ uint16_t seq_xcond(uint16_t c, uint16_t a, uint16_t b, uint16_t tag)
 {
     uint16_t kind = (uint16_t)(c & 0x7Fu);
     uint16_t slot = (uint16_t)(c >> 8);
-    int16_t st = ((kind == XC_STATION) || (kind == XC_STATION_RUNNING) || (kind >= XC_STATION_MOD)) ? acs_station_get(slot) : 0;
+    int16_t st = ((kind == XC_STATION) || (kind == XC_STATION_RUNNING) || ((kind >= XC_STATION_MOD) && (kind <= XC_TAG_NUM))) ? acs_station_get(slot) : 0;
     int16_t v;
     uint16_t ok;
 

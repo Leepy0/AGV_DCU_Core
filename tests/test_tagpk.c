@@ -30,20 +30,31 @@ static int fn0(seq_ctx_t *c)
 static const seq_call_fn s_calls[] = { fn0, fn1, fn2, fn3 };
 static const seq_site_t s_site = { 0, 0, 0, 0, s_calls, 4, 0, 0, 0 };
 
+#define XS(k, lo, hi)  (XC_STATE | DSL_SLOT(k)), lo, hi   /* 확장 조건 세 값(STATE 와 같은 꼴) */
 TAG_X_BEGIN( s_x )
     TAG_X( X_BACKWARD )                      /* 1: 전진 중이라 거짓 */
+    TAG_X( XS( 3, 1, 1 ) )                   /* 2: 상태[3] == 1 */
+    TAG_X( X_NOT( XS( 3, 1, 5 ) ) )          /* 3: 상태[3] 이 1~5 밖 */
 TAG_POOL_END
 TAG_IN_BEGIN( s_in )
 TAG_POOL_END
+/* 상태 칸 조건 낱말 STATE(v0.61.0): 펼친 표와 압축 표(생성기가 내는 꼴을 손으로) */
+TAG_TABLE_BEGIN( s_st_rules )
+    TAG_IF( 60, 0, AND( STATE( 3, 1 ) ), CALL(1) )
+    TAG_IF( 61, 0, AND( NOT( STATE( 3, 1, 5 ) ), ID( 0, 99 ) ), CALL(2) )
+TAG_TABLE_END
 TAG_ACT_BEGIN( s_act )
     TAG_ACTS( CALL(0), CALL(1), CALL(1), CALL(1) )   /* 1 */
     TAG_ACTS( CALL(2) )                                    /* 2 */
     TAG_ACTS( CALL(3), CALL(3), CALL(3), CALL(3) )   /* 3 */
+    TAG_ACTS( CALL(1) )                                    /* 4 */
 TAG_POOL_END
 TAGP_BEGIN( s_prules )
     TAGP( 50, 0, 0, 0, 0, 1 )
     TAGP( 51, 0, 0, 0, 0, 2 )
     TAGP( 53, 0, 1, 0, 0, 3 )
+    TAGP( 60, 0, 2, 0, 0, 4 )
+    TAGP( 61, 0, 3, 0, 0, 2 )
 TAG_POOL_END
 TAG_PACKED( s_pk, s_prules, s_x, s_in, s_act )
 
@@ -64,6 +75,21 @@ int main(void)
     printf("\n");
     assert(s_nlog == 5u);
     for (i = 0; i < 5u; i++) { assert(s_log[i] == want[i]); }
+    /* 태그 STATE 조건: 상태 칸을 바꿔 가며 두 표로 같은 답 */
+    for (i = 0; i < 2u; i++) {
+        static const struct { uint16_t st, tag, want; } c[] = { { 0, 60, 0 }, { 1, 60, 1 }, { 1, 61, 0 }, { 5, 61, 0 }, { 6, 61, 2 }, { 0, 61, 2 } };
+        uint16_t k;
+        if (i == 0u) { tagact_bind(s_st_rules, sizeof(s_st_rules) / sizeof(s_st_rules[0]), 0); }
+        else         { tagact_bind_packed(&s_pk, 0); }
+        for (k = 0; k < sizeof(c) / sizeof(c[0]); k++) {
+            s_nlog = 0;
+            seq_state[3] = c[k].st;
+            (void)tagact_run(c[k].tag);
+            assert((c[k].want == 0u) ? (s_nlog == 0u) : ((s_nlog == 1u) && (s_log[0] == c[k].want)));
+        }
+    }
+    seq_state[3] = 0;
+    printf("  태그 STATE 조건: 펼친·압축 같음\n");
     printf("test_tagpk ok\n");
     return 0;
 }

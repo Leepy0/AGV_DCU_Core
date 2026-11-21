@@ -214,7 +214,6 @@ static void recalc_all(void)
     param_dv.auto_drive_mode = (int16_t)(s_set[P_AUTO_DRIVE_MODE] & 1);
     param_dv.auto_slow_mode = (int16_t)((s_set[P_AUTO_DRIVE_MODE] >> 1) & 1);
     param_dv.agv_type_mode = (int16_t)(10 * param_digit(s_set[P_AGV_TYPE], 100) + param_digit(s_set[P_AGV_TYPE], 10));
-    param_dv.actuator_delay = (int16_t)(s_set[P_SPEED_MIN] * 10);
     param_dv.for_bumper = param_digit(s_set[P_BUMPER_USE], 10);
     param_dv.back_bumper = param_digit(s_set[P_BUMPER_USE], 1);
     param_dv.for_obs = param_digit(s_set[P_OBS_USE], 10);
@@ -291,7 +290,6 @@ static void recalc_one(uint16_t i)
     case P_AGV_TYPE:
         param_dv.agv_type_mode = (int16_t)(10 * param_digit(s_set[P_AGV_TYPE], 100) + param_digit(s_set[P_AGV_TYPE], 10));
         break;
-    case P_SPEED_MIN:     param_dv.actuator_delay = (int16_t)(s_set[P_SPEED_MIN] * 10); break;
     case P_STOP_LEN_FWD_CM:  recalc_fwd_stop_len(); break;
     case P_ACS_STANDBY:
         param_dv.acs_group = param_digit(s_set[P_ACS_STANDBY], 10);
@@ -320,6 +318,9 @@ static void store_all(void)
 
 int16_t param_set_ram(uint16_t idx, int16_t value)
 {
+#if !AGV_DEV_TESTS
+    if (idx == 59u) { return -1; }            /* 현장 이미지의 빈 번호(TST 는 개발 이미지에만). 읽으면 늘 0 */
+#endif
     if ((idx == 0) || (idx >= P_COUNT) || !limit_ok(idx, value)) { return -1; }
     s_set[idx] = value;
     recalc_one(idx);

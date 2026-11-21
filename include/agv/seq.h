@@ -214,7 +214,7 @@ uint16_t seq_xcond(uint16_t c, uint16_t a, uint16_t b, uint16_t tag);
 uint16_t seq_mask_true(uint32_t v, uint32_t on, uint32_t off);
 
 /* 사이트 상태 변수 (SET_STATE, WAIT_STATE, WHEN_STATE, 조건 낱말 STATE). 사이트 C 는 배열을 바로 읽고 써도 된다(v0.61.0):
- * #define FL_check seq_state[ST_FL_CHECK]. 부팅 때 0, 시퀀스 끝·중단에도 지우지 않는다 */
+ * #define MY_FLAG seq_state[ST_MY_FLAG]. 부팅 때 0, 시퀀스 끝·중단에도 지우지 않는다 */
 extern uint16_t seq_state[SEQ_STATE_COUNT];
 uint16_t seq_state_get(uint16_t id);
 void     seq_state_set(uint16_t id, uint16_t value);

@@ -90,6 +90,12 @@ SEQ_BEGIN( s_sb_turn )
     DSL_STURN3( TURN_CW, 90, 0, 1 )
     END_STOP
 SEQ_END
+/* 사이트 C(site_manual)가 쓴 상태 칸을 시퀀스가 읽는다(v0.61.0) */
+SEQ_BEGIN( s_state_wait )
+    WAIT( AND( STATE( 5, 1 ) ) )
+    OUT_ON( O_X )
+    END_STOP
+SEQ_END
 #include "agv/tag_dsl.h"   /* 여기부터 태그 표 */
 
 static const seq_def_t s_seqs[] = {
@@ -98,7 +104,8 @@ static const seq_def_t s_seqs[] = {
     { 0, SEQ_BOX_LOAD, s_turn0_steps, sizeof(s_turn0_steps) / sizeof(s_turn0_steps[0]) },
     { 0, SEQ_BOX_UNLOAD, s_sb_stop_steps, sizeof(s_sb_stop_steps) / sizeof(s_sb_stop_steps[0]) },
     { 0, SEQ_UNLOAD_FINISH, s_sb_restart_steps, sizeof(s_sb_restart_steps) / sizeof(s_sb_restart_steps[0]) },
-    { 0, SEQ_UNLOAD_PART, s_sb_turn_steps, sizeof(s_sb_turn_steps) / sizeof(s_sb_turn_steps[0]) }
+    { 0, SEQ_UNLOAD_PART, s_sb_turn_steps, sizeof(s_sb_turn_steps) / sizeof(s_sb_turn_steps[0]) },
+    { 0, SEQ_LOAD_EMPTY, s_state_wait_steps, sizeof(s_state_wait_steps) / sizeof(s_state_wait_steps[0]) }
 };
 static const seq_def_t s_acts[] = { { 0, ACT_HOLD, a_hold_steps, sizeof(a_hold_steps) / sizeof(a_hold_steps[0]) } };
 static int stop_len_call(seq_ctx_t *c) { (void)c; tagact_stop_length(); return 1; }
@@ -293,13 +300,14 @@ TAG_PACKED_R( s_tag_pk, s_prules, s_px, s_pin, s_pact, s_prange )
 
 static int s_manual_count;
 static int s_man_tick;            /* 1 = site_manual 이 manual_tick 을 부른다(MAN_START_SW 시험) */
+static int s_man_state;           /* 1 = site_manual 이 상태 칸 5 에 1 을 쓴다(사이트 C 의 #define 변수 꼴) */
 void site_register(void)
 {
     param_default_type(0);
     (void)seq_bind(&s_site);
     tagact_bind(s_rules, sizeof(s_rules) / sizeof(s_rules[0]), 0);
 }
-void site_manual(void) { s_manual_count++; if (s_man_tick) { manual_tick(); } if (s_ref.on) { ref_tick(); } }
+void site_manual(void) { s_manual_count++; if (s_man_tick) { manual_tick(); } if (s_ref.on) { ref_tick(); } if (s_man_state) { seq_state[5] = 1; } }
 
 /* ---- 도구 ---- */
 
@@ -686,6 +694,47 @@ static void test_amp_alarm(void)
     assert(pulsed == 1);
     assert(D.system_err == 0);
     printf("  amp alarm ok\n");
+}
+
+/* 한 틱 안 순서: 시퀀스(run_seq) → site_manual. site_manual 이 쓴 상태 칸은 다음 틱의 시퀀스가 읽는다 */
+static void test_state_from_site(void)
+{
+    boot();
+    seq_state[5] = 0;
+    seq_request(SEQ_LOAD_EMPTY);
+    ticks(3);
+    assert(seq_is_active() && !(io_out_mask() & (1UL << O_X)));
+    s_man_state = 1;
+    tick();                                           /* 이 틱의 시퀀스는 site_manual 보다 먼저라 아직 0 을 본다 */
+    assert(seq_state[5] == 1 && seq_is_active() && !(io_out_mask() & (1UL << O_X)));
+    tick();
+    assert(!seq_is_active() && (io_out_mask() & (1UL << O_X)));
+    s_man_state = 0;
+    seq_state[5] = 0;
+    io_out_masks(0, 1UL << O_X);
+    printf("  site_manual 상태 칸 → 다음 틱 시퀀스 ok\n");
+}
+
+static void boot_keys(uint16_t keys, int keep);
+/* ACD(60): 저장 큐로 EEPROM 84 에 쓰이고, 파라미터 초기화(INT 77, 1~45 만)에도 남고, 전원을 다시 켜도 남는다 */
+static void test_acd(void)
+{
+    boot();
+    assert(param_get(P_ACT_DELAY) == 0 && host.ee[PARAM_ACT_DELAY_ADDR] == 0xFFFFu);
+    assert(param_set(P_ACT_DELAY, 12) == 0);
+    ticks(100);
+    assert(host.ee[PARAM_ACT_DELAY_ADDR] == 12 && storage_pending() == 0);
+    keep_flush_if_changed();                          /* KEEP 빈 칸이라 KEEP 쓰기가 옛 값으로 덮지 않는다 */
+    ticks(20);
+    assert(host.ee[PARAM_ACT_DELAY_ADDR] == 12);
+    param_default();
+    ticks(100);
+    assert(param_get(P_ACT_DELAY) == 12 && host.ee[PARAM_ACT_DELAY_ADDR] == 12);
+    boot_keys(0, 1);
+    assert(param_get(P_ACT_DELAY) == 12);
+    (void)param_set(P_ACT_DELAY, 0);
+    ticks(100);
+    printf("  ACD ok\n");
 }
 
 static void test_stop_switch_aborts(void)
@@ -4895,6 +4944,8 @@ int main(void)
     test_status_report();
     test_ui();
     test_menu5();
+    test_state_from_site();
+    test_acd();
 #if AGV_DEV_TESTS
     test_s_tag();                       /* 'S' 처리는 두 빌드 같다(comm.c). 개발 빌드에서만 돌린다 */
     test_move_tag_ignore();

@@ -29,7 +29,7 @@
 #define BELT4_CCW  NO_OUT
 
 enum { PF_ONE = 1, PF_TWO = 2 };
-enum { ACT_PULSE = 1, ACT_HOLD, ACT_FAIL, ACT_BAD_FN, ACT_SPARE1, ACT_SPARE2, ACT_SPARE3 };
+enum { ACT_PULSE = 1, ACT_HOLD, ACT_FAIL, ACT_BAD_FN, ACT_SPARE1, ACT_SPARE2, ACT_SPARE3, ACT_WH1, ACT_WH2, ACT_WH3 };
 enum { ST_0 = 0, ST_1 };
 
 SEQ_LABELS( L_RETRY, L_OK, L_ERR, L_A, L_B, L_C, L_LOOP, L_MISSING )
@@ -265,6 +265,32 @@ SEQ_BEGIN( s_when_out )
     END_ERROR( 291 )
 SEQ_END
 
+/* 가지가 묶음 앞 라벨로 되돌아오면 셈은 0 부터. 유지 가지의 PARAM_TIME */
+SEQ_BEGIN( s_hold_loop )
+    L( L_LOOP )
+    SELECT_BEGIN
+        WHEN( IN( ON(SEN_E) ), L_LOOP )
+        WHEN_STABLE( IN( ON(SEN_B) ), PARAM_TIME( ST, TICK ), L_B )
+        WHEN_ACCUM( IN( ON(SEN_C) ), 3, L_C )
+    SELECT_END
+    L( L_B )
+    OUT_ON( O_B )
+    END_STOP
+    L( L_C )
+    OUT_ON( O_C )
+    END_STOP
+SEQ_END
+
+/* WAIT_STABLE_TO + PARAM_TIME + UNMATCHED */
+SEQ_BEGIN( s_hold_param2 )
+    WAIT_STABLE_TO( IN( ON(SEN_A) ), PARAM_TIME( ST, DSEC ), UNMATCHED(5), L_ERR )
+    OUT_ON( O_A )
+    END_STOP
+    L( L_ERR )
+    OUT_ON( OUT_EXT_5 )
+    END_STOP
+SEQ_END
+
 SEQ_BEGIN( s_standby )
     ACS( STANDBY, 7 )
     ACS( CALL, 9 )
@@ -418,6 +444,32 @@ SEQ_BEGIN( s_prof_any )
     OUT_ON( O_B )
 SEQ_END
 
+/* ACT 안 묶음 가지(v0.61.0): 출력·유지·누적. 채널마다 셈이 따로다 */
+ACT_BEGIN( a_wh )
+    SELECT_BEGIN
+        WHEN_OUT( IN( ON(OUT_EXT_8) ), L_A )
+        WHEN_STABLE( IN( ON(SEN_D) ), 2, L_B )
+        WHEN_ACCUM( IN( ON(SEN_E) ), 3, L_C )
+    SELECT_END
+    L( L_A )
+    OUT_ON( OUT_EXT_11 )
+    END_STOP
+    L( L_B )
+    OUT_ON( OUT_EXT_12 )
+    END_STOP
+    L( L_C )
+    OUT_ON( OUT_EXT_13 )
+    END_STOP
+ACT_END
+ACT_BEGIN( a_wh3 )
+    SELECT_BEGIN
+        WHEN_STABLE( IN( ON(SEN_D) ), 1, L_A )
+        WHEN_STABLE( IN( ON(SEN_D) ), 1, L_A )
+        WHEN_ACCUM( IN( ON(SEN_D) ), 1, L_A )
+    SELECT_END
+    L( L_A )
+    END_STOP
+ACT_END
 ACT_BEGIN( a_pulse )
     OUT_PULSE( O_A, 2, 2, 2 )
 ACT_END
@@ -509,7 +561,7 @@ enum {
     S_XWHEN, S_XWAIT, S_ANY2, S_DPARAM, S_TPARAM, S_NOWAIT, S_MOVE, S_ALIGN, S_MOVE_TAPE,
     S_BELTS, S_BELT_OFF, S_BELT_END, S_BELT_MANY, S_OBS_AUTO, S_HIGH
 };
-enum { S_FLICKER_ST = SEQ_UNLOAD_PART + 3, S_AND, S_STANDBY, S_ACCUM, S_HOLD_PARAM, S_WHEN_HOLD, S_WHEN_HOLD3, S_STATE_COND, S_WHEN_OUT };   /* 사이트 ID 가 SEQ_MAX(64)를 넘지 않게 코어 ID 빈 자리를 쓴다 */
+enum { S_FLICKER_ST = SEQ_UNLOAD_PART + 3, S_AND, S_STANDBY, S_ACCUM, S_HOLD_PARAM, S_WHEN_HOLD, S_WHEN_HOLD3, S_STATE_COND, S_WHEN_OUT, S_HOLD_LOOP, S_HOLD_PARAM2 };   /* 사이트 ID 가 SEQ_MAX(64)를 넘지 않게 코어 ID 빈 자리를 쓴다 */
 
 SEQ_MAP_BEGIN( site_seqs )
     SEQ_MAP( 0, S_BRANCH, s_branch )
@@ -552,6 +604,8 @@ SEQ_MAP_BEGIN( site_seqs )
     SEQ_MAP( 0, S_WHEN_HOLD3, s_when_hold3 )
     SEQ_MAP( 0, S_STATE_COND, s_state_cond )
     SEQ_MAP( 0, S_WHEN_OUT, s_when_out )
+    SEQ_MAP( 0, S_HOLD_LOOP, s_hold_loop )
+    SEQ_MAP( 0, S_HOLD_PARAM2, s_hold_param2 )
     SEQ_MAP( 0, S_HIGH, s_high )
 SEQ_MAP_END
 
@@ -562,6 +616,9 @@ ACT_MAP_BEGIN( site_acts )
     ACT_MAP( 0, ACT_SPARE1, a_hold )
     ACT_MAP( 0, ACT_SPARE2, a_hold )
     ACT_MAP( 0, ACT_SPARE3, a_hold )
+    ACT_MAP( 0, ACT_WH1, a_wh )
+    ACT_MAP( 0, ACT_WH2, a_wh )
+    ACT_MAP( 0, ACT_WH3, a_wh3 )
 ACT_MAP_END
 
 PROFILE_TABLE_BEGIN( site_profiles )
@@ -1186,6 +1243,90 @@ static void run_all(void)
     seq_run();
     assert(!seq_is_active() && fake_out == 0 && D.action_err == SEQ_ERR_TABLE);
     D.action_err = 0;
+
+    /* 묶음 앞 라벨로 되돌아오면 유지·누적 셈은 0 부터. 유지 가지 한도 = ST(3) 틱 */
+    (void)param_set(P_STATION_NO, 3);
+    start(S_HOLD_LOOP);
+    fake_in = BIT(SEN_B) | BIT(SEN_C);
+    for (int i = 0; i < 3; i++) { seq_run(); }              /* 유지 3, 누적 3: 다음 참 틱이면 둘 다 넘는다 */
+    fake_in = BIT(SEN_E);
+    seq_run();                                              /* 되돌아옴(같은 스캔에 여러 번) */
+    fake_in = BIT(SEN_B) | BIT(SEN_C);
+    for (int i = 0; i < 3; i++) { seq_run(); }
+    assert(seq_is_active() && fake_out == 0);               /* 이어 셌으면 첫 틱에 L_B */
+    seq_run();
+    assert(!seq_is_active() && fake_out == BIT(O_B));
+    start(S_HOLD_LOOP);                                     /* 누적도 0 부터 */
+    fake_in = BIT(SEN_C);
+    for (int i = 0; i < 3; i++) { seq_run(); }
+    fake_in = BIT(SEN_E);
+    seq_run();
+    fake_in = BIT(SEN_C);
+    for (int i = 0; i < 3; i++) { seq_run(); }
+    assert(seq_is_active() && fake_out == 0);
+    seq_run();
+    assert(!seq_is_active() && fake_out == BIT(O_C));
+
+    /* WAIT_STABLE_TO + PARAM_TIME( ST, DSEC ) + UNMATCHED(5): ST 1 = 10 틱. 거짓 3(셈 0, 거짓 누적 3) 뒤 참 11 에 통과 */
+    (void)param_set(P_STATION_NO, 1);
+    start(S_HOLD_PARAM2);
+    fake_in = BIT(SEN_A);
+    for (int i = 0; i < 10; i++) { seq_run(); }
+    fake_in = 0;
+    for (int i = 0; i < 3; i++) { seq_run(); }
+    fake_in = BIT(SEN_A);
+    for (int i = 0; i < 10; i++) { seq_run(); }
+    assert(seq_is_active() && fake_out == 0);
+    seq_run();
+    assert(!seq_is_active() && fake_out == BIT(O_A));
+    start(S_HOLD_PARAM2);                                   /* 거짓 틱이 모두 6(> 5) 이면 제한 라벨 */
+    for (int i = 0; i < 3; i++) { seq_run(); }
+    fake_in = BIT(SEN_A);
+    seq_run();
+    fake_in = 0;
+    for (int i = 0; i < 2; i++) { seq_run(); }
+    assert(seq_is_active());
+    seq_run();
+    assert(!seq_is_active() && fake_out == BIT(OUT_EXT_5));
+
+    /* ACT 안 묶음 가지: 채널 둘과 시퀀스가 셈을 따로 센다 */
+    (void)param_set(P_STATION_NO, 2);
+    start(S_WHEN_HOLD);                                     /* 시퀀스: SEN_B 유지 3 */
+    fake_in = BIT(SEN_B) | BIT(SEN_D);
+    assert(act_start(ACT_WH1) == 0);
+    for (int i = 0; i < 2; i++) { seq_run(); act_run(); }   /* 시퀀스 2, 채널 1 은 2 */
+    assert(act_start(ACT_WH2) == 0);
+    seq_run(); act_run();                                   /* 시퀀스 3, 채널 1 은 3 > 2, 채널 2 는 1 */
+    assert(!act_is_busy(ACT_WH1) && act_is_busy(ACT_WH2) && seq_is_active() && (fake_out & BIT(OUT_EXT_12)));
+    seq_run(); act_run();                                   /* 시퀀스 4 > 3, 채널 2 는 2 */
+    assert(!seq_is_active() && (fake_out & BIT(O_B)) && act_is_busy(ACT_WH2));
+    seq_run(); act_run();
+    assert(!act_is_busy(ACT_WH2));
+    fake_in = 0;
+    fake_out = 0;
+    assert(act_start(ACT_WH1) == 0);                        /* ACT 누적: 참 2, 거짓 2(그대로), 참 2 → 4 > 3 */
+    fake_in = BIT(SEN_E);
+    for (int i = 0; i < 2; i++) { act_run(); }
+    fake_in = 0;
+    for (int i = 0; i < 2; i++) { act_run(); }
+    fake_in = BIT(SEN_E);
+    act_run();
+    assert(act_is_busy(ACT_WH1) && fake_out == 0);
+    act_run();
+    assert(!act_is_busy(ACT_WH1) && fake_out == BIT(OUT_EXT_13));
+    fake_in = 0;
+    fake_out = 0;
+    assert(act_start(ACT_WH1) == 0);                        /* ACT 출력 가지 */
+    act_run();
+    assert(act_is_busy(ACT_WH1));
+    fake_out = BIT(OUT_EXT_8);
+    act_run();
+    assert(!act_is_busy(ACT_WH1) && (fake_out & BIT(OUT_EXT_11)));
+    fake_out = 0;
+    assert(act_start(ACT_WH3) == 0);                        /* ACT 의 셋째 유지 가지는 정지 오류 290 */
+    act_run();
+    assert(!act_is_busy(ACT_WH3) && D.stop_err == SEQ_ERR_TABLE && D.action_err == 0);
+    D.stop_err = 0;
     (void)param_set(P_STATION_NO, 0);
     fake_in = 0;
 

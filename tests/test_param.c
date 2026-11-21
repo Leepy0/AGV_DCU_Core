@@ -74,6 +74,11 @@ int main(void)
     assert(param_boot(&fake_store, 2611) == 0 && param_get(P_ACT_DELAY) == 7);
     fake_ee[PARAM_ACT_DELAY_ADDR] = 0xFFFFu;
     assert(param_boot(&fake_store, 2611) == 0 && param_get(P_ACT_DELAY) == 0);
+#if !AGV_DEV_TESTS
+    /* 현장 이미지의 59번은 빈 번호: 읽으면 0, 쓰기는 거부(RAM·EEPROM 모두) */
+    fake_ee_writes = 0;
+    assert(param_get(59) == 0 && param_set(59, 5) == -1 && param_set_ram(59, 5) == -1 && param_get(59) == 0 && fake_ee_writes == 0);
+#endif
     /* 공차 프로필: 기본 0, 77~81 저장, 0·적재 하한 아래는 적재 값. 부팅은 적재 */
     assert(param_get(P_EMPTY_SPEED) == 0 && param_get(P_LOAD_DETECT) == 0 && !param_profile_empty());
     { int16_t t = P.target_speed, d = P.dcc, a = P.acc;
@@ -142,7 +147,7 @@ int main(void)
     /* 번호별 재계산: 28 은 런타임에 최저속을 다시 계산하지 않는다, 3 은 부팅과 같은 하한(회전 최저 = DRS 하한 7)을 건다(v0.48.0) */
     { int16_t min_before = P.min_speed;
       assert(param_set(P_SPEED_MIN, 9) == 0);
-      assert(P.min_speed == min_before && P.actuator_delay == 90); }
+      assert(P.min_speed == min_before && param_get(P_SPEED_MIN) == 9); }
     assert(param_set(P_SPEED_TURN, 3) == 0 && P.turn_min == param_rpm(7) && P.turn_speed == P.turn_min);
     assert(param_set(P_SPEED_TURN, 8) == 0 && P.turn_speed == param_rpm(8));
     assert(param_set(P_SPEED_LOW, 60) == 0 && P.low_speed == P.target_speed);
