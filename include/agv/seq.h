@@ -175,8 +175,10 @@ typedef int (*seq_call_fn)(seq_ctx_t *ctx);
 
 /* agv_type 0 = 타입 무관. 빌드가 곧 사이트인 경우에 쓴다.
  * load_mask: 적재 센서 입력 비트(하나라도 켜지면 적재). 0 = 정의 없음(LDS 를 켜도 늘 적재)
- * load_if: 적재 조건 둘 {켬, 끔, 켬, 끔}(하나라도 참이면 적재, agv/manual.h PROFILE_LOAD_IF). 0 = 없음 */
+ * load_if: 적재 조건 둘 {켬, 끔, 켬, 끔}(하나라도 참이면 적재, agv/manual.h PROFILE_LOAD_IF). 0 = 없음
+ * profile: 하위 8비트 번호, 상위 8비트 PF_F_*(v0.63.0, 표 매크로 STOP_BACK_FL) */
 typedef struct { uint16_t profile, agv_type, id_from, id_to; uint32_t load_mask; const uint32_t *load_if; } profile_row_t;
+#define PF_F_STOP_BACK_FL  0x100u   /* 태그로 새로 건 분류 1 정지: 후진이면 FL, 전진이면 SL */
 
 typedef struct {
     const seq_def_t *seqs;          uint16_t nseqs;
@@ -192,7 +194,8 @@ typedef struct {
 /* 부팅 시 등록. P_AGV_TYPE·P_AGV_ID 로 프로파일을 고르고, ACT 표의 금지 스텝을 검사한다.
  * 펼친 표와 압축 표(site->packed) 둘 다 받는다. 반환 0 정상, 그 외 첫 금지 스텝이 있는 ACT ID. */
 uint16_t seq_bind(const seq_site_t *site);
-uint16_t seq_profile(void);
+uint16_t seq_profile(void);       /* 고른 행의 프로파일 번호. 0 = 없음 */
+uint16_t seq_profile_flags(void); /* 고른 행의 PF_F_* */
 uint32_t seq_load_mask(void);      /* 고른 프로파일의 적재 센서 비트. 0 = 없음 */
 int16_t  seq_load_site(void);      /* 현장 적재 판정 결과. 음수 = 판정 없음 */
 void     seq_pick_profile(void);   /* 파라미터를 읽은 뒤나 바꾼 뒤 프로파일을 다시 고른다 */

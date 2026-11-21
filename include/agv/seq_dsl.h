@@ -213,13 +213,17 @@ typedef unsigned long long dsl_cond_t;
 
 /* 시퀀스 대응표: 프로파일 + 요청 ID → 표 */
 #define SEQ_MAP_BEGIN(name)      const seq_def_t name[] = {
-#define SEQ_MAP(profile, id, seq)  { (uint16_t)(profile), (uint16_t)(id), seq##_steps, \
+#define SEQ_MAP(profile, id, seq)  { DSL_TPF(profile), (uint16_t)(id), seq##_steps, \
                                      (uint16_t)(sizeof(seq##_steps) / sizeof(seq_step_t)) },
 #define SEQ_MAP_END              };
 #define ACT_MAP_BEGIN(name)      SEQ_MAP_BEGIN(name)
 #define ACT_MAP(profile, id, act)  SEQ_MAP(profile, id, act)
 #define ACT_MAP_END              SEQ_MAP_END
 
+/* 프로파일 칸을 감싼다: 그 행의 호기는 태그로 새로 건 분류 1 정지가 후진이면 FL, 전진이면 SL(v0.63.0, docs/03 5.1절).
+ * 프로파일 표에만 쓴다. 수동 표(DSL_MPF)·태그 표·대응표(DSL_TPF, 0~63)에 쓰면 컴파일 오류 */
+#define STOP_BACK_FL(p)            ((p) + PF_F_STOP_BACK_FL + 0 * sizeof(char[(((p) >= 1) && ((p) <= 63)) ? 1 : -1]))
+#define DSL_TPF(p)                 ((uint16_t)((p) + 0 * sizeof(char[(((p) >= 0) && ((p) <= 63)) ? 1 : -1])))
 #define PROFILE_TABLE_BEGIN(name)  const profile_row_t name[] = {
 #define PROFILE(profile, type, from, to)  { (uint16_t)(profile), (uint16_t)(type), (uint16_t)(from), (uint16_t)(to), 0UL, 0 },
 /* 적재 센서가 있는 프로파일. mask = LOAD_SENSORS(SEN_1, ...) 하나라도 켜지면 적재 */
@@ -412,6 +416,8 @@ typedef unsigned long long dsl_cond_t;
 #define DSL_INFO_CALL       'C'
 #define DSL_INFO_DISPLAY    'D'   /* 표시 번호(v0.61.0). 번호 0 이하는 보내지 않는다(acs.c) */
 #define DSL_INFO_IDLE       'X'   /* 오류 5초 뒤 자동 보고(acs.c)와 같은 Info·같은 슬롯. 같은 슬롯이라 둘이 겹치면 나중 것으로 바뀌고 ACK 하나로 풀린다 */
+#define DSL_INFO_CROSS_IN   'I'   /* 교차로 IN(v0.63.0): 'I' 태그와 같은 보고·허가 대기(acs.c). 시퀀스 중이면 허가까지 바로 유지 */
+#define DSL_INFO_CROSS_OUT  'O'   /* 교차로 OUT(v0.63.0): 'O' 태그와 같은 OUT 보고 큐(acs.c). 서지 않는다 */
 /* 번호 자리의 스테이션 큐 번호: ACS_SEND( NEXT, STATION(1) ) = 레거시 DA_ACS_Next( ACS_Station_Call_Num[1] ). k 0~23.
  * 상수식이라 정적 표에 쓴다(ACS( 종류, STATION(k) ) 의 출처 자리에서는 이름으로 붙는다).
  * 스테이션 큐 식: STATION(k) ± n, MOD( STATION(k), m ), n + MOD( STATION(k), m ) 를 C 연산 그대로 쓴다(IF_TAG_NUM, 태그 ACS_SEND).
@@ -536,8 +542,11 @@ typedef unsigned long long dsl_cond_t;
  * MAN( 프로파일, 모드, 조건, 출력… ) 사슬의 가지, MAN_ELSE( 프로파일, 모드, 출력… ) 사슬 끝. 모든 사슬은 MAN_ELSE 로 닫는다
  * (할 일이 없으면 NO_OUT). 한 프로파일에 사슬이 여럿이어도 된다.
  * 프로파일: 사이트 프로파일 상수 그대로(1~63, 0·범위 밖은 컴파일 오류). 지금 프로파일(seq_profile())과 같은 줄만 맞는다(v0.54.0,
- * 예전 ID( 처음, 끝 ) 호기 범위). 여러 프로파일이 같은 동작이면 사슬을 프로파일마다 통째로 한 벌씩 적는다.
- * 모드: IDLE 자동 화면에서 대기(run_is_idle(), 준비 아님, STOP 아님), JOG 조그 화면이고 STOP 아님.
+ * 예전 ID( 처음, 끝 ) 호기 범위). 여러 프로파일이 같은 동작이면 묶음을 쓴다(v0.63.0): MAN_PROFILES( PROFILE_SET( k ), 프로파일… )
+ * 묶음 줄(k 0~15, 프로파일 1~63 을 16 개까지, 같은 k 로 줄을 더 쓰면 OR) 뒤에 MAN·MAN_ELSE·MAN_FB_SW·MAN_OBS_B·MAN_START_SW 의
+ * 프로파일 칸에 PROFILE_SET( k ) 를 쓰면 지금 프로파일이 그 묶음에 들 때 맞는다. 묶음 줄은 표를 훑으며 읽으므로 쓰는 줄보다 앞에 둔다.
+ * 모드: IDLE 자동 화면에서 대기(run_is_idle(), 준비 아님, STOP 아님), JOG 조그 화면이고 STOP 아님,
+ *   ANY 모드 무관(manual_tick 이 도는 모든 틱, 자동 주행·시퀀스 중·STOP 도. 같은 틱의 시퀀스·ACT 출력을 덮는다, v0.63.0).
  * 조건: IN( ON(…), OFF(…) ), KEY( UP )(지금 눌린 키, 소비하지 않음), NO_IN(늘 참), AND( ON·OFF·ANY… [, KEY( k )] )(키는 하나까지,
  *   다른 상태 낱말·둘째 ANY 는 컴파일 오류. 줄은 키와 입력 조건이 둘 다 맞아야 한다).
  * 출력(여럿이면 모두): ON( 출력… ) 켬, OFF( 출력… ) 끔, BELT( n, CW | CCW | OFF ). 한 출력을 켜면서 끄면 컴파일 오류.
@@ -547,10 +556,17 @@ typedef unsigned long long dsl_cond_t;
  * MAN_START_SW( 프로파일, 입력 ): 그 입력이 켜져 있으면 START 스위치가 눌린 것과 똑같이 본다(본체 START 와 OR, 줄이 여럿이면 모두 OR, manual_tick 이 넘겨 한 틱 늦다) */
 #define MANUAL_BEGIN(name)  const man_row_t name[] = {
 #define MANUAL_END          };
-/* 프로파일 1~63(압축 태그 표의 프로파일 칸 6비트와 같은 범위) */
-#define DSL_MPF(p)          ((uint16_t)(p) + (0 * sizeof(char[(((p) >= 1) && ((p) <= 63)) ? 1 : -1])))
+/* 프로파일 1~63(압축 태그 표의 프로파일 칸 6비트와 같은 범위) 또는 묶음 PROFILE_SET( 0~15 ) */
+#define DSL_PSET(s)         ((((s) & ~15) == MAN_PSET) ? 1 : 0)
+#define DSL_MPF(p)          ((uint16_t)(p) + (0 * sizeof(char[((((p) >= 1) && ((p) <= 63)) || DSL_PSET(p)) ? 1 : -1])))
+#define PROFILE_SET(k)      (MAN_PSET + (k) + 0 * sizeof(char[(((k) >= 0) && ((k) <= 15)) ? 1 : -1]))
+#define DSL_PLO(p)          ((((p) < 32) ? (1UL << ((p) & 31)) : 0UL) + 0 * sizeof(char[(((p) >= 1) && ((p) <= 63)) ? 1 : -1]))
+#define DSL_PHI(p)          (((p) >= 32) ? (1UL << ((p) & 31)) : 0UL)
+#define MAN_PROFILES(s, ...) { (uint16_t)((s) + 0 * sizeof(char[DSL_PSET(s) ? 1 : -1])), MAN_K_PROFILES, \
+                               DSL_FMASK(DSL_PLO, __VA_ARGS__), DSL_FMASK(DSL_PHI, __VA_ARGS__), 0UL, 0UL },
 #define DSL_MM_IDLE         MAN_K_IDLE
 #define DSL_MM_JOG          MAN_K_JOG
+#define DSL_MM_ANY          MAN_K_ANY
 /* 조건 칸은 첫 낱말을 붙여 "키, 입력 조건" 둘로 펼친다 */
 #define DSL_MC_IN(...)      0, IN(__VA_ARGS__)
 #define DSL_MC_NO_IN        0, NO_IN
@@ -580,7 +596,7 @@ typedef unsigned long long dsl_cond_t;
 /* 위에서 아래로 첫 번째로 맞는 규칙 하나만 실행. 액션은 최대 4칸 */
 /* 동작 칸은 값이 4 개까지다(AGV_TURN·ACS_SEND 는 2 칸, 값 개수를 센다). 넘으면 컴파일 오류(검사값은 태그 번호 칸에 더한다) */
 #define DSL_ACTS_OK(acts)      (0 * sizeof(char[(DSL_NARG(DSL_UNPAREN acts) <= 4) ? 1 : -1]))
-#define TAG(tag, profile, ...)  { (uint16_t)((tag) + DSL_ACTS_OK((__VA_ARGS__))), (uint16_t)(profile), TAG_COND_NONE, 0, 0, { __VA_ARGS__ } },
+#define TAG(tag, profile, ...)  { (uint16_t)((tag) + DSL_ACTS_OK((__VA_ARGS__))), DSL_TPF(profile), TAG_COND_NONE, 0, 0, { __VA_ARGS__ } },
 /* cond: AND( … ) 하나(기록 1값), 또는 IF_* 하나(확장 조건 둘과 입력 조건 하나를 AND 한다, 8값). 값 개수로 가린다.
  * 맨 X_…(3값)는 받지 않는다: 둘째 X_ 가 동작 칸으로 들어가 실행되는 조용한 오류가 된다(상태 조건 하나는 AND( BACKWARD ) 나 IF_X( X_… )).
  * 다른 개수는 DSL_TAGC? 가 없어 컴파일 오류 */
@@ -589,18 +605,18 @@ typedef unsigned long long dsl_cond_t;
 #define DSL_TAGC1(t, p, acts, rec)       DSL_APPLY(DSL_TAG_, t, p, DSL_TG_##rec, acts)
 #define DSL_TAGC8(t, p, acts, ...)       DSL_TAG_(t, p, __VA_ARGS__, acts)
 #define DSL_TAG_(t, p, k1, a1, b1, k2, a2, b2, on, off, acts)                                         \
-    { (uint16_t)((t) + DSL_ACTS_OK(acts)), (uint16_t)(p), (uint16_t)(k1), (uint16_t)(a1), (uint16_t)(b1), { DSL_UNPAREN acts }, \
+    { (uint16_t)((t) + DSL_ACTS_OK(acts)), DSL_TPF(p), (uint16_t)(k1), (uint16_t)(a1), (uint16_t)(b1), { DSL_UNPAREN acts }, \
       (uint16_t)(k2), (uint16_t)(a2), (uint16_t)(b2), (uint32_t)(on), (uint32_t)(off) },
 /* 범위 규칙: 한 규칙이 태그 lo~hi 를 받는다(lo <= hi <= 1023). 고르는 순서는 다른 규칙과 같다(표에 적힌 순서, 먼저 맞는 하나) */
 #define DSL_TRANGE_OK(lo, hi)  (0 * sizeof(char[(((lo) >= 0) && ((lo) <= (hi)) && ((hi) <= 1023)) ? 1 : -1]))
 #define TAG_RANGE(lo, hi, profile, ...)  \
-    { (uint16_t)((lo) + DSL_ACTS_OK((__VA_ARGS__))), (uint16_t)(profile), TAG_COND_NONE, 0, 0, { __VA_ARGS__ }, 0, 0, 0, 0UL, 0UL, (uint16_t)((hi) + DSL_TRANGE_OK(lo, hi)) },
+    { (uint16_t)((lo) + DSL_ACTS_OK((__VA_ARGS__))), DSL_TPF(profile), TAG_COND_NONE, 0, 0, { __VA_ARGS__ }, 0, 0, 0, 0UL, 0UL, (uint16_t)((hi) + DSL_TRANGE_OK(lo, hi)) },
 #define TAG_RANGE_IF(lo, hi, profile, cond, ...)  DSL_TAGRIF_(lo, hi, profile, (__VA_ARGS__), cond)
 #define DSL_TAGRIF_(lo, hi, p, acts, ...)    DSL_BPASTE(DSL_TAGRC, DSL_NARG(__VA_ARGS__))(lo, hi, p, acts, __VA_ARGS__)
 #define DSL_TAGRC1(lo, hi, p, acts, rec)     DSL_APPLY(DSL_TAGR_, lo, hi, p, DSL_TG_##rec, acts)
 #define DSL_TAGRC8(lo, hi, p, acts, ...)     DSL_TAGR_(lo, hi, p, __VA_ARGS__, acts)
 #define DSL_TAGR_(lo, hi, p, k1, a1, b1, k2, a2, b2, on, off, acts)                                    \
-    { (uint16_t)((lo) + DSL_ACTS_OK(acts)), (uint16_t)(p), (uint16_t)(k1), (uint16_t)(a1), (uint16_t)(b1), { DSL_UNPAREN acts }, \
+    { (uint16_t)((lo) + DSL_ACTS_OK(acts)), DSL_TPF(p), (uint16_t)(k1), (uint16_t)(a1), (uint16_t)(b1), { DSL_UNPAREN acts }, \
       (uint16_t)(k2), (uint16_t)(a2), (uint16_t)(b2), (uint32_t)(on), (uint32_t)(off), (uint16_t)((hi) + DSL_TRANGE_OK(lo, hi)) },
 
 /* 압축 표 (생성기용, tagact.h tag_packed_t). 번호 0 칸(없음)은 BEGIN 이 넣는다.
@@ -612,7 +628,7 @@ typedef unsigned long long dsl_cond_t;
 #define TAG_ACT_BEGIN(name)    static const tag_act_t name[] = { { { 0 } },
 #define TAG_ACTS(...)          { { __VA_ARGS__ } },
 #define TAGP_BEGIN(name)       static const tag_pack_t name[] = {
-#define TAGP(tag, profile, x1, x2, in, act)     { (uint16_t)((tag) | ((uint16_t)(profile) << 10)), (uint16_t)((x1) | ((uint16_t)(x2) << 8)), (uint16_t)((act) | ((uint16_t)(in) << 8)) },
+#define TAGP(tag, profile, x1, x2, in, act)     { (uint16_t)((tag) | (DSL_TPF(profile) << 10)), (uint16_t)((x1) | ((uint16_t)(x2) << 8)), (uint16_t)((act) | ((uint16_t)(in) << 8)) },
 #define TAG_POOL_END           };
 #define TAG_PACKED(name, rules, x, in, act)     const tag_packed_t name = { rules, x, in, act, (uint16_t)(sizeof(rules) / sizeof(rules[0])) };
 /* 범위 규칙이 있는 압축 표: TAG_RANGE_P( 규칙 번호, hi ) 를 규칙 번호 순서로. 그 규칙의 TAGP 태그가 lo 다 */
