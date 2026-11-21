@@ -539,7 +539,8 @@ typedef unsigned long long dsl_cond_t;
  * 예전 ID( 처음, 끝 ) 호기 범위). 여러 프로파일이 같은 동작이면 묶음을 쓴다(v0.63.0): MAN_PROFILES( PROFILE_SET( k ), 프로파일… )
  * 묶음 줄(k 0~15, 프로파일 1~63 을 16 개까지, 같은 k 로 줄을 더 쓰면 OR) 뒤에 MAN·MAN_ELSE·MAN_FB_SW·MAN_OBS_B·MAN_START_SW 의
  * 프로파일 칸에 PROFILE_SET( k ) 를 쓰면 지금 프로파일이 그 묶음에 들 때 맞는다. 묶음 줄은 표를 훑으며 읽으므로 쓰는 줄보다 앞에 둔다.
- * 모드: IDLE 자동 화면에서 대기(run_is_idle(), 준비 아님, STOP 아님), JOG 조그 화면이고 STOP 아님.
+ * 모드: IDLE 자동 화면에서 대기(run_is_idle(), 준비 아님, STOP 아님), JOG 조그 화면이고 STOP 아님,
+ *   ANY 모드 무관(manual_tick 이 도는 모든 틱, 자동 주행·시퀀스 중·STOP 도. 같은 틱의 시퀀스·ACT 출력을 덮는다, v0.63.0).
  * 조건: IN( ON(…), OFF(…) ), KEY( UP )(지금 눌린 키, 소비하지 않음), NO_IN(늘 참), AND( ON·OFF·ANY… [, KEY( k )] )(키는 하나까지,
  *   다른 상태 낱말·둘째 ANY 는 컴파일 오류. 줄은 키와 입력 조건이 둘 다 맞아야 한다).
  * 출력(여럿이면 모두): ON( 출력… ) 켬, OFF( 출력… ) 끔, BELT( n, CW | CCW | OFF ). 한 출력을 켜면서 끄면 컴파일 오류.
@@ -559,6 +560,7 @@ typedef unsigned long long dsl_cond_t;
                                DSL_FMASK(DSL_PLO, __VA_ARGS__), DSL_FMASK(DSL_PHI, __VA_ARGS__), 0UL, 0UL },
 #define DSL_MM_IDLE         MAN_K_IDLE
 #define DSL_MM_JOG          MAN_K_JOG
+#define DSL_MM_ANY          MAN_K_ANY
 /* 조건 칸은 첫 낱말을 붙여 "키, 입력 조건" 둘로 펼친다 */
 #define DSL_MC_IN(...)      0, IN(__VA_ARGS__)
 #define DSL_MC_NO_IN        0, NO_IN

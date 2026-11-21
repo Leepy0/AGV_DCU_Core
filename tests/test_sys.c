@@ -153,6 +153,13 @@ MANUAL_BEGIN( s_man_start )
     MAN_START_SW( 2, IN_IF_2 )
     MAN_START_SW( 1, IN_IF_1 )
 MANUAL_END
+/* 모드 무관 줄(v0.63.0): 둘째 사슬은 늘 O_X 를 끈다(시퀀스 s_load 가 켠 같은 틱에 덮는지 본다) */
+MANUAL_BEGIN( s_man_any )
+    MAN( 1, ANY, IN( ON(IN_IF_1) ), ON( OUT_EXT_3 ) )
+    MAN_ELSE( 1, ANY,               OFF( OUT_EXT_3 ) )
+    MAN( 1, ANY, NO_IN,             OFF( O_X ) )
+    MAN_ELSE( 1, ANY,               NO_OUT )
+MANUAL_END
 /* 같은 시작 입력을 묶음으로(v0.63.0): 묶음 3 = 프로파일 2·1 */
 MANUAL_BEGIN( s_man_start_set )
     MAN_PROFILES( PROFILE_SET( 3 ), 2, 1 )
@@ -2373,6 +2380,58 @@ static void test_man_start_sw(void)
     manual_bind(0, 0, 0, 0);
     boot();
     printf("  man start sw ok\n");
+}
+
+/* 수동 표 모드 ANY(v0.63.0): 대기·자동 주행·시퀀스 중 모두 돈다. 한 틱 안 순서가 run_seq → site_manual 이라
+ * 시퀀스가 켠 출력을 같은 틱의 ANY 줄이 덮는다 */
+static void test_man_any(void)
+{
+    int i;
+    uint32_t prev = 0;
+
+    man_start_boot(0);                                      /* 프로파일 1, 줄 없음: 시퀀스만이면 O_X 가 켜진다(견줌) */
+    seq_request(SEQ_LOAD);
+    for (i = 0; (i < 20) && !(io_out_mask() & (1UL << O_X)); i++) { tick(); }
+    assert(seq_is_active() && (io_out_mask() & (1UL << O_X)));
+    seq_abort_all();
+    run_standby_clear(0);
+
+    man_start_boot(0);
+    manual_bind(s_man_any, (uint16_t)(sizeof(s_man_any) / sizeof(s_man_any[0])), s_profiles, 1);
+    assert(run_is_idle());                                  /* 대기 */
+    if_in(IN_IF_1, 1);  tick();
+    assert(io_out_mask() & (1UL << OUT_EXT_3));
+    if_in(IN_IF_1, 0);  tick();
+    assert(!(io_out_mask() & (1UL << OUT_EXT_3)));
+    raw_a(RAW_STOP, 0);  if_in(IN_IF_1, 1);  ticks(2);      /* STOP 이 눌린 동안도 돈다 */
+    assert(D.stop_sw && (io_out_mask() & (1UL << OUT_EXT_3)));
+    raw_a(0, RAW_STOP);  if_in(IN_IF_1, 0);  ticks(3);
+    assert(!D.stop_sw && !(io_out_mask() & (1UL << OUT_EXT_3)));
+
+    drive_up();                                             /* 자동 주행 중 */
+    run_scan(5);
+    assert(D.flag_run && !run_is_idle());
+    if_in(IN_IF_1, 1);  run_scan(1);
+    assert(io_out_mask() & (1UL << OUT_EXT_3));
+    if_in(IN_IF_1, 0);  run_scan(1);
+    assert(!(io_out_mask() & (1UL << OUT_EXT_3)));
+
+    man_start_boot(0);                                      /* 시퀀스 중: 시퀀스가 켠 O_X 를 같은 틱에 끈다 */
+    manual_bind(s_man_any, (uint16_t)(sizeof(s_man_any) / sizeof(s_man_any[0])), s_profiles, 1);
+    seq_request(SEQ_LOAD);
+    if_in(IN_IF_1, 1);
+    for (i = 0; i < 20; i++) {
+        tick();
+        prev |= io_out_mask();
+    }
+    assert(seq_is_active() && !(prev & (1UL << O_X)) && (prev & (1UL << OUT_EXT_3)));
+    if_in(IN_IF_1, 0);
+    seq_abort_all();
+    run_standby_clear(0);
+    s_man_tick = 0;
+    manual_bind(0, 0, 0, 0);
+    boot();
+    printf("  man any ok\n");
 }
 
 static void test_seq_standby_hold(void)
@@ -4978,6 +5037,7 @@ int main(void)
     test_seq_standby_cleanup();
     test_seq_standby_hold();
     test_man_start_sw();
+    test_man_any();
     test_tape_turn_request();
     test_move_cross_tag();
     test_tune_entry();

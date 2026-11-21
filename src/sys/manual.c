@@ -52,7 +52,7 @@ void manual_tick(void)
             if (hit && io_in((uint16_t)r->set)) { start_ext = 1; }
         }
         else {
-            if (hit && !done && mode_ok[k] && ((key == 0u) || (ui_key() == key)) && seq_mask_true(in, r->on, r->off)) {
+            if (hit && !done && ((k == MAN_K_ANY) || mode_ok[k]) && ((key == 0u) || (ui_key() == key)) && seq_mask_true(in, r->on, r->off)) {
                 io_out_masks(r->set, r->clr);
                 done = 1;
             }

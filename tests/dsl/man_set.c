@@ -10,6 +10,8 @@ MANUAL_BEGIN( m_new )
     MAN_FB_SW( PROFILE_SET( 15 ), SEN_2 )
     MAN_OBS_B( PROFILE_SET( 0 ), SEN_3 )
     MAN_START_SW( PROFILE_SET( 2 ), SEN_4 )
+    MAN( 9, ANY, IN( OFF(SEN_5) ),                ON( OUT_EXT_5 ) )   /* 모드 무관(v0.63.0) */
+    MAN_ELSE( PROFILE_SET( 2 ), ANY,              NO_OUT )
 MANUAL_END
 MANUAL_BEGIN( m_old )
     { MAN_PSET + 2u, MAN_K_PROFILES, (1UL << 1) | (1UL << 5) | (1UL << 31), (1UL << 0) | (1UL << 31), 0UL, 0UL },
@@ -19,6 +21,8 @@ MANUAL_BEGIN( m_old )
     { MAN_PSET + 15u, MAN_K_FB_SW, 0UL, 0UL, SEN_2, 0UL },
     { MAN_PSET + 0u, MAN_K_OBS_B, 0UL, 0UL, SEN_3, 0UL },
     { MAN_PSET + 2u, MAN_K_START_SW, 0UL, 0UL, SEN_4, 0UL },
+    { 9, MAN_K_ANY, DSL_COND_ON(IN( OFF(SEN_5) )), DSL_COND_OFF(IN( OFF(SEN_5) )), OUTS(OUT_EXT_5), 0UL },
+    { MAN_PSET + 2u, MAN_K_ANY | MAN_F_ELSE, 0UL, 0UL, 0UL, 0UL },
 MANUAL_END
 #ifdef NEG_SET_16
 MANUAL_BEGIN( m_neg )  MAN_PROFILES( PROFILE_SET( 16 ), 1 )  MANUAL_END                    /* 묶음 번호 0~15 밖 */
@@ -43,6 +47,9 @@ MANUAL_BEGIN( m_neg )  MAN_PROFILES( PROFILE_SET( 1 ), 1, 2, 3, 4, 5, 6, 7, 8, 9
 #endif
 #ifdef NEG_SET_KEY
 MANUAL_BEGIN( m_neg )  MAN_START_SW( MAN_PSET + 16, SEN_1 )  MANUAL_END                    /* 묶음도 프로파일도 아님 */
+#endif
+#ifdef NEG_ANY_LOWER
+MANUAL_BEGIN( m_neg )  MAN( 1, any, NO_IN, NO_OUT )  MANUAL_END                           /* 정하지 않은 모드 낱말 */
 #endif
 #ifdef NEG_SET_64
 MANUAL_BEGIN( m_neg )  MAN( 64, JOG, NO_IN, NO_OUT )  MANUAL_END                           /* 맨 숫자 64 는 묶음이 아님 */

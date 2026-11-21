@@ -67,6 +67,17 @@ MANUAL_BEGIN( s_tab2 )
     MAN_OBS_B( PROFILE_SET( 15 ), IN_IF_4 )
 MANUAL_END
 
+/* 모드 ANY(v0.63.0): 조그·조그 아님(자동 화면)·STOP 모두. 같은 프로파일의 JOG 사슬과 견준다. 한 사슬에 모드가 섞여도 된다 */
+MANUAL_BEGIN( s_tab3 )
+    MAN( PF_A, ANY, IN( ON(IN_IF_1) ),  ON( OUT_EXT_7 ) )
+    MAN( PF_A, JOG, IN( ON(IN_IF_3) ),  ON( OUT_EXT_8 ) )
+    MAN_ELSE( PF_A, ANY,                OFF( OUT_EXT_7, OUT_EXT_8 ) )
+    MAN( PF_A, JOG, IN( ON(IN_IF_2) ),  ON( OUT_EXT_9 ) )
+    MAN_ELSE( PF_A, JOG,                OFF( OUT_EXT_9 ) )
+    MAN( PROFILE_SET( 1 ), ANY, NO_IN,  ON( OUT_EXT_12 ) )   /* 묶음 1 은 정의가 없다: 안 맞는다 */
+    MAN_ELSE( PROFILE_SET( 1 ), ANY,    NO_OUT )
+MANUAL_END
+
 /* 컴파일 오류 시험(tests/run_host.ps1 이 하나씩 본다) */
 #ifdef NEG_MAN_SETCLR
 MANUAL_BEGIN( s_neg )  MAN( PF_A, JOG, NO_IN, ON( OUT_EXT_1 ), OFF( OUT_EXT_1 ) )  MANUAL_END   /* 켜면서 끔 */
@@ -240,6 +251,34 @@ int main(void)
     set_id(7);                                              /* 프로파일 없음(0): 묶음 줄 비트 0 은 늘 0 이라 아무 줄도 안 맞는다 */
     o = run_tick(1u | 2u | 8u);
     assert(o == 0UL && agv_drive.obs_b_ext == 0);
+
+    /* 모드 ANY */
+    assert((s_tab3[0].kind & 0x0Fu) == MAN_K_ANY && s_tab3[2].kind == (MAN_K_ANY | MAN_F_ELSE));
+    manual_bind(s_tab3, (uint16_t)(sizeof(s_tab3) / sizeof(s_tab3[0])), s_prof, (uint16_t)(sizeof(s_prof) / sizeof(s_prof[0])));
+    io_out_masks(0, 0xFFFFFFFFUL);
+    set_id(4);
+    agv_drive.ui_mode = UI_JOG;                             /* 조그: ANY·JOG 둘 다 */
+    o = run_tick(1u | 2u);
+    assert(o == (OUTB(OUT_EXT_7) | OUTB(OUT_EXT_9)));
+    o = run_tick(4u);                                       /* ANY 가 거짓이면 같은 사슬의 JOG 줄(EXT_7 은 그대로), 둘째 사슬 else */
+    assert(o == (OUTB(OUT_EXT_7) | OUTB(OUT_EXT_8)));
+    o = run_tick(0u);                                       /* else 둘 */
+    assert(o == 0UL);
+    agv_drive.ui_mode = UI_AUTO;                            /* 자동 화면, 대기 아님: ANY 만 */
+    assert(!run_is_idle());
+    o = run_tick(1u | 2u | 4u);
+    assert(o == OUTB(OUT_EXT_7));
+    o = run_tick(4u);                                       /* JOG 줄은 안 맞고 ANY 의 else */
+    assert(o == 0UL);
+    agv_drive.stop_sw = 1;                                  /* STOP 과 무관 */
+    o = run_tick(1u);
+    assert(o == OUTB(OUT_EXT_7));
+    agv_drive.ui_mode = UI_JOG;
+    o = run_tick(1u | 2u);                                  /* STOP: JOG 사슬은 안 돈다 */
+    assert(o == OUTB(OUT_EXT_7));
+    o = run_tick(0u);
+    assert(o == 0UL);
+    agv_drive.stop_sw = 0;
 
     printf("test_manual ok\n");
     return 0;

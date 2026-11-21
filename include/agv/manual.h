@@ -22,7 +22,7 @@ typedef struct {
     uint32_t set, clr;    /* 출력: clr 끄고 set 켬. MAN_K_FB_SW·MAN_K_OBS_B·MAN_K_START_SW 는 set 이 입력 ID */
 } man_row_t;
 
-enum { MAN_K_IDLE = 0, MAN_K_JOG, MAN_K_FB_SW, MAN_K_OBS_B, MAN_K_START_SW, MAN_K_PROFILES };
+enum { MAN_K_IDLE = 0, MAN_K_JOG, MAN_K_FB_SW, MAN_K_OBS_B, MAN_K_START_SW, MAN_K_PROFILES, MAN_K_ANY };   /* MAN_K_ANY: 모드 무관(매 틱) */
 #define MAN_F_ELSE  0x10u
 #define MAN_PSET    0x4000u   /* 묶음 열쇠: 프로파일 번호(1~63)와 겹치지 않게 떨어진 값. 하위 4비트가 묶음 번호 */
 
