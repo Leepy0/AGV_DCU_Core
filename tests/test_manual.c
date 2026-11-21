@@ -50,6 +50,7 @@ PROFILE_TABLE_BEGIN( s_prof )
     PROFILE_LOAD_IF( PF_B, 0, 6, 6, s_lif_6 )
     PROFILE_LOAD( PF_C, 0, 5, 5, LOAD_SENSORS(IN_IF_1) )
     PROFILE( PF_D, 0, 8, 8 )
+    PROFILE( PF_D + 64, 0, 9, 9 )     /* 64 이상(프로파일 표는 검사 없음): 비트 자리가 PF_D 와 겹쳐도 묶음에 안 든다 */
 PROFILE_TABLE_END
 
 /* 묶음(v0.63.0): 묶음 0 = A·D·C(줄 둘의 OR), 묶음 15 = B. 묶음 줄보다 앞의 줄은 그 틱에 안 맞는다 */
@@ -243,6 +244,10 @@ int main(void)
     o = run_tick(1u);
     assert(o == OUTB(OUT_EXT_1));
     io_out_masks(0, 0xFFFFFFFFUL);
+    set_id(9);                                              /* 104: 묶음 밖 */
+    assert(seq_profile() == PF_D + 64);
+    o = run_tick(1u);
+    assert(o == 0UL);
     set_id(6);                                              /* B: 묶음 15 만. 묶음 0 사슬은 안 돈다 */
     o = run_tick(1u | 8u);
     assert(o == OUTB(OUT_EXT_6) && agv_drive.obs_b_ext == 1);

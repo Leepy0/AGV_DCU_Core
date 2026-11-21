@@ -37,8 +37,8 @@ void manual_tick(void)
         uint16_t key = r->kind >> 8;
         uint16_t hit;
 
-        if (k == MAN_K_PROFILES) {       /* pf 0 은 비트 0 이라 늘 빠진다(묶음은 1~63) */
-            if ((((pf < 32u) ? r->on : r->off) >> (pf & 31u)) & 1u) { sets |= (uint16_t)(1u << (r->profile & 15u)); }
+        if (k == MAN_K_PROFILES) {       /* pf 0 은 비트 0 이라 늘 빠진다(묶음은 1~63). 64 이상(프로파일 표는 검사가 없다)도 빠진다 */
+            if ((pf < 64u) && ((((pf < 32u) ? r->on : r->off) >> (pf & 31u)) & 1u)) { sets |= (uint16_t)(1u << (r->profile & 15u)); }
             continue;
         }
         hit = (r->profile & MAN_PSET) ? (uint16_t)((sets >> (r->profile & 15u)) & 1u) : (uint16_t)((pf != 0u) && (r->profile == pf));
