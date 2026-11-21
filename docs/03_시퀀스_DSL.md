@@ -330,13 +330,13 @@ SELECT_END
 #### 3.4.1 유지·누적 대기와 묶음 안 유지 셈 (v0.61.0)
 
 ```c
-WAIT_ACCUM( IN( ON(SEN_3) ), 200 )                              /* 켜진 틱만 모아 200 을 넘으면 */
-WAIT_STABLE( IN( ON(SEN_4) ), PARAM_TIME( ACD, SEC ) )          /* ACD 초를 넘어 이어서 켜지면 */
+WAIT_ACCUM( IN( ON(SEN_A) ), 450 )                              /* 켜진 틱만 모아 450 을 넘으면 */
+WAIT_STABLE( IN( ON(SEN_B) ), PARAM_TIME( ACD, SEC ) )          /* ACD 초를 넘어 이어서 켜지면 */
 
 SELECT_BEGIN
-    WHEN( IN( ON(IF_IN_9) ), C1_GO )
-    WHEN_STABLE( IN( ANY_ON(SEN_3, SEN_4) ), 1500, C1_TIMEOUT )
-    WHEN_OUT( IN( ON(BELT1_POWER, BELT2_POWER) ), ERR_BOTH )
+    WHEN( IN( ON(SEN_GO) ), L_GO )
+    WHEN_STABLE( IN( ANY_ON(SEN_C, SEN_D) ), 800, L_TIMEOUT )
+    WHEN_OUT( IN( ON(OUT_A, OUT_B) ), L_ERR_BOTH )
 SELECT_END
 ```
 
@@ -352,7 +352,10 @@ SELECT_END
 | `WHEN_OUT` | | | 출력 래치가 조건이면 라벨로 |
 
 - 한도: 틱 숫자 0\~65534(새 매크로는 밖이면 컴파일 오류. `WAIT_STABLE(_TO)` 의 숫자는 예전처럼 검사하지 않는다) 또는 `PARAM_TIME( FND, TICK \| DSEC \| SEC )`(3.3.2).
-- 묶음은 위에서부터 본다. 앞 가지가 참인 틱에는 그리로 가고 뒤 유지 가지의 셈은 그 틱에 건드리지 않는다. 묶음 안 첫째 유지 가지와 둘째 유지 가지는 셈을 따로 둔다(러너 칸 둘). **유지 가지는 묶음당 둘까지**: 셋째에 닿으면 표 오류 290(`action_err`, ACT 는 `stop_err`)으로 끝난다. 매크로는 스텝 사이를 못 보아 막지 못한다(생성기·표 편집기가 잡는다). `SELECT_END_TO` 의 제한은 진입 뒤 틱이라 셈과 겹치지 않는다.
+- `PARAM_TIME` 의 값 x 단위는 65534 틱(약 655초)으로 묶인다. 단위 수를 따로 세어 99분까지 가는 `WAIT_TO` 의 파라미터 제한·`DELAY_PARAM` 과 다르다.
+- 묶음은 위에서부터 본다. 앞 가지가 참인 틱에는 그리로 가고 뒤 유지 가지의 셈은 그 틱에 건드리지 않는다. 묶음 안 첫째 유지 가지와 둘째 유지 가지는 셈을 따로 둔다(러너 칸 둘). **유지 가지는 묶음당 둘까지**: 셋째에 닿으면 시퀀스는 오류 290(`action_err`)으로 시퀀스만 끝나고 켜 둔 출력은 그대로 남는다. ACT 는 정지 오류 290(`stop_err`)이다. 매크로는 스텝 사이를 못 보아 막지 못하므로 표를 만드는 도구(생성기·표 편집기)가 미리 막아야 한다. `SELECT_END_TO` 의 제한은 진입 뒤 틱이라 셈과 겹치지 않는다.
+- 가지가 묶음 앞 라벨로 되돌아오면(묶음에 다시 들어오면) 유지·누적 셈은 0 부터 다시 센다.
+- 유지 가지 뒤에 `OTHERWISE` 를 두면 유지가 채워지기 전 틱마다 `OTHERWISE` 로 가므로, 유지 가지는 한도 0 일 때만 닿는다(첫 참 틱).
 - 조건은 입력만(`IN( … )` 또는 `AND( ON·OFF·ANY … )`). 상태 낱말·둘째 `ANY` 는 컴파일 오류(칸이 겹친다). `WHEN_OUT` 의 조건은 출력 ID 다.
 - 셋 다 ACT 에서 된다. 태그 표 파일에서 쓰면 컴파일 오류.
 - 저장: `WAIT_ACCUM` 은 `SK_WAIT_STABLE` 그대로이고 `arg1` 비트 0(`SEQ_HOLD_ACCUM`)만 선다. 파라미터 시간은 `arg0` = 파라미터 번호, `arg1` 상위 8비트 = 단위 틱(1·10·100. 0 이면 `arg0` 가 틱). `WHEN_STABLE`·`WHEN_ACCUM` 은 새 종류 `SK_WHEN_STABLE`(`target` 라벨, `arg0`·`arg1` 은 위와 같다, `on`·`off` 조건), `WHEN_OUT` 은 `SK_WHEN_OUT`(`target`, `on`·`off` 출력 조건). 두 종류는 열거형 끝에 붙여 기존 번호가 그대로다. `arg1` 이 0 인 예전 `WAIT_STABLE` 표는 바이트·동작이 같다.
