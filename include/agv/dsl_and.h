@@ -6,7 +6,7 @@
  *   입력  ON( … ) OFF( … ) ANY( … )           ANY 는 최대 2개: 첫째는 입력 조건 안(ANY_ON 과 같다), 둘째는 따로 둔다
  *   상태  FORWARD BACKWARD FORBACK_MODE LOW_BATTERY ID( lo, hi ) STATION( k, lo, hi ) STATION_MOD( k, n, m ) STATION_DIV( k, n, m )
  *         TAG_IS( 식 ) PARAM( FND, v ) PARAM_MIN( FND, v ) PARAM_MAX( FND, v ) CROSS_IN CROSS_OUT CROSS_IN_WAIT CROSS_OUT_WAIT
- *         ERR_IS( n ) KEY( k ) ALWAYS NOT( 상태 )
+ *         ERR_IS( n ) KEY( k ) STATE( 칸, 값 ) STATE( 칸, 처음, 끝 ) ALWAYS NOT( 상태 )
  *   입력 묶음 IN( … ) 도 항목으로 받는다
  * 낱말은 매크로가 아니라 불활성 머리다(붙이기로 고른다). 사이트가 같은 이름의 매크로(#define FORWARD 1 등)를 정의하면 깨진다.
  *
@@ -65,6 +65,12 @@
 #define DSL_AX_PARAM(name, v)       DSL_RS(DSL_XPRM(DSL_PRM_##name, v))
 #define DSL_AX_PARAM_MIN(name, v)   DSL_RS(DSL_XPRMC(DSL_PRM_##name, v, XC_PARAM_GE))
 #define DSL_AX_PARAM_MAX(name, v)   DSL_RS(DSL_XPRMC(DSL_PRM_##name, v, XC_PARAM_LE))
+/* 사이트 상태 칸(SET_STATE 와 같은 칸, v0.61.0): STATE( 칸, 값 ) 같음, STATE( 칸, 처음, 끝 ) 범위(부호 없는 16비트). 칸 0~15,
+ * 값 0~65535, 처음 <= 끝(밖은 컴파일 오류). "> 0" 은 STATE( 칸, 1, 65535 ) */
+#define DSL_AX_STATE(...)           DSL_BPASTE(DSL_AXST_, DSL_NARG(__VA_ARGS__))(__VA_ARGS__)
+#define DSL_AXST_2(k, v)            DSL_AXST_3(k, v, v)
+#define DSL_AXST_3(k, lo, hi)       DSL_RS((XC_STATE | DSL_SLOT(k)), (lo) + DSL_STATE_OK(k, lo, hi), hi)
+#define DSL_STATE_OK(k, lo, hi)     (0 * sizeof(char[(((k) >= 0) && ((k) < SEQ_STATE_COUNT) && ((lo) >= 0) && ((lo) <= (hi)) && ((hi) <= 0xFFFFL)) ? 1 : -1]))
 /* PARAM_MIN·MAX 는 자리 없는 파라미터만 받는다(자릿수 파라미터의 한 자리 TFB_1 등은 컴파일 오류) */
 #define DSL_XPRMC(...)            DSL_XPRMC_(__VA_ARGS__)
 #define DSL_XPRMC_(p, place, v, kind)  ((kind) | DSL_SLOT(p)), (v), (0 * sizeof(char[((place) == 0) ? 1 : -1]))

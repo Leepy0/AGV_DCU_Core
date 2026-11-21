@@ -43,7 +43,7 @@ typedef enum {
     SK_LABEL,             /* 분기 목적지 표시. 실행 시간 없음 */
     SK_OUT,               /* on = 켤 출력, off = 끌 출력. 끄기를 먼저 적용 */
     SK_WAIT,              /* 입력 조건 대기. timeout 있으면 target 으로 */
-    SK_WAIT_STABLE,       /* 조건이 arg0 틱 초과 연속 참이면 통과. timeout 있으면 target 으로 */
+    SK_WAIT_STABLE,       /* 조건이 arg0 틱 초과 연속 참이면 통과. timeout 있으면 target 으로. arg1 SEQ_HOLD_ACCUM 이면 참인 틱을 누적 */
     SK_WAIT_OUT,          /* 출력 래치 조건 대기 */
     SK_DELAY,             /* arg0 틱 대기 */
     SK_OUT_PULSE,         /* out 을 arg0 틱 켜고 arg1 틱 끄기를 timeout 회 반복 */
@@ -78,6 +78,9 @@ typedef enum {
     SK_BELT_UNTIL,        /* BELT_ON( n, 방향, UNTIL( 조건 ) ): SK_OUT 처럼 켜고(on|off = 그 벨트 출력) 정지 조건을 건다. 조건은
                            * must_on = out, must_off = arg0 | arg1 << 16. 시퀀스가 살아 있는 동안 매 틱 보고 참이면 그 벨트 출력을 끈다.
                            * 칸 SEQ_BELTS 개. ACT 금지 */
+    SK_WHEN_STABLE,       /* WHEN 묶음의 유지 가지(v0.61.0): 입력 조건 on·off 가 arg0 틱 초과 이어서 참이면 target 으로. arg1 SEQ_HOLD_ACCUM 이면
+                           * 참인 틱을 누적. 셈은 묶음 안 첫째 유지 가지 a, 둘째 b. 셋째는 표 오류 */
+    SK_WHEN_OUT,          /* WHEN 묶음의 출력 가지(v0.61.0): 출력 래치가 on·off 조건이면 target 으로(SK_WAIT_OUT 과 같은 조건) */
     SK_KIND_MAX
 } seq_kind_t;
 
@@ -105,7 +108,8 @@ enum {
     XC_KEY,               /* 지금 눌린 키 == a. 키를 소비하지 않는다 */
     XC_STATION_MOD,       /* 큐[칸] % a == b */
     XC_STATION_DIV,       /* 큐[칸] / a == b */
-    XC_TAG_NUM            /* 태그 == (b ? 큐[칸] % b : 큐[칸]) + a(a 부호 있음). 태그 표 전용(시퀀스는 태그 0) */
+    XC_TAG_NUM,           /* 태그 == (b ? 큐[칸] % b : 큐[칸]) + a(a 부호 있음). 태그 표 전용(시퀀스는 태그 0) */
+    XC_STATE              /* a <= 사이트 상태[칸] <= b(부호 없음, v0.61.0) */
 };
 #define XC_NOT  0x80u
 
@@ -114,6 +118,9 @@ enum { SEQ_SPD_HIGH = 0xFFF0, SEQ_SPD_LOW = 0xFFF1, SEQ_SPD_LLOW = 0xFFF2, SEQ_S
 
 #define SEQ_NO_LABEL     0u       /* target 없음. 라벨 값은 1부터 */
 #define SEQ_TO_UNMATCHED 0x8000u  /* timeout 최상위 비트: 조건이 거짓인 틱만 누적 (최대 32767 = 327초) */
+#define SEQ_HOLD_ACCUM   0x0001u  /* SK_WAIT_STABLE·SK_WHEN_STABLE 의 arg1 비트 0: 조건이 거짓인 틱에 셈을 지우지 않고 멈춘다(누적, v0.61.0) */
+/* SK_WAIT_STABLE·SK_WHEN_STABLE 의 arg1 상위 8비트: 0 이면 arg0 = 틱, 아니면 단위 틱(1·10·100)이고 arg0 = 파라미터 번호(값 x 단위, v0.61.0) */
+#define SEQ_HOLD_UNIT(arg1)  ((uint16_t)((arg1) >> 8))
 
 #define SEQ_ERR_CALL     290u     /* 사용자 정의 함수가 실패(2)를 돌려준 경우 */
 #define SEQ_ERR_TABLE    290u     /* 없는 라벨·함수 인덱스 */
@@ -206,7 +213,9 @@ uint16_t seq_xcond(uint16_t c, uint16_t a, uint16_t b, uint16_t tag);
 /* on·off 에 같이 선 비트는 "하나라도 ON", 나머지는 전부 ON / 전부 OFF */
 uint16_t seq_mask_true(uint32_t v, uint32_t on, uint32_t off);
 
-/* 사이트 상태 변수 (SET_STATE, WAIT_STATE, WHEN_STATE) */
+/* 사이트 상태 변수 (SET_STATE, WAIT_STATE, WHEN_STATE, 조건 낱말 STATE). 사이트 C 는 배열을 바로 읽고 써도 된다(v0.61.0):
+ * #define MY_FLAG seq_state[ST_MY_FLAG]. 부팅 때 0, 시퀀스 끝·중단에도 지우지 않는다 */
+extern uint16_t seq_state[SEQ_STATE_COUNT];
 uint16_t seq_state_get(uint16_t id);
 void     seq_state_set(uint16_t id, uint16_t value);
 

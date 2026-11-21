@@ -48,6 +48,9 @@ enum {
 #if AGV_DEV_TESTS
     P_DEV_TEST,             /* 59 TST: 임시 시험 고르기 0~3(param_tst_apply, param.c). 체크섬 밖 EEPROM 82(KEEP 빈 칸). 개발 이미지에만 */
 #endif
+    /* 60 AD: 시퀀스 액추에이터 지연 0.1초 단위 0~999(99.9초), 기본 0(v0.61.0). 표는 PARAM_TIME( AD, DSEC ) 로 읽는다. 체크섬 밖 EEPROM 84(KEEP 빈 칸).
+     * 번호는 두 이미지 모두 60 이다(현장 이미지는 59 가 빈 번호): 앱 생성기가 개발 헤더로 표를 만들어도 번호가 같게 */
+    P_ACT_DELAY = 60,
     P_COUNT
 };
 #define P_SAVED_LAST 45   /* 이 번호까지 EEPROM 에 저장한다 */
@@ -88,6 +91,7 @@ enum {
 #define PARAM_GUIDE_DIST_LOW     100
 #define PARAM_GUIDE_DIST_UP      999
 #define PARAM_EMPTY_ADDR0        77    /* 54~58 번 → 77~81 */
+#define PARAM_ACT_DELAY_ADDR     84    /* 60 번(AD). KEEP 빈 칸(77~88), 83 은 LG b11 표시 */
 
 /* P_OPT_FLAGS(51 OPT) 는 안 쓴다(v0.49.0). 살아 있는 비트가 없다. 값이 남아 있어도 무시한다. 번호·EEPROM 116·한계 0~63 은 그대로.
  * b0·b1·b4 는 기본 동작이 되어 비었다(예전 동작은 QUIRK_STEER_LEGACY). b5 도 기본이 되어 비었다(v0.26).
@@ -120,7 +124,6 @@ typedef struct {
     int16_t stop_len, fwd_stop_len;                 /* gStop_length, gFoward_Stop_length */
     int16_t display_mode, turn_mode, forback_mode;
     int16_t auto_drive_mode, auto_slow_mode, agv_type_mode;
-    int16_t actuator_delay;
     int16_t for_bumper, back_bumper, for_obs, back_obs;
     int16_t acs_group, acs_standby;
 } param_dv_t;
