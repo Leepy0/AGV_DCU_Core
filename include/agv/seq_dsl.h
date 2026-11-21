@@ -416,6 +416,8 @@ typedef unsigned long long dsl_cond_t;
 #define DSL_INFO_CALL       'C'
 #define DSL_INFO_DISPLAY    'D'   /* 표시 번호(v0.61.0). 번호 0 이하는 보내지 않는다(acs.c) */
 #define DSL_INFO_IDLE       'X'   /* 오류 5초 뒤 자동 보고(acs.c)와 같은 Info·같은 슬롯. 같은 슬롯이라 둘이 겹치면 나중 것으로 바뀌고 ACK 하나로 풀린다 */
+#define DSL_INFO_CROSS_IN   'I'   /* 교차로 IN(v0.63.0): 'I' 태그와 같은 보고·허가 대기(acs.c). 시퀀스 중이면 허가까지 바로 유지 */
+#define DSL_INFO_CROSS_OUT  'O'   /* 교차로 OUT(v0.63.0): 'O' 태그와 같은 OUT 보고 큐(acs.c). 서지 않는다 */
 /* 번호 자리의 스테이션 큐 번호: ACS_SEND( NEXT, STATION(1) ) = 레거시 DA_ACS_Next( ACS_Station_Call_Num[1] ). k 0~23.
  * 상수식이라 정적 표에 쓴다(ACS( 종류, STATION(k) ) 의 출처 자리에서는 이름으로 붙는다).
  * 스테이션 큐 식: STATION(k) ± n, MOD( STATION(k), m ), n + MOD( STATION(k), m ) 를 C 연산 그대로 쓴다(IF_TAG_NUM, 태그 ACS_SEND).

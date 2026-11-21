@@ -184,6 +184,9 @@ void acs_report_slot(uint16_t slot, int16_t num)
 void acs_report(uint16_t info, int16_t num)
 {
     uint16_t i;
+    /* 교차로 IN·OUT(v0.63.0, ACS( CROSS_IN·CROSS_OUT, n )): 슬롯이 아니라 'I'·'O' 태그와 같은 교차로 상태로 간다('I'·'O' 는 s_map 에 없다) */
+    if (info == 'I') { acs_cross_in(num); return; }
+    if (info == 'O') { acs_cross_out(num); return; }
     for (i = 0; i < MAP_COUNT; i++) {
         if ((s_map[i].info == info) && (s_map[i].slot != ACS_SLOT_CALL_ACK)) {
             acs_report_slot(s_map[i].slot, num);

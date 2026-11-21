@@ -36,7 +36,8 @@
  *   ACS( STANDBY_RESET, 번호 )        위와 같고 먼저 스테이션 큐를 지운다(레거시 DA_ACS_Standby( n, RESET ))
  *   STATION_RESET                    스테이션 큐를 지운다
  *   NO_ACTION                        아무 동작 없음(0). 뒤 규칙으로 넘어가지 않게 막는 용도
- * 종류는 seq_dsl.h DSL_INFO_* 이름(LOADING UNLOADING NEXT ARRIVE FINISH PROCESSING STANDBY CALL IDLE DISPLAY).
+ *   ACS( CROSS_IN, 번호 ) / ACS( CROSS_OUT, 번호 )   교차로 IN·OUT: 'I'·'O' 태그와 같다(IN 은 허가 대기 정지, OUT 은 보고 큐만). 번호 칸은 위와 같다
+ * 종류는 seq_dsl.h DSL_INFO_* 이름(LOADING UNLOADING NEXT ARRIVE FINISH PROCESSING STANDBY CALL IDLE DISPLAY CROSS_IN CROSS_OUT).
  * 시퀀스 표의 ACS( STANDBY, … ) 도 보고 + 자동 재전송을 하지만 정지는 걸지 않는다(시퀀스는 이미 선 뒤에 돈다).
  *
  * 정지가 진행 중(감속·정지 진행 중, D.flag_stopping)에 읽은 다른 태그의 단순 정지(AGV_STOP·AGV_STOP( cm )·AGV_AUTOSTART, 대기 보고의 정지 부분)만

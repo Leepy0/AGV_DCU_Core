@@ -250,6 +250,8 @@ static const tag_rule_t s_rules[] = {
     TAG( 204, 0, ACS_SEND( NEXT, 9 ) )                         /* 보고만: 서지 않고 ACK 까지 재전송 */
     TAG( 205, 0, ACS_SEND( IDLE, 9 ) )                         /* v0.59.0 IDLE 보고: Info 'X', 서지 않고 ACK 까지 재전송 */
     TAG( 206, 0, ACS( IDLE, STATION0 ) )                       /* 1칸 형식 */
+    TAG( 207, 0, ACS( CROSS_IN, 30 ) )                         /* v0.63.0 교차로 IN: 'I' 태그와 같은 길 */
+    TAG( 208, 0, ACS( CROSS_OUT, 17 ), ACS( CROSS_OUT, 17 ) )  /* 교차로 OUT: 같은 구역은 큐에 한 번 */
 };
 
 /* 위 20~23 과 같은 규칙의 압축 표. 앞 줄은 다른 프로파일이라 건너뛴다 */
@@ -1062,6 +1064,22 @@ static void test_cross(void)
     send_frame(b, 0);
     run_scan(1);
     assert((D.cross_in_flag == 0) && (D.cross_in_on == 0));
+
+    /* 태그 동작 ACS( CROSS_IN·CROSS_OUT, n )(v0.63.0): 'I'·'O' 태그와 같은 교차로 상태. 보고 슬롯은 쓰지 않는다 */
+    boot();
+    drive_up();
+    run_scan(5);
+    {
+        uint16_t pend = acs_pending();
+        (void)tagact_run(207);
+        assert((D.cross_in_flag == 1) && (acs_cross_num(ACS_CROSS_IN) == 30) && !D.flag_stopping);
+        assert(D.cross_pulses == (int16_t)((float)param_get(P_CROSS_IN_CM) * 10.0f * P.one_length_pulse + 0.5f));
+        run_scan(1);
+        assert(tx_has('E', 'I'));
+        (void)tagact_run(208);
+        assert((acs_cross_out_count() == 1) && (acs_cross_num(ACS_CROSS_OUT) == 17) && (acs_pending() == pend));
+        assert(D.cross_out_flag == 0);                       /* OUT 은 서지 않는다 */
+    }
     printf("  cross ok\n");
 }
 /* 마지막으로 보낸 (type, info) 프레임의 MsgID. 없으면 0 */
