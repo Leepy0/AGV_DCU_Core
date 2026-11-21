@@ -153,6 +153,11 @@ MANUAL_BEGIN( s_man_start )
     MAN_START_SW( 2, IN_IF_2 )
     MAN_START_SW( 1, IN_IF_1 )
 MANUAL_END
+/* 같은 시작 입력을 묶음으로(v0.63.0): 묶음 3 = 프로파일 2·1 */
+MANUAL_BEGIN( s_man_start_set )
+    MAN_PROFILES( PROFILE_SET( 3 ), 2, 1 )
+    MAN_START_SW( PROFILE_SET( 3 ), IN_IF_1 )
+MANUAL_END
 /* 현장 적재 판정 시험용. 음수 = 판정 없음(센서 묶음을 쓴다) */
 static int16_t s_load_site = -1;
 static int16_t site_load(void) { return s_load_site; }
@@ -2309,6 +2314,13 @@ static void test_man_start_sw(void)
     assert(!D.flag_ready);
     raw_a(0, RAW_START);  tick();
     assert(D.flag_ready == 1);
+    /* 묶음 열쇠의 시작 입력(v0.63.0): 프로파일 1 이 묶음 3 에 들어 같은 출발 */
+    man_start_boot(0);
+    manual_bind(s_man_start_set, 2, s_profiles, 1);
+    if_in(IN_IF_1, 1);  ticks(3);
+    assert(!D.flag_ready);
+    if_in(IN_IF_1, 0);  ticks(2);
+    assert(D.flag_ready == 1 && run_auto_started());
 
     /* 프로파일이 없어지면(0) 켜져 있던 값이 남지 않는다: 매 틱 0 을 넘기므로 입력이 켜진 채여도 놓은 것으로 본다 */
     man_start_boot(2);

@@ -536,7 +536,9 @@ typedef unsigned long long dsl_cond_t;
  * MAN( 프로파일, 모드, 조건, 출력… ) 사슬의 가지, MAN_ELSE( 프로파일, 모드, 출력… ) 사슬 끝. 모든 사슬은 MAN_ELSE 로 닫는다
  * (할 일이 없으면 NO_OUT). 한 프로파일에 사슬이 여럿이어도 된다.
  * 프로파일: 사이트 프로파일 상수 그대로(1~63, 0·범위 밖은 컴파일 오류). 지금 프로파일(seq_profile())과 같은 줄만 맞는다(v0.54.0,
- * 예전 ID( 처음, 끝 ) 호기 범위). 여러 프로파일이 같은 동작이면 사슬을 프로파일마다 통째로 한 벌씩 적는다.
+ * 예전 ID( 처음, 끝 ) 호기 범위). 여러 프로파일이 같은 동작이면 묶음을 쓴다(v0.63.0): MAN_PROFILES( PROFILE_SET( k ), 프로파일… )
+ * 묶음 줄(k 0~15, 프로파일 1~63 을 16 개까지, 같은 k 로 줄을 더 쓰면 OR) 뒤에 MAN·MAN_ELSE·MAN_FB_SW·MAN_OBS_B·MAN_START_SW 의
+ * 프로파일 칸에 PROFILE_SET( k ) 를 쓰면 지금 프로파일이 그 묶음에 들 때 맞는다. 묶음 줄은 표를 훑으며 읽으므로 쓰는 줄보다 앞에 둔다.
  * 모드: IDLE 자동 화면에서 대기(run_is_idle(), 준비 아님, STOP 아님), JOG 조그 화면이고 STOP 아님.
  * 조건: IN( ON(…), OFF(…) ), KEY( UP )(지금 눌린 키, 소비하지 않음), NO_IN(늘 참), AND( ON·OFF·ANY… [, KEY( k )] )(키는 하나까지,
  *   다른 상태 낱말·둘째 ANY 는 컴파일 오류. 줄은 키와 입력 조건이 둘 다 맞아야 한다).
@@ -547,8 +549,14 @@ typedef unsigned long long dsl_cond_t;
  * MAN_START_SW( 프로파일, 입력 ): 그 입력이 켜져 있으면 START 스위치가 눌린 것과 똑같이 본다(본체 START 와 OR, 줄이 여럿이면 모두 OR, manual_tick 이 넘겨 한 틱 늦다) */
 #define MANUAL_BEGIN(name)  const man_row_t name[] = {
 #define MANUAL_END          };
-/* 프로파일 1~63(압축 태그 표의 프로파일 칸 6비트와 같은 범위) */
-#define DSL_MPF(p)          ((uint16_t)(p) + (0 * sizeof(char[(((p) >= 1) && ((p) <= 63)) ? 1 : -1])))
+/* 프로파일 1~63(압축 태그 표의 프로파일 칸 6비트와 같은 범위) 또는 묶음 PROFILE_SET( 0~15 ) */
+#define DSL_PSET(s)         ((((s) & ~15) == MAN_PSET) ? 1 : 0)
+#define DSL_MPF(p)          ((uint16_t)(p) + (0 * sizeof(char[((((p) >= 1) && ((p) <= 63)) || DSL_PSET(p)) ? 1 : -1])))
+#define PROFILE_SET(k)      (MAN_PSET + (k) + 0 * sizeof(char[(((k) >= 0) && ((k) <= 15)) ? 1 : -1]))
+#define DSL_PLO(p)          ((((p) < 32) ? (1UL << ((p) & 31)) : 0UL) + 0 * sizeof(char[(((p) >= 1) && ((p) <= 63)) ? 1 : -1]))
+#define DSL_PHI(p)          (((p) >= 32) ? (1UL << ((p) & 31)) : 0UL)
+#define MAN_PROFILES(s, ...) { (uint16_t)((s) + 0 * sizeof(char[DSL_PSET(s) ? 1 : -1])), MAN_K_PROFILES, \
+                               DSL_FMASK(DSL_PLO, __VA_ARGS__), DSL_FMASK(DSL_PHI, __VA_ARGS__), 0UL, 0UL },
 #define DSL_MM_IDLE         MAN_K_IDLE
 #define DSL_MM_JOG          MAN_K_JOG
 /* 조건 칸은 첫 낱말을 붙여 "키, 입력 조건" 둘로 펼친다 */

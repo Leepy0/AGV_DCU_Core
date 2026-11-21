@@ -4,6 +4,8 @@
  *
  * 한 줄 = 사슬의 가지 하나. 사슬은 MAN 줄 여럿과 끝의 MAN_ELSE 한 줄이다(C 의 if / else if / else 하나).
  *  - 줄의 열쇠는 프로파일 하나다(v0.54.0, 예전 호기 범위). 지금 프로파일(seq_profile())과 같은 줄만 맞는다. 프로파일이 없으면(0) 아무 줄도 안 맞는다.
+ *  - 열쇠가 묶음(MAN_PSET + k)이면 지금 프로파일이 그 묶음에 들 때 맞는다. 묶음은 MAN_K_PROFILES 줄이 정한다(on = 프로파일 1~31 비트,
+ *    off = 32~63 비트, 같은 묶음 줄이 여럿이면 OR). 표를 훑으며 정하므로 묶음 줄은 그 묶음을 쓰는 줄보다 앞에 둔다.
  *  - 위에서부터 프로파일·모드·조건이 맞는 첫 MAN 줄의 출력만 쓴다. 맞는 줄이 없으면 MAN_ELSE 줄의 출력을 쓴다.
  *  - 쓰지 않은 출력은 그대로 둔다(암묵적으로 끄지 않는다).
  */
@@ -14,14 +16,15 @@
 
 /* 줄 하나 10워드(C28x) */
 typedef struct {
-    uint16_t profile;     /* 프로파일 번호 1~63(seq_profile() 과 같으면 맞는다) */
+    uint16_t profile;     /* 프로파일 번호 1~63(seq_profile() 과 같으면 맞는다) 또는 묶음 MAN_PSET + 0~15 */
     uint16_t kind;        /* 하위 4비트 MAN_K_*, MAN_F_ELSE, 상위 8비트 키(0 = 키 조건 없음) */
-    uint32_t on, off;     /* 입력 조건 (seq_mask_true) */
+    uint32_t on, off;     /* 입력 조건 (seq_mask_true). MAN_K_PROFILES 는 묶음에 드는 프로파일 비트 */
     uint32_t set, clr;    /* 출력: clr 끄고 set 켬. MAN_K_FB_SW·MAN_K_OBS_B·MAN_K_START_SW 는 set 이 입력 ID */
 } man_row_t;
 
-enum { MAN_K_IDLE = 0, MAN_K_JOG, MAN_K_FB_SW, MAN_K_OBS_B, MAN_K_START_SW };
+enum { MAN_K_IDLE = 0, MAN_K_JOG, MAN_K_FB_SW, MAN_K_OBS_B, MAN_K_START_SW, MAN_K_PROFILES };
 #define MAN_F_ELSE  0x10u
+#define MAN_PSET    0x4000u   /* 묶음 열쇠: 프로파일 번호(1~63)와 겹치지 않게 떨어진 값. 하위 4비트가 묶음 번호 */
 
 /* 표와 프로파일 표를 넘긴다(적재 조건은 프로파일 표의 PROFILE_LOAD_IF 칸) */
 void    manual_bind(const man_row_t *rows, uint16_t n, const profile_row_t *prof, uint16_t nprof);

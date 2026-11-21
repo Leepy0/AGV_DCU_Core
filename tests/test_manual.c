@@ -16,8 +16,8 @@
 #define BELT2_CW     OUTS( OUT_EXT_3 )
 #define BELT2_CCW    NO_OUT
 
-/* 프로파일(아래 프로파일 표): 호기 4 = PF_A, 6 = PF_B, 5 = PF_C, 그 밖 = 없음(0) */
-enum { PF_A = 1, PF_B = 2, PF_C = 3 };
+/* 프로파일(아래 프로파일 표): 호기 4 = PF_A, 6 = PF_B, 5 = PF_C, 8 = PF_D(32 이상: 묶음 줄의 off 절반), 그 밖 = 없음(0) */
+enum { PF_A = 1, PF_B = 2, PF_C = 3, PF_D = 40 };
 
 MANUAL_BEGIN( s_tab )
     MAN( PF_A, JOG, IN( ON(IN_IF_1), OFF(IN_IF_2) ), BELT( 1, CW ) )
@@ -49,7 +49,23 @@ PROFILE_TABLE_BEGIN( s_prof )
     PROFILE_LOAD_IF( PF_A, 0, 4, 4, s_lif_4 )
     PROFILE_LOAD_IF( PF_B, 0, 6, 6, s_lif_6 )
     PROFILE_LOAD( PF_C, 0, 5, 5, LOAD_SENSORS(IN_IF_1) )
+    PROFILE( PF_D, 0, 8, 8 )
 PROFILE_TABLE_END
+
+/* 묶음(v0.63.0): 묶음 0 = A·D·C(줄 둘의 OR), 묶음 15 = B. 묶음 줄보다 앞의 줄은 그 틱에 안 맞는다 */
+MANUAL_BEGIN( s_tab2 )
+    MAN( PROFILE_SET( 0 ), JOG, NO_IN,              ON( OUT_EXT_5 ) )        /* 묶음 줄보다 앞: 안 맞는다 */
+    MAN_ELSE( PROFILE_SET( 0 ), JOG,                NO_OUT )
+    MAN_PROFILES( PROFILE_SET( 0 ), PF_A, PF_D )
+    MAN_PROFILES( PROFILE_SET( 15 ), PF_B )
+    MAN_PROFILES( PROFILE_SET( 0 ), PF_C )
+    MAN( PROFILE_SET( 0 ), JOG, IN( ON(IN_IF_1) ),  ON( OUT_EXT_1 ) )
+    MAN( PF_C, JOG, IN( ON(IN_IF_2) ),              ON( OUT_EXT_2 ) )        /* 낱개 프로파일 줄이 섞인 사슬 */
+    MAN_ELSE( PROFILE_SET( 0 ), JOG,                OFF( OUT_EXT_1, OUT_EXT_2 ) )
+    MAN( PROFILE_SET( 15 ), JOG, NO_IN,             ON( OUT_EXT_6 ) )
+    MAN_ELSE( PROFILE_SET( 15 ), JOG,               NO_OUT )
+    MAN_OBS_B( PROFILE_SET( 15 ), IN_IF_4 )
+MANUAL_END
 
 /* 컴파일 오류 시험(tests/run_host.ps1 이 하나씩 본다) */
 #ifdef NEG_MAN_SETCLR
@@ -80,6 +96,7 @@ LOAD_IF( s_neg_if, NO_IN )                                                      
 static const uint32_t s_neg_if[2] = { 1, 0 };
 PROFILE_TABLE_BEGIN( s_neg )  PROFILE_LOAD_IF( 1, 0, 1, 1, s_neg_if )  PROFILE_TABLE_END          /* LOAD_IF 배열이 아님 */
 #endif
+/* 묶음·모드 ANY·STOP_BACK_FL 의 컴파일 오류는 tests/dsl/man_set.c(gcc·cl2000 둘 다) */
 
 void site_register(void) {}
 void site_manual(void) {}
@@ -187,6 +204,42 @@ int main(void)
     assert(manual_load() == -1);
     set_id(7);
     assert(manual_load() == -1);
+
+    /* 묶음(v0.63.0): 묶음 줄은 10워드 줄 하나(열쇠 MAN_PSET + k, on = 1~31, off = 32~63) */
+    assert(s_tab2[2].profile == MAN_PSET && s_tab2[2].kind == MAN_K_PROFILES && s_tab2[2].on == (1UL << PF_A)
+           && s_tab2[2].off == (1UL << (PF_D - 32)) && s_tab2[2].set == 0UL && s_tab2[2].clr == 0UL);
+    assert(s_tab2[3].profile == (MAN_PSET | 15u) && s_tab2[5].profile == MAN_PSET && s_tab2[6].profile == PF_C);
+    manual_bind(s_tab2, (uint16_t)(sizeof(s_tab2) / sizeof(s_tab2[0])), s_prof, (uint16_t)(sizeof(s_prof) / sizeof(s_prof[0])));
+    agv_drive.ui_mode = UI_JOG;
+    agv_drive.obs_b_ext = 0;
+    io_out_masks(0, 0xFFFFFFFFUL);
+    set_id(4);                                              /* A: 묶음 0. 묶음 줄 앞의 사슬(EXT_5)은 안 돈다 */
+    o = run_tick(1u);
+    assert(o == OUTB(OUT_EXT_1));
+    o = run_tick(2u);                                       /* 묶음 사슬의 else. C 낱개 줄은 A 에 안 맞는다 */
+    assert(o == 0UL);
+    o = run_tick(8u);                                       /* 추가 장애물 줄은 묶음 15(B)만 */
+    assert(o == 0UL && agv_drive.obs_b_ext == 0);
+    set_id(5);                                              /* C: 둘째 묶음 줄로 든다(OR). 낱개 줄도 맞는다 */
+    o = run_tick(2u);
+    assert(o == OUTB(OUT_EXT_2));
+    o = run_tick(1u);
+    assert(o == (OUTB(OUT_EXT_1) | OUTB(OUT_EXT_2)));
+    o = run_tick(0u);
+    assert(o == 0UL);
+    set_id(8);                                              /* D(40): 묶음 줄의 off 절반 */
+    assert(seq_profile() == PF_D);
+    o = run_tick(1u);
+    assert(o == OUTB(OUT_EXT_1));
+    io_out_masks(0, 0xFFFFFFFFUL);
+    set_id(6);                                              /* B: 묶음 15 만. 묶음 0 사슬은 안 돈다 */
+    o = run_tick(1u | 8u);
+    assert(o == OUTB(OUT_EXT_6) && agv_drive.obs_b_ext == 1);
+    io_out_masks(0, 0xFFFFFFFFUL);
+    agv_drive.obs_b_ext = 0;
+    set_id(7);                                              /* 프로파일 없음(0): 묶음 줄 비트 0 은 늘 0 이라 아무 줄도 안 맞는다 */
+    o = run_tick(1u | 2u | 8u);
+    assert(o == 0UL && agv_drive.obs_b_ext == 0);
 
     printf("test_manual ok\n");
     return 0;

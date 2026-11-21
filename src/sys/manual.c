@@ -25,6 +25,7 @@ void manual_tick(void)
     uint16_t mode_ok[2];
     uint16_t fb = IN_IF_5;           /* run.c 의 기본 입력 */
     uint16_t start_ext = 0;          /* MAN_START_SW 입력의 OR */
+    uint16_t sets = 0;               /* 비트 k = 지금 프로파일이 묶음 k 에 든다(앞 MAN_K_PROFILES 줄) */
     uint16_t done = 0, i;
 
     mode_ok[MAN_K_IDLE] = (uint16_t)(run_is_idle() && !agv_drive.flag_ready && !agv_drive.stop_sw);
@@ -34,8 +35,13 @@ void manual_tick(void)
         const man_row_t *r = &s_rows[i];
         uint16_t k = r->kind & 0x0Fu;
         uint16_t key = r->kind >> 8;
-        uint16_t hit = (uint16_t)((pf != 0u) && (r->profile == pf));
+        uint16_t hit;
 
+        if (k == MAN_K_PROFILES) {       /* pf 0 은 비트 0 이라 늘 빠진다(묶음은 1~63) */
+            if ((((pf < 32u) ? r->on : r->off) >> (pf & 31u)) & 1u) { sets |= (uint16_t)(1u << (r->profile & 15u)); }
+            continue;
+        }
+        hit = (r->profile & MAN_PSET) ? (uint16_t)((sets >> (r->profile & 15u)) & 1u) : (uint16_t)((pf != 0u) && (r->profile == pf));
         if (k == MAN_K_FB_SW) {
             if (hit) { fb = (uint16_t)r->set; }
         }
