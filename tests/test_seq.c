@@ -186,6 +186,51 @@ SEQ_BEGIN( s_accum )
     END_STOP
 SEQ_END
 
+/* 파라미터 시간 유지 대기(v0.61.0): 한도 = 값 x 단위, 틱마다 다시 읽는다. 음수 0, 65534 로 묶음 */
+SEQ_BEGIN( s_hold_param )
+    WAIT_STABLE( IN( ON(SEN_A) ), PARAM_TIME( ST, TICK ) )
+    OUT_ON( O_A )
+    WAIT_STABLE( IN( ON(SEN_C) ), PARAM_TIME( BO, TICK ) )
+    OUT_ON( O_C )
+    WAIT_ACCUM( IN( ON(SEN_B) ), PARAM_TIME( P_AUTO_START_SEC, SEC ) )
+    OUT_ON( O_B )
+    END_STOP
+SEQ_END
+
+/* 묶음 안 유지 셈(v0.61.0): 앞 가지가 이기고, 유지 가지 둘은 따로 센다(a·b), 제한은 timer */
+SEQ_BEGIN( s_when_hold )
+    SELECT_BEGIN
+        WHEN( IN( ON(SEN_A) ), L_A )
+        WHEN_STABLE( IN( ON(SEN_B) ), 3, L_B )
+        WHEN_ACCUM( IN( ON(SEN_C) ), PARAM_TIME( ST, TICK ), L_C )
+    SELECT_END_TO( 50, L_ERR )
+    L( L_A )
+    OUT_ON( O_A )
+    END_STOP
+    L( L_B )
+    OUT_ON( O_B )
+    END_STOP
+    L( L_C )
+    OUT_ON( O_C )
+    END_STOP
+    L( L_ERR )
+    OUT_ON( OUT_EXT_5 )
+    END_STOP
+SEQ_END
+
+/* 셋째 유지 가지는 닿으면 표 오류 */
+SEQ_BEGIN( s_when_hold3 )
+    SELECT_BEGIN
+        WHEN( IN( ON(SEN_D) ), L_A )
+        WHEN_STABLE( IN( ON(SEN_A) ), 1, L_A )
+        WHEN_STABLE( IN( ON(SEN_B) ), 1, L_A )
+        WHEN_ACCUM( IN( ON(SEN_C) ), 1, L_A )
+    SELECT_END
+    L( L_A )
+    OUT_ON( O_A )
+    END_STOP
+SEQ_END
+
 SEQ_BEGIN( s_standby )
     ACS( STANDBY, 7 )
     ACS( CALL, 9 )
@@ -430,7 +475,7 @@ enum {
     S_XWHEN, S_XWAIT, S_ANY2, S_DPARAM, S_TPARAM, S_NOWAIT, S_MOVE, S_ALIGN, S_MOVE_TAPE,
     S_BELTS, S_BELT_OFF, S_BELT_END, S_BELT_MANY, S_OBS_AUTO, S_HIGH
 };
-enum { S_FLICKER_ST = SEQ_UNLOAD_PART + 3, S_AND, S_STANDBY, S_ACCUM };   /* 사이트 ID 가 SEQ_MAX(64)를 넘지 않게 코어 ID 빈 자리를 쓴다 */
+enum { S_FLICKER_ST = SEQ_UNLOAD_PART + 3, S_AND, S_STANDBY, S_ACCUM, S_HOLD_PARAM, S_WHEN_HOLD, S_WHEN_HOLD3 };   /* 사이트 ID 가 SEQ_MAX(64)를 넘지 않게 코어 ID 빈 자리를 쓴다 */
 
 SEQ_MAP_BEGIN( site_seqs )
     SEQ_MAP( 0, S_BRANCH, s_branch )
@@ -468,6 +513,9 @@ SEQ_MAP_BEGIN( site_seqs )
     SEQ_MAP( 0, S_AND, s_and )
     SEQ_MAP( 0, S_STANDBY, s_standby )
     SEQ_MAP( 0, S_ACCUM, s_accum )
+    SEQ_MAP( 0, S_HOLD_PARAM, s_hold_param )
+    SEQ_MAP( 0, S_WHEN_HOLD, s_when_hold )
+    SEQ_MAP( 0, S_WHEN_HOLD3, s_when_hold3 )
     SEQ_MAP( 0, S_HIGH, s_high )
 SEQ_MAP_END
 
@@ -1023,6 +1071,86 @@ static void run_all(void)
     assert(seq_is_active());
     seq_run();
     assert(!seq_is_active() && fake_out == (BIT(O_A) | BIT(O_B) | BIT(OUT_EXT_5)));
+    fake_in = 0;
+
+    /* 파라미터 시간 유지 대기: ST 0 = 첫 참 틱에 통과 */
+    (void)param_set(P_STATION_NO, 0);
+    (void)param_set(P_BAT_OFFSET_DV, -5);
+    (void)param_set(P_AUTO_START_SEC, 700);                 /* 70000 틱 → 65534 로 묶음 */
+    start(S_HOLD_PARAM);
+    fake_in = BIT(SEN_A);
+    seq_run();
+    assert(fake_out == BIT(O_A));
+    start(S_HOLD_PARAM);                                    /* ST 3: 참 3 → 거짓(0) → 참 3, 도는 중 5 로 올리면 셈 5 까지 못 넘고, 2 로 내리면 다음 참 틱에 */
+    (void)param_set(P_STATION_NO, 3);
+    fake_in = BIT(SEN_A);
+    for (int i = 0; i < 3; i++) { seq_run(); }
+    fake_in = 0;
+    seq_run();
+    fake_in = BIT(SEN_A);
+    for (int i = 0; i < 3; i++) { seq_run(); }
+    assert(fake_out == 0);
+    (void)param_set(P_STATION_NO, 5);
+    for (int i = 0; i < 2; i++) { seq_run(); }              /* 셈 5 */
+    assert(fake_out == 0);
+    (void)param_set(P_STATION_NO, 2);
+    seq_run();                                              /* 셈 6 > 2. 다음 대기(BO -5 → 0) 첫 틱은 SEN_C 꺼짐 */
+    assert(fake_out == BIT(O_A));
+    fake_in = BIT(SEN_C);
+    seq_run();                                              /* 음수 = 0: 첫 참 틱. 누적 대기 첫 틱은 SEN_B 꺼짐 */
+    assert(fake_out == (BIT(O_A) | BIT(O_C)));
+    fake_in = BIT(SEN_B);
+    for (long t = 0; t < 65534L; t++) { seq_run(); }
+    assert(seq_is_active() && !(fake_out & BIT(O_B)));
+    seq_run();
+    assert(!seq_is_active() && (fake_out & BIT(O_B)));
+    (void)param_set(P_BAT_OFFSET_DV, 0);
+    (void)param_set(P_AUTO_START_SEC, 0);
+    fake_in = 0;
+
+    /* 묶음 안 유지 셈 */
+    (void)param_set(P_STATION_NO, 2);
+    start(S_WHEN_HOLD);                                     /* 유지: 참 3 → 거짓(0) → 참 3 은 아직, 4 번째에 */
+    fake_in = BIT(SEN_B);
+    for (int i = 0; i < 3; i++) { seq_run(); }
+    fake_in = 0;
+    seq_run();
+    fake_in = BIT(SEN_B);
+    for (int i = 0; i < 3; i++) { seq_run(); }
+    assert(seq_is_active() && fake_out == 0);
+    seq_run();
+    assert(!seq_is_active() && fake_out == BIT(O_B));
+    start(S_WHEN_HOLD);                                     /* 앞 가지가 이긴다: 유지가 넘는 틱에 SEN_A 도 켜지면 L_A */
+    fake_in = BIT(SEN_B);
+    for (int i = 0; i < 3; i++) { seq_run(); }
+    fake_in = BIT(SEN_A) | BIT(SEN_B);
+    seq_run();
+    assert(!seq_is_active() && fake_out == BIT(O_A));
+    start(S_WHEN_HOLD);                                     /* 둘이 따로 센다: B·C 2, B 만 1(B 3, C 2 유지), 둘 다 거짓(B 0, C 2), C 1 → C 3 > 2 */
+    fake_in = BIT(SEN_B) | BIT(SEN_C);
+    for (int i = 0; i < 2; i++) { seq_run(); }
+    fake_in = BIT(SEN_B);
+    seq_run();
+    fake_in = 0;
+    seq_run();
+    assert(seq_is_active() && fake_out == 0);
+    fake_in = BIT(SEN_C);
+    seq_run();
+    assert(!seq_is_active() && fake_out == BIT(O_C));
+    start(S_WHEN_HOLD);                                     /* 제한은 timer: 셈과 따로. 참·거짓이 섞여도 50 틱 넘으면 L_ERR */
+    for (int i = 0; i < 50; i++) { fake_in = (i & 1) ? BIT(SEN_B) : 0u; seq_run(); }
+    assert(seq_is_active() && fake_out == 0);
+    seq_run();
+    assert(!seq_is_active() && fake_out == BIT(OUT_EXT_5));
+    start(S_WHEN_HOLD3);                                    /* 셋째 유지 가지: 앞 가지가 참인 틱에는 오류 없음 */
+    fake_in = BIT(SEN_D);
+    seq_run();
+    assert(!seq_is_active() && fake_out == BIT(O_A) && D.action_err == 0);
+    start(S_WHEN_HOLD3);
+    seq_run();
+    assert(!seq_is_active() && fake_out == 0 && D.action_err == SEQ_ERR_TABLE);
+    D.action_err = 0;
+    (void)param_set(P_STATION_NO, 0);
     fake_in = 0;
 
     /* 시퀀스의 대기 보고(STANDBY)는 보고 + 자동 재전송(run_standby)이고 정지는 걸지 않는다. 다른 보고는 슬롯만 */

@@ -195,6 +195,10 @@ enum { AGV_STOP = TA_STOP };
 #undef WHEN_ANY2
 #define WHEN_ANY2(...) DSL_NOT_IN_TAG
 #undef WHEN_ID
+#undef WHEN_STABLE
+#define WHEN_STABLE(...) DSL_NOT_IN_TAG
+#undef WHEN_ACCUM
+#define WHEN_ACCUM(...) DSL_NOT_IN_TAG
 #define WHEN_ID(...) DSL_NOT_IN_TAG
 #undef OTHERWISE
 #define OTHERWISE(...) DSL_NOT_IN_TAG

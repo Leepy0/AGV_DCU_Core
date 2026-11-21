@@ -415,6 +415,20 @@ static uint16_t param_time_over(seq_runner_t *r, const seq_step_t *s)
     return (r->b > (uint16_t)v) || ((r->b == (uint16_t)v) && (r->a != 0));
 }
 
+/* 유지·누적 셈의 한도(SK_WAIT_STABLE·SK_WHEN_STABLE). 단위(arg1 상위 8비트)가 있으면 파라미터 arg0 x 단위를 부를 때마다 읽는다.
+ * 음수는 0, 65534 로 묶는다(셈이 한도를 넘는 틱에 통과하므로 16비트 셈이 넘치지 않는다) */
+static uint16_t hold_limit(const seq_step_t *s)
+{
+    uint16_t unit = SEQ_HOLD_UNIT(s->arg1);
+    int16_t v;
+    uint32_t t;
+
+    if (unit == 0u) { return s->arg0; }
+    v = param_get(s->arg0);
+    t = (v > 0) ? (uint32_t)v * unit : 0UL;
+    return (t > 65534UL) ? 65534u : (uint16_t)t;
+}
+
 /* 라벨은 분기할 때 표에서 찾는다. 없으면 표 오류로 끝낸다 */
 static uint16_t jump(seq_runner_t *r, uint16_t label)
 {
@@ -432,10 +446,10 @@ static uint16_t jump(seq_runner_t *r, uint16_t label)
     return R_ENDED;
 }
 
-/* 연속한 WHEN 묶음을 위에서 평가한다 */
+/* 연속한 WHEN 묶음을 위에서 평가한다. 앞 가지가 참이면 그 틱에 가고 뒤 가지(유지 셈)는 보지 않는다 */
 static uint16_t eval_when(seq_runner_t *r)
 {
-    uint16_t i, at = (PK != 0) ? r->t.pk.at : 0u;
+    uint16_t i, h = 0, at = (PK != 0) ? r->t.pk.at : 0u;
     tick(r);
     for (i = r->c.step; i < r->nsteps; i++) {
         const seq_step_t *s = step_read(r->t.tbl, i, at);
@@ -445,6 +459,19 @@ static uint16_t eval_when(seq_runner_t *r)
         }
         else if (s->kind == SK_WHEN_STATE) {
             if (seq_state_get(s->arg0) == s->arg1) { return jump(r, s->target); }
+        }
+        else if (s->kind == SK_WHEN_STABLE) {
+            /* 유지 가지: 셈은 묶음 안 첫째 a, 둘째 b(묶음에 들어올 때 0). 셋째는 표 오류 */
+            uint16_t *cnt = (h == 0u) ? &r->a : &r->b;
+            if (h++ >= 2u) {
+                runner_fail(r, SEQ_ERR_TABLE);
+                return R_ENDED;
+            }
+            if (cond_true(s)) {
+                (*cnt)++;
+                if (*cnt > hold_limit(s)) { return jump(r, s->target); }
+            }
+            else if (!(s->arg1 & SEQ_HOLD_ACCUM)) { *cnt = 0; }
         }
         else if (s->kind == SK_WHEN_TIMEOUT) {
             return (r->c.timer > s->timeout) ? jump(r, s->target) : (uint16_t)R_WAIT;
@@ -465,7 +492,7 @@ static uint16_t eval_wait_stable(seq_runner_t *r, const seq_step_t *s)
     tick(r);
     if (cond_true(s)) {
         r->a++;
-        if (r->a > s->arg0) { return R_NEXT; }
+        if (r->a > hold_limit(s)) { return R_NEXT; }
     }
     else {
         if (!(s->arg1 & SEQ_HOLD_ACCUM)) { r->a = 0; }
@@ -720,6 +747,7 @@ static uint16_t eval_step(seq_runner_t *r, const seq_step_t *s)
     case SK_WHEN:
     case SK_WHEN_STATE:
     case SK_WHEN_TIMEOUT:
+    case SK_WHEN_STABLE:
         return eval_when(r);
     case SK_ERROR_HOLD:
         D.action_err = (int16_t)s->arg0;

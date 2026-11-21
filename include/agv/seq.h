@@ -78,6 +78,8 @@ typedef enum {
     SK_BELT_UNTIL,        /* BELT_ON( n, 방향, UNTIL( 조건 ) ): SK_OUT 처럼 켜고(on|off = 그 벨트 출력) 정지 조건을 건다. 조건은
                            * must_on = out, must_off = arg0 | arg1 << 16. 시퀀스가 살아 있는 동안 매 틱 보고 참이면 그 벨트 출력을 끈다.
                            * 칸 SEQ_BELTS 개. ACT 금지 */
+    SK_WHEN_STABLE,       /* WHEN 묶음의 유지 가지(v0.61.0): 입력 조건 on·off 가 arg0 틱 초과 이어서 참이면 target 으로. arg1 SEQ_HOLD_ACCUM 이면
+                           * 참인 틱을 누적. 셈은 묶음 안 첫째 유지 가지 a, 둘째 b. 셋째는 표 오류 */
     SK_KIND_MAX
 } seq_kind_t;
 
@@ -114,7 +116,9 @@ enum { SEQ_SPD_HIGH = 0xFFF0, SEQ_SPD_LOW = 0xFFF1, SEQ_SPD_LLOW = 0xFFF2, SEQ_S
 
 #define SEQ_NO_LABEL     0u       /* target 없음. 라벨 값은 1부터 */
 #define SEQ_TO_UNMATCHED 0x8000u  /* timeout 최상위 비트: 조건이 거짓인 틱만 누적 (최대 32767 = 327초) */
-#define SEQ_HOLD_ACCUM   0x0001u  /* SK_WAIT_STABLE 의 arg1 비트 0: 조건이 거짓인 틱에 셈을 지우지 않고 멈춘다(누적 대기, v0.61.0) */
+#define SEQ_HOLD_ACCUM   0x0001u  /* SK_WAIT_STABLE·SK_WHEN_STABLE 의 arg1 비트 0: 조건이 거짓인 틱에 셈을 지우지 않고 멈춘다(누적, v0.61.0) */
+/* SK_WAIT_STABLE·SK_WHEN_STABLE 의 arg1 상위 8비트: 0 이면 arg0 = 틱, 아니면 단위 틱(1·10·100)이고 arg0 = 파라미터 번호(값 x 단위, v0.61.0) */
+#define SEQ_HOLD_UNIT(arg1)  ((uint16_t)((arg1) >> 8))
 
 #define SEQ_ERR_CALL     290u     /* 사용자 정의 함수가 실패(2)를 돌려준 경우 */
 #define SEQ_ERR_TABLE    290u     /* 없는 라벨·함수 인덱스 */

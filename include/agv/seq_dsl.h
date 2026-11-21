@@ -253,6 +253,13 @@ typedef unsigned long long dsl_cond_t;
 #define WHEN_IF(x, label)            DSL_STEP_X(SK_WHEN, label, 0, x, NO_IN, 0)
 #define WHEN_IF_IN(x, c, label)      DSL_STEP_X(SK_WHEN, label, 0, x, c, 0)
 #define WHEN_ANY2(c, any2, label)    DSL_STEP_C(SK_WHEN, label, 0, 0, 0, c, any2)
+/* WHEN_STABLE( 조건, 틱, 라벨 )·WHEN_ACCUM( 조건, 틱, 라벨 )(v0.61.0): 묶음 안 유지 가지. 조건(입력만)이 틱 초과 이어서(누적은 모두 합쳐)
+ * 참이면 라벨로. 틱은 WAIT_ACCUM 과 같다(0~65534 또는 PARAM_TIME). 거짓이면 셈 0(누적은 그대로). 앞 가지가 참인 틱에는 셈을 보지 않는다.
+ * 묶음당 유지 가지 둘까지(셋째는 실행 때 표 오류 290. 매크로는 못 잡는다). ACT 에서도 된다 */
+#define DSL_WNHOLD(c, s, acc, label)        DSL_APPLY(DSL_WNHOLD_, c, acc, label, DSL_HT(s, DSL_HOLD_OK))
+#define DSL_WNHOLD_(c, acc, label, a0, u)   DSL_STEP_C(SK_WHEN_STABLE, label, a0, (u) | (acc), 0, DSL_CN(c), 0)
+#define WHEN_STABLE(c, s, label)     DSL_WNHOLD(c, s, 0, label)
+#define WHEN_ACCUM(c, s, label)      DSL_WNHOLD(c, s, SEQ_HOLD_ACCUM, label)
 /* 호기별 분기. 프로파일을 나누지 않고 한 표에서 호기 번호로 가른다 */
 #define WHEN_ID(lo, hi, label)       WHEN_IF(X_ID(lo, hi), label)
 #define OTHERWISE(label)             DSL_STEP(SK_WHEN, label, 0, 0, 0, 0, 0, 0)
@@ -344,14 +351,29 @@ typedef unsigned long long dsl_cond_t;
 #define DSL_WAITTO_0(c, t, label)   DSL_APPLY(DSL_STEP_X, SK_WAIT, label, t, DSL_SQ_##c)
 #define DSL_WTOPARAM(c, t, label)   DSL_APPLY(DSL_WTOPARAM_, c, label, DSL_PTMX_##t)
 #define DSL_WTOPARAM_(c, label, p, u)  DSL_STEP_C(SK_WAIT_PARAM, label, (p) + DSL_PARAM_OK(p), u, 0, DSL_CN(c), 0)
-#define WAIT_STABLE(c, s)           DSL_STEP_C(SK_WAIT_STABLE, SEQ_NO_LABEL, s, 0, 0, DSL_CN(c), 0)
-#define WAIT_STABLE_TO(c, s, t, label)  DSL_STEP_C(SK_WAIT_STABLE, label, s, 0, t, DSL_CN(c), 0)
+/* 유지 틱 칸 s(WAIT_STABLE(_TO)·WAIT_ACCUM(_TO)·WHEN_STABLE·WHEN_ACCUM, v0.61.0): 틱 숫자 또는 PARAM_TIME( FND 또는 P_…, TICK | DSEC | SEC ).
+ * 두 값 "arg0, arg1 상위 8비트" 로 펼친다. 파라미터 시간은 arg0 = 파라미터 번호, arg1 상위 8비트 = 단위 틱(1·10·100. MIN 은 8비트에
+ * 안 들어가 컴파일 오류). 한도 = 값 x 단위를 틱마다 다시 읽는다(음수 0, 65534 로 묶음, 값 0 = 첫 참 틱에 통과, seq.c hold_limit).
+ * chk 는 숫자 틱의 검사 매크로: WAIT_STABLE(_TO) 는 예전처럼 검사 없음, 새 매크로는 0~65534 */
+#define DSL_HOLD_OK(t)              (0 * sizeof(char[(((t) >= 0) && ((t) <= 0xFFFEL)) ? 1 : -1]))
+#define DSL_HOLD_NOCHK(t)           0
+#define DSL_HUNIT_OK(u)             (0 * sizeof(char[((u) <= 0xFF) ? 1 : -1]))
+#define DSL_HT(s, chk)              DSL_CAT(DSL_HTP_, DSL_IS_PAREN(s))(s, chk)
+#define DSL_HTP_1(s, chk)           DSL_HTN(s, chk)
+#define DSL_HTP_0(s, chk)           DSL_ARG2(DSL_HTW_##s, DSL_HTN)(s, chk)
+#define DSL_HTW_DSL_PTM(p, u)       ~, DSL_HTPRM
+#define DSL_HTN(s, chk)             ((s) + chk(s)), 0
+#define DSL_HTPRM(s, chk)           DSL_APPLY(DSL_HTPRM_, DSL_PTMX_##s)
+#define DSL_HTPRM_(p, u)            ((p) + DSL_PARAM_OK(p)), ((uint16_t)((u) + DSL_HUNIT_OK(u)) << 8)
+#define DSL_WHOLD(c, s, acc, t, label, chk)   DSL_APPLY(DSL_WHOLD_, c, acc, t, label, DSL_HT(s, chk))
+#define DSL_WHOLD_(c, acc, t, label, a0, u)   DSL_STEP_C(SK_WAIT_STABLE, label, a0, (u) | (acc), t, DSL_CN(c), 0)
+#define WAIT_STABLE(c, s)           DSL_WHOLD(c, s, 0, 0, SEQ_NO_LABEL, DSL_HOLD_NOCHK)
+#define WAIT_STABLE_TO(c, s, t, label)  DSL_WHOLD(c, s, 0, t, label, DSL_HOLD_NOCHK)
 /* WAIT_ACCUM( 조건, 틱 )·WAIT_ACCUM_TO( 조건, 틱, 제한, 라벨 )(v0.61.0): WAIT_STABLE(_TO) 와 같은 스텝이고 arg1 = SEQ_HOLD_ACCUM.
  * 조건이 참인 틱만 세고 거짓인 틱에는 셈을 멈춘다(지우지 않는다). 참인 틱이 모두 합쳐 틱을 넘는 틱에 통과.
- * 틱 0~65534(밖은 컴파일 오류). 조건은 입력만(상태 낱말·둘째 ANY 는 오류). 제한은 WAIT_STABLE_TO 와 같다(UNMATCHED 도 받는다) */
-#define DSL_HOLD_OK(t)              (0 * sizeof(char[(((t) >= 0) && ((t) <= 0xFFFEL)) ? 1 : -1]))
-#define WAIT_ACCUM(c, s)            DSL_STEP_C(SK_WAIT_STABLE, SEQ_NO_LABEL, (s) + DSL_HOLD_OK(s), SEQ_HOLD_ACCUM, 0, DSL_CN(c), 0)
-#define WAIT_ACCUM_TO(c, s, t, label)   DSL_STEP_C(SK_WAIT_STABLE, label, (s) + DSL_HOLD_OK(s), SEQ_HOLD_ACCUM, t, DSL_CN(c), 0)
+ * 틱 0~65534 또는 PARAM_TIME(밖은 컴파일 오류). 조건은 입력만(상태 낱말·둘째 ANY 는 오류). 제한은 WAIT_STABLE_TO 와 같다(UNMATCHED 도 받는다) */
+#define WAIT_ACCUM(c, s)            DSL_WHOLD(c, s, SEQ_HOLD_ACCUM, 0, SEQ_NO_LABEL, DSL_HOLD_OK)
+#define WAIT_ACCUM_TO(c, s, t, label)   DSL_WHOLD(c, s, SEQ_HOLD_ACCUM, t, label, DSL_HOLD_OK)
 #define WAIT_OUT(c)                 DSL_STEP_C(SK_WAIT_OUT, SEQ_NO_LABEL, 0, 0, 0, c, 0)
 #define DELAY(t)                    DSL_STEP(SK_DELAY, SEQ_NO_LABEL, t, 0, 0, 0, 0, 0)
 #define WAIT_IF(x)                  DSL_STEP_X(SK_WAIT, SEQ_NO_LABEL, 0, x, NO_IN, 0)
