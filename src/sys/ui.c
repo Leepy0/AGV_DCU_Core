@@ -103,7 +103,7 @@ static const para_view_t s_view[P_COUNT] = {
 #else
     , {"   ", 2}                /* 59: 현장 이미지에는 TST 가 없다(번호만 비워 둔다) */
 #endif
-    , {"ACD", 2}
+    , {"AD ", 3}
 };
 static const char s_lamp_name[UI_LAMP_EXT_COUNT] = { 'G', 'R', 'Y' };
 

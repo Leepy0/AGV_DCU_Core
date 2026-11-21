@@ -716,7 +716,7 @@ static void test_state_from_site(void)
 }
 
 static void boot_keys(uint16_t keys, int keep);
-/* ACD(60): 저장 큐로 EEPROM 84 에 쓰이고, 파라미터 초기화(INT 77, 1~45 만)에도 남고, 전원을 다시 켜도 남는다 */
+/* AD(60): 저장 큐로 EEPROM 84 에 쓰이고, 파라미터 초기화(INT 77, 1~45 만)에도 남고, 전원을 다시 켜도 남는다 */
 static void test_acd(void)
 {
     boot();
@@ -734,7 +734,7 @@ static void test_acd(void)
     assert(param_get(P_ACT_DELAY) == 12);
     (void)param_set(P_ACT_DELAY, 0);
     ticks(100);
-    printf("  ACD ok\n");
+    printf("  AD ok\n");
 }
 
 static void test_stop_switch_aborts(void)
@@ -1208,7 +1208,7 @@ static void test_menu5(void)
     static const struct { uint16_t idx; char c[4]; } names[] = {
         { P_SPEED_MIN, "SPN" }, { P_GUIDE_TIMEOUT, "GTO" }, { P_COMM_LINK, "CML" }, { P_STEER_RPM_OFFSET, "SR " },
         { P_GUIDE_CURVE_DETECT, "GSR" }, { P_LEGACY_QUIRKS, "L  " }, { P_EMPTY_SPEED, "EDS" }, { P_EMPTY_TURN, "ETN" },
-        { P_EMPTY_ACC, "EAC" }, { P_EMPTY_DCC, "EDC" }, { P_LOAD_DETECT, "LDS" }, { P_AUTO_DRIVE_MODE, "ATD" }, { P_ACT_DELAY, "ACD" }
+        { P_EMPTY_ACC, "EAC" }, { P_EMPTY_DCC, "EDC" }, { P_LOAD_DETECT, "LDS" }, { P_AUTO_DRIVE_MODE, "ATD" }, { P_ACT_DELAY, "AD " }
     };
     uint16_t d[5];
     char l[3];
