@@ -67,7 +67,7 @@
 | | `AGV_MOVE( mm )` | 그 자리에서 mm 앞에 위치 정지하고 설 때까지 대기(3.2.1) | 없음(v0.41.0) |
 | | `OBS_ON` / `OBS_OFF` | 장애물 센서 사용 | `Flag_OBS_Sen_Use` |
 | | `OBS_OFF_AUTO` | 장애물 센서 끔(`D.obs_use` 2). 일을 통째로 지우면(STOP·비상 정지·오류·ACS 작업 취소·수동 전환, `run_seq_init`) 다시 켠다. 다시 출발·방향 전환에서는 켜지 않는다. 태그 표도 같은 이름 | 없음. `OBS_OFF` 는 그때도 꺼진 채(레거시) |
-| 상태 | `SET_STATE( id, 값 )` / `WAIT_STATE( id, 값 )` | 사이트 상태 변수. 조건 칸에서는 낱말 `STATE( 칸, 값 )`·`STATE( 칸, 처음, 끝 )`(v0.61.0, 3.3.3). 사이트 C 는 공개 배열 `seq_state[칸]` 을 바로 읽고 쓴다 | `Gate1_Out`, `FL_check` 류 |
+| 상태 | `SET_STATE( id, 값 )` / `WAIT_STATE( id, 값 )` | 사이트 상태 변수. 조건 칸에서는 낱말 `STATE( 칸, 값 )`·`STATE( 칸, 처음, 끝 )`(v0.61.0, 3.3.3). 사이트 C 는 공개 배열 `seq_state[칸]` 을 바로 읽고 쓴다. 태그 표도 `SET_STATE( 칸, 값 )`(2칸, v0.63.0, 칸 0\~15·값 0\~65535, 밖은 컴파일 오류)를 쓴다 | `Gate1_Out`, `FL_check` 류 |
 | 병렬 | `ACT_START( id )` / `WAIT_ACT( id )` | 4절 | |
 | 확장 | `CALL( 인덱스 )` | 사용자 정의 함수 | 표로 안 되는 블록 |
 | 종료 | `END_RESTART` / `END_STOP` / `END_ERROR( 코드 )` | 재출발 예약 / 그냥 종료 / 오류 종료 | `case 11` / 플래그 OFF / `action_err = n` |
@@ -291,7 +291,7 @@ TAG_IF( 10, PF_X, AND( FORWARD, STATION( 0, 70, 71 ) ), AGV_STOP )   /* TAG_IF( 
 | `OUT_SET( 켬, 끔 )` | 켜고 끄기를 한 스텝에(`BELT_ON` 과 같은 `SK_OUT`). 사이트가 같은 토큰열로 정의해 쓰던 것을 코어로 옮겼다(재정의 경고 없음) |
 | `NO_ACTION` | 태그 동작 칸 0. 뒤 규칙으로 넘어가지 않게 막는 용도 |
 
-그 밖의 정적 검사(v0.58.0): `AND` 안의 `ANY_ON`(또는 `IN( ANY_ON( … ) )`)과 `ANY( … )` 항목을 같이 쓰면 두 묶음이 하나로 합쳐져 조건이 조용히 약해지므로 컴파일 오류(둘째 묶음은 `ANY` 둘로). `TAG_IF`·`TAG_RANGE_IF` 의 조건 칸은 `AND( … )` 와 `IF_…` 만 받는다. 맨 `X_…` 는 컴파일 오류다(`TAG_IF( t, p, X_FORWARD, X_ID( 1, 9 ), 동작 )` 에서 둘째 `X_` 가 동작 칸으로 들어가 실행되기 때문. 상태 하나는 `AND( BACKWARD )` 나 `IF_X( X_BACKWARD )`). `AND` 안의 `ANY_ON`(또는 `IN( ANY_ON( … ) )`)과 `ANY( … )` 항목을 같이 쓰면 두 묶음이 하나로 합쳐져 조건이 조용히 약해지므로 컴파일 오류(둘째 묶음은 `ANY` 둘로). `TAG_IF`·`TAG_RANGE_IF` 의 조건 칸은 `AND( … )` 와 `IF_…` 만 받는다. 맨 `X_…` 는 컴파일 오류다(`TAG_IF( t, p, X_FORWARD, X_ID( 1, 9 ), 동작 )` 에서 둘째 `X_` 가 동작 칸으로 들어가 실행되기 때문. 상태 하나는 `AND( BACKWARD )` 나 `IF_X( X_BACKWARD )`). 태그 `AGV_AUTOSTART( n )`·`CALL( n )`·`ACT_START( n )` 는 0\~255. 태그 동작은 값 4개까지(`TAG`·`TAG_IF`·`TAG_RANGE`·`TAG_RANGE_IF`, `AGV_TURN`·`ACS_SEND` 는 2칸). 태그 표 파일(`tag_dsl.h` 를 포함)에서 시퀀스 스텝 이름(`WHEN` `WAIT…` `L` `GOTO` `OUT_ON` `DELAY` `HANDSHAKE` …)을 쓰면 `SEQ_STEP_NOT_ALLOWED_IN_TAG_TABLE` 이 선언 안 됐다는 오류가 난다. 시퀀스 `WHEN_IF`·`WAIT_IF*` 에 `X_TAG_NUM` 을 쓰면 오류(시퀀스에서는 태그 번호가 늘 0). `SELECT_END_TO` 의 제한은 1\~0x7FFF.
+그 밖의 정적 검사(v0.58.0): `AND` 안의 `ANY_ON`(또는 `IN( ANY_ON( … ) )`)과 `ANY( … )` 항목을 같이 쓰면 두 묶음이 하나로 합쳐져 조건이 조용히 약해지므로 컴파일 오류(둘째 묶음은 `ANY` 둘로). `TAG_IF`·`TAG_RANGE_IF` 의 조건 칸은 `AND( … )` 와 `IF_…` 만 받는다. 맨 `X_…` 는 컴파일 오류다(`TAG_IF( t, p, X_FORWARD, X_ID( 1, 9 ), 동작 )` 에서 둘째 `X_` 가 동작 칸으로 들어가 실행되기 때문. 상태 하나는 `AND( BACKWARD )` 나 `IF_X( X_BACKWARD )`). `AND` 안의 `ANY_ON`(또는 `IN( ANY_ON( … ) )`)과 `ANY( … )` 항목을 같이 쓰면 두 묶음이 하나로 합쳐져 조건이 조용히 약해지므로 컴파일 오류(둘째 묶음은 `ANY` 둘로). `TAG_IF`·`TAG_RANGE_IF` 의 조건 칸은 `AND( … )` 와 `IF_…` 만 받는다. 맨 `X_…` 는 컴파일 오류다(`TAG_IF( t, p, X_FORWARD, X_ID( 1, 9 ), 동작 )` 에서 둘째 `X_` 가 동작 칸으로 들어가 실행되기 때문. 상태 하나는 `AND( BACKWARD )` 나 `IF_X( X_BACKWARD )`). 태그 `AGV_AUTOSTART( n )`·`CALL( n )`·`ACT_START( n )` 는 0\~255. 태그 동작은 값 4개까지(`TAG`·`TAG_IF`·`TAG_RANGE`·`TAG_RANGE_IF`, `AGV_TURN`·`ACS_SEND`·`SET_STATE` 는 2칸). 태그 표 파일(`tag_dsl.h` 를 포함)에서 시퀀스 스텝 이름(`WHEN` `WAIT…` `L` `GOTO` `OUT_ON` `DELAY` `HANDSHAKE` …)을 쓰면 `SEQ_STEP_NOT_ALLOWED_IN_TAG_TABLE` 이 선언 안 됐다는 오류가 난다. 시퀀스 `WHEN_IF`·`WAIT_IF*` 에 `X_TAG_NUM` 을 쓰면 오류(시퀀스에서는 태그 번호가 늘 0). `SELECT_END_TO` 의 제한은 1\~0x7FFF.
 
 ### 3.4 분기
 

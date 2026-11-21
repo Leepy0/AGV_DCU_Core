@@ -35,6 +35,7 @@ TAG_X_BEGIN( s_x )
     TAG_X( X_BACKWARD )                      /* 1: 전진 중이라 거짓 */
     TAG_X( XS( 3, 1, 1 ) )                   /* 2: 상태[3] == 1 */
     TAG_X( X_NOT( XS( 3, 1, 5 ) ) )          /* 3: 상태[3] 이 1~5 밖 */
+    TAG_X( XS( 4, 9, 9 ) )                   /* 4: 상태[4] == 9 */
 TAG_POOL_END
 TAG_IN_BEGIN( s_in )
 TAG_POOL_END
@@ -42,12 +43,17 @@ TAG_POOL_END
 TAG_TABLE_BEGIN( s_st_rules )
     TAG_IF( 60, 0, AND( STATE( 3, 1 ) ), CALL(1) )
     TAG_IF( 61, 0, AND( NOT( STATE( 3, 1, 5 ) ), ID( 0, 99 ) ), CALL(2) )
+    TAG( 70, 0, SET_STATE( 4, 9 ) )                       /* 태그 동작 SET_STATE(v0.63.0): 쓴 값을 STATE 조건이 읽는다 */
+    TAG_IF( 71, 0, AND( STATE( 4, 9 ) ), CALL(1) )
+    TAG( 72, 0, SET_STATE( 4, 0 ), CALL(1) )              /* 둘째 칸 0 도 한 칸으로 먹고 뒤 동작이 돈다 */
 TAG_TABLE_END
 TAG_ACT_BEGIN( s_act )
     TAG_ACTS( CALL(0), CALL(1), CALL(1), CALL(1) )   /* 1 */
     TAG_ACTS( CALL(2) )                                    /* 2 */
     TAG_ACTS( CALL(3), CALL(3), CALL(3), CALL(3) )   /* 3 */
     TAG_ACTS( CALL(1) )                                    /* 4 */
+    TAG_ACTS( SET_STATE( 4, 9 ) )                          /* 5 */
+    TAG_ACTS( SET_STATE( 4, 0 ), CALL(1) )                 /* 6 */
 TAG_POOL_END
 TAGP_BEGIN( s_prules )
     TAGP( 50, 0, 0, 0, 0, 1 )
@@ -55,6 +61,9 @@ TAGP_BEGIN( s_prules )
     TAGP( 53, 0, 1, 0, 0, 3 )
     TAGP( 60, 0, 2, 0, 0, 4 )
     TAGP( 61, 0, 3, 0, 0, 2 )
+    TAGP( 70, 0, 0, 0, 0, 5 )
+    TAGP( 71, 0, 4, 0, 0, 4 )
+    TAGP( 72, 0, 0, 0, 0, 6 )
 TAG_POOL_END
 TAG_PACKED( s_pk, s_prules, s_x, s_in, s_act )
 
@@ -90,6 +99,24 @@ int main(void)
     }
     seq_state[3] = 0;
     printf("  태그 STATE 조건: 펼친·압축 같음\n");
+    /* 태그 동작 SET_STATE: 규칙이 쓴 칸 값을 STATE( 칸, 값 ) 조건이 읽는다(펼친·압축 같음) */
+    for (i = 0; i < 2u; i++) {
+        if (i == 0u) { tagact_bind(s_st_rules, sizeof(s_st_rules) / sizeof(s_st_rules[0]), 0); }
+        else         { tagact_bind_packed(&s_pk, 0); }
+        seq_state[4] = 0; seq_state[5] = 77;
+        s_nlog = 0; (void)tagact_run(71);
+        assert(s_nlog == 0u);                                   /* 쓰기 전: 조건 거짓 */
+        (void)tagact_run(70);
+        assert(seq_state[4] == 9u && seq_state[5] == 77u);      /* 칸 4 만 바뀜 */
+        (void)tagact_run(71);
+        assert(s_nlog == 1u && s_log[0] == 1u);                 /* 쓴 뒤: 조건 참 */
+        s_nlog = 0; (void)tagact_run(72);
+        assert(seq_state[4] == 0u && s_nlog == 1u && s_log[0] == 1u);
+        s_nlog = 0; (void)tagact_run(71);
+        assert(s_nlog == 0u);
+    }
+    seq_state[4] = 0; seq_state[5] = 0;
+    printf("  태그 SET_STATE → STATE 조건: 펼친·압축 같음\n");
     printf("test_tagpk ok\n");
     return 0;
 }

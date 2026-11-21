@@ -262,8 +262,9 @@ enum { AGV_STOP = TA_STOP };
 #define ACS_WAIT_ACK(...) DSL_NOT_IN_TAG
 #undef ACS_STATION
 #define ACS_STATION(...) DSL_NOT_IN_TAG
+/* 태그 동작 SET_STATE( 칸, 값 )(v0.63.0, 2칸): 시퀀스 SET_STATE 와 같은 사이트 상태 칸 0~15, 값 0~65535(밖은 컴파일 오류) */
 #undef SET_STATE
-#define SET_STATE(...) DSL_NOT_IN_TAG
+#define SET_STATE(k, v) (TA_STATE | (uint16_t)((k) + DSL_STATE_OK(k, v, v))), (uint16_t)(v)
 #undef WAIT_STATE
 #define WAIT_STATE(...) DSL_NOT_IN_TAG
 #undef WAIT_ACT
