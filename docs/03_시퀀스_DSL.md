@@ -228,7 +228,7 @@ SELECT_END
 - 단위 안 틱과 지난 단위 수를 따로 세서 16비트 틱(655초)을 넘어도 된다. 99분 = 594000틱.
 - 파라미터 번호는 1 \~ `P_COUNT`-1, 밖이면 컴파일 오류.
 - 유지 틱(v0.61.0): `WAIT_STABLE(_TO)`·`WAIT_ACCUM(_TO)`·`WHEN_STABLE`·`WHEN_ACCUM` 의 틱 칸도 `PARAM_TIME( FND 또는 P_x, TICK \| DSEC \| SEC )` 를 받는다. `MIN` 은 칸(8비트)에 안 들어가 컴파일 오류. 한도는 값 x 단위를 셀 때마다 다시 읽고(도는 중에 바꾸면 그다음 틱부터), 음수는 0, 65534 로 묶는다. 값 0 이면 첫 참 틱에 통과한다.
-- 시퀀스 지연 초는 60번 `ACD`(0\~99초, 기본 0, v0.61.0)에 둔다: `DELAY_PARAM( P_ACT_DELAY, SEC )`, `WAIT_STABLE( 조건, PARAM_TIME( ACD, SEC ) )`. 28번 `SPN` 은 최저 속도 그대로다.
+- 시퀀스 지연은 60번 `ACD`(0.1초 단위 0\~99 = 9.9초, 기본 0, v0.61.0)에 둔다: `DELAY_PARAM( P_ACT_DELAY, DSEC )`, `WAIT_STABLE( 조건, PARAM_TIME( ACD, DSEC ) )`. 28번 `SPN` 은 최저 속도 그대로다.
 
 #### 3.3.3 `AND( … )` 조건과 이름 통일 (v0.58.0)
 
@@ -331,7 +331,7 @@ SELECT_END
 
 ```c
 WAIT_ACCUM( IN( ON(SEN_A) ), 450 )                              /* 켜진 틱만 모아 450 을 넘으면 */
-WAIT_STABLE( IN( ON(SEN_B) ), PARAM_TIME( ACD, SEC ) )          /* ACD 초를 넘어 이어서 켜지면 */
+WAIT_STABLE( IN( ON(SEN_B) ), PARAM_TIME( ACD, DSEC ) )         /* ACD 0.1초 단위 시간을 넘어 이어서 켜지면 */
 
 SELECT_BEGIN
     WHEN( IN( ON(SEN_GO) ), L_GO )

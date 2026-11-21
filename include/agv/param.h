@@ -48,7 +48,7 @@ enum {
 #if AGV_DEV_TESTS
     P_DEV_TEST,             /* 59 TST: 임시 시험 고르기 0~3(param_tst_apply, param.c). 체크섬 밖 EEPROM 82(KEEP 빈 칸). 개발 이미지에만 */
 #endif
-    /* 60 ACD: 시퀀스 액추에이터 지연 초 0~99, 기본 0(v0.61.0). 표는 PARAM_TIME( ACD, SEC ) 로 읽는다. 체크섬 밖 EEPROM 84(KEEP 빈 칸).
+    /* 60 ACD: 시퀀스 액추에이터 지연 0.1초 단위 0~99(9.9초), 기본 0(v0.61.0). 표는 PARAM_TIME( ACD, DSEC ) 로 읽는다. 체크섬 밖 EEPROM 84(KEEP 빈 칸).
      * 번호는 두 이미지 모두 60 이다(현장 이미지는 59 가 빈 번호): 앱 생성기가 개발 헤더로 표를 만들어도 번호가 같게 */
     P_ACT_DELAY = 60,
     P_COUNT

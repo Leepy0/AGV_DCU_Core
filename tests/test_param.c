@@ -67,10 +67,10 @@ int main(void)
     assert(fake_ee_writes == 0 && fake_ee[116] == 5 && fake_ee[P_SPEED_TURN] == 13);
     assert(param_boot(&fake_store, 2611) == 0 && param_get(P_OPT_FLAGS) == 5 && param_get(P_SPEED_TURN) == 13);
     assert(param_set(P_OPT_FLAGS, 0) == 0 && param_set(P_SPEED_FF, 0) == 0 && param_set(P_ENC_STALL_TICKS, 0) == 0);
-    /* ACD(v0.61.0): 번호 60(두 이미지 같다), 체크섬 밖 EEPROM 84, 0~99. 빈 칩·범위 밖이면 0. 체크섬 칸은 건드리지 않는다 */
+    /* ACD(v0.61.0): 번호 60(두 이미지 같다), 체크섬 밖 EEPROM 84, 0~99(0.1초). 빈 칩·범위 밖이면 0. 체크섬 칸은 건드리지 않는다 */
     assert(P_ACT_DELAY == 60 && param_get(P_ACT_DELAY) == 0);
     { uint16_t sum = fake_ee[0];
-      assert(param_set(P_ACT_DELAY, 100) == -1 && param_set(P_ACT_DELAY, 7) == 0 && fake_ee[PARAM_ACT_DELAY_ADDR] == 7 && fake_ee[0] == sum); }
+      assert(param_set(P_ACT_DELAY, 100) == -1 && param_set(P_ACT_DELAY, 99) == 0 && param_get(P_ACT_DELAY) == 99 && param_set(P_ACT_DELAY, 7) == 0 && fake_ee[PARAM_ACT_DELAY_ADDR] == 7 && fake_ee[0] == sum); }
     assert(param_boot(&fake_store, 2611) == 0 && param_get(P_ACT_DELAY) == 7);
     fake_ee[PARAM_ACT_DELAY_ADDR] = 0xFFFFu;
     assert(param_boot(&fake_store, 2611) == 0 && param_get(P_ACT_DELAY) == 0);
