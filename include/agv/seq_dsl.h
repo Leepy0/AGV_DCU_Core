@@ -197,6 +197,7 @@ typedef unsigned long long dsl_cond_t;
 #define DSL_PRM_EAC   P_EMPTY_ACC, 0
 #define DSL_PRM_EDC   P_EMPTY_DCC, 0
 #define DSL_PRM_LDS   P_LOAD_DETECT, 0
+#define DSL_PRM_ACD   P_ACT_DELAY, 0
 #define X_NOT(x)                     DSL_XNOT_(x)
 #define DSL_XNOT_(k, a, b)           ((k) | XC_NOT), a, b
 

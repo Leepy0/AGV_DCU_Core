@@ -91,6 +91,7 @@ static const extra_t s_extra[] = {
 #if AGV_DEV_TESTS
     , { P_DEV_TEST,  PARAM_EMPTY_ADDR0 + 5u, 0, 3,  0 }   /* 82: 레거시 KEEP 빈 칸(77~88). 4~8 은 부팅 때 0 */
 #endif
+    , { P_ACT_DELAY, PARAM_ACT_DELAY_ADDR, 0, 99, 0 }     /* 84: 시퀀스 액추에이터 지연 초. 빈 칩(0xFFFF)이면 0 */
 };
 static int16_t s_empty;
 #define EXTRA_COUNT (sizeof(s_extra) / sizeof(s_extra[0]))

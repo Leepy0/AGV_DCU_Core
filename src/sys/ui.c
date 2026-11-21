@@ -67,7 +67,7 @@ static const uint16_t s_menu[] = {
     P_EMPTY_ACC, P_EMPTY_DCC, P_SPEED_MIN,
     /* 2 주행·안전 */
     P_STOP_LEN_CM, P_CROSS_IN_CM, P_AUTO_START_SEC, P_OBS_USE, P_BUMPER_USE, P_STOP_LEN_FWD_CM, P_LOAD_DETECT,
-    P_GUIDE_DIST_MM, P_TURN_FORBACK, P_BRANCH_OFFSET, P_ENC_STALL_TICKS, P_GUIDE_TIMEOUT,
+    P_GUIDE_DIST_MM, P_TURN_FORBACK, P_BRANCH_OFFSET, P_ENC_STALL_TICKS, P_GUIDE_TIMEOUT, P_ACT_DELAY,
     /* 3 차량·튜닝 */
     P_AGV_ID, P_WHEEL_DIA_MM, P_WHEEL_BASE_MM, P_GEAR_RATIO, P_AGV_TYPE,
     P_STEER_KP, P_STEER_KI, P_SPEED_FF,
@@ -81,7 +81,7 @@ static const uint16_t s_menu[] = {
 };
 #define MENU_COUNT ((int16_t)(sizeof(s_menu) / sizeof(s_menu[0])))
 #define MENU_HIDDEN_FIRST (MENU_COUNT - 3)
-static const int16_t s_group_end[UI_GROUP_COUNT] = { 11 + MENU_TST, 23 + MENU_TST, 31 + MENU_TST, 46 + MENU_TST, MENU_COUNT };   /* 묶음 다음 첫 칸 */
+static const int16_t s_group_end[UI_GROUP_COUNT] = { 11 + MENU_TST, 24 + MENU_TST, 32 + MENU_TST, 47 + MENU_TST, MENU_COUNT };   /* 묶음 다음 첫 칸 */
 static const char s_group_name[UI_GROUP_COUNT][DISP_DIGITS] = {
     {'P','1','S','P','D'}, {'P','2','R','U','N'}, {'P','3','C','A','R'}, {'P','4','C','O','M'}, {'P','5','I','N','F'}
 };
@@ -100,7 +100,10 @@ static const para_view_t s_view[P_COUNT] = {
     {"EDS", 2}, {"ETN", 2}, {"EAC", 2}, {"EDC", 2}, {"LDS", 0}
 #if AGV_DEV_TESTS
     , {"TST", 1}
+#else
+    , {"   ", 2}                /* 59: 현장 이미지에는 TST 가 없다(번호만 비워 둔다) */
 #endif
+    , {"ACD", 2}
 };
 static const char s_lamp_name[UI_LAMP_EXT_COUNT] = { 'G', 'R', 'Y' };
 
