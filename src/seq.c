@@ -35,7 +35,8 @@ int seq_request_flag[SEQ_MAX];
 
 static const seq_site_t *s_site;
 static uint16_t      s_nacts;      /* 금지 스텝이 있으면 0 으로 두어 ACT 를 쓰지 않는다 */
-static uint16_t      s_profile;
+static uint16_t      s_profile;    /* 고른 행의 profile 칸 그대로(번호 | PF_F_*). RAM 을 늘리지 않으려고 한 칸에 둔다 */
+#define PF_NUM       (s_profile & 0xFFu)
 static uint32_t      s_load_mask;
 static seq_runner_t  s_seq;
 static seq_runner_t  s_act[ACT_SLOTS];
@@ -43,7 +44,8 @@ uint16_t             seq_state[SEQ_STATE_COUNT];
 static uint16_t      s_belt[SEQ_BELTS];   /* 건 벨트 정지 조건: 시퀀스 표의 SK_BELT_UNTIL 스텝 번호(압축 표는 머리 자리) + 1, 0 빈 칸 */
 static seq_step_t    s_buf;               /* 압축 표에서 푼 스텝. 한 번에 하나: 평가 중인 스텝, WHEN 묶음 훑기, 벨트 조건 */
 
-uint16_t seq_profile(void)      { return s_profile; }
+uint16_t seq_profile(void)      { return PF_NUM; }
+uint16_t seq_profile_flags(void) { return s_profile & 0xFF00u; }
 uint32_t seq_load_mask(void)    { return s_load_mask; }
 int16_t  seq_load_site(void)    { return ((s_site != 0) && (s_site->load_fn != 0)) ? s_site->load_fn() : -1; }
 int      seq_is_active(void)    { return s_seq.active != 0; }
@@ -142,7 +144,7 @@ static uint16_t find_act(uint16_t id)
     uint16_t i, pf, d;
     for (i = 0; i < s_nacts; i++) {
         map_get(1, i, &pf, &d);
-        if ((d == id) && ((pf == 0) || (pf == s_profile))) { return i; }
+        if ((d == id) && ((pf == 0) || (pf == PF_NUM))) { return i; }
     }
     return 0xFFFFu;
 }
@@ -826,7 +828,7 @@ void seq_run(void)
         uint16_t i, id, pf, n = map_count(0);
         for (i = 0; i < n; i++) {
             map_get(0, i, &pf, &id);
-            if (((pf == 0) || (pf == s_profile)) && seq_request_flag[id]) {
+            if (((pf == 0) || (pf == PF_NUM)) && seq_request_flag[id]) {
                 runner_start(&s_seq, 0, i);
                 break;
             }

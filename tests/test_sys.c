@@ -169,6 +169,12 @@ MANUAL_END
 static int16_t s_load_site = -1;
 static int16_t site_load(void) { return s_load_site; }
 static const seq_site_t s_site = { s_seqs, sizeof(s_seqs) / sizeof(s_seqs[0]), s_acts, 1, s_calls, 3, s_profiles, 1, site_load };
+/* 후진 정지 FL(v0.63.0): 호기 AGV_ID = 프로파일 2 + STOP_BACK_FL, 호기 8 = 프로파일 3(표시 없음) */
+PROFILE_TABLE_BEGIN( s_profiles_fl )
+    PROFILE( STOP_BACK_FL( 2 ), 0, AGV_ID, AGV_ID )
+    PROFILE( 3, 0, 8, 8 )
+PROFILE_TABLE_END
+static const seq_site_t s_site_fl = { s_seqs, sizeof(s_seqs) / sizeof(s_seqs[0]), s_acts, 1, s_calls, 3, s_profiles_fl, 2, site_load };
 
 /* 태그 표 */
 static const tag_rule_t s_rules[] = {
@@ -2432,6 +2438,79 @@ static void test_man_any(void)
     manual_bind(0, 0, 0, 0);
     boot();
     printf("  man any ok\n");
+}
+
+/* 프로파일별 후진 정지 거리(v0.63.0). SL 100 cm, FL 40 cm(분류 2 의 30 cm 와 다르게). site 를 묶고 id 로 프로파일을 고른 뒤 back 이면 후진으로 달린다 */
+static void fl_up(const seq_site_t *site, int16_t id, int back, int16_t fl)
+{
+    boot();
+    (void)param_set(P_STOP_LEN_MM, 100);
+    assert(param_set_ram(P_STOP_LEN_FWD_MM, fl) == 0);
+    (void)seq_bind(site);
+    (void)param_set_ram(P_AGV_ID, id);
+    seq_pick_profile();
+    run_seq_init();
+    if (back) { run_relay(1, 0); }
+    drive_up();
+    run_scan(20);
+    assert(!D.flag_stopping && (D.backward == back));
+}
+
+static void test_stop_back_fl(void)
+{
+    int16_t sl, fl, len;
+
+    /* 표시한 행: 번호와 표시를 나눠 돌려준다. 전진 SL */
+    fl_up(&s_site_fl, AGV_ID, 0, 40);
+    assert((seq_profile() == 2u) && (seq_profile_flags() == PF_F_STOP_BACK_FL));
+    sl = P.stop_len;  fl = P.fwd_stop_len;
+    assert((sl != fl) && (fl > 0));
+    (void)tagact_run(1);                                    /* AGV_STOP */
+    assert(D.flag_stopping && (D.stop_pulses == sl));
+    /* 후진 FL */
+    fl_up(&s_site_fl, AGV_ID, 1, 40);
+    (void)tagact_run(1);
+    assert(D.flag_stopping && (D.stop_pulses == fl));
+    /* 정지 진행 중에 읽은 태그는 거리를 다시 넣지 않는다 */
+    run_scan(3);
+    len = D.stop_pulses;
+    assert(len < fl);
+    (void)tagact_run(1);
+    assert(D.stop_pulses == len);
+    /* 대기 보고의 정지(분류 1)도 FL */
+    fl_up(&s_site_fl, AGV_ID, 1, 40);
+    (void)tagact_run(34);
+    assert(D.flag_stopping && (D.stop_pulses == fl));
+    run_standby_clear(0);
+    /* 거리를 준 정지(분류 2, 30 cm)는 cm 그대로. 같은 규칙의 AGV_STOP 을 이긴다 */
+    fl_up(&s_site_fl, AGV_ID, 1, 40);
+    (void)tagact_run(47);                                   /* AGV_STOP( 30 ) */
+    assert(D.flag_stopping && (D.stop_pulses == (int16_t)(30.0f * P.one_length_pulse * 10.0f)) && (D.stop_pulses != fl));
+    fl_up(&s_site_fl, AGV_ID, 1, 40);
+    (void)tagact_run(38);                                   /* AGV_STOP, AGV_STOP( 0 ) */
+    assert(D.flag_stopping && (D.stop_pulses == 0));
+    /* FL 0: 후진은 태그 자리에서 바로 */
+    fl_up(&s_site_fl, AGV_ID, 1, 0);
+    (void)tagact_run(1);
+    assert(D.flag_stopping && (D.stop_pulses == 0));
+    /* 표시 없는 행(호기 8)·프로파일 없는 표(s_site): 후진도 SL */
+    fl_up(&s_site_fl, 8, 1, 40);
+    assert((seq_profile() == 3u) && (seq_profile_flags() == 0u));
+    (void)tagact_run(1);
+    assert(D.flag_stopping && (D.stop_pulses == sl));
+    fl_up(&s_site, AGV_ID, 1, 40);
+    assert((seq_profile() == 0u) && (seq_profile_flags() == 0u));
+    (void)tagact_run(1);
+    assert(D.flag_stopping && (D.stop_pulses == sl));
+    /* 호기를 바꿔 다시 고르면 표시도 다시 고른다 */
+    fl_up(&s_site_fl, 8, 1, 40);
+    (void)param_set_ram(P_AGV_ID, AGV_ID);
+    seq_pick_profile();
+    assert((seq_profile() == 2u) && (seq_profile_flags() == PF_F_STOP_BACK_FL));
+    (void)tagact_run(1);
+    assert(D.flag_stopping && (D.stop_pulses == fl));
+    boot();
+    printf("  stop back fl ok\n");
 }
 
 static void test_seq_standby_hold(void)
@@ -5038,6 +5117,7 @@ int main(void)
     test_seq_standby_hold();
     test_man_start_sw();
     test_man_any();
+    test_stop_back_fl();
     test_tape_turn_request();
     test_move_cross_tag();
     test_tune_entry();

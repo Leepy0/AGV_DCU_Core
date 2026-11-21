@@ -213,13 +213,17 @@ typedef unsigned long long dsl_cond_t;
 
 /* 시퀀스 대응표: 프로파일 + 요청 ID → 표 */
 #define SEQ_MAP_BEGIN(name)      const seq_def_t name[] = {
-#define SEQ_MAP(profile, id, seq)  { (uint16_t)(profile), (uint16_t)(id), seq##_steps, \
+#define SEQ_MAP(profile, id, seq)  { DSL_TPF(profile), (uint16_t)(id), seq##_steps, \
                                      (uint16_t)(sizeof(seq##_steps) / sizeof(seq_step_t)) },
 #define SEQ_MAP_END              };
 #define ACT_MAP_BEGIN(name)      SEQ_MAP_BEGIN(name)
 #define ACT_MAP(profile, id, act)  SEQ_MAP(profile, id, act)
 #define ACT_MAP_END              SEQ_MAP_END
 
+/* 프로파일 칸을 감싼다: 그 행의 호기는 태그로 새로 건 분류 1 정지가 후진이면 FL, 전진이면 SL(v0.63.0, docs/03 5.1절).
+ * 프로파일 표에만 쓴다. 수동 표(DSL_MPF)·태그 표·대응표(DSL_TPF, 0~63)에 쓰면 컴파일 오류 */
+#define STOP_BACK_FL(p)            ((p) + PF_F_STOP_BACK_FL + 0 * sizeof(char[(((p) >= 1) && ((p) <= 63)) ? 1 : -1]))
+#define DSL_TPF(p)                 ((uint16_t)((p) + 0 * sizeof(char[(((p) >= 0) && ((p) <= 63)) ? 1 : -1])))
 #define PROFILE_TABLE_BEGIN(name)  const profile_row_t name[] = {
 #define PROFILE(profile, type, from, to)  { (uint16_t)(profile), (uint16_t)(type), (uint16_t)(from), (uint16_t)(to), 0UL, 0 },
 /* 적재 센서가 있는 프로파일. mask = LOAD_SENSORS(SEN_1, ...) 하나라도 켜지면 적재 */
@@ -590,7 +594,7 @@ typedef unsigned long long dsl_cond_t;
 /* 위에서 아래로 첫 번째로 맞는 규칙 하나만 실행. 액션은 최대 4칸 */
 /* 동작 칸은 값이 4 개까지다(AGV_TURN·ACS_SEND 는 2 칸, 값 개수를 센다). 넘으면 컴파일 오류(검사값은 태그 번호 칸에 더한다) */
 #define DSL_ACTS_OK(acts)      (0 * sizeof(char[(DSL_NARG(DSL_UNPAREN acts) <= 4) ? 1 : -1]))
-#define TAG(tag, profile, ...)  { (uint16_t)((tag) + DSL_ACTS_OK((__VA_ARGS__))), (uint16_t)(profile), TAG_COND_NONE, 0, 0, { __VA_ARGS__ } },
+#define TAG(tag, profile, ...)  { (uint16_t)((tag) + DSL_ACTS_OK((__VA_ARGS__))), DSL_TPF(profile), TAG_COND_NONE, 0, 0, { __VA_ARGS__ } },
 /* cond: AND( … ) 하나(기록 1값), 또는 IF_* 하나(확장 조건 둘과 입력 조건 하나를 AND 한다, 8값). 값 개수로 가린다.
  * 맨 X_…(3값)는 받지 않는다: 둘째 X_ 가 동작 칸으로 들어가 실행되는 조용한 오류가 된다(상태 조건 하나는 AND( BACKWARD ) 나 IF_X( X_… )).
  * 다른 개수는 DSL_TAGC? 가 없어 컴파일 오류 */
@@ -599,18 +603,18 @@ typedef unsigned long long dsl_cond_t;
 #define DSL_TAGC1(t, p, acts, rec)       DSL_APPLY(DSL_TAG_, t, p, DSL_TG_##rec, acts)
 #define DSL_TAGC8(t, p, acts, ...)       DSL_TAG_(t, p, __VA_ARGS__, acts)
 #define DSL_TAG_(t, p, k1, a1, b1, k2, a2, b2, on, off, acts)                                         \
-    { (uint16_t)((t) + DSL_ACTS_OK(acts)), (uint16_t)(p), (uint16_t)(k1), (uint16_t)(a1), (uint16_t)(b1), { DSL_UNPAREN acts }, \
+    { (uint16_t)((t) + DSL_ACTS_OK(acts)), DSL_TPF(p), (uint16_t)(k1), (uint16_t)(a1), (uint16_t)(b1), { DSL_UNPAREN acts }, \
       (uint16_t)(k2), (uint16_t)(a2), (uint16_t)(b2), (uint32_t)(on), (uint32_t)(off) },
 /* 범위 규칙: 한 규칙이 태그 lo~hi 를 받는다(lo <= hi <= 1023). 고르는 순서는 다른 규칙과 같다(표에 적힌 순서, 먼저 맞는 하나) */
 #define DSL_TRANGE_OK(lo, hi)  (0 * sizeof(char[(((lo) >= 0) && ((lo) <= (hi)) && ((hi) <= 1023)) ? 1 : -1]))
 #define TAG_RANGE(lo, hi, profile, ...)  \
-    { (uint16_t)((lo) + DSL_ACTS_OK((__VA_ARGS__))), (uint16_t)(profile), TAG_COND_NONE, 0, 0, { __VA_ARGS__ }, 0, 0, 0, 0UL, 0UL, (uint16_t)((hi) + DSL_TRANGE_OK(lo, hi)) },
+    { (uint16_t)((lo) + DSL_ACTS_OK((__VA_ARGS__))), DSL_TPF(profile), TAG_COND_NONE, 0, 0, { __VA_ARGS__ }, 0, 0, 0, 0UL, 0UL, (uint16_t)((hi) + DSL_TRANGE_OK(lo, hi)) },
 #define TAG_RANGE_IF(lo, hi, profile, cond, ...)  DSL_TAGRIF_(lo, hi, profile, (__VA_ARGS__), cond)
 #define DSL_TAGRIF_(lo, hi, p, acts, ...)    DSL_BPASTE(DSL_TAGRC, DSL_NARG(__VA_ARGS__))(lo, hi, p, acts, __VA_ARGS__)
 #define DSL_TAGRC1(lo, hi, p, acts, rec)     DSL_APPLY(DSL_TAGR_, lo, hi, p, DSL_TG_##rec, acts)
 #define DSL_TAGRC8(lo, hi, p, acts, ...)     DSL_TAGR_(lo, hi, p, __VA_ARGS__, acts)
 #define DSL_TAGR_(lo, hi, p, k1, a1, b1, k2, a2, b2, on, off, acts)                                    \
-    { (uint16_t)((lo) + DSL_ACTS_OK(acts)), (uint16_t)(p), (uint16_t)(k1), (uint16_t)(a1), (uint16_t)(b1), { DSL_UNPAREN acts }, \
+    { (uint16_t)((lo) + DSL_ACTS_OK(acts)), DSL_TPF(p), (uint16_t)(k1), (uint16_t)(a1), (uint16_t)(b1), { DSL_UNPAREN acts }, \
       (uint16_t)(k2), (uint16_t)(a2), (uint16_t)(b2), (uint32_t)(on), (uint32_t)(off), (uint16_t)((hi) + DSL_TRANGE_OK(lo, hi)) },
 
 /* 압축 표 (생성기용, tagact.h tag_packed_t). 번호 0 칸(없음)은 BEGIN 이 넣는다.
@@ -622,7 +626,7 @@ typedef unsigned long long dsl_cond_t;
 #define TAG_ACT_BEGIN(name)    static const tag_act_t name[] = { { { 0 } },
 #define TAG_ACTS(...)          { { __VA_ARGS__ } },
 #define TAGP_BEGIN(name)       static const tag_pack_t name[] = {
-#define TAGP(tag, profile, x1, x2, in, act)     { (uint16_t)((tag) | ((uint16_t)(profile) << 10)), (uint16_t)((x1) | ((uint16_t)(x2) << 8)), (uint16_t)((act) | ((uint16_t)(in) << 8)) },
+#define TAGP(tag, profile, x1, x2, in, act)     { (uint16_t)((tag) | (DSL_TPF(profile) << 10)), (uint16_t)((x1) | ((uint16_t)(x2) << 8)), (uint16_t)((act) | ((uint16_t)(in) << 8)) },
 #define TAG_POOL_END           };
 #define TAG_PACKED(name, rules, x, in, act)     const tag_packed_t name = { rules, x, in, act, (uint16_t)(sizeof(rules) / sizeof(rules[0])) };
 /* 범위 규칙이 있는 압축 표: TAG_RANGE_P( 규칙 번호, hi ) 를 규칙 번호 순서로. 그 규칙의 TAGP 태그가 lo 다 */

@@ -618,10 +618,11 @@ int tagact_run(uint16_t tag)
     }
     /* 이 태그로 시작된 정지만 거리를 건다. 레거시는 정지 중 태그마다 다시 걸어 정지 위치가 밀렸다.
      * 분류 2 는 SL 과 같은 cm(× 10 mm × 펄스/mm)·같은 정지에 거리만 다르다.
-     * shortcut: 방향별 정지 거리를 쓰는 타입을 옮길 때 사이트 선택으로 바꾼다 */
+     * 프로파일 행에 STOP_BACK_FL 이면 후진은 FL(방향은 규칙을 다 실행한 뒤: AGV_FORBACK 은 선 뒤에 바뀐다) */
     started = (int)(D.flag_stopping && !was_stopping);
     if (started && !s_len_set) {
-        D.stop_pulses = (cls == 2) ? (int16_t)((float)carg * P.one_length_pulse * 10.0f) : P.stop_len;
+        D.stop_pulses = (cls == 2) ? (int16_t)((float)carg * P.one_length_pulse * 10.0f)
+                      : (D.backward && (seq_profile_flags() & PF_F_STOP_BACK_FL)) ? P.fwd_stop_len : P.stop_len;
         s_len_set = 1;
     }
     s_depth--;
