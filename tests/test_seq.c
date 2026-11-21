@@ -172,6 +172,20 @@ SEQ_BEGIN( s_and )
     END_STOP
 SEQ_END
 
+/* 누적 대기(v0.61.0): 참인 틱만 세고 거짓인 틱에는 멈춘다(지우지 않는다). 제한은 진입부터·거짓 틱만, 조건이 먼저 */
+SEQ_BEGIN( s_accum )
+    WAIT_ACCUM( IN( ON(SEN_A) ), 5 )
+    OUT_ON( O_A )
+    WAIT_ACCUM_TO( IN( ON(SEN_B) ), 3, 10, L_ERR )
+    OUT_ON( O_B )
+    WAIT_ACCUM_TO( IN( ON(SEN_C) ), 2, UNMATCHED(4), L_ERR )
+    OUT_ON( O_C )
+    END_STOP
+    L( L_ERR )
+    OUT_ON( OUT_EXT_5 )
+    END_STOP
+SEQ_END
+
 SEQ_BEGIN( s_standby )
     ACS( STANDBY, 7 )
     ACS( CALL, 9 )
@@ -416,7 +430,7 @@ enum {
     S_XWHEN, S_XWAIT, S_ANY2, S_DPARAM, S_TPARAM, S_NOWAIT, S_MOVE, S_ALIGN, S_MOVE_TAPE,
     S_BELTS, S_BELT_OFF, S_BELT_END, S_BELT_MANY, S_OBS_AUTO, S_HIGH
 };
-enum { S_FLICKER_ST = SEQ_UNLOAD_PART + 3, S_AND, S_STANDBY };   /* 사이트 ID 가 SEQ_MAX(64)를 넘지 않게 코어 ID 빈 자리를 쓴다 */
+enum { S_FLICKER_ST = SEQ_UNLOAD_PART + 3, S_AND, S_STANDBY, S_ACCUM };   /* 사이트 ID 가 SEQ_MAX(64)를 넘지 않게 코어 ID 빈 자리를 쓴다 */
 
 SEQ_MAP_BEGIN( site_seqs )
     SEQ_MAP( 0, S_BRANCH, s_branch )
@@ -453,6 +467,7 @@ SEQ_MAP_BEGIN( site_seqs )
     SEQ_MAP( 0, S_FLICKER_ST, s_flicker_st )
     SEQ_MAP( 0, S_AND, s_and )
     SEQ_MAP( 0, S_STANDBY, s_standby )
+    SEQ_MAP( 0, S_ACCUM, s_accum )
     SEQ_MAP( 0, S_HIGH, s_high )
 SEQ_MAP_END
 
@@ -955,6 +970,60 @@ static void run_all(void)
     D.backward = 0;
     fake_in = 0;
     seq_abort_all();
+
+    /* 누적 대기: 참 3 → 거짓 5(셈 유지) → 참 2 는 아직(5 를 넘지 않음), 참 1 더(6) 에 통과 */
+    start(S_ACCUM);
+    fake_in = BIT(SEN_A);
+    for (int i = 0; i < 3; i++) { seq_run(); }
+    fake_in = 0;
+    for (int i = 0; i < 5; i++) { seq_run(); }
+    fake_in = BIT(SEN_A);
+    for (int i = 0; i < 2; i++) { seq_run(); }
+    assert(fake_out == 0);
+    seq_run();                                              /* 같은 스캔에 다음 대기 첫 틱(SEN_B 꺼짐) */
+    assert(fake_out == BIT(O_A));
+    fake_in = BIT(SEN_B);                                   /* 제한 10(진입부터): 참 2, 거짓 7, 11 번째 틱 참은 셈 3(넘지 않음) → 제한 */
+    for (int i = 0; i < 2; i++) { seq_run(); }
+    fake_in = 0;
+    for (int i = 0; i < 7; i++) { seq_run(); }
+    assert(fake_out == BIT(O_A));
+    fake_in = BIT(SEN_B);
+    seq_run();
+    assert(!seq_is_active() && fake_out == (BIT(O_A) | BIT(OUT_EXT_5)));
+    start(S_ACCUM);                                         /* 제한과 같은 틱에 셈이 넘으면 조건이 이긴다 */
+    fake_in = BIT(SEN_A);
+    for (int i = 0; i < 6; i++) { seq_run(); }
+    assert(fake_out == BIT(O_A));                           /* 둘째 대기 1 틱(거짓) */
+    fake_in = BIT(SEN_B);
+    for (int i = 0; i < 3; i++) { seq_run(); }
+    fake_in = 0;
+    for (int i = 0; i < 6; i++) { seq_run(); }
+    assert(fake_out == BIT(O_A));                           /* 틱 10, 셈 3 */
+    fake_in = BIT(SEN_B);
+    seq_run();                                              /* 틱 11 > 10 이지만 셈 4 > 3 이 먼저. 셋째 대기 첫 틱은 거짓(거짓 1) */
+    assert(seq_is_active() && fake_out == (BIT(O_A) | BIT(O_B)));
+    fake_in = BIT(SEN_C);                                   /* UNMATCHED(4): 거짓 틱만 센다. 참 1, 거짓 3(합 4, 넘지 않음), 참 2 → 셈 3 > 2 */
+    seq_run();
+    fake_in = 0;
+    for (int i = 0; i < 3; i++) { seq_run(); }
+    assert(seq_is_active() && fake_out == (BIT(O_A) | BIT(O_B)));
+    fake_in = BIT(SEN_C);
+    seq_run();
+    assert(seq_is_active());
+    seq_run();
+    assert(!seq_is_active() && fake_out == (BIT(O_A) | BIT(O_B) | BIT(O_C)));
+    start(S_ACCUM);                                         /* 거짓 틱 5(> 4) 면 제한 라벨 */
+    fake_in = BIT(SEN_A);
+    for (int i = 0; i < 6; i++) { seq_run(); }
+    fake_in = BIT(SEN_B);
+    for (int i = 0; i < 4; i++) { seq_run(); }
+    assert(fake_out == (BIT(O_A) | BIT(O_B)));              /* 셋째 대기 거짓 1 */
+    fake_in = 0;
+    for (int i = 0; i < 3; i++) { seq_run(); }
+    assert(seq_is_active());
+    seq_run();
+    assert(!seq_is_active() && fake_out == (BIT(O_A) | BIT(O_B) | BIT(OUT_EXT_5)));
+    fake_in = 0;
 
     /* 시퀀스의 대기 보고(STANDBY)는 보고 + 자동 재전송(run_standby)이고 정지는 걸지 않는다. 다른 보고는 슬롯만 */
     fake_standby_count = 0;

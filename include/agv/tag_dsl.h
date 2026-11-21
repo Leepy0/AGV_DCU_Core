@@ -226,6 +226,10 @@ enum { AGV_STOP = TA_STOP };
 #define WAIT_STABLE(...) DSL_NOT_IN_TAG
 #undef WAIT_STABLE_TO
 #define WAIT_STABLE_TO(...) DSL_NOT_IN_TAG
+#undef WAIT_ACCUM
+#define WAIT_ACCUM(...) DSL_NOT_IN_TAG
+#undef WAIT_ACCUM_TO
+#define WAIT_ACCUM_TO(...) DSL_NOT_IN_TAG
 #undef WAIT_OUT
 #define WAIT_OUT(...) DSL_NOT_IN_TAG
 #undef DELAY

@@ -24,6 +24,7 @@ $pairs = @{
  'man_and' = @(,@('m_new','m_old'));
  'site_words_seq' = @(,@('s_new_steps','s_ref_steps'));
  'site_words_tag' = @(,@('t_new','t_ref'));
+ 'hold_seq' = @(,@('s_new_steps','s_ref_steps'));
 }
 foreach ($n in $pairs.Keys | Sort-Object) {
   $src = "$core\tests\dsl\$n.c"
@@ -57,6 +58,7 @@ $neg = [ordered]@{
  'speed_tag' = '0 3 256 WORD NEG LOWER EMPTY'
  'man_and' = 'MAN_STATE MAN_STATE2 MAN_KEY2 MAN_ANY2'
  'wait_to' = 'UNMATCHED BIG NEG STATE_PARAM ANY2_PARAM UNIT PARAM0 FND PLACE PTM_ALONE PCOUNT UNMATCHED_AND'
+ 'hold_seq' = 'TAG_ACCUM TAG_ACCUM_TO ACCUM_STATE ACCUM_ANY2 ACCUM_BIG ACCUM_NEG'
 }
 $ok = 0
 foreach ($f in $neg.Keys) {

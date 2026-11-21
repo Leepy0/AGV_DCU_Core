@@ -456,7 +456,7 @@ static uint16_t eval_when(seq_runner_t *r)
     return R_WAIT;
 }
 
-/* WAIT·WAIT_STABLE. 조건이 먼저이고 타임아웃은 그다음이다 */
+/* WAIT·WAIT_STABLE·WAIT_ACCUM. 조건이 먼저이고 타임아웃은 그다음이다. 누적(SEQ_HOLD_ACCUM)은 거짓인 틱에 셈을 그대로 둔다 */
 static uint16_t eval_wait_stable(seq_runner_t *r, const seq_step_t *s)
 {
     uint16_t unmatched = (s->timeout & SEQ_TO_UNMATCHED) != 0;
@@ -468,7 +468,7 @@ static uint16_t eval_wait_stable(seq_runner_t *r, const seq_step_t *s)
         if (r->a > s->arg0) { return R_NEXT; }
     }
     else {
-        r->a = 0;
+        if (!(s->arg1 & SEQ_HOLD_ACCUM)) { r->a = 0; }
         r->b++;
     }
     if ((limit != 0) && ((unmatched ? r->b : r->c.timer) > limit)) { return jump(r, s->target); }

@@ -43,7 +43,7 @@ typedef enum {
     SK_LABEL,             /* 분기 목적지 표시. 실행 시간 없음 */
     SK_OUT,               /* on = 켤 출력, off = 끌 출력. 끄기를 먼저 적용 */
     SK_WAIT,              /* 입력 조건 대기. timeout 있으면 target 으로 */
-    SK_WAIT_STABLE,       /* 조건이 arg0 틱 초과 연속 참이면 통과. timeout 있으면 target 으로 */
+    SK_WAIT_STABLE,       /* 조건이 arg0 틱 초과 연속 참이면 통과. timeout 있으면 target 으로. arg1 SEQ_HOLD_ACCUM 이면 참인 틱을 누적 */
     SK_WAIT_OUT,          /* 출력 래치 조건 대기 */
     SK_DELAY,             /* arg0 틱 대기 */
     SK_OUT_PULSE,         /* out 을 arg0 틱 켜고 arg1 틱 끄기를 timeout 회 반복 */
@@ -114,6 +114,7 @@ enum { SEQ_SPD_HIGH = 0xFFF0, SEQ_SPD_LOW = 0xFFF1, SEQ_SPD_LLOW = 0xFFF2, SEQ_S
 
 #define SEQ_NO_LABEL     0u       /* target 없음. 라벨 값은 1부터 */
 #define SEQ_TO_UNMATCHED 0x8000u  /* timeout 최상위 비트: 조건이 거짓인 틱만 누적 (최대 32767 = 327초) */
+#define SEQ_HOLD_ACCUM   0x0001u  /* SK_WAIT_STABLE 의 arg1 비트 0: 조건이 거짓인 틱에 셈을 지우지 않고 멈춘다(누적 대기, v0.61.0) */
 
 #define SEQ_ERR_CALL     290u     /* 사용자 정의 함수가 실패(2)를 돌려준 경우 */
 #define SEQ_ERR_TABLE    290u     /* 없는 라벨·함수 인덱스 */

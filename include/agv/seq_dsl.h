@@ -346,6 +346,12 @@ typedef unsigned long long dsl_cond_t;
 #define DSL_WTOPARAM_(c, label, p, u)  DSL_STEP_C(SK_WAIT_PARAM, label, (p) + DSL_PARAM_OK(p), u, 0, DSL_CN(c), 0)
 #define WAIT_STABLE(c, s)           DSL_STEP_C(SK_WAIT_STABLE, SEQ_NO_LABEL, s, 0, 0, DSL_CN(c), 0)
 #define WAIT_STABLE_TO(c, s, t, label)  DSL_STEP_C(SK_WAIT_STABLE, label, s, 0, t, DSL_CN(c), 0)
+/* WAIT_ACCUM( 조건, 틱 )·WAIT_ACCUM_TO( 조건, 틱, 제한, 라벨 )(v0.61.0): WAIT_STABLE(_TO) 와 같은 스텝이고 arg1 = SEQ_HOLD_ACCUM.
+ * 조건이 참인 틱만 세고 거짓인 틱에는 셈을 멈춘다(지우지 않는다). 참인 틱이 모두 합쳐 틱을 넘는 틱에 통과.
+ * 틱 0~65534(밖은 컴파일 오류). 조건은 입력만(상태 낱말·둘째 ANY 는 오류). 제한은 WAIT_STABLE_TO 와 같다(UNMATCHED 도 받는다) */
+#define DSL_HOLD_OK(t)              (0 * sizeof(char[(((t) >= 0) && ((t) <= 0xFFFEL)) ? 1 : -1]))
+#define WAIT_ACCUM(c, s)            DSL_STEP_C(SK_WAIT_STABLE, SEQ_NO_LABEL, (s) + DSL_HOLD_OK(s), SEQ_HOLD_ACCUM, 0, DSL_CN(c), 0)
+#define WAIT_ACCUM_TO(c, s, t, label)   DSL_STEP_C(SK_WAIT_STABLE, label, (s) + DSL_HOLD_OK(s), SEQ_HOLD_ACCUM, t, DSL_CN(c), 0)
 #define WAIT_OUT(c)                 DSL_STEP_C(SK_WAIT_OUT, SEQ_NO_LABEL, 0, 0, 0, c, 0)
 #define DELAY(t)                    DSL_STEP(SK_DELAY, SEQ_NO_LABEL, t, 0, 0, 0, 0, 0)
 #define WAIT_IF(x)                  DSL_STEP_X(SK_WAIT, SEQ_NO_LABEL, 0, x, NO_IN, 0)
