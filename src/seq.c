@@ -368,7 +368,10 @@ uint16_t seq_xcond(uint16_t c, uint16_t a, uint16_t b, uint16_t tag)
     case XC_STATION_MOD:     ok = (uint16_t)((a != 0u) && ((st % (int16_t)a) == (int16_t)b)); break;
     case XC_STATION_DIV:     ok = (uint16_t)((a != 0u) && ((st / (int16_t)a) == (int16_t)b)); break;
     case XC_TAG_NUM:         ok = (uint16_t)((int16_t)tag == (int16_t)(((b != 0u) ? (st % (int16_t)b) : st) + (int16_t)a)); break;
-    case XC_STATE:           ok = (uint16_t)((seq_state_get(slot) >= a) && (seq_state_get(slot) <= b)); break;
+    case XC_STATE:
+        v = (int16_t)seq_state_get(slot);
+        ok = (uint16_t)(((uint16_t)v >= a) && ((uint16_t)v <= b));
+        break;
     default:                 return 0;
     }
     return (c & XC_NOT) ? (uint16_t)!ok : ok;
