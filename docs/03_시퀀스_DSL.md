@@ -43,7 +43,8 @@
 | 대기 | `WAIT( 조건 )` | 조건 참까지 대기 | `if (In == nON) step = n;` |
 | | `WAIT_TO( 조건, 제한, 라벨 )` | 제한 넘으면 라벨로 | `cnt++; if (cnt > N) …` |
 | | `WAIT_STABLE( 조건, 안정 )` | 조건이 연속으로 `안정`을 초과해 참이면 통과 | `if (In) { cnt++; if (cnt > N) … } else cnt = 0;` |
-| | `WAIT_STABLE_TO( 조건, 안정, 제한, 라벨 )` | 위 + 제한. `UNMATCHED(제한)`이면 조건이 거짓인 시간만 누적 | `else { cnt_2++; … }` |
+| | `WAIT_STABLE_TO( 조건, 안정, 제한, 라벨 )` | 위 + 제한. `UNMATCHED(제한)`이면 조건이 거짓인 시간만 누적. `안정` 칸은 `PARAM_TIME( FND, 단위 )` 도 받는다(v0.61.0, 3.4.1) | `else { cnt_2++; … }` |
+| | `WAIT_ACCUM( 조건, 틱 )` / `WAIT_ACCUM_TO( 조건, 틱, 제한, 라벨 )` | 조건이 참인 틱만 세고 거짓인 틱에는 멈춘다(지우지 않는다). 모두 합쳐 틱을 넘으면 통과(v0.61.0, 3.4.1) | `if (In) { cnt++; if (cnt > N) … }`(else 없음) |
 | | `WAIT_OUT( 조건 )` | 출력 상태 대기 | `if (Output_Spare.bit.X == nOFF)` |
 | | `DELAY( 시간 )` | 시간 대기 | `cnt++; if (cnt > N)` |
 | | `WAIT_IF( x )` / `WAIT_IF_TO( x, 제한, 라벨 )` | 확장 조건 대기 (3.3.1) | `if (AGV_Backward == ON)` |
@@ -52,9 +53,11 @@
 | | `DELAY_PARAM( P_x, 단위 )` | 파라미터 x 단위 대기 (3.3.2) | `cnt++; if (cnt > set[X] * 6000)` |
 | | `WAIT_TO_PARAM( 조건, P_x, 단위, 라벨 )` | 제한 시간이 파라미터인 `WAIT_TO`. v0.58.0: `WAIT_TO( 조건, PARAM_TIME( FND, 단위 ), 라벨 )` 과 같다(`WAIT_PARAM_TO` 별칭) | |
 | 분기 | `SELECT_BEGIN … WHEN … SELECT_END` | 3.4절 | `if … else if` |
+| | `WHEN_STABLE( 조건, 틱, 라벨 )` / `WHEN_ACCUM( 조건, 틱, 라벨 )` | 묶음 안 유지 가지: 조건이 틱을 넘어 이어서(누적은 모두 합쳐) 참이면 라벨로. 묶음당 둘까지(v0.61.0, 3.4.1) | `else if (In) { cnt++; if (cnt > N) … } else cnt = 0;` |
+| | `WHEN_OUT( 출력 조건, 라벨 )` | 묶음 안 출력 가지: 출력 래치가 조건이면 라벨로(`WAIT_OUT` 과 같은 조건, v0.61.0) | `if (Output.bit.X == nON && …)` |
 | | `GOTO( 라벨 )` | 이동 | `step = n;` |
 | | `ERROR_HOLD( 코드, 조건, 라벨 )` | 오류 표시 유지, 조건 참이면 라벨로 | `case 290` |
-| ACS | `ACS_SEND( LOADING, 87 )` / `ACS_SEND( NEXT, STATION(1) )` / `ACS( LOADING, AGV_ID )` | 보고. `ACS_SEND` 번호는 상수 0\~65535 또는 `STATION(k)`(스테이션 큐[k], `ACS( 종류, STATION(k) )` 와 같은 스텝). 종류는 레거시 함수 이름 그대로 `LOADING` `UNLOADING` `NEXT` `ARRIVE` `FINISH` `PROCESSING` `STANDBY` `CALL` `IDLE`(태그 표는 `DSL_INFO_<이름>`). `IDLE` 은 Info 'X'(v0.59.0)이고 오류가 5초 지속되면 코어가 스스로 보내는 'X' 보고와 같은 슬롯(`ACS_SLOT_IDLE_X`)을 쓴다. 둘이 겹치면 나중 것으로 번호가 바뀌고 슬롯은 하나라 ACK 한 번에 풀린다(자동 보고는 그대로). 수동 표 `MAN` 의 모드 `IDLE` 과 이름만 같고 따로 쓰는 낱말이다. 번호 출처 `STATION0`, `STATION0_PLUS1`, `STATION(k)`(큐[k]), `AGV_ID` 또는 상수 | `DA_ACS_Loading(…)` |
+| ACS | `ACS_SEND( LOADING, 87 )` / `ACS_SEND( NEXT, STATION(1) )` / `ACS( LOADING, AGV_ID )` | 보고. `ACS_SEND` 번호는 상수 0\~65535 또는 `STATION(k)`(스테이션 큐[k], `ACS( 종류, STATION(k) )` 와 같은 스텝). 종류는 레거시 함수 이름 그대로 `LOADING` `UNLOADING` `NEXT` `ARRIVE` `FINISH` `PROCESSING` `STANDBY` `CALL` `IDLE` `DISPLAY`(태그 표는 `DSL_INFO_<이름>`). `DISPLAY` 는 Info 'D'(v0.61.0, 표시 번호)이고 번호 0 이하는 보내지 않는다. `IDLE` 은 Info 'X'(v0.59.0)이고 오류가 5초 지속되면 코어가 스스로 보내는 'X' 보고와 같은 슬롯(`ACS_SLOT_IDLE_X`)을 쓴다. 둘이 겹치면 나중 것으로 번호가 바뀌고 슬롯은 하나라 ACK 한 번에 풀린다(자동 보고는 그대로). 수동 표 `MAN` 의 모드 `IDLE` 과 이름만 같고 따로 쓰는 낱말이다. 번호 출처 `STATION0`, `STATION0_PLUS1`, `STATION(k)`(큐[k]), `AGV_ID` 또는 상수 | `DA_ACS_Loading(…)` |
 | | `ACS_WAIT_ACK( 제한, 라벨 )` | ACK 대기 | `Scia_Send_AGV2PC_Message == ACK_NONE_MSG` |
 | | `ACS_STATION( 칸, 값, 길이 )` / `STATION_RESET` | 스테이션 큐 | `ACS_Station_Call_Num[1] = 0;` |
 | 주행 | `AGV_SPEED( HIGH·LOW·LLOW·MIN \| m/min )` / `AGV_SPEED_MMIN( v )` | 재출발 속도. 낱말 또는 m/min 4\~255(`AGV_SPEED_MMIN` 은 숫자만 받는 별칭, v0.58.0) | `gDriving_speed = …` |
@@ -64,7 +67,7 @@
 | | `AGV_MOVE( mm )` | 그 자리에서 mm 앞에 위치 정지하고 설 때까지 대기(3.2.1) | 없음(v0.41.0) |
 | | `OBS_ON` / `OBS_OFF` | 장애물 센서 사용 | `Flag_OBS_Sen_Use` |
 | | `OBS_OFF_AUTO` | 장애물 센서 끔(`D.obs_use` 2). 일을 통째로 지우면(STOP·비상 정지·오류·ACS 작업 취소·수동 전환, `run_seq_init`) 다시 켠다. 다시 출발·방향 전환에서는 켜지 않는다. 태그 표도 같은 이름 | 없음. `OBS_OFF` 는 그때도 꺼진 채(레거시) |
-| 상태 | `SET_STATE( id, 값 )` / `WAIT_STATE( id, 값 )` | 사이트 상태 변수 | `Gate1_Out`, `FL_check` 류 |
+| 상태 | `SET_STATE( id, 값 )` / `WAIT_STATE( id, 값 )` | 사이트 상태 변수. 조건 칸에서는 낱말 `STATE( 칸, 값 )`·`STATE( 칸, 처음, 끝 )`(v0.61.0, 3.3.3). 사이트 C 는 공개 배열 `seq_state[칸]` 을 바로 읽고 쓴다 | `Gate1_Out`, `FL_check` 류 |
 | 병렬 | `ACT_START( id )` / `WAIT_ACT( id )` | 4절 | |
 | 확장 | `CALL( 인덱스 )` | 사용자 정의 함수 | 표로 안 되는 블록 |
 | 종료 | `END_RESTART` / `END_STOP` / `END_ERROR( 코드 )` | 재출발 예약 / 그냥 종료 / 오류 종료 | `case 11` / 플래그 OFF / `action_err = n` |
@@ -224,6 +227,8 @@ SELECT_END
 - 값은 스캔마다 다시 읽는다. 음수는 0. `WAIT_TO_PARAM`은 값 0 이하면 제한 없음.
 - 단위 안 틱과 지난 단위 수를 따로 세서 16비트 틱(655초)을 넘어도 된다. 99분 = 594000틱.
 - 파라미터 번호는 1 \~ `P_COUNT`-1, 밖이면 컴파일 오류.
+- 유지 틱(v0.61.0): `WAIT_STABLE(_TO)`·`WAIT_ACCUM(_TO)`·`WHEN_STABLE`·`WHEN_ACCUM` 의 틱 칸도 `PARAM_TIME( FND 또는 P_x, TICK \| DSEC \| SEC )` 를 받는다. `MIN` 은 칸(8비트)에 안 들어가 컴파일 오류. 한도는 값 x 단위를 셀 때마다 다시 읽고(도는 중에 바꾸면 그다음 틱부터), 음수는 0, 65534 로 묶는다. 값 0 이면 첫 참 틱에 통과한다.
+- 시퀀스 지연 초는 60번 `ACD`(0\~99초, 기본 0, v0.61.0)에 둔다: `DELAY_PARAM( P_ACT_DELAY, SEC )`, `WAIT_STABLE( 조건, PARAM_TIME( ACD, SEC ) )`. 28번 `SPN` 은 최저 속도 그대로다.
 
 #### 3.3.3 `AND( … )` 조건과 이름 통일 (v0.58.0)
 
@@ -253,6 +258,7 @@ TAG_IF( 10, PF_X, AND( FORWARD, STATION( 0, 70, 71 ) ), AGV_STOP )   /* TAG_IF( 
 | `CROSS_IN` / `CROSS_OUT` | `X_CROSS_IN` / `X_CROSS_OUT` |
 | `CROSS_IN_WAIT` / `CROSS_OUT_WAIT` | `X_CROSS_IN_ON` / `X_CROSS_OUT_ON`(유지, 허가 대기 정지 중) |
 | `ERR_IS( n )` / `KEY( k )` | `X_ERR_EQ( n )` / `X_KEY( k )` |
+| `STATE( 칸, 값 )` / `STATE( 칸, 처음, 끝 )` | 없음(v0.61.0). 사이트 상태 칸(`SET_STATE` 와 같은 칸, 0\~15)이 값과 같음 / 처음 이상 끝 이하(부호 없는 16비트). `> 0` 은 `STATE( 칸, 1, 65535 )`. `NOT( STATE( … ) )` 도 된다. 칸 16 이상·처음 > 끝·0\~65535 밖은 컴파일 오류 |
 | `NOT( 상태 )` | `X_NOT( x )`(상태 낱말에만. 입력 항목·`NOT( NOT( … ) )` 는 컴파일 오류) |
 | `ALWAYS` | `X_ALWAYS`(상태 칸을 쓰지 않는다) |
 
@@ -261,7 +267,8 @@ TAG_IF( 10, PF_X, AND( FORWARD, STATION( 0, 70, 71 ) ), AGV_STOP )   /* TAG_IF( 
 | 명령 | 입력 | 상태 낱말 | 둘째 `ANY` |
 |---|---|---|---|
 | `WHEN` `WAIT` `WAIT_TO` | O | 1개(`xc`·`arg0`·`arg1`) | 상태가 없을 때만(`out`) |
-| `WAIT_STABLE(_TO)` `ERROR_HOLD` | O | 못 씀(`arg0` 가 안정 틱·오류 코드) | 못 씀 |
+| `WAIT_STABLE(_TO)` `WAIT_ACCUM(_TO)` `ERROR_HOLD` | O | 못 씀(`arg0` 가 안정 틱·오류 코드) | 못 씀 |
+| `WHEN_STABLE` `WHEN_ACCUM` `WHEN_OUT` | O(`WHEN_OUT` 은 출력) | 못 씀(`arg0`·`arg1` 가 틱·방식) | 못 씀 |
 | `WAIT_TO( …, PARAM_TIME( … ), … )` | O | 못 씀(`arg0`·`arg1` 가 파라미터·단위) | 못 씀 |
 | `OUT_FLICKER_UNTIL_IN(_TO)` | O | 1개 | 못 씀 |
 | `TAG_IF` `TAG_RANGE_IF` | O | 2개(`cond`·`cond2`) | 못 씀(태그 규칙에 둘 칸이 없다) |
@@ -318,7 +325,37 @@ SELECT_END
 | `case 290: action_err = 290; if (START_SW == nON) step = 1;` | `ERROR_HOLD( 290, IN( ON(START_SW) ), 복귀라벨 )` |
 | 앞 스텝의 결과를 뒤에서 사용 | 가지마다 `ACS_STATION`·`SET_STATE` 뒤 `GOTO( 합류라벨 )`. 뒤에서 값을 보려면 `WHEN_STATE( id, 값, 라벨 )` |
 
-`SELECT_BEGIN`·`SELECT_END`는 읽기 위한 표시이며 스텝을 만들지 않는다. 코어는 연속한 `WHEN`을 하나의 묶음으로 본다. 가지 하나가 스텝 한 칸(12워드)을 쓴다.
+`SELECT_BEGIN`·`SELECT_END`는 읽기 위한 표시이며 스텝을 만들지 않는다. 코어는 연속한 `WHEN`을 하나의 묶음으로 본다. 가지 하나가 스텝 한 칸(12워드)을 쓴다. 묶음에 들어가는 가지는 `WHEN`·`WHEN_IF*`·`WHEN_ANY2`·`WHEN_ID`·`OTHERWISE`·`WHEN_STATE`·`WHEN_STABLE`·`WHEN_ACCUM`·`WHEN_OUT` 이고 `SELECT_END_TO` 가 묶음을 닫는다.
+
+#### 3.4.1 유지·누적 대기와 묶음 안 유지 셈 (v0.61.0)
+
+```c
+WAIT_ACCUM( IN( ON(SEN_3) ), 200 )                              /* 켜진 틱만 모아 200 을 넘으면 */
+WAIT_STABLE( IN( ON(SEN_4) ), PARAM_TIME( ACD, SEC ) )          /* ACD 초를 넘어 이어서 켜지면 */
+
+SELECT_BEGIN
+    WHEN( IN( ON(IF_IN_9) ), C1_GO )
+    WHEN_STABLE( IN( ANY_ON(SEN_3, SEN_4) ), 1500, C1_TIMEOUT )
+    WHEN_OUT( IN( ON(BELT1_POWER, BELT2_POWER) ), ERR_BOTH )
+SELECT_END
+```
+
+틱(10 ms)마다의 뜻. 셈은 스텝(묶음)에 들어올 때 0 이다.
+
+| 스텝 | 조건이 참인 틱 | 거짓인 틱 | 통과·분기 |
+|---|---|---|---|
+| `WAIT_STABLE` | 셈 + 1 | 셈 0, 거짓 틱 + 1 | 셈 > 한도인 틱(같은 스캔에 다음 스텝) |
+| `WAIT_ACCUM` | 셈 + 1 | 셈 그대로, 거짓 틱 + 1 | 같다. N + 1 번째 참 틱 |
+| `_TO` 제한 | | | 조건 판정 다음에 `(UNMATCHED ? 거짓 틱 : 진입 뒤 틱) > 제한` 이면 라벨로. 같은 틱이면 조건이 이긴다 |
+| `WHEN_STABLE` | 셈 + 1 | 셈 0 | 셈 > 한도인 틱에 라벨로 |
+| `WHEN_ACCUM` | 셈 + 1 | 셈 그대로 | 같다 |
+| `WHEN_OUT` | | | 출력 래치가 조건이면 라벨로 |
+
+- 한도: 틱 숫자 0\~65534(새 매크로는 밖이면 컴파일 오류. `WAIT_STABLE(_TO)` 의 숫자는 예전처럼 검사하지 않는다) 또는 `PARAM_TIME( FND, TICK \| DSEC \| SEC )`(3.3.2).
+- 묶음은 위에서부터 본다. 앞 가지가 참인 틱에는 그리로 가고 뒤 유지 가지의 셈은 그 틱에 건드리지 않는다. 묶음 안 첫째 유지 가지와 둘째 유지 가지는 셈을 따로 둔다(러너 칸 둘). **유지 가지는 묶음당 둘까지**: 셋째에 닿으면 표 오류 290(`action_err`, ACT 는 `stop_err`)으로 끝난다. 매크로는 스텝 사이를 못 보아 막지 못한다(생성기·표 편집기가 잡는다). `SELECT_END_TO` 의 제한은 진입 뒤 틱이라 셈과 겹치지 않는다.
+- 조건은 입력만(`IN( … )` 또는 `AND( ON·OFF·ANY … )`). 상태 낱말·둘째 `ANY` 는 컴파일 오류(칸이 겹친다). `WHEN_OUT` 의 조건은 출력 ID 다.
+- 셋 다 ACT 에서 된다. 태그 표 파일에서 쓰면 컴파일 오류.
+- 저장: `WAIT_ACCUM` 은 `SK_WAIT_STABLE` 그대로이고 `arg1` 비트 0(`SEQ_HOLD_ACCUM`)만 선다. 파라미터 시간은 `arg0` = 파라미터 번호, `arg1` 상위 8비트 = 단위 틱(1·10·100. 0 이면 `arg0` 가 틱). `WHEN_STABLE`·`WHEN_ACCUM` 은 새 종류 `SK_WHEN_STABLE`(`target` 라벨, `arg0`·`arg1` 은 위와 같다, `on`·`off` 조건), `WHEN_OUT` 은 `SK_WHEN_OUT`(`target`, `on`·`off` 출력 조건). 두 종류는 열거형 끝에 붙여 기존 번호가 그대로다. `arg1` 이 0 인 예전 `WAIT_STABLE` 표는 바이트·동작이 같다.
 
 ### 3.5 벨트
 
@@ -376,7 +413,7 @@ L( RUN )
 
 - 스텝 = 머리 1워드 + 0 이 아닌 칸의 값(칸 순서). 머리 하위 12비트는 0 이 아닌 칸, 상위 4비트는 뒤따르는 값 워드 수(`SEQ_PK_LEN`). 칸: 0 `kind`, 1 `target`, 2 `arg0`, 3 `arg1`, 4 `timeout`, 5 `xc`, 6·7 `on`(하위·상위 16비트), 8·9 `off`, 10·11 `out`. 펼친 스텝의 칸은 대부분 0 이라(사이트 표에서 16비트 칸의 약 80%) 한 스텝이 평균 3워드쯤이 된다.
 - 대응표 한 줄 `seq_pmap_t` = `pid`(프로파일 \| ID << 8), `off`(스텝 워드 배열 `w` 안 첫 스텝 머리), `n`(스텝 수), 3워드(펼친 대응표 6워드). 순서는 펼친 대응표와 같다. 같은 스텝 표를 여러 줄이 쓰면 `off` 가 같다. ACT 대응표도 같은 꼴(`acts`).
-- 시퀀스당 스텝 64 이하(ACT 도 같다). 앱 생성기가 넘으면 시퀀스 이름과 스텝 수를 내고 멈춘다. 시퀀스 ID 는 `SEQ_MAX`(64) 미만.
+- 형식 한계: 시퀀스·ACT 당 스텝 수는 대응표 `n`(16비트, 65535)까지다. 스텝 워드 배열 `w` 는 머리 자리(`off`, 러너의 지금 자리)가 16비트이고 벨트 정지 칸이 자리 + 1 을 담아 표 전체 0xFFFE 워드까지다. 앱 생성기는 이보다 낮은 한계를 따로 둘 수 있고, 넘으면 시퀀스 이름과 스텝 수를 내고 멈춘다. 시퀀스 ID 는 `SEQ_MAX`(64) 미만.
 - 스텝별 자리 표는 두지 않는다. 러너가 지금 스텝의 머리 자리를 들고 다니며 다음 스텝은 머리의 길이로 간다. 다음 스텝 자리는 스텝을 평가한 뒤에 구한다(사용자 함수가 그 러너를 다시 시작했으면 새 표가 기준, v0.56.1). 점프(라벨 찾기)는 그 시퀀스 첫 스텝부터 머리만 훑는다(종류·`target` 은 머리 비트로 바로 읽는다). WHEN 묶음은 지금 스텝부터 하나씩 푼다.
 - 스텝을 읽는 곳은 `src/seq.c` 의 표 읽기 구역 하나다(`step_read`·`step_head`·`step_next_at`·`map_get`). 푼 스텝은 정적 버퍼 하나(12워드)에 두고 평가 로직은 펼친 표와 같은 `seq_step_t` 를 받는다. 공개 함수 `seq_unpack(p, s)` 는 스텝 하나를 풀고 워드 수를 돌려준다(생성기 왕복 시험용).
 - 벨트 정지 조건(`SK_BELT_UNTIL`)은 압축 표에서 스텝 번호 대신 머리 자리를 기억한다. 벨트 출력만 보는 곳은 버퍼를 쓰지 않고 칸 하나만 읽는다(출력 스텝을 평가하는 중이라서).
