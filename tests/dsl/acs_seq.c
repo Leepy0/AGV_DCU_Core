@@ -51,6 +51,11 @@ SEQ_BEGIN( s_old )
     OLD_ACS( RAWX, AGV_ID )
     OLD_ACS_SEND( RAWX, STATION(2) )
 SEQ_END
+/* 칸 23(끝)과 255(큐 길이만)는 받는다 */
+SEQ_BEGIN( s_stok )
+    ACS_STATION( 23, 1, 2 )
+    ACS_STATION( 255, 0, 2 )
+SEQ_END
 MAIN_BEGIN
     SAME(s_new_steps, s_old_steps);
 MAIN_END
@@ -70,6 +75,10 @@ SEQ_BEGIN( n )
     ACS( NEXT, -1 )
 #elif defined(NEG_STK)
     ACS( NEXT, STATION(24) )
+#elif defined(NEG_ACSST24)
+    ACS_STATION( 24, 1, 2 )
+#elif defined(NEG_ACSSTNEG)
+    ACS_STATION( -1, 1, 2 )
 #elif defined(NEG_BADWORD)
     ACS( NEXT, STATION1 )
 #elif defined(NEG_AGVMINUS)

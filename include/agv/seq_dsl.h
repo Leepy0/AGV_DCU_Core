@@ -139,10 +139,12 @@ typedef unsigned long long dsl_cond_t;
 #define X_PARAM_LE(p, v)             (XC_PARAM_LE | DSL_SLOT(p)), (v), 0
 #define X_ID(lo, hi)                 XC_ID, (lo), (hi)
 #define X_KEY(k)                     XC_KEY, KEY_##k, 0
-#define X_STATION(k, lo, hi)         (XC_STATION | DSL_SLOT(k)), (lo), (hi)
-#define X_STATION_RUNNING(k, lo, hi) (XC_STATION_RUNNING | DSL_SLOT(k)), (lo), (hi)
-#define X_STATION_MOD(k, n, m)       (XC_STATION_MOD | DSL_SLOT(k)), ((n) + DSL_NZ(n)), (m)
-#define X_STATION_DIV(k, n, m)       (XC_STATION_DIV | DSL_SLOT(k)), ((n) + DSL_NZ(n)), (m)
+/* 스테이션 큐 칸 k 는 0~ACS_STATION_MAX-1(밖이면 acs_station_get 이 늘 0 을 돌려 조건이 조용히 거짓이 된다. 컴파일 때만 검사, 코드 0 워드) */
+#define DSL_STK(k)                   ((k) + (0 * sizeof(char[(((k) >= 0) && ((k) < ACS_STATION_MAX)) ? 1 : -1])))
+#define X_STATION(k, lo, hi)         (XC_STATION | DSL_SLOT(DSL_STK(k))), (lo), (hi)
+#define X_STATION_RUNNING(k, lo, hi) (XC_STATION_RUNNING | DSL_SLOT(DSL_STK(k))), (lo), (hi)
+#define X_STATION_MOD(k, n, m)       (XC_STATION_MOD | DSL_SLOT(DSL_STK(k))), ((n) + DSL_NZ(n)), (m)
+#define X_STATION_DIV(k, n, m)       (XC_STATION_DIV | DSL_SLOT(DSL_STK(k))), ((n) + DSL_NZ(n)), (m)
 /* 지금 태그 번호 == 식. 식은 스테이션 큐 식(아래 STATION): STATION(k), STATION(k) ± n, MOD( STATION(k), m ),
  * n + MOD( STATION(k), m ). 태그 표 전용. 예: 레거시 "Station[0] == Tag - 100" 은 X_TAG_NUM( STATION(0) + 100 ) */
 #define X_TAG_NUM(e)                 (XC_TAG_NUM | DSL_SLOT(DSL_ST_K(e))), (uint16_t)(DSL_ST_N(e) + DSL_ST_OK(e)), (uint16_t)DSL_ST_M(e)
@@ -462,7 +464,9 @@ typedef unsigned long long dsl_cond_t;
 /* 옛 이름: ACS( 종류, 번호 ) 의 별칭(숫자·STATION(k) 만 쓰던 꼴이 그대로 된다) */
 #define ACS_SEND(info, num)    DSL_ACSN(info, num)
 #define ACS_WAIT_ACK(t, label) DSL_STEP(SK_ACS_WAIT_ACK, label, 0, 0, t, 0, 0, 0)
-#define ACS_STATION(idx, val, cnt)  DSL_STEP(SK_ACS_STATION, SEQ_NO_LABEL, idx, val, cnt, 0, 0, 0)
+/* 칸 idx: 0~ACS_STATION_MAX-1 또는 255(칸은 안 쓰고 큐 길이 cnt 만 정한다) */
+#define DSL_STKW(idx)          ((idx) + (0 * sizeof(char[((((idx) >= 0) && ((idx) < ACS_STATION_MAX)) || ((idx) == 255)) ? 1 : -1])))
+#define ACS_STATION(idx, val, cnt)  DSL_STEP(SK_ACS_STATION, SEQ_NO_LABEL, DSL_STKW(idx), val, cnt, 0, 0, 0)
 #define STATION_RESET          DSL_STEP(SK_STATION_RESET, SEQ_NO_LABEL, 0, 0, 0, 0, 0, 0)
 
 /* ---- 주행 관련 (ACT 에서 금지, seq_bind 가 부팅 때 거부) ----

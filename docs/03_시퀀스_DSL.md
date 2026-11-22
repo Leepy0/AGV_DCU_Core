@@ -59,7 +59,7 @@
 | | `ERROR_HOLD( 코드, 조건, 라벨 )` | 오류 표시 유지, 조건 참이면 라벨로 | `case 290` |
 | ACS | `ACS_SEND( LOADING, 87 )` / `ACS_SEND( NEXT, STATION(1) )` / `ACS( LOADING, AGV_ID )` | 보고. `ACS_SEND` 번호는 상수 0\~65535 또는 `STATION(k)`(스테이션 큐[k], `ACS( 종류, STATION(k) )` 와 같은 스텝). 종류는 레거시 함수 이름 그대로 `LOADING` `UNLOADING` `NEXT` `ARRIVE` `FINISH` `PROCESSING` `STANDBY` `CALL` `IDLE` `DISPLAY` `CROSS_IN` `CROSS_OUT`(태그 표는 `DSL_INFO_<이름>`). `DISPLAY` 는 Info 'D'(v0.61.0, 표시 번호)이고 번호 0 이하는 보내지 않는다. `CROSS_IN`·`CROSS_OUT`(v0.63.0, Info 'I'·'O')은 보고 슬롯이 아니라 'I'·'O' 태그와 같은 교차로 상태로 간다: IN 은 보고 + 허가 대기(`CD` 거리에서 정지, 시퀀스 중이면 곧바로 허가까지 유지), OUT 은 OUT 보고 큐에만 넣고 서지 않는다(같은 구역은 한 번). 태그·시퀀스 모두, 번호 칸은 다른 종류와 같다. `IDLE` 은 Info 'X'(v0.59.0)이고 오류가 5초 지속되면 코어가 스스로 보내는 'X' 보고와 같은 슬롯(`ACS_SLOT_IDLE_X`)을 쓴다. 둘이 겹치면 나중 것으로 번호가 바뀌고 슬롯은 하나라 ACK 한 번에 풀린다(자동 보고는 그대로). 수동 표 `MAN` 의 모드 `IDLE` 과 이름만 같고 따로 쓰는 낱말이다. 번호 출처 `STATION0`, `STATION0_PLUS1`, `STATION(k)`(큐[k]), `AGV_ID` 또는 상수 | `DA_ACS_Loading(…)` |
 | | `ACS_WAIT_ACK( 제한, 라벨 )` | ACK 대기 | `Scia_Send_AGV2PC_Message == ACK_NONE_MSG` |
-| | `ACS_STATION( 칸, 값, 길이 )` / `STATION_RESET` | 스테이션 큐 | `ACS_Station_Call_Num[1] = 0;` |
+| | `ACS_STATION( 칸, 값, 길이 )` / `STATION_RESET` | 스테이션 큐(칸 0\~23 또는 255 = 길이만, 밖은 컴파일 오류) | `ACS_Station_Call_Num[1] = 0;` |
 | 주행 | `AGV_SPEED( HIGH·LOW·LLOW·MIN \| m/min )` / `AGV_SPEED_MMIN( v )` | 재출발 속도. 낱말 또는 m/min 4\~255(`AGV_SPEED_MMIN` 은 숫자만 받는 별칭, v0.58.0) | `gDriving_speed = …` |
 | | `AGV_FORBACK( FWD·BACK·TOGGLE )` | 방향 전환 예약 | `AGV_ForBack_Action(FB)` |
 | | `AGV_TURN( CW, 90, fb, auto[, 속도[, 옵션…]] )` | 회전 요청 + 완료 대기(3.2.2) | `AGV_Turn_Action(…)` |
@@ -250,7 +250,7 @@ TAG_IF( 10, PF_X, AND( FORWARD, STATION( 0, 70, 71 ) ), AGV_STOP )   /* TAG_IF( 
 | `FORWARD` / `BACKWARD` | `X_FORWARD` `IF_FORWARD` / `X_BACKWARD` `IF_BACKWARD` |
 | `FORBACK_MODE` / `LOW_BATTERY` | `X_FORBACK_MODE` / `X_LOW_BATTERY` |
 | `ID( lo, hi )` | `X_ID` `IF_ID` `WHEN_ID` |
-| `STATION( k, lo, hi )` | `X_STATION` `IF_STATION` `X_STATION_RUNNING` `IF_STATION_RUNNING`(k 는 큐 칸 0 이상 `ACS_STATION_MAX` 미만) |
+| `STATION( k, lo, hi )` | `X_STATION` `IF_STATION` `X_STATION_RUNNING` `IF_STATION_RUNNING`(k 는 큐 칸 0 이상 `ACS_STATION_MAX`(24) 미만, 밖은 컴파일 오류) |
 | `STATION_MOD( k, n, m )` / `STATION_DIV( k, n, m )` | `X_STATION_MOD` / `X_STATION_DIV` |
 | `TAG_IS( 식 )` | `X_TAG_NUM` `IF_TAG_NUM`(태그 표 전용. 시퀀스에서는 컴파일 오류) |
 | `PARAM( FND, v )` | `X_PARAM` `IF_PARAM`(FND 이름, 자릿수 파라미터의 한 자리는 `TFB_1`) |
