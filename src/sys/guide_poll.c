@@ -164,6 +164,7 @@ static void on_rx(const guide_rx_t *rx)
     if (D.flag_ready) {
 #if AGV_DEV_TESTS
         if (param_get(P_DEV_TEST) != 0) { param_tst_apply(); }   /* TST 시험을 주행마다 다시 건다(0 은 시험 스위치를 건드리지 않는다) */
+        if (tune_active()) { param_tst = 0; }    /* 4~8 긴 차 사행 시험은 튜닝 주행에 걸지 않는다 */
 #endif
         D.control = RUN_DRIVE;
         D.flag_run = 1;

@@ -1335,9 +1335,10 @@ static void test_menu5(void)
 
 #if AGV_DEV_TESTS
 static void boot_keys(uint16_t keys, int keep);
-/* TST 임시 시험: 0·2, EEPROM 82 에 남아 부팅 뒤 되살아난다. K_P·K_I·FF 원래 값은 그대로 둔다.
+/* TST 임시 시험: EEPROM 85 에 남아 부팅 뒤 되살아난다(v0.64.0 까지 쓰던 82 는 읽지 않는다). K_P·K_I·FF 원래 값은 그대로 둔다.
  * 0 기본(두 깃발 0: 속도 루프·끝 처리 A+B·속도 비례, K_P·K_I 0 = 60·5), 1 새 조향 + 예전 속도 루프,
- * 2 예전(두 깃발 1: 예전 속도 루프·끝 감쇠, 속도 비례 없음, K_P·K_I 0 = 자동 이득), 3 예전 조향 + 새 속도 루프 */
+ * 2 예전(두 깃발 1: 예전 속도 루프·끝 감쇠, 속도 비례 없음, K_P·K_I 0 = 자동 이득), 3 예전 조향 + 새 속도 루프,
+ * 4~8 긴 차 사행 시험(두 깃발 0, param_tst 로 고른다. 튜닝 주행은 param_tst 0) */
 static void test_tst(void)
 {
     char c[5];
@@ -1349,15 +1350,15 @@ static void test_tst(void)
     assert(D.p_kp == 60.0f && D.p_ki == 0.5f && motor_speed_ff() == 0.999f);          /* 부팅: K_P·K_I 0 = 권장값 */
     ui_param_text(P_DEV_TEST, 5, c);
     assert(memcmp(c, "TST 5", 5) == 0);
-    assert(param_set(P_DEV_TEST, 4) != 0 && param_set(P_DEV_TEST, 9) != 0);
-    assert(param_get(P_DEV_TEST) == 0);
+    assert(param_set(P_DEV_TEST, 9) != 0 && param_set(P_DEV_TEST, -1) != 0);
+    assert(param_get(P_DEV_TEST) == 0 && param_tst == 0);
     assert(param_set_ram(P_SPEED_FF, 300) == 0);
     for (k = 0; k < 2; k++) {                         /* K_P·K_I 파라미터 45·3, 0·0 */
         assert((param_set_ram(P_STEER_KP, (int16_t)(k ? 0 : 45)) == 0) && (param_set_ram(P_STEER_KI, (int16_t)(k ? 0 : 3)) == 0));
-        for (t = 0; t <= 3; t++) {
-            int16_t so = (int16_t)(t >= 2), vo = (int16_t)((t == 1) || (t == 2));   /* 예전 조향, 예전 속도 루프 */
+        for (t = 0; t <= 8; t++) {
+            int16_t so = (int16_t)((t == 2) || (t == 3)), vo = (int16_t)((t == 1) || (t == 2));   /* 예전 조향, 예전 속도 루프 */
             assert(param_set(P_DEV_TEST, t) == 0);
-            assert(param_tst_steer_old == so && param_tst_speed_old == vo && param_get(P_OPT_FLAGS) == 0);
+            assert(param_tst == t && param_tst_steer_old == so && param_tst_speed_old == vo && param_get(P_OPT_FLAGS) == 0);
             assert(param_get(P_STEER_KP) == (k ? 0 : 45) && param_get(P_STEER_KI) == (k ? 0 : 3));   /* 파라미터 칸은 그대로 */
             assert(param_gain(P_STEER_KP) == (k ? (so ? 0 : 60) : 45) && D.p_kp == (float)param_gain(P_STEER_KP));
             assert(param_gain(P_STEER_KI) == (k ? (so ? 0 : 5) : 3) && D.p_ki == (float)param_gain(P_STEER_KI) * 0.1f);
@@ -1366,17 +1367,34 @@ static void test_tst(void)
         }
     }
     (void)param_set_ram(P_SPEED_FF, 0);
+    assert(host.ee[PARAM_DEV_TEST_ADDR] == 0xFFFFu && host.ee[82] == 0xFFFFu);   /* 빈 칩: 0 으로 읽었다 */
+    for (k = 1; k <= 8; k++) {                        /* 예전 번지 82(v0.64.0 까지)에 남은 값은 읽지 않는다: 4~8 이 저절로 걸리지 않는다 */
+        host.ee[82] = (uint16_t)k;
+        boot_keys(0, 1);
+        assert(param_get(P_DEV_TEST) == 0 && param_tst == 0 && !param_tst_steer_old && !param_tst_speed_old && host.ee[82] == (uint16_t)k);
+    }
     assert(param_set(P_DEV_TEST, 2) == 0);
     ticks(100);
-    assert(host.ee[82] == 2);
+    assert(host.ee[PARAM_DEV_TEST_ADDR] == 2 && host.ee[82] == 8);   /* 새 번지 85 에만 쓴다 */
     boot_keys(0, 1);                                  /* 전원을 다시 켜도 2 */
     assert(param_get(P_DEV_TEST) == 2 && param_tst_steer_old && param_tst_speed_old);
-    for (k = 0; k < 2; k++) {                         /* 4~8 이 EEPROM 에 남아 있으면 부팅 때 0 */
-        host.ee[82] = (uint16_t)(k ? 8 : 4);
+    for (k = 0; k < 2; k++) {                         /* 범위 밖(9 이상)이 EEPROM 에 남아 있으면 부팅 때 0 */
+        host.ee[PARAM_DEV_TEST_ADDR] = (uint16_t)(k ? 15 : 9);
         boot_keys(0, 1);
-        assert(param_get(P_DEV_TEST) == 0 && !param_tst_steer_old && !param_tst_speed_old);
+        assert(param_get(P_DEV_TEST) == 0 && param_tst == 0 && !param_tst_steer_old && !param_tst_speed_old);
     }
-    host.ee[82] = 3;                                  /* 3 은 예전 조향 + 새 속도 루프로 되살아난다 */
+    for (k = 4; k <= 8; k += 4) {                     /* 새 번지에 이 이미지가 쓴 4·8 은 되살아난다 */
+        host.ee[PARAM_DEV_TEST_ADDR] = (uint16_t)k;
+        boot_keys(0, 1);
+        assert(param_get(P_DEV_TEST) == k && param_tst == k && !param_tst_steer_old && !param_tst_speed_old);
+    }
+    boot_keys(KEY_MODE + KEY_SET, 1);                 /* 튜닝: 주행 시작 때 param_tst 0(TST 값은 그대로) */
+    assert(tune_active() && param_tst == 8);
+    D.flag_ready = 1;
+    guide_reply(0);
+    tick();
+    assert(D.flag_run && param_tst == 0 && param_get(P_DEV_TEST) == 8);
+    host.ee[PARAM_DEV_TEST_ADDR] = 3;                 /* 3 은 예전 조향 + 새 속도 루프로 되살아난다 */
     boot_keys(0, 1);
     assert(param_get(P_DEV_TEST) == 3 && param_tst_steer_old && !param_tst_speed_old);
     boot();
@@ -1387,6 +1405,12 @@ static void test_tst(void)
     drive_up();
     run_scan(20);
     assert(D.flag_run && param_tst_steer_old && param_tst_speed_old);
+    boot();
+    assert(param_set(P_DEV_TEST, 5) == 0);
+    param_tst = 0;
+    ticks(120);
+    drive_up();
+    assert(D.flag_run && param_tst == 5);             /* 평소 주행은 다시 건다 */
     (void)param_set(P_DEV_TEST, 0);
     printf("  TST ok\n");
 }

@@ -97,6 +97,27 @@ static void exit_ab(int16_t dev, int16_t fast)
 #if AGV_DEV_TESTS
 int16_t steer_test_rpm;
 float steer_i_out(void) { return s_steer.i_out; }   /* 조향 기록기(steerlog.c)가 읽는다 */
+
+/* TST 4·5·8 차동 오차 되먹임(v0.65.0). 긴 차는 바퀴 속도 PI 가 느린 구동기(rpm 1차 지연 2~3 s)와 만나 좌우 차가 0.5 Hz 쯤에서
+ * 감쇠비 0.14 로 공진해 직선에서 사행했다(모의). 지난 틱 바퀴 지령 차의 반보다 잰 차의 반((rpm 왼쪽 − 오른쪽) / 2)이 모자란 만큼에
+ * kw 를 곱해 조향 출력에 더한다. 바퀴가 지령을 따르면 0 이라 곡선 조향 크기는 그대로다. 바퀴 공간 값이라 후진도 부호가 같다.
+ * 되먹임은 속도 루프와 같은 D.rpm(1표본, 스파이크 컷 뒤). 두 바퀴 rpm 이 TST_RPM_MIN 아래면 끈다.
+ * 상한 STEER_FB_MAX = 계단 완화 4틱 몫: 긴 차 모의에서 100 이면 출발 과도에 묶여 사행이 남았고 200 은 상한 없음과 같았다.
+ * 되먹임 항 자체도 틱당 계단 완화 값(slew)까지만 바뀐다: 출력 계단 완화가 안 걸리는 큰 편차·분기·예전 조향(LG b8)에서도
+ * rpm 600 을 오가거나 엔코더가 튀어 한 틱에 ±200 이 뛰지 않는다. 꺼질 때(on 0)도 같은 빠르기로 0 까지 내려간다.
+ * 출력 전체는 그대로 계단 완화(틱당 50 rpm)·상한(min(|v| × 2, 1500))을 거친다 */
+#define STEER_FB_MAX      (STEER_SLEW_RPM * 4.0f)
+static float s_fb;          /* 지금 더하는 되먹임. 주행 밖·GD 조향 고정·초기화 때 0 */
+static float diff_fb(int16_t on, float slew)
+{
+    float f = 0.0f;
+    if (on && (D.rpm[0] >= TST_RPM_MIN) && (D.rpm[1] >= TST_RPM_MIN)) {
+        f = ((param_tst == 5) ? 0.4f : 0.3f) * (float)((int32_t)D.w_cmd[0] - D.rpm[0] - D.w_cmd[1] + D.rpm[1]);   /* kw 0.8·0.6 의 반 */
+        if (f > STEER_FB_MAX) { f = STEER_FB_MAX; } else if (f < -STEER_FB_MAX) { f = -STEER_FB_MAX; }
+    }
+    if (f > s_fb + slew) { f = s_fb + slew; } else if (f < s_fb - slew) { f = s_fb - slew; }
+    return s_fb = f;
+}
 #endif
 
 void steer_reset(void)
@@ -108,6 +129,9 @@ void steer_reset(void)
     s_steer.prev_p_cmd = 0;
     s_steer.previous_speed = 0;
     s_steer.i_exit = 0;
+#if AGV_DEV_TESTS
+    s_fb = 0.0f;
+#endif
 }
 
 static int16_t popcount16(uint16_t v)
@@ -262,6 +286,9 @@ void steer_run(int16_t tuning_type)
         s_steer.i_out = 0.0f;
         s_steer.i_exit = 0;
         if (D.control != RUN_DRIVE) { D.p_pi_out = 0.0f; }
+#if AGV_DEV_TESTS
+        if (D.control != RUN_DRIVE) { s_fb = 0.0f; }
+#endif
     }
 
     /* 정지 진입 때의 조향은 유지하고 적분만 속도에 맞춰 줄인다 */
@@ -290,6 +317,9 @@ void steer_run(int16_t tuning_type)
         if (D.steer_hold) {     /* 교차선 뒤 GD 구간(run.c): 조향 보정 0, 적분 지움. 바퀴 보정(offset_kp)은 둔다 */
             s_steer.i_out = 0.0f;
             D.p_pi_out = 0.0f;
+#if AGV_DEV_TESTS
+            s_fb = 0.0f;        /* 조향 출력과 같이 0. 끝난 뒤 되먹임은 0 에서 다시 오른다 */
+#endif
             D.add_speed_l = D.offset_kp;
             D.add_speed_r = (int16_t)-D.offset_kp;
             return;
@@ -340,6 +370,14 @@ void steer_run(int16_t tuning_type)
         }
 
         out = p_out + s_steer.i_out + rate_ff;
+#if AGV_DEV_TESTS
+        /* 줄 따라가기 중에만 오른다. 분기·정지 제어·출발 정렬과 적분을 지운 틱(선 없음·교차선, 상태·기준 바뀜)은 0 으로 내려간다
+         * (GD 구간 조향 고정은 위에서 0). 적분 판단(unsat) 뒤에 더해 출력 포화 때 적분을 밀거나 멈추지 않는다. 아래 계단 완화·상한은 그대로 걸린다 */
+        if ((param_tst == 4) || (param_tst == 5) || (param_tst == 8)) {
+            out += diff_fb((int16_t)(!clear_integral && (D.branch_start == 0) && !D.flag_stopping && !stop_is_braking() && (D.start_align == 0)),
+                           fast ? STEER_SLEW_RPM : (STEER_SLEW_RPM * 2.0f));
+        }
+#endif
         /* 분기는 일부러 고정 편이를 거는 동작이라 묶지 않는다 */
         if (smooth && (D.branch_start == 0) && (dev < (D.guide_wide ? STEER_SLEW_DEV_MAX_WIDE : STEER_SLEW_DEV_MAX))) {
             float slew = fast ? STEER_SLEW_RPM : (STEER_SLEW_RPM * 2.0f);

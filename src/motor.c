@@ -54,6 +54,27 @@ float atanf(float x);
 agv_drive_t agv_drive;
 #if AGV_DEV_TESTS
 float motor_speed_ff(void) { return param_tst_speed_old ? P.speed_ff : MOTOR_SPEED_FF; }
+
+/* TST 6·7·8 속도 루프 좌우 차 비례(v0.65.0, 주행 중만). 긴 차 모의에서 좌우 차 공진(0.5 Hz, 감쇠비 0.14)의 감쇠를 올린다.
+ * 좌우 차의 반 오차 ((지령 − rpm)왼쪽 − (지령 − rpm)오른쪽) / 2 를 1차 지연 0.1 s 로 걸러 Kp × (배수 − 1) 배를 왼쪽 PI 에 +, 오른쪽에 −.
+ * 평균 몫·적분은 그대로라 가감속 추종은 같다. 거르지 않은 Kp ×4·×8 은 빠른 바퀴(토크 모형 10.7 ms)에서 틱마다 뒤집히는 토크 진동을 냈다(모의).
+ * 줄 따라가기 중에만 오차를 넣는다: 두 바퀴 rpm TST_RPM_MIN 이상(틱마다 새 주기)·지령 0 아님, 정지 중·정지 제동·분기·출발 정렬·GD 구간 조향 고정 아님.
+ * 그 밖에는 0 을 넣어 같은 0.1 s 로 빠진다(한 틱에 다 빠지지 않는다). 더하는 양은 ±MOTOR_DIFF_MAX */
+#define MOTOR_DIFF_LPF 0.1f      /* 10 ms / 0.1 s */
+#define MOTOR_DIFF_MAX 450.0f    /* 맞춘 긴 차 모형 직선(6 m 뒤, 20·30 m/min, 바퀴 지연 ±50 %)에서 나온 최대 225(×8)의 2배 */
+static float s_edf;
+static float diff_p(int16_t input)
+{
+    int16_t c0 = (int16_t)(D.add_speed_l + input), c1 = (int16_t)(D.add_speed_r + input);
+    float e = 0.0f;
+    if ((c0 > 0) && (c1 > 0) && (D.rpm[0] >= TST_RPM_MIN) && (D.rpm[1] >= TST_RPM_MIN) && !D.flag_stopping && !stop_is_braking()
+        && (D.branch_start == 0) && (D.start_align == 0) && !D.steer_hold) {
+        e = 0.5f * (float)((int32_t)c0 - D.rpm[0] - c1 + D.rpm[1]);
+    }
+    s_edf += (e - s_edf) * MOTOR_DIFF_LPF;
+    e = ((param_tst == 7) ? (MOTOR_SPEED_KP * 7.0f) : (MOTOR_SPEED_KP * 3.0f)) * s_edf;   /* 7 은 ×8, 6·8 은 ×4 */
+    return (e > MOTOR_DIFF_MAX) ? MOTOR_DIFF_MAX : ((e < -MOTOR_DIFF_MAX) ? -MOTOR_DIFF_MAX : e);
+}
 #endif
 
 static struct {
@@ -225,6 +246,11 @@ void motor_speed_pi(int16_t input)
 #define PI_FB(i) (D.rpm[i])
 #endif
     uint16_t i;
+#if AGV_DEV_TESTS
+    const int16_t dp = (int16_t)((D.control == RUN_DRIVE) && (param_tst >= 6) && (param_tst <= 8));
+    float xd = 0.0f;
+    if (dp) { xd = diff_p(input); } else { s_edf = 0.0f; }   /* 주행이 아니면(회전·조그·정지 상태) 지운다 */
+#endif
 
     D.v_cmd = input;
     for (i = 0; i < 2; i++) {
@@ -244,6 +270,9 @@ void motor_speed_pi(int16_t input)
         /* 역계산 anti-windup: 지난 틱에 PI 가 낼 수 있는 범위를 넘은 만큼(iref_fb - w_pi_out)을 적분에 되돌린다 */
         D.iref_it[i] += ki * ((float)D.w_err[i] - ka * (D.iref_fb[i] - D.w_pi_out[i]));
         D.iref_fb[i] = kp * (float)D.w_err[i] + D.iref_it[i];
+#if AGV_DEV_TESTS
+        if (dp && (D.w_cmd[i] != 0)) { D.iref_fb[i] += (i == 0) ? xd : -xd; }   /* 지령 0 인 바퀴(PI 를 지운다)에는 넣지 않는다 */
+#endif
         D.w_pi_out[i] = D.iref_fb[i];
         {   /* 피드포워드: 지령 rpm 에 비례한 토크를 더해 PI 가 메울 몫을 줄인다 */
             float f = ff * (float)D.w_cmd[i], tq;

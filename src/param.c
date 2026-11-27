@@ -44,13 +44,15 @@ int16_t param_digit(int16_t value, int16_t place)
 int16_t param_get(uint16_t idx)        { return (idx < P_COUNT) ? s_set[idx] : 0; }
 
 #if AGV_DEV_TESTS
-/* TST(param.h): 0 기본(현장 이미지와 같다), 1 새 조향 + 예전 속도 루프, 2 예전(53차 TST 0), 3 예전 조향 + 새 속도 루프 */
+/* TST(param.h): 0 기본(현장 이미지와 같다), 1 새 조향 + 예전 속도 루프, 2 예전(53차 TST 0), 3 예전 조향 + 새 속도 루프, 4~8 긴 차 사행 시험 */
 int16_t param_tst_steer_old;
 int16_t param_tst_speed_old;
+int16_t param_tst;
 
 void param_tst_apply(void)
 {
     int16_t t = s_set[P_DEV_TEST];
+    param_tst = t;
     param_tst_steer_old = (int16_t)((t == 2) || (t == 3));
     param_tst_speed_old = (int16_t)((t == 1) || (t == 2));
     D.p_kp = (float)param_gain(P_STEER_KP);      /* 0 이면 steer.c 가 경사로 다시 잡는다 */
@@ -89,7 +91,7 @@ static const extra_t s_extra[] = {
     { P_EMPTY_DCC,   PARAM_EMPTY_ADDR0 + 3u, 0, 60, 0 },
     { P_LOAD_DETECT, PARAM_EMPTY_ADDR0 + 4u, 0, 1,  0 }
 #if AGV_DEV_TESTS
-    , { P_DEV_TEST,  PARAM_EMPTY_ADDR0 + 5u, 0, 3,  0 }   /* 82: 레거시 KEEP 빈 칸(77~88). 4~8 은 부팅 때 0 */
+    , { P_DEV_TEST,  PARAM_DEV_TEST_ADDR, 0, 8,  0 }      /* 85: 레거시 KEEP 빈 칸(77~88). 빈 칩(0xFFFF)·범위 밖은 부팅 때 0 */
 #endif
     , { P_ACT_DELAY, PARAM_ACT_DELAY_ADDR, 0, 999, 0 }     /* 84: 시퀀스 액추에이터 지연(0.1초). 빈 칩(0xFFFF)이면 0 */
 };

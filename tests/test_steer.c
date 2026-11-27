@@ -676,6 +676,76 @@ int main(void)
       }
       (void)param_set(P_STEER_KI, 0);
       printf("  속도 비례 적분 C ok\n"); }
+
+    /* TST 4·5·8 차동 오차 되먹임: 같은 TST 에서 바퀴가 지령을 따를 때(rpm = 지령 1000)와 견줘 출력이 kw × ((지령 − rpm)왼쪽 − (지령 − rpm)오른쪽) / 2
+     * 만큼 바뀐다(상한 ±200). 되먹임 항은 틱당 50 rpm(계단 완화와 같은 값)까지만 바뀐다: 편차 10단위 이상·예전 조향(LG b8)처럼 출력 계단 완화가
+     * 안 걸려도 0 → 200 이 50·100·150·200, 꺼지면 150·100·50·0, rpm 600 을 오가면 50·0 을 오간다. 후진도 부호가 같다.
+     * 바퀴 rpm 600 아래·분기·정지 중·정지 제동·출발 정렬·선 없음·GD 조향 고정·다른 TST 는 그대로. 적분은 늘 같다 */
+    { static const struct { int16_t tst, r0, r1, back, cond, pos, v, n, seq; float add; } cs[] = {
+          { 4, 960, 1040, 0, 0, 1, 1000, 1, 0, 24.0f }, { 5, 960, 1040, 0, 0, 1, 1000, 1, 0, 32.0f }, { 8, 960, 1040, 0, 0, 1, 1000, 1, 0, 24.0f },
+          { 4, 1040, 960, 0, 0, 1, 1000, 1, 0, -24.0f }, { 4, 960, 1040, 1, 0, 1, 1000, 1, 0, 24.0f }, { 5, 1040, 960, 1, 0, -1, 1000, 1, 0, -32.0f },
+          { 4, 600, 1400, 0, 0, 12, 1000, 4, 0, 200.0f }, { 5, 1400, 600, 1, 0, -12, 1000, 6, 0, -200.0f },   /* 상한·틱당 50(편차 10단위 이상) */
+          { 4, 600, 1400, 0, 6, 1, 1000, 4, 0, 200.0f },                                                  /* 예전 조향 LG b8: 출력 계단 완화 없음 */
+          { 4, 600, 1400, 0, 0, 12, 1000, 8, 2, 0.0f }, { 4, 600, 1400, 0, 6, 1, 1000, 20, 1, 0.0f },      /* 꺼짐 뒤 내려감, rpm 599·600 오감 */
+          { 4, 599, 1040, 0, 0, 1, 1000, 1, 0, 0.0f }, { 4, 960, 599, 0, 0, 1, 1000, 1, 0, 0.0f },         /* 바퀴 rpm 600 아래 */
+          { 4, 960, 1040, 0, 1, 1, 1000, 1, 0, 0.0f }, { 4, 960, 1040, 0, 2, 1, 1000, 1, 0, 0.0f },         /* 분기, 정지 중 */
+          { 4, 960, 1040, 0, 3, 1, 1000, 1, 0, 0.0f }, { 4, 960, 1040, 0, 4, 1, 1000, 1, 0, 0.0f },         /* 출발 정렬(끝난 뒤 비탈 포함), 선 없음 */
+          { 4, 600, 1400, 0, 5, 12, 1000, 4, 0, 0.0f }, { 4, 600, 1400, 0, 7, 12, 1000, 4, 0, 0.0f },      /* 정지 제동, GD 조향 고정 */
+          { 0, 960, 1040, 0, 0, 1, 1000, 1, 0, 0.0f }, { 1, 960, 1040, 0, 0, 1, 1000, 1, 0, 0.0f }, { 2, 960, 1040, 0, 0, 1, 1000, 1, 0, 0.0f },
+          { 3, 960, 1040, 0, 0, 1, 1000, 1, 0, 0.0f }, { 6, 960, 1040, 0, 0, 1, 1000, 1, 0, 0.0f }, { 7, 960, 1040, 0, 0, 1, 1000, 1, 0, 0.0f },
+          { 4, 1400, 600, 0, 0, 16, 400, 30, 0, 0.0f }, { 5, 600, 1400, 0, 0, -16, 400, 30, 0, 0.0f } };  /* 출력 포화를 더 미는 쪽: 적분 같음 */
+      int c, k, m;
+      for (c = 0; c < (int)(sizeof(cs) / sizeof(cs[0])); c++) {
+          float out[2][30], it[30], d, dp = 0.0f, sg = (cs[c].add < 0.0f) ? -1.0f : 1.0f;
+          for (m = 0; m < 2; m++) {
+              s_tst = cs[c].tst;
+              setup();
+              (void)param_set(P_STEER_KI, 5);
+              (void)param_set(P_LEGACY_QUIRKS, (int16_t)((cs[c].cond == 6) ? QUIRK_STEER_STEP : 0));
+              D.vin_out = D.v_cmd = D.last_input = cs[c].v;
+              D.backward = cs[c].back;
+              D.branch_start = (int16_t)(cs[c].cond == 1);
+              D.p_cmd = (int16_t)((cs[c].cond == 1) ? 3 : 0);
+              D.flag_stopping = (int16_t)(cs[c].cond == 2);
+              D.start_align = (int16_t)((cs[c].cond == 3) ? 5 : 0);
+              D.guide_all_off = (int16_t)(cs[c].cond == 4);
+              D.steer_hold = (int16_t)(cs[c].cond == 7);
+              if (cs[c].cond == 5) { stop_begin_runtime(STOP_REASON_COMMAND); assert(stop_is_braking() && !D.flag_stopping); }
+              D.guide_pos = cs[c].pos;
+              D.w_cmd[0] = D.w_cmd[1] = D.rpm[0] = D.rpm[1] = 1000;
+              for (k = 0; k < 5; k++) { steer_run(1); }
+              for (k = 0; k < cs[c].n; k++) {
+                  if (m) {
+                      int off = ((cs[c].seq == 1) && (k & 1)) || ((cs[c].seq == 2) && (k >= 4));
+                      D.rpm[0] = (int16_t)(off ? 599 : cs[c].r0);
+                      D.rpm[1] = cs[c].r1;
+                  }
+                  steer_run(1);
+                  if (m == 0) { it[k] = steer_i_out(); } else { assert(steer_i_out() == it[k]); }
+                  out[m][k] = D.p_pi_out;
+              }
+          }
+          for (k = 0; k < cs[c].n; k++) {
+              d = out[1][k] - out[0][k];
+              assert((near0(d - dp) < 50.0f + 1e-3f) && (near0(d) < 200.0f + 1e-3f));     /* 틱당 50, 상한 200 */
+              dp = d;
+              if (cs[c].n == 30)       { continue; }                                    /* 포화: 아래에서 본다 */
+              if (cs[c].seq == 1)      { assert(near0(d - ((k & 1) ? 0.0f : 50.0f)) < 1e-3f); }
+              else if (cs[c].seq == 2) { assert(near0(d - 50.0f * (float)((k < 4) ? (k + 1) : (7 - k))) < 1e-3f); }
+              else {
+                  float x = 50.0f * (float)(k + 1);
+                  assert(near0(d - sg * ((x < near0(cs[c].add)) ? x : near0(cs[c].add))) < 1e-3f);
+              }
+          }
+          if (cs[c].n == 30) {    /* 포화: 둘 다 상한에 묶이고 적분은 틱마다 되먹임 없는 판과 같다 */
+              float lim = (float)(cs[c].v * 2);
+              assert((out[0][29] == ((cs[c].pos > 0) ? -lim : lim)) && (out[1][29] == out[0][29]));
+          }
+      }
+      (void)param_set(P_STEER_KI, 0);
+      (void)param_set(P_LEGACY_QUIRKS, 0);
+      stop_reset();
+      printf("  TST 4·5·8 차동 오차 되먹임 ok\n"); }
     s_tst = 2;
 #endif
 

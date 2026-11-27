@@ -939,6 +939,69 @@ int main(void)
 #endif
     }
 
+#if AGV_DEV_TESTS
+    /* TST 6·7·8 속도 루프 좌우 차 비례: 줄 따라가기 중(두 바퀴 rpm 600 이상·지령 0 아님, 정지 중·정지 제동·분기·출발 정렬·GD 조향 고정 아님)이면
+     * 좌우 차의 반 오차 ed, 아니면 0 을 0.1 s 로 거른 값 s(s += (입력 − s) × 0.1) × Kp × 3(6·8)·7(7) 을 왼쪽 PI 에 +, 오른쪽에 −(±450, 지령 0 인 바퀴는 빼고).
+     * 꺼져도 s 를 지우지 않아 한 틱에 다 빠지지 않는다: rpm 599·1000 을 오가면 더하는 양의 틱당 변화 ≤ 0.1 × Kp × 배수 × |ed|. 적분은 TST 0 과 같다.
+     * 회전·다른 TST 는 그대로. cond: 1 정지 제동, 2 정지 중, 3 분기, 4 출발 정렬, 5 GD 조향 고정. seq: 0 그대로, 1 셋째 틱만 rpm 599, 2 틱마다 599·1000, 3 넷째 틱부터 정지 제동 */
+    { static const struct { int16_t tst, ctl, l, r, r0, r1, cond, seq; float k; int16_t in; } cs[] = {   /* in 0 = 1000 rpm 지령 */
+          { 6, RUN_DRIVE, 100, -100, 1000, 1000, 0, 1, 3.0f }, { 7, RUN_DRIVE, 100, -100, 1000, 1000, 0, 1, 7.0f }, { 8, RUN_DRIVE, 100, -100, 1000, 1000, 0, 1, 3.0f },
+          { 6, RUN_DRIVE, -100, 100, 1050, 950, 0, 1, 3.0f }, { 7, RUN_DRIVE, 0, 0, 900, 1100, 0, 1, 7.0f },
+          { 7, RUN_DRIVE, 100, -100, 1600, 2400, 0, 0, 7.0f, 2000 },                           /* ed 500: ×8 은 450 에 묶인다(토크는 포화 안 됨) */
+          { 6, RUN_DRIVE, 100, -100, 1000, 1000, 0, 2, 3.0f }, { 7, RUN_DRIVE, 100, -100, 1000, 1000, 0, 2, 7.0f },   /* rpm 599·1000 오감 */
+          { 7, RUN_DRIVE, 100, -100, 1000, 1000, 0, 3, 7.0f },                                 /* 정지 제동이 걸리면 0 으로 빠진다 */
+          { 6, RUN_DRIVE, 100, -100, 1000, 1000, 1, 0, 3.0f }, { 6, RUN_DRIVE, 100, -100, 1000, 1000, 2, 0, 3.0f },
+          { 6, RUN_DRIVE, 100, -100, 1000, 1000, 3, 0, 3.0f }, { 6, RUN_DRIVE, 100, -100, 1000, 1000, 4, 0, 3.0f }, { 7, RUN_DRIVE, 100, -100, 1000, 1000, 5, 0, 7.0f },
+          { 6, RUN_DRIVE, 100, -100, 599, 1000, 0, 0, 3.0f }, { 6, RUN_DRIVE, 100, -100, 1000, 599, 0, 0, 3.0f }, { 6, RUN_DRIVE, 100, -1100, 1000, 1000, 0, 0, 3.0f },
+          { 6, RUN_TURN, 100, -100, 1000, 1000, 0, 0, 0.0f }, { 3, RUN_DRIVE, 100, -100, 1000, 1000, 0, 0, 0.0f }, { 4, RUN_DRIVE, 100, -100, 1000, 1000, 0, 0, 0.0f },
+          { 5, RUN_DRIVE, 100, -100, 1000, 1000, 0, 0, 0.0f } };
+      int c, t, m;
+      for (c = 0; c < (int)(sizeof(cs) / sizeof(cs[0])); c++) {
+          float fb[2][12][2], it[2][12][2];
+          int16_t in = (int16_t)(cs[c].in ? cs[c].in : 1000), w0 = (int16_t)(in + cs[c].l), w1 = (int16_t)(in + cs[c].r);
+          for (m = 0; m < 2; m++) {
+              setup();
+              (void)param_set_ram(P_DEV_TEST, (int16_t)(m ? cs[c].tst : 0));
+              assert(param_tst == (m ? cs[c].tst : 0));
+              D.control = cs[c].ctl;
+              D.add_speed_l = cs[c].l;
+              D.add_speed_r = cs[c].r;
+              D.last_input = 1000;
+              D.flag_stopping = (int16_t)(cs[c].cond == 2);
+              D.branch_start = (int16_t)(cs[c].cond == 3);
+              D.start_align = (int16_t)((cs[c].cond == 4) ? 5 : 0);
+              D.steer_hold = (int16_t)(cs[c].cond == 5);
+              if (cs[c].cond == 1) { stop_begin_runtime(STOP_REASON_COMMAND); assert(stop_is_braking()); }
+              for (t = 0; t < 12; t++) {
+                  if ((cs[c].seq == 3) && (t == 3)) { stop_begin_runtime(STOP_REASON_COMMAND); assert(stop_is_braking()); }
+                  D.rpm[0] = (int16_t)((((cs[c].seq == 1) && (t == 2)) || ((cs[c].seq == 2) && (t & 1))) ? 599 : cs[c].r0);
+                  D.rpm[1] = cs[c].r1;
+                  motor_speed_pi(in);
+                  for (int i = 0; i < 2; i++) { fb[m][t][i] = D.iref_fb[i]; it[m][t][i] = D.iref_it[i]; }
+              }
+          }
+          {
+              float ed = 0.5f * ((float)(w0 - cs[c].r0) - (float)(w1 - cs[c].r1)), s = 0.0f, xp = 0.0f;
+              for (t = 0; t < 12; t++) {
+                  int on = (cs[c].cond == 0) && (cs[c].k > 0.0f) && (w0 > 0) && (w1 > 0) && (cs[c].r1 >= 600) && !((cs[c].seq == 3) && (t >= 3))
+                        && ((((cs[c].seq == 1) && (t == 2)) || ((cs[c].seq == 2) && (t & 1))) ? 0 : (cs[c].r0 >= 600));
+                  float x;
+                  s += ((on ? ed : 0.0f) - s) * 0.1f;
+                  x = MOTOR_SPEED_KP * cs[c].k * s;
+                  if (x > 450.0f) { x = 450.0f; } else if (x < -450.0f) { x = -450.0f; }
+                  assert(fabsf(fb[1][t][0] - fb[0][t][0] - ((w0 > 0) ? x : 0.0f)) < 1e-2f && fabsf(fb[1][t][1] - fb[0][t][1] + ((w1 > 0) ? x : 0.0f)) < 1e-2f);
+                  assert(it[1][t][0] == it[0][t][0] && it[1][t][1] == it[0][t][1]);
+                  assert(fabsf(x - xp) <= 0.1f * MOTOR_SPEED_KP * cs[c].k * fabsf(ed) + 1e-3f);   /* 더하는 양의 틱당 변화 */
+                  xp = x;
+              }
+              if (cs[c].seq == 3) { assert((fabsf(xp) > 0.0f) && (fabsf(xp) < 0.5f * MOTOR_SPEED_KP * cs[c].k * fabsf(ed))); }   /* 제동 9틱 뒤에도 0.9^9 배가 남아 있다 */
+          }
+      }
+      (void)param_set_ram(P_DEV_TEST, 0);
+      stop_reset();
+      printf("  TST 6·7·8 좌우 차 비례 ok\n"); }
+#endif
+
     {   /* 합 포화 되돌림(v0.48.0): 모형 (가)에서 고치기 전(v0.47.0, PI 단독 4000 만 봄)보다 4000·0 에 덜 붙는다 */
         int st, rl;
         float vm;
