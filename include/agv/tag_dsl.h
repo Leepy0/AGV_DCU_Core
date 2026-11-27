@@ -8,8 +8,10 @@
  * 같은 규칙의 AGV_STOP·SEQ_START( 시퀀스 )·AGV_AUTOSTART·ACS_SEND( STANDBY… ) 는 태그 자리 SL 정지를 걸지 않는다.
  *   AGV_STOP                          1: 태그 자리에서 SL 만큼 가서 선다
  *   AGV_STOP( cm )                    2: 태그 자리에서 cm 가서 선다. 0~255, 0 = 바로. 숫자로 적는다(표의 거리는 모두 cm, SL 과 같다)
- *   AGV_STOP( TAPE )                  3: 교차선을 찾아 본 자리에서 바로 선다
- *   AGV_STOP( TAPE_GD )               4: 교차선을 찾아 GD 더 가서 선다(회전 중심이 교차선 위)
+ *   AGV_STOP( TAPE )                  3: 교차선을 SPN 으로 찾아 본 자리에서 바로 선다
+ *   AGV_STOP( TAPE_GD )               4: 교차선을 찾아 GD 더 가서 선다(회전 중심이 교차선 위). 찾는 속도는 교차선 회전과 같은
+ *                                     계산값(SPN~min(계산값, LOS, 15 m/min, 일반 센서 12 m/min), run_seek_rpm).
+ *                                     GD 구간에 여유가 있으면 그 속도로 더 가다 감속한다. GD 구간의 태그는 서는 중과 같이 본다
  *   AGV_STOP( FL|cm, FROM_SENSOR( 입력, 유지틱 ) )   센서가 켜진 자리부터 거리만큼 가서 선다(아래). 교차선 요청과 한 규칙에 못 쓴다
  *   SEQ_START( 시퀀스 )                1 + 시퀀스(SEQ_ 뺀 이름: LOAD, UNLOAD, LOAD_1 …)
  *   SEQ_START( cm, 시퀀스 )            2 + 시퀀스 (2칸)

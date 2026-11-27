@@ -517,9 +517,10 @@ typedef unsigned long long dsl_cond_t;
 /* 표의 거리는 모두 cm 다(태그 AGV_STOP( cm )·SEQ_START( cm, x ), 파라미터 SL 과 같다). 스텝에는 mm 로 넣는다(× 10).
  * AGV_MOVE( cm ): 그 자리에서 출발해 cm 앞(지금 전후진 방향)에 위치 정지하고, 설 때까지 기다린 뒤 다음 스텝. 1~3276 cm(밖이면 컴파일 오류).
  * 속도는 거리에 맞춰 SPN~LLOW 안에서 자동(tagact_move_mm). 이동 중 태그는 무시, 장애물은 일시정지 뒤 이어 감.
- * AGV_MOVE( 한계 cm, TAPE ): 그 자리에서 출발해 다음 교차선에서 서고(태그 교차선 정지와 같은 인정·서는 방식·찾는 속도),
+ * AGV_MOVE( 한계 cm, TAPE ): 그 자리에서 출발해 다음 교차선에서 서고(태그 교차선 정지와 같은 인정·서는 방식, 찾는 속도 SPN),
  * 설 때까지 기다린 뒤 다음 스텝. 출발 때 선 위면 그 선은 건너뛴다. 한계 1~3276 cm 안에 못 찾으면 서고 오류 258, 시퀀스 끝.
- * AGV_MOVE( 한계 cm, TAPE_GD ): 같고, 교차선을 본 뒤 GD 더 가서 회전 중심이 교차선 위에 서게 한다(교차선 회전 앞 정지와 같은 루틴) */
+ * AGV_MOVE( 한계 cm, TAPE_GD ): 같고, 교차선을 본 뒤 GD 더 가서 회전 중심이 교차선 위에 서게 한다(교차선 회전 앞 정지와 같은 루틴).
+ * 찾는 속도는 분류 4 와 같은 계산값(LOS 이하)이다. GD 구간에 여유가 있으면 그 속도로 더 가다 감속한다 */
 #define DSL_CM_OK(cm)          (0 * sizeof(char[(((cm) >= 1) && ((cm) <= 3276)) ? 1 : -1]))
 #define DSL_CM2MM(cm)          ((cm) * 10 + DSL_CM_OK(cm))
 #define DSL_MOVE1(cm)          DSL_STEP(SK_MOVE_MM, SEQ_NO_LABEL, DSL_CM2MM(cm), 0, 0, 0, 0, 0)

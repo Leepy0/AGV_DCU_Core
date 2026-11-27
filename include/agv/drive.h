@@ -186,7 +186,7 @@ typedef struct {
 
     /* 조향 출력 */
     int16_t add_speed_l, add_speed_r;
-    int16_t steer_hold;              /* 1 = 조향 보정 0·적분 지움(교차선 뒤 GD 구간, run.c) */
+    int16_t steer_hold;              /* 1 = 조향 보정 0·적분 지움(교차선 뒤 GD 구간, run.c). 태그는 서는 중으로 본다(tagact.c) */
     int16_t offset_kp;               /* offset_p_kp */
     int16_t p_err, p_err_1;
     float   p_kp, p_ki, p_pi_out;
