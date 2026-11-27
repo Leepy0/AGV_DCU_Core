@@ -46,7 +46,7 @@ enum {
     P_EMPTY_DCC,            /* 57 EDC: 공차 감속 (적재 13번) */
     P_LOAD_DETECT,          /* 58 LDS: 적재 감지 사용. 0 = 늘 적재(예전과 같다) */
 #if AGV_DEV_TESTS
-    P_DEV_TEST,             /* 59 TST: 임시 시험 고르기 0~3(param_tst_apply, param.c). 체크섬 밖 EEPROM 82(KEEP 빈 칸). 개발 이미지에만 */
+    P_DEV_TEST,             /* 59 TST: 임시 시험 고르기 0~8(param_tst_apply, param.c). 체크섬 밖 EEPROM 85(KEEP 빈 칸, v0.64.0 까지 82). 개발 이미지에만 */
 #endif
     /* 60 AD: 시퀀스 액추에이터 지연 0.1초 단위 0~999(99.9초), 기본 0(v0.61.0). 표는 PARAM_TIME( AD, DSEC ) 로 읽는다. 체크섬 밖 EEPROM 84(KEEP 빈 칸).
      * 번호는 두 이미지 모두 60 이다(현장 이미지는 59 가 빈 번호): 앱 생성기가 개발 헤더로 표를 만들어도 번호가 같게 */
@@ -92,6 +92,9 @@ enum {
 #define PARAM_GUIDE_DIST_UP      999
 #define PARAM_EMPTY_ADDR0        77    /* 54~58 번 → 77~81 */
 #define PARAM_ACT_DELAY_ADDR     84    /* 60 번(AD). KEEP 빈 칸(77~88), 83 은 LG b11 표시 */
+/* 59 번(TST, 개발 이미지만). v0.64.0 까지는 82 였다. 82 에는 한계가 0~8 이던 예전 이미지가 쓴 4~8 이 남아 있을 수 있어
+ * 새 시험(4~8)이 저절로 걸리지 않게 아무 이미지도 쓴 적 없는 85 로 옮겼다(v0.65.0). 82 는 읽지 않는다 */
+#define PARAM_DEV_TEST_ADDR      85
 
 /* P_OPT_FLAGS(51 OPT) 는 안 쓴다(v0.49.0). 살아 있는 비트가 없다. 값이 남아 있어도 무시한다. 번호·EEPROM 116·한계 0~63 은 그대로.
  * b0·b1·b4 는 기본 동작이 되어 비었다(예전 동작은 QUIRK_STEER_LEGACY). b5 도 기본이 되어 비었다(v0.26).
@@ -164,9 +167,13 @@ int16_t  param_gain(uint16_t idx);
  *  1 새 조향 + 예전 속도 루프(param_tst_speed_old 1): 6표본 Kp 2.2 Ki 0.2, FF 파라미터. 조향은 0 과 같다.
  *  2 예전(53차 TST 0): 예전 조향(param_tst_steer_old 1: 37차 자동 이득, 예전 끝 감쇠, 속도 비례 없음) + 예전 속도 루프.
  *  3 예전 조향 + 새 속도 루프. 1·3 은 원인 가르기용으로 기존 경로를 고르기만 한다(v0.57.0).
- * 두 깃발과 D.p_kp·D.p_ki 는 이 함수가 맞춘다: 부팅·TST 저장 때, 주행 시작 때(TST 0 이 아니면) */
+ *  4~8 긴 차 직선 사행 시험(v0.65.0). 그 밖의 조향·속도 루프는 0 과 같다.
+ *    4 차동 오차 되먹임 kw 0.6, 5 kw 0.8(steer.c diff_fb), 6 속도 루프 좌우 차 비례 ×4, 7 ×8(motor.c diff_p, 0.1 s 거름), 8 = 4 + 6.
+ * 두 깃발·param_tst 와 D.p_kp·D.p_ki 는 이 함수가 맞춘다: 부팅·TST 저장 때, 주행 시작 때(TST 0 이 아니면. 튜닝 주행은 param_tst 0) */
 extern int16_t param_tst_steer_old;
 extern int16_t param_tst_speed_old;
+extern int16_t param_tst;              /* 지금 건 TST 번호 */
+#define TST_RPM_MIN 600                /* 4~8 은 두 바퀴 rpm 이 이 위에서만: 펄스 간격 8.3 ms < 틱 10 ms 라 틱마다 새 주기다(아래는 경과 틱 상한이 섞인다) */
 void     param_tst_apply(void);
 #else
 #define param_tst_steer_old 0    /* 현장 이미지는 기본 동작 고정 */
