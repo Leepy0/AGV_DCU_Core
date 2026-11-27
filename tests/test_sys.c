@@ -2024,7 +2024,7 @@ static void test_tag_stop_class(void)
         int i;
         uint16_t n0 = run_tape_last.n;
         for (i = 0; (i < 20) && (D.tape_stop_kind != 0); i++) { guide_led_reply(0x03FFu); run_encoder(0, 20000); tick(); }
-        assert((D.tape_stop_kind == 0) && D.flag_stopping && (D.stop_pulses > 0) && !D.system_err);
+        assert((D.tape_stop_kind == 0) && D.steer_hold && !D.system_err);   /* GD 구간(여유가 있으면 순항한 뒤 정지) */
         for (i = 0; (i < 20000) && D.flag_run; i++) {   /* 지령이 0 이면 바퀴도 선다(지나침 60 mm 넘으면 258) */
             if (D.vin_out > 0) { run_scan(1); }
             else { guide_reply(0); tick(); }
@@ -3333,7 +3333,7 @@ static void gain_case(int16_t kp, int16_t ki, int16_t ng, int16_t saved_kp, int1
     fake_build_done();
     ticks(200);
     if (want_sets) {
-        for (k = 0; (k < 250) && !shows(kp == 60 ? "K_P 0" : (kp == 30 ? "K_P30" : "K_P20")); k++) { tick(); }
+        for (k = 0; (k < 250) && !shows(kp == 60 ? "K_P 0" : (kp == 50 ? "K_P50" : "K_P40")); k++) { tick(); }
         (void)tune_text(c);
         assert(c[0] == 'K' && c[1] == '_' && c[2] == 'P');
         assert(tune_page() == 0);
@@ -3360,18 +3360,20 @@ static void gain_case(int16_t kp, int16_t ki, int16_t ng, int16_t saved_kp, int1
     for (k = 0; (k < 300) && (storage_pending() != 0u); k++) { tick(); }
     ticks(5);
     if (want_sets) {
-        assert(param_get(P_STEER_KP) == (kp == 60 ? 0 : kp) && param_get(P_STEER_KI) == (kp == 60 ? 0 : ki));
+        assert(param_get(P_STEER_KP) == (kp == 60 ? 0 : kp) && param_get(P_STEER_KI) == (ki == 5 ? 0 : ki));
     }
     else { assert(param_get(P_STEER_KP) == saved_kp && param_get(P_STEER_KI) == saved_ki); }
 }
 
 static void test_tune_gain_pages(void)
 {
-    gain_case(30, 3, 0, 0, 0, 1, "KP030");     /* 30·3: 저장 0·0 과 다르다 → K_P·K_I 채택 둘 */
+    gain_case(50, 1, 0, 0, 0, 1, "KP050");     /* 50·1: 저장 0·0 과 다르다 → K_P·K_I 채택 둘 */
     gain_case(60, 5, 0, 0, 0, 0, "KP060");     /* 60: 저장값 0 = 지금 저장값 → 채택 쪽 없음 */
     gain_case(60, 5, 0, 40, 3, 1, "KP060");    /* 60 인데 지금 저장 40·3: 0·0 으로 채택 */
-    gain_case(30, 3, 0, 30, 3, 0, "KP030");    /* 지금 저장값과 같다 → 없음 */
-    gain_case(20, 2, 1, 0, 0, 1, "KP020");     /* 후보 전부 탈락: 20·2 와 NG 깜박임 */
+    gain_case(60, 2, 0, 40, 3, 1, "KP060");    /* 60·2: K_P 는 0, K_I 는 2 로 채택(둘 다 저장 40·3 과 다르다) */
+    gain_case(50, 1, 0, 50, 1, 0, "KP050");    /* 지금 저장값과 같다 → 없음 */
+    gain_case(40, 1, 1, 0, 0, 1, "KP040");     /* 후보 전부 탈락: 40·1 과 NG 깜박임 */
+    gain_case(40, 1, 0, 0, 0, 1, "KP040");     /* 40·1 만 깨끗 → 40·1, NG 아님(깜박임 없음) */
     printf("  tune gain pages ok\n");
 }
 
@@ -4098,12 +4100,30 @@ static void test_tape_turn(void)
     guide_led_reply(0x03FFu);
     tick();
     assert(D.tape_turn_dir == 0);
+    {   /* 인정 때 지령이 찾는 속도보다 낮다(출발 가속 중): GD 구간을 찾는 속도로 순항하다 계획 감속 거리에서 회전·정지를 건다.
+         * 조향 0, 태그 정지 없음. 정지 거리 = 그 틱 지령 v 의 v²/(2a) + 여유 50 + 반폭 10 mm 안(한 틱에 간 거리),
+         * a = min(0.15·DCC, SEEK_DECEL_MAX 60 mm/s²). 기본 DCC 40 은 159 라 상한 60. 순항에 든 뒤라 들 때 여유 30 mm 는 없다 */
+        int i;
+        float v = 0.0f, a = 0.15f * (float)P.dcc * 100.0f / P.one_meter_rpm * (1000.0f / 60.0f), want, mm;
+        if (a > 60.0f) { a = 60.0f; }
+        assert(D.steer_hold && !D.flag_stopping && (D.vin_out < D.speed_cmd));
+        for (i = 0; (i < 300) && !D.tape_align; i++) {
+            host_sci_t *b = &host.sci[HAL_SCI_B];
+            assert(D.steer_hold && !D.flag_stopping && (D.speed_cmd == run_seek_rpm()));
+            v = (float)D.vin_out * P.one_rpm_meter * (1000.0f / 60.0f);   /* 다음 틱에 gd_cruise 가 보는 지령(mm/s) */
+            if (b->rx_pos == b->rx_len) { b->rx_len = b->rx_pos = 0; }
+            guide_reply(0);
+            run_encoder(0, 20000);
+            run_encoder(1, 20000);
+            tick();
+        }
+        want = (v * v / (2.0f * a)) + 60.0f;
+        mm = (float)D.stop_pulses * P.one_pulse_length;
+        assert((i > 0) && (mm <= want + 0.5f) && (mm > want - 3.0f));
+    }
     assert(D.tape_align == 1);
     assert(D.turn_pulses == P.turn_90);
     assert(D.flag_stopping == 1);
-    /* 교차선 뒤 GD 구간: GD + 기본 반폭(10 mm) - 응답 늦음. 조향 보정 0 */
-    assert((D.stop_pulses >= (int16_t)(P.guide_dist_mm * P.one_length_pulse))
-           && (D.stop_pulses <= (int16_t)((P.guide_dist_mm + 10.0f) * P.one_length_pulse + 0.5f)));
     assert(D.steer_hold == 1);
     printf("  tape turn ok\n");
 }
@@ -4265,16 +4285,20 @@ static void test_tape_turn_paused(void)
 }
 
 /* GD 구간 중 명령 정지(ACS 교통 정지): 회전·분류 4 를 버리지 않고 다시 출발하면 남은 거리를 가서 서고 돈다.
- * 분류 4 + 시퀀스는 GD 에 선 뒤에 시퀀스 */
-static void gd_cmd_stop(int turn)
+ * 분류 4 + 시퀀스는 GD 에 선 뒤에 시퀀스. late 0: 순항 중(인정 때 지령이 찾는 속도보다 낮다), 1: 정지를 건 뒤 */
+static void gd_cmd_stop(int turn, int late)
 {
     int i;
     h_drive_up(turn);
     if (turn) { D.tape_turn_dir = TURN_CW; D.tape_turn_deg = 90; D.tape_turn_next = 0x10; }
     else      { D.tape_stop_kind = 4; D.tape_stop_id = SEQ_LOAD; }
     led_run(0x0180u, 5, 1);
-    led_run(0x01FFu, 3, 1);                     /* 인정: GD 정지 */
-    assert(D.steer_hold && D.flag_stopping && (D.stop_pulses > 0));
+    led_run(0x01FFu, 3, 1);                     /* 인정: GD 구간 순항 */
+    assert(D.steer_hold && !D.flag_stopping && (D.stop_pulses == 0));
+    if (late) {
+        for (i = 0; (i < 400) && !D.flag_stopping; i++) { led_run(0x0180u, 1, 1); }
+        assert(D.steer_hold && D.flag_stopping && (D.stop_pulses > 0) && (!turn || D.tape_align));
+    }
     led_run(0x0180u, 5, 1);
     stop_request_rapid(STOP_REASON_COMMAND);    /* 'W' 'C' '0' */
     D.flag_stopping = 1;
@@ -4293,8 +4317,10 @@ static void gd_cmd_stop(int turn)
 
 static void test_tape_gd_cmd_stop(void)
 {
-    gd_cmd_stop(1);
-    gd_cmd_stop(0);
+    gd_cmd_stop(1, 0);
+    gd_cmd_stop(0, 0);
+    gd_cmd_stop(1, 1);
+    gd_cmd_stop(0, 1);
     printf("  tape gd cmd stop ok\n");
 }
 
@@ -4342,7 +4368,7 @@ static void test_gd_traffic_reset(void)
     D.tape_stop_kind = 4;
     led_run(0x0180u, 5, 1);
     led_run(0x01FFu, 3, 1);
-    assert(D.steer_hold && D.flag_stopping);
+    assert(D.steer_hold && !D.flag_stopping);   /* 순항 중: 취소되면 정지를 건 때와 같이 목표에 선다 */
     run_seq_init();                             /* traffic_reset 이 부른다 */
     led_run(0x0000u, 1, 1);
     assert(D.steer_hold && D.flag_stopping);
@@ -4350,6 +4376,119 @@ static void test_gd_traffic_reset(void)
     led_run(0x0000u, 2, 0);
     assert(!D.flag_run && !D.steer_hold && !D.system_err && !D.stop_err);
     printf("  gd traffic reset ok\n");
+}
+
+/* 설 때까지(바퀴 흉내는 지령이 있을 때만) */
+static void gd_run_to_stop(void)
+{
+    int i;
+    for (i = 0; (i < 4000) && (D.flag_run || D.flag_ready); i++) { led_run(0x0180u, 1, (D.vin_out > 0) ? 1 : 0); }
+    led_run(0x0180u, 5, 0);
+}
+
+/* GD 구간 순항(v0.64.0)이 예전(인정한 틱에 정지를 건다)과 같은 결과를 내는지: 독립 검토 재현 시험 */
+static void test_gd_cruise_same(void)
+{
+    int i;
+    uint32_t p0;
+    int32_t gd_p = (int32_t)(P.guide_dist_mm * P.one_length_pulse);
+
+    /* 1. 순항 중 읽은 둘째 분류 4 요청은 새 요청: 다시 출발한 뒤 찾기 한계(SL 2배)를 처음부터 센다 */
+    h_drive_up(0);
+    (void)param_set_ram(P_GUIDE_DIST_MM, 600);
+    D.tape_stop_kind = 4;
+    led_run(0x0180u, 450, 1);                   /* 첫 찾기가 SL 2배 가까이 간다 */
+    led_run(0x01FFu, 3, 1);
+    assert(D.steer_hold && !D.flag_stopping);   /* 순항 */
+    led_run(0x0180u, 3, 1);
+    D.tape_stop_kind = 4;                       /* 둘째 태그 */
+    gd_run_to_stop();
+    run_wait_start();
+    for (i = 0; i < 20; i++) { guide_led_reply(0x0180u); tick(); }
+    p0 = D.travel_pulses;
+    for (i = 0; (i < 2 * P.stop_len - 10) && !D.system_err; i++) { led_run(0x0180u, 1, 1); }
+    assert(!D.system_err && (D.tape_stop_kind == 4) && ((int32_t)(D.travel_pulses - p0) >= 2L * P.stop_len - 12L));
+    run_seq_init();
+
+    /* 2. 순항 중 공개 정지 API(사이트 코드의 센서 정지 등)는 서는 중처럼 무시: 목표에 서고 정지 뒤 시퀀스 */
+    h_drive_up(0);
+    gd_p = (int32_t)(P.guide_dist_mm * P.one_length_pulse);
+    D.tape_stop_kind = 4;
+    D.tape_stop_id = SEQ_LOAD;
+    led_run(0x0180u, 5, 1);
+    led_run(0x01FFu, 3, 1);
+    p0 = D.travel_pulses;
+    led_run(0x0180u, 3, 1);
+    assert(D.steer_hold && !D.flag_stopping);
+    tagact_stop_after_mm(50);
+    tagact_stop_length();
+    tagact_stop();
+    assert(!D.flag_stopping && (D.stop_pulses == 0));
+    gd_run_to_stop();
+    assert(seq_request_flag[SEQ_LOAD] && (run_tape_last.kind == 4) && ((int32_t)(D.travel_pulses - p0) > gd_p) && !D.system_err);
+    run_seq_init();
+
+    /* 3. AGV_MOVE( 한계, TAPE_GD ) 순항 중 같은 API: 목표에 서고 도착(MOVE_DONE) */
+    boot();
+    (void)param_set_ram(P_LEGACY_QUIRKS, 0);
+    assert(tagact_move_tape(3000, 4) == 1);
+    ticks(3);
+    guide_led_reply(0x0180u);
+    tick();
+    led_run(0x0180u, 60, 1);
+    led_run(0x01FFu, 2, 1);
+    p0 = D.travel_pulses;
+    led_run(0x0180u, 3, 1);
+    assert((D.move_on == MOVE_FOUND) && D.steer_hold && !D.flag_stopping);
+    tagact_stop_after_mm(50);
+    gd_run_to_stop();
+    assert((D.move_on == MOVE_DONE) && ((int32_t)(D.travel_pulses - p0) > gd_p) && !D.system_err && !D.stop_err);
+    run_seq_init();
+
+    /* 4. 찾는 속도는 LOS 를 넘지 않는다: LOS 보다 빠르게 달리다 요청, 찾는 중 명령 정지 뒤 서 있다 다시 출발해도 LOS */
+    h_drive_up(0);
+    (void)param_set_ram(P_SPEED_LOW, 8);
+    D.speed_cmd = P.target_speed;
+    D.step = DRIVE_CHANGE_SPEED;
+    for (i = 0; (i < 2000) && (D.vin_out < P.target_speed); i++) { led_run(0x0180u, 1, 1); }
+    assert(D.vin_out > P.low_speed);
+    D.tape_stop_kind = 4;
+    led_run(0x0180u, 3, 0);
+    assert((D.speed_cmd == run_seek_rpm()) && (D.speed_cmd <= P.low_speed));
+    stop_request_rapid(STOP_REASON_COMMAND);
+    D.flag_stopping = 1;
+    for (i = 0; (i < 800) && D.flag_run; i++) { led_run(0x0180u, 1, 0); }
+    led_run(0x0180u, 5, 0);
+    run_wait_start();
+    for (i = 0; i < 20; i++) { guide_led_reply(0x0180u); tick(); }
+    led_run(0x0180u, 300, 0);
+    assert((D.tape_stop_kind == 4) && (D.speed_cmd <= P.low_speed) && (D.vin_out <= P.low_speed) && !D.system_err);
+    run_seq_init();
+
+    /* 5. 순항 중 사이트 코드가 직접 쓴 교차선 회전 요청은 버린다(예전 GD 구간은 정지 거리가 있어 받지 않았다).
+     *    분류 4 를 맡을 때 이미 걸려 있던 회전 요청은 남는다 */
+    h_drive_up(1);
+    D.tape_stop_kind = 4;
+    D.tape_stop_id = SEQ_LOAD;
+    led_run(0x0180u, 5, 1);
+    led_run(0x01FFu, 3, 1);
+    led_run(0x0180u, 3, 1);
+    assert(D.steer_hold && !D.flag_stopping && (D.stop_pulses == 0) && (D.turn_pulses == 0));
+    D.tape_turn_dir = TURN_CW; D.tape_turn_deg = 90; D.tape_turn_next = 0x10;
+    led_run(0x0180u, 1, 1);
+    assert((D.tape_turn_dir == 0) && (D.tape_turn_deg == 0) && (D.tape_turn_next == 0));
+    gd_run_to_stop();
+    assert(!D.flag_turn && (D.turn_motion == 0) && (D.tape_turn_dir == 0) && seq_request_flag[SEQ_LOAD] && !D.system_err);
+    run_seq_init();
+    h_drive_up(1);
+    D.tape_stop_kind = 4;
+    D.tape_turn_dir = TURN_CW; D.tape_turn_deg = 90; D.tape_turn_next = 0x10;   /* 분류 4 를 찾는 중 걸린 회전 요청 */
+    led_run(0x0180u, 5, 1);
+    led_run(0x01FFu, 3, 1);
+    led_run(0x0180u, 3, 1);
+    assert(D.steer_hold && !D.flag_stopping && (D.tape_turn_dir == TURN_CW) && (D.tape_turn_deg == 90));
+    run_seq_init();
+    printf("  gd cruise same ok\n");
 }
 
 /* 찾기 한계는 찾는 동안 간 거리만 센다: 보류된 사이 바퀴가 돈 펄스(제자리 회전·조그)는 넣지 않는다 */
@@ -4405,6 +4544,7 @@ static void test_gd_overrun(void)
     D.tape_turn_dir = TURN_CW; D.tape_turn_deg = 90; D.tape_turn_next = 0x10;
     led_run(0x0180u, 5, 1);
     led_run(0x01FFu, 2, 1);
+    for (i = 0; (i < 400) && D.steer_hold && !D.tape_align; i++) { led_run(0x0180u, 1, 2); }   /* 순항 뒤 회전·정지 */
     assert(D.steer_hold && D.tape_align);
     for (i = 0; (i < 900) && D.flag_run; i++) {   /* 지령이 0 이 된 뒤에도 80 틱 굴러간다 */
         led_run(0x0180u, 1, ((D.vin_out > 0) || (coast++ < 80)) ? 2 : 0);
@@ -5168,6 +5308,7 @@ int main(void)
     test_tape_gd_cmd_stop();
     test_move_gd_cmd();
     test_gd_traffic_reset();
+    test_gd_cruise_same();
     test_tape_seek_len();
     test_gd_overrun();
     test_gd_autostart();

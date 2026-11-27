@@ -420,8 +420,8 @@ static void build_pages(void)
     add_set(P_DCC, b->dcc_rec);
     add_set(P_CROSS_IN_CM, b->cid_rec);
     add_set(P_ACC, b->acc_rec);
-    if ((m & BLD_GAIN) && (b->kp_rec >= 0)) {   /* 60 이면 저장값 0(= 권장값). 지금 저장값과 같으면 항목을 만들지 않는다 */
-        int16_t kp = (b->kp_rec == 60) ? 0 : b->kp_rec, ki = (b->kp_rec == 60) ? 0 : b->ki_rec;
+    if ((m & BLD_GAIN) && (b->kp_rec >= 0)) {   /* K_P 60·K_I 5 는 저장값 0(= 권장값). 지금 저장값과 같으면 항목을 만들지 않는다 */
+        int16_t kp = (b->kp_rec == 60) ? 0 : b->kp_rec, ki = (b->ki_rec == 5) ? 0 : b->ki_rec;
         if (kp != param_get(P_STEER_KP)) { add_set(P_STEER_KP, kp); }
         if (ki != param_get(P_STEER_KI)) { add_set(P_STEER_KI, ki); }
     }

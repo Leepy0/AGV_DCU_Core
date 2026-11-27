@@ -903,27 +903,51 @@ static void drive_pre(void)
 
 #define TAPE_ID_TURN (-1)   /* 분류(3·4)와 겹치지 않는 회전 탐색 표시 */
 
-/* 정렬 회전 앞 교차 테이프 찾기 속도. 센서가 회전 중심보다 GD 앞이라 테이프를 본 뒤 GD 안에 서면 된다.
+/* 분류 4·교차선 회전 앞 교차선 찾기 속도. 센서가 회전 중심보다 GD 앞이라 교차선을 본 뒤 GD 안에 서면 된다.
  * 인정(새 응답 두 번) 지연 t 동안 v·t 를 가고, 감속도 k·DCC(1 = 100 rpm/s)로 GD - 여유 - v·t 안에 선다:
- * v² = 2·k·a·(d0 - v·t) → v = √((k·a·t)² + 2·k·a·d0) - k·a·t. SPN 과 min(LOS, 12 m/min) 사이로 묶는다.
+ * v² = 2·k·a·(d0 - v·t) → v = √((k·a·t)² + 2·k·a·d0) - k·a·t. 계획 감속도 k·a 는 SEEK_DECEL_MAX 까지(seek_decel):
+ * 지나침 ≈ 감속도 × 바퀴 지연²(모의 지연 250 ms·DCC 50 에서 k·a 198 mm/s² 는 +14 mm, 100 은 +7 mm, 60 은 +5.4 mm 로 예전 최악과 같다).
+ * 찾는 속도에서는 그 상한을 12 m/min 이 그 GD 에서 요구하는 감속도까지 올린다: GD 가 짧아도 예전 찾는 속도보다 낮지 않다
+ * (제동 거리는 SEEK_DECEL_MAX 로 재므로 남은 거리보다 길어 인정한 틱에 바로 선다. 예전과 같다). 속도 상한은 둘이다.
+ * - LOS: 찾느라 LOS 위로 가속하지 않는다(ACS 가 LOS 를 낮춘 구역 포함).
+ * - SEEK_TAPE_MM ÷ 40 ms: 응답(10 ms) 한 번이 빠져도 교차선 위 응답이 이어서 두 번 오게, 선 위에 응답 4번 머문다.
+ *   일반(16칸) 센서는 SEEK_NARROW_MPM 까지: 모의(45도 분기선, 폭 25·50 mm)에서 12 m/min 보다 빠르면 오인정이 늘었다(wide 는 0).
+ * 바닥은 SPN. 상한에 걸려 GD 구간에 여유가 남으면 순항한 뒤 감속한다(gd_cruise).
  * 모의(test_curve tape, DCC 20·50, GD 250·400, 바퀴 지연 50·150 ms): k 0.5 는 회전 중심 정지 위치가 SPN 4 보다
  * 최대 17 mm 더 나갔다. k 0.15 + 12 m/min 상한에서 +5 mm 안. 테이프 정지(바로 섬)는 속도만큼 더 가서 SPN 그대로 */
 #ifndef SEEK_DCC_SHARE
 #define SEEK_DCC_SHARE 0.15f    /* S커브 저크 풀림·앰프 응답·정지 제어 여유 */
 #endif
-#ifndef SEEK_MAX_MPM
-#define SEEK_MAX_MPM   12
+#ifndef SEEK_DECEL_MAX
+#define SEEK_DECEL_MAX 60.0f    /* 계획 감속도 상한 mm/s² */
 #endif
+#define SEEK_ENTER_MM  30.0f    /* 순항에 들 때만 더 두는 여유: 몇 mm 만 순항해 감속 모양만 바뀌는 것을 막는다(예전처럼 바로 정지) */
+#ifndef SEEK_TAPE_MM
+#define SEEK_TAPE_MM   10.0f    /* 교차선 폭 mm. 10 이면 15 m/min */
+#endif
+#ifndef SEEK_NARROW_MPM
+#define SEEK_NARROW_MPM 12.0f
+#endif
+#define SEEK_DWELL_S   0.04f
 #define SEEK_MARGIN_MM 50.0f
 float sqrtf(float x);
 #define SEEK_ACK_S     0.02f
+#define SEEK_OLD_MMS   200.0f   /* 예전 상한 12 m/min */
+static float seek_decel(float lim)   /* 계획 감속도 mm/s²: min(k·DCC, lim) */
+{
+    float a = SEEK_DCC_SHARE * (float)P.dcc * 100.0f / P.one_meter_rpm * (1000.0f / 60.0f);
+    return (a > lim) ? lim : a;
+}
 int16_t run_seek_rpm(void)
 {
-    float a = SEEK_DCC_SHARE * (float)P.dcc * 100.0f / P.one_meter_rpm * (1000.0f / 60.0f);   /* mm/s² */
-    float d0 = P.guide_dist_mm - SEEK_MARGIN_MM, at = a * SEEK_ACK_S;
+    float d0 = P.guide_dist_mm - SEEK_MARGIN_MM;
+    float a12 = (0.5f * SEEK_OLD_MMS * SEEK_OLD_MMS) / (d0 - (SEEK_OLD_MMS * SEEK_ACK_S));   /* 12 m/min 이 이 GD 에서 요구하는 감속도 */
+    float a = seek_decel((a12 > SEEK_DECEL_MAX) ? a12 : SEEK_DECEL_MAX), at = a * SEEK_ACK_S;
     float r = (d0 > 0.0f) ? (sqrtf((at * at) + (2.0f * a * d0)) - at) * (0.06f * P.one_meter_rpm) : 0.0f;   /* mm/s → rpm */
+    float cap = SEEK_TAPE_MM * (0.06f / SEEK_DWELL_S);                                                     /* m/min */
+    if (!D.guide_wide && (cap > SEEK_NARROW_MPM)) { cap = SEEK_NARROW_MPM; }
     if (r > (float)P.low_speed) { r = (float)P.low_speed; }
-    if (r > (float)SEEK_MAX_MPM * P.one_meter_rpm) { r = (float)SEEK_MAX_MPM * P.one_meter_rpm; }
+    if (r > cap * P.one_meter_rpm) { r = cap * P.one_meter_rpm; }
     return (r > (float)P.min_speed) ? (int16_t)r : P.min_speed;
 }
 
@@ -959,8 +983,9 @@ static struct {
     uint32_t dark_at[2];     /* 그 쪽이 마지막으로 2/3 넘게 비어 있던 때 travel_pulses */
 } s_cr;
 
-/* 교차선 뒤 GD 구간(분류 4 정지·교차선 회전·AGV_MOVE( 한계, TAPE_GD )): 정지를 건 틱부터 설 때까지 조향 보정 0(D.steer_hold,
- * 두 바퀴 같은 지령, 적분 지움)과 "선 없음" 오류 막기. 목표 = 앞 가장자리 + GD + 반폭 - 응답 늦음(펄스, 절대 자리).
+/* 교차선 뒤 GD 구간(분류 4 정지·교차선 회전·AGV_MOVE( 한계, TAPE_GD )): 인정한 틱부터 설 때까지 조향 보정 0(D.steer_hold,
+ * 두 바퀴 같은 지령, 적분 지움)과 "선 없음" 오류 막기. 태그는 서는 중과 같이 본다(tagact: 정지·회전을 걸지 않는다).
+ * 남은 거리에 여유가 있으면 찾는 속도로 순항하다 k 몫 감속 거리에서 정지를 건다(gd_cruise). 목표 = 앞 가장자리 + GD + 반폭 - 응답 늦음(펄스, 절대 자리).
  * 반폭은 TAPE_HALF_MM 으로 걸고, 뒤 가장자리(교차선 위가 아닌 응답이 이어서 두 번, 첫 응답 자리)를 보면 (뒤 - 앞) / 2 로,
  * 앞 가장자리 뒤 TAPE_BACK_MM 을 가도 못 보면 TAPE_BACK_MM / 2(적어도 그만큼 넓다)로 고친다.
  * 인정한 교차선은 요청과 함께 맡는다(s_gd). 회전이 거부되거나(서 있어 속도 ≈ 0 등) GD 정지가 다른 정지(명령 정지 등)로 끝나면
@@ -977,7 +1002,7 @@ static struct {
 #endif
 run_tape_last_t run_tape_last;
 /* s_gd(위 선언): kind 맡은 요청(0 없음, 3 바로 정지, 4 GD 정지, TAPE_ID_TURN 교차선 회전. 위치 정지로 서거나 요청이 지워질 때까지.
- * 맡을 때 요청 칸을 옮겨 두고 지운다: id 정지 뒤 시퀀스, dir·deg·next 회전), run 1 = 정지를 건 뒤 서는 중(조향 0),
+ * 맡을 때 요청 칸을 옮겨 두고 지운다: id 정지 뒤 시퀀스, dir·deg·next 회전), run GD 구간(조향 0): 1 정지를 건 뒤 서는 중, 2 순항(gd_cruise),
  * mv 1 = 시퀀스 이동, front·back 앞·뒤 가장자리, edge 0 분류 3, 1 뒤 가장자리 기다림, 2 봄, 3 못 봄, miss 뒤 가장자리의 아닌 응답 수,
  * lag 인정 때 응답 늦음(펄스), target 목표, start 인정한 자리, as 이 정지에 건 자동 출발(D.tape_autostart 값, 0 없음),
  * hold 맡은 채 선 뒤 틱(TAPE_SETTLE_TICKS 에서 멈춤), halt 그때 travel_pulses(밀림 기준) */
@@ -1039,7 +1064,7 @@ static void stop_add(int32_t d)
 static void gd_retarget(void)
 {
     uint32_t t = gd_target();
-    if (s_gd.run) { stop_add((int32_t)(t - s_gd.target)); }
+    if (s_gd.run == 1) { stop_add((int32_t)(t - s_gd.target)); }
     s_gd.target = t;
 }
 
@@ -1088,9 +1113,10 @@ static void gd_claim(int16_t kind, int16_t mv)
     s_gd.target = gd_target();
     s_gd.as = 0;
     s_gd.hold = 0;
+    s_tape.prev_id = 0;             /* GD 구간(순항 포함)에 읽은 같은 분류 요청도 새 요청(찾기 한계를 처음부터) */
+    s_gd.dir = D.tape_turn_dir;     /* 분류 4·이동이면 맡을 때 걸려 있던 회전 요청(순항 중 새로 쓴 것과 가른다, tape_stop) */
     if (!mv) {
         s_gd.id = D.tape_stop_id;
-        s_gd.dir = D.tape_turn_dir;
         s_gd.deg = D.tape_turn_deg;
         s_gd.next = D.tape_turn_next;
         if (kind == TAPE_ID_TURN) { D.tape_turn_dir = 0; }
@@ -1099,27 +1125,36 @@ static void gd_claim(int16_t kind, int16_t mv)
     }
 }
 
+/* 맡은 교차선의 GD 구간에 든다(run 1 정지를 건다, 2 순항). 분류 3·4 의 자동 출발은 구간에 들 때 예약(끊기면 gd_tick 이 거둔다.
+ * 순항에서 정지로 넘어갈 때는 다시 걸지 않는다: 구간 안에서 읽은 새 분류 3·4 규칙의 자동 출발은 그 요청 것이다) */
+static void gd_enter(int16_t run)
+{
+    if (!s_gd.run) {
+        s_gd.hold = 0;
+        if (!s_gd.mv && (s_gd.kind != TAPE_ID_TURN) && (D.tape_autostart != 0u)) {
+            s_gd.as = D.tape_autostart;
+            tagact_autostart_arm((uint16_t)(D.tape_autostart - 1u));
+            D.tape_autostart = 0;
+        }
+    }
+    s_gd.run = run;
+    if (s_gd.kind != 3) { D.steer_hold = 1; }
+}
+
 /* 맡은 교차선에 정지를 건다. 분류 3 은 본 자리에서 바로(정지 거리 0), 4·회전은 GD 구간(목표까지). 정지 거리를 돌려준다 */
-static int16_t gd_start(int16_t kind, int16_t mv)
+static int16_t gd_start(void)
 {
     int32_t p;
 
-    s_gd.run = 1;
-    s_gd.hold = 0;
-    if (!mv && (kind != TAPE_ID_TURN) && (D.tape_autostart != 0u)) {   /* 분류 3·4 의 자동 출발은 정지를 실제로 걸 때 예약 */
-        s_gd.as = D.tape_autostart;                                    /* 끊기면 gd_tick 이 거둔다 */
-        tagact_autostart_arm((uint16_t)(D.tape_autostart - 1u));
-        D.tape_autostart = 0;
-    }
-    if (kind == 3) { return 0; }
-    D.steer_hold = 1;
+    gd_enter(1);
+    if (s_gd.kind == 3) { return 0; }
     p = (int32_t)(s_gd.target - D.travel_pulses);
     return (p < 1L) ? 1 : ((p > 32767L) ? 32767 : (int16_t)p);
 }
 
-static void tape_found(int16_t kind, int16_t mv)
+static void tape_found(void)
 {
-    int16_t p = gd_start(kind, mv);
+    int16_t p = gd_start();
     D.flag_stopping = 1;
     D.stop_pulses = p;
     stop_request_tag();
@@ -1171,7 +1206,7 @@ static void gd_tick(void)
     }
     if (!D.flag_run) {
         int16_t r = stop_reason();
-        int16_t done = s_gd.run && ((s_gd.kind == 3) || (stop_is_position(r) && (r != STOP_REASON_TRAFFIC_POSITION)));
+        int16_t done = (s_gd.run == 1) && ((s_gd.kind == 3) || (stop_is_position(r) && (r != STOP_REASON_TRAFFIC_POSITION)));
         D.steer_hold = 0;
         if (done && gd_overrun()) {
             s_gd.run = 0;
@@ -1205,6 +1240,7 @@ static void gd_tick(void)
     s_gd.hold = 0;
     if (s_gd.ticks < 32767) { s_gd.ticks++; }
     if (s_gd.kind == 3) { return; }
+    if ((s_gd.run == 2) && !s_gd.kind && tape_req_ok()) { tape_found(); }   /* 순항 중 요청이 지워졌다(작업 취소 등): 정지를 건 때와 같이 목표에 선다 */
     if (s_gd.run) { run_rail_cut_clear(); }
     if ((s_gd.edge == 1) && ((float)(int32_t)(D.travel_pulses - s_gd.front) > TAPE_BACK_MM * P.one_length_pulse)) {
         s_gd.back = D.travel_pulses;                /* 못 봤다: 교차선은 적어도 이만큼 넓다 */
@@ -1236,8 +1272,26 @@ static int16_t tape_seek(int16_t rpm)
     return 0;
 }
 
-/* 맡은 태그 요청에 정지를 건다(인정한 틱, 회전이 거부된 뒤, 다른 정지로 끊긴 뒤 다시 달릴 때). 1 걸었다,
- * 0 아직(회전이 거부됐다: 맡은 채 다음 틱에 다시). 목표를 TAPE_BACK_MM 넘게 지났으면 회전·자동 출발 없이 바로 제어 정지를 걸고
+/* 찾는 속도가 계산값보다 낮게 묶였으면 GD 구간에 여유가 남는다. 남은 거리가 지금 지령 v(vin_out. 태그가 가까우면 아직 감속 중이라
+ * 찾는 속도보다 빠르다)에서 계획 감속도(seek_decel)로 서는 거리 + 여유(찾는 속도 계산의 여유 + 반폭)보다 멀면 찾는 속도로 더 간다.
+ * 순항에 들 때만(인정한 틱, 끊긴 뒤 다시 달릴 때) 여유에 SEEK_ENTER_MM 을 더 둔다. 그보다 짧으면 예전처럼 바로 정지.
+ * 묶이지 않은 찾는 속도면 인정한 틱의 남은 거리가 이보다 짧아(찾는 속도 계산이 인정 지연 v·t 를 더 잡는다) 바로 정지(예전과 같다).
+ * 1 순항, 0 정지를 걸 때다. 펄스로 센다: v rpm = v·PPR/60 펄스/s, a mm/s² = a·(펄스/mm) 펄스/s² → v²/(2a) = v²/(2·(60/PPR)²·a·펄스/mm) */
+#define SEEK_BRAKE_K   (2.0f * (60.0f / (float)STOP_ENCODER_PPR) * (60.0f / (float)STOP_ENCODER_PPR))
+static int16_t gd_cruise(void)
+{
+    int32_t v = D.vin_out;
+
+    if ((int32_t)(s_gd.target - D.travel_pulses) <= ((v * v) / ((int32_t)(SEEK_BRAKE_K * seek_decel(SEEK_DECEL_MAX) * P.one_length_pulse) + 1L))
+        + (int32_t)((SEEK_MARGIN_MM + TAPE_HALF_MM + ((s_gd.run == 2) ? 0.0f : SEEK_ENTER_MM)) * P.one_length_pulse)) { return 0; }   /* + 1: 나누기 0 없게 */
+    gd_enter(2);
+    D.speed_cmd = seek_rpm(s_gd.kind);   /* 끊긴 뒤 다시 달릴 때도 찾는 속도로 */
+    D.step = DRIVE_CHANGE_SPEED;
+    return 1;
+}
+
+/* 맡은 요청에 정지를 건다(인정한 틱, 순항 중, 회전이 거부된 뒤, 다른 정지로 끊긴 뒤 다시 달릴 때). 1 걸었다,
+ * 0 아직(순항 중이거나 회전이 거부됐다: 맡은 채 다음 틱에 다시). 목표를 TAPE_BACK_MM 넘게 지났으면 회전·자동 출발 없이 바로 제어 정지를 걸고
  * 선 뒤에 258(gd_tick) */
 static int16_t gd_try(void)
 {
@@ -1248,14 +1302,16 @@ static int16_t gd_try(void)
         stop_request_tag();
         return 1;
     }
+    if ((s_gd.kind != 3) && gd_cruise()) { return 0; }
     if (s_gd.kind != TAPE_ID_TURN) {
-        tape_found(s_gd.kind, 0);
+        tape_found();
         return 1;
     }
+    D.steer_hold = 0;           /* tagact 는 GD 구간을 서는 중으로 보아 회전을 거부한다. 걸면 gd_start 가 다시 켠다 */
     tagact_turn_align_cross((turn_dir_t)s_gd.dir, (uint16_t)s_gd.deg, s_gd.next);
     if (!D.tape_align) { return 0; }
     if (!D.flag_stopping) { s_gd.kind = 0; }        /* 서 있다 바로 도는 회전(시퀀스 중): 맡을 정지가 없다 */
-    else { D.stop_pulses = gd_start(TAPE_ID_TURN, 0); }   /* tagact_turn 이 건 GD 정지를 목표로 고친다 */
+    else { D.stop_pulses = gd_start(); }            /* tagact_turn 이 건 GD 정지를 목표로 고친다 */
     return 1;
 }
 
@@ -1287,7 +1343,7 @@ static void move_tape_tick(void)
         s_mt.on = 0;
         D.move_on = MOVE_FOUND;                    /* 교차선 정지와 같은 태그 정지로 서면 finish 가 MOVE_DONE */
         gd_claim(s_mt.kind, 1);
-        tape_found(s_mt.kind, 1);
+        (void)gd_try();                            /* TAPE_GD 는 여유가 있으면 순항(tape_stop 이 잇는다) */
         return;
     }
     if ((int32_t)(s_pulses[0] - s_mt.start) > D.move_pulses) {
@@ -1300,11 +1356,18 @@ static void tape_stop(void)
 {
     int16_t kind = D.tape_stop_kind;
 
+    if ((s_gd.run == 2) && ((s_gd.kind == TAPE_ID_TURN) || (D.tape_turn_dir != s_gd.dir))) {
+        /* 순항 중 새로 쓴 교차선 회전 요청(사이트 코드)은 버린다: 예전 GD 구간은 정지 거리가 있어 회전을 받지 않았다.
+         * 맡은 회전(s_gd)과 분류 4 를 맡을 때 이미 걸려 있던 요청은 그대로 */
+        D.tape_turn_dir = 0;
+        D.tape_turn_deg = 0;
+        D.tape_turn_next = 0;
+    }
     if (s_gd.run || s_gd.kind) { gd_tick(); }
     if ((D.move_on == 0) || (D.move_on >= MOVE_FOUND)) { s_mt.on = 0; }   /* 이동이 끝났다(어떤 원인이든) */
     if ((kind == 0) && (P.turn_mode <= 0)) { D.tape_turn_dir = 0; }   /* 회전 모드 0: 교차선 회전 요청은 받지 않는다 */
     if ((kind == 0) && (D.tape_turn_dir != 0)) { kind = TAPE_ID_TURN; }
-    if (s_gd.kind && !s_gd.run) {                  /* 맡은 요청(회전 거부·다른 정지로 끊김): 달리면 다시 건다 */
+    if (s_gd.kind && (s_gd.run != 1)) {            /* 맡은 요청(순항·회전 거부·다른 정지로 끊김): 달리면 다시 건다 */
         if (tape_req_ok() && (gd_try() < 0)) { run_tape_req_clear(); }
     }
     else if ((kind != 0) && !s_gd.run) {

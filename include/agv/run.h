@@ -15,7 +15,7 @@ void     run_seq(void);             /* 10 ms, motor_run 뒤. 시퀀스 스텝과
 void     run_after_motor(void);     /* 10 ms, site_manual 뒤. error_check 후반 */
 void     run_encoder(uint16_t wheel, uint32_t period);   /* eCAP ISR */
 
-int16_t  run_seek_rpm(void);              /* 정렬 회전 앞 교차 테이프 찾기 속도 rpm. SPN~min(LOS, 12 m/min) */
+int16_t  run_seek_rpm(void);              /* 분류 4·교차선 회전 앞 교차선 찾기 속도 rpm. SPN~min(계산값, LOS, SEEK_TAPE_MM ÷ 40 ms) */
 void     run_move_tape_start(int16_t kind);   /* 시퀀스 AGV_MOVE( 한계, TAPE… ): kind 3 바로 정지, 4 GD 정지. tagact_move_tape 가 부른다 */
 int      run_move_tape_on(void);          /* 1 = 교차선까지 이동 중(아직 못 찾음)이거나 교차선 뒤 가장자리를 기다린다 */
 int      run_tape_turn_held(void);        /* 1 = 인정한 교차선의 회전을 맡고 있다(회전이 거부됐거나 GD 정지가 끊겨 다시 걸 때까지) */

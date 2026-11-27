@@ -3,7 +3,8 @@
 #include "agv/gain.h"
 #include "agv/guide.h"
 
-static const int16_t s_kp[GAIN_CANDS] = { 60, 50, 40, 30, 25, 20 };
+static const int16_t s_kp[GAIN_CANDS] = { 60, 60, 60, 50, 40 };
+static const int16_t s_ki[GAIN_CANDS] = {  5,  2,  1,  1,  1 };
 
 void gain_judge(const int16_t *g, int16_t n, gain_log_t *r)
 {
@@ -13,7 +14,7 @@ void gain_judge(const int16_t *g, int16_t n, gain_log_t *r)
     int bad_rms, wobble;
 
     r->rms10 = r->peak10 = r->flips = r->verdict = 0;
-    if (n < GAIN_WIN_MIN) { return; }
+    if (n < GAIN_N_MIN) { return; }
     for (i = 0; i < n; i++) { sum += g[i]; }
     mean = (sum >= 0) ? (sum + n / 2) / n : -((-sum + n / 2) / n);
     for (i = 0; i < n; i++) {
@@ -51,18 +52,26 @@ void gain_judge(const int16_t *g, int16_t n, gain_log_t *r)
     r->verdict = (int16_t)((bad_rms && wobble) ? GAIN_V_BOTH : (bad_rms ? GAIN_V_RMS : (wobble ? GAIN_V_WOBBLE : GAIN_V_CLEAN)));
 }
 
-void gain_seq_begin(gain_seq_t *s) { s->idx = 0; s->done = 0; s->ng = 0; }
+void gain_seq_begin(gain_seq_t *s) { s->idx = 0; s->done = 0; s->ng = 0; s->first = -1; }
 int16_t gain_kp(const gain_seq_t *s) { return s_kp[s->idx]; }
-int16_t gain_ki(const gain_seq_t *s)
-{
-    int16_t k = (int16_t)((s_kp[s->idx] * 5 + 30) / 60);     /* 반올림(K_P × 5 / 60) */
-    return (k < 1) ? 1 : k;
-}
+int16_t gain_ki(const gain_seq_t *s) { return s_ki[s->idx]; }
 
 void gain_seq_next(gain_seq_t *s, int clean)
 {
-    if (clean) { s->done = 1; return; }
+    if (s->first >= 0) {                                      /* 한 칸 낮춘 후보를 달렸다 */
+        if (!clean) { s->idx = s->first; }                    /* 탈락이면 처음 깨끗했던 값으로 */
+        s->done = 1;
+        return;
+    }
+    if (clean) { s->first = s->idx; }                         /* 처음 깨끗: 다음 후보가 있으면 그것도 달려 본다 */
     if (s->idx + 1 < GAIN_CANDS) { s->idx++; return; }
-    s->done = 1;                                              /* 마지막 후보(20·2)도 탈락 */
-    s->ng = 1;
+    s->done = 1;
+    s->ng = (int16_t)!clean;                                  /* 마지막 후보가 처음 깨끗이면 NG 아님, 그것도 탈락이면 NG */
+}
+
+int16_t gain_seq_miss(gain_seq_t *s)
+{
+    if (s->first < 0) { return 0; }
+    gain_seq_next(s, 0);                                      /* 한 칸 낮춘 후보: 탈락과 같이 처음 깨끗했던 값으로 끝 */
+    return 1;
 }

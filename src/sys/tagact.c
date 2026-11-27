@@ -71,11 +71,12 @@ static const tag_rule_t *pk_rule(uint16_t i)
 
 /* ---- 개별 액션 ---- */
 
-void tagact_stop(void) { D.flag_stopping = 1; }
+/* 교차선 뒤 GD 구간(순항 포함, D.steer_hold)은 서는 중으로 본다: 세 API 모두 진행 중인 정지처럼 건드리지 않는다 */
+void tagact_stop(void) { if (!D.steer_hold) { D.flag_stopping = 1; } }
 
 void tagact_stop_length(void)
 {
-    if (D.flag_stopping) { return; }     /* 진행 중인 정지의 거리를 바꾸지 않는다 */
+    if (D.flag_stopping || D.steer_hold) { return; }     /* 진행 중인 정지의 거리를 바꾸지 않는다 */
     D.flag_stopping = 1;
     D.stop_pulses = D.backward ? P.stop_len : P.fwd_stop_len;
     stop_request_tag();
@@ -86,7 +87,7 @@ void tagact_stop_after_mm(int32_t mm)
 {
     float p;
 
-    if (D.flag_stopping || (mm <= 0)) { return; }
+    if (D.flag_stopping || D.steer_hold || (mm <= 0)) { return; }
     p = (float)mm * P.one_length_pulse;
     if (p > 32767.0f) { p = 32767.0f; }
     D.flag_stopping = 1;
@@ -181,10 +182,10 @@ static int16_t turn_90(void)
     return (q > 16383.0f) ? 16383 : (int16_t)q;
 }
 
-/* 회전을 걸지 않는 상황: 회전 모드 0, 회전 중, 정지 거리 진행 중, 서 있음(시퀀스·튜닝 아니면) */
+/* 회전을 걸지 않는 상황: 회전 모드 0, 회전 중, 정지 거리 진행 중(교차선 뒤 GD 구간 포함), 서 있음(시퀀스·튜닝 아니면) */
 static int turn_refused(void)
 {
-    return (P.turn_mode <= 0) || (D.turn_pulses != 0) || (D.stop_pulses != 0)
+    return (P.turn_mode <= 0) || (D.turn_pulses != 0) || (D.stop_pulses != 0) || D.steer_hold
            || (!seq_is_active() && !s_turn_from_stop && (D.vin_out <= TURN_STOP_MIN_VIN));
 }
 
@@ -392,10 +393,10 @@ static int16_t stop_class(const uint16_t *act, uint16_t *arg)
     return cls;
 }
 
-/* 분류 3·4 규칙에서는 태그 자리에서 서지 않는다(교차선에서 run.c 가 세운다) */
+/* 분류 3·4 규칙에서는 태그 자리에서 서지 않는다(교차선에서 run.c 가 세운다). 교차선 뒤 GD 구간은 서는 중으로 본다 */
 static void rule_stop(int16_t cls)
 {
-    if (cls < 3) { D.flag_stopping = 1; }
+    if ((cls < 3) && !D.steer_hold) { D.flag_stopping = 1; }
 }
 
 void tagact_autostart_arm(uint16_t arg)
@@ -546,7 +547,7 @@ void tagact_tick(void)
         s_fs.w2 = 0;
         return;
     }
-    if (!D.flag_run || D.flag_stopping) { return; }     /* 서 있거나 서는 동안(일시정지 등)은 기다린다 */
+    if (!D.flag_run || D.flag_stopping || D.steer_hold) { return; }   /* 서 있거나 서는 동안(일시정지·교차선 뒤 GD 구간 등)은 기다린다 */
     on = io_in(s_fs.w2 & 0x3Fu);
     if (on) { s_fs.off = 0; }
     else if ((s_fs.ticks < 0) || (++s_fs.off > FS_OFF_TICKS)) { s_fs.ticks = -1; }
@@ -581,7 +582,7 @@ static int16_t s_depth, s_len_set;
 
 int tagact_run(uint16_t tag)
 {
-    int16_t was_stopping = D.flag_stopping;
+    int16_t was_stopping = (int16_t)(D.flag_stopping || D.steer_hold);   /* 교차선 뒤 GD 구간(순항 포함)은 서는 중 */
     int16_t prev_len = D.stop_pulses;
     const tag_rule_t *r;
     uint16_t i, irq, carg = 0, prev_tag = s_tag;

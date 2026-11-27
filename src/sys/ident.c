@@ -235,7 +235,7 @@ static struct {
     uint32_t start, begin, ticks;     /* ticks: 통합 시험 경과 */
     float    budget;
     step_t   lat, spd[2];
-    union { float y[WIN_TICKS]; int16_t ring[2][TOP_RING]; int16_t g[GAIN_WIN_MAX]; } u;   /* ring: 최고 속도 시험 0.3 s 원시 rpm, g: 단계 7 정속 창 가이드 위치 × 8 */
+    union { float y[WIN_TICKS]; int16_t ring[2][TOP_RING]; int16_t g[GAIN_N_MAX]; } u;   /* ring: 최고 속도 시험 0.3 s 원시 rpm, g: 단계 7 정속 창 가이드 위치 × 8 (20 ms 표본) */
     float    steer_ss, rpm_s[2], rpm_ss[2], tq_s[2];
 } s_id;
 
@@ -819,15 +819,15 @@ static void pass_begin(void)
     enter(PH_RAMP);
 }
 
-/* 단계 7: 남은 거리로 정속 창(최대 GAIN_WIN_MAX 틱)을 정한다. 옆 계단은 없다. 0 = GAIN_WIN_MIN 보다 짧다 */
+/* 단계 7: 남은 거리로 정속 창(최대 GAIN_TICKS_MAX 틱)을 정한다. 옆 계단은 없다. 0 = GAIN_TICKS_MIN 틱보다 짧다 */
 static int gain_plan(ident_level_t *lv)
 {
     const float k = 1000.0f / 6000.0f;
     float v = (float)s_id.want / P.one_meter_rpm * k;
     float rem = (s_id.budget - mm_since(s_id.begin)) / v * PLAN_SLACK - (float)SETTLE_TICKS;
-    float hold = (rem < (float)GAIN_WIN_MAX) ? rem : (float)GAIN_WIN_MAX;
+    float hold = (rem < (float)GAIN_TICKS_MAX) ? rem : (float)GAIN_TICKS_MAX;
 
-    if (hold < (float)GAIN_WIN_MIN) { return 0; }
+    if (hold < (float)GAIN_TICKS_MIN) { return 0; }
     s_id.hold_n = (int16_t)hold;
     s_id.lat_n = 0;
     lv->hold_ms = ms(s_id.hold_n);
@@ -907,32 +907,37 @@ static int fail_now(void)
 
 /* ---- 연속 시험 단계 7: 조향 이득 찾기 ---- */
 
-/* 정속 창 매 틱: 가이드 위치 × 8 을 쌓는다(기존 편차 창 버퍼 u 를 그대로 쓴다. 새 RAM 없음) */
+/* 정속 창 매 틱: GAIN_DECIM 틱(20 ms)마다 가이드 위치 × 8 을 하나 쌓는다(기존 편차 창 버퍼 u 를 그대로 쓴다. 새 RAM 없음).
+ * 창 틱 t 의 표본 자리 = t / GAIN_DECIM. t < hold_n ≤ GAIN_TICKS_MAX 라 자리는 GAIN_N_MAX 를 넘지 않는다(그래도 막는다) */
 static void gain_sample(void)
 {
     float x = lateral() * (float)GAIN_SCALE;
-    s_id.u.g[s_id.t] = (int16_t)((x > 4000.0f) ? 4000.0f : ((x < -4000.0f) ? -4000.0f : x));
+    int16_t j = (int16_t)(s_id.t / GAIN_DECIM);
+    if (((s_id.t % GAIN_DECIM) != 0) || (j >= GAIN_N_MAX)) { return; }
+    s_id.u.g[j] = (int16_t)((x > 4000.0f) ? 4000.0f : ((x < -4000.0f) ? -4000.0f : x));
 }
 
-/* 창이 모자라 판정하지 못했다. 같은 후보로 한 번 더 하고 또 못 보면 실패(속도는 안 낮춘다) */
+/* 창이 모자라 판정하지 못했다. 같은 후보로 한 번 더 하고 또 못 보면 실패(속도는 안 낮춘다).
+ * 한 칸 낮춘 후보(처음 깨끗한 값이 있다)가 또 못 보면 실패가 아니라 탈락과 같이 처음 깨끗한 값을 추천하고 끝낸다 */
 static int gain_miss(void)
 {
     agv_build.kp_log[s_gain.q.idx].verdict = GAIN_V_NONE;
-    if (s_gain.miss) { return fail_now(); }
-    s_gain.miss = 1;
-    s_id.retry = 1;
+    if (s_gain.miss && !gain_seq_miss(&s_gain.q)) { return fail_now(); }
+    if (!s_gain.miss) { s_id.retry = 1; }
+    s_gain.miss = (int16_t)!s_gain.miss;
     D.p_test = 0;
     set_speed(P.min_speed, 1);
     leave(0);
     return 0;
 }
 
-/* 정속 창 n 틱을 판정해 기록하고 다음 후보(또는 끝)로. 차는 감속하며 다음 자리로 간다 */
-static int gain_hold_end(int16_t n)
+/* 정속 창 t 틱(표본 = 올림(t / GAIN_DECIM) 개)을 판정해 기록하고 다음 후보(또는 끝)로. 차는 감속하며 다음 자리로 간다 */
+static int gain_hold_end(int16_t t)
 {
     gain_log_t *e = &agv_build.kp_log[s_gain.q.idx];
+    int16_t n = (int16_t)((t + GAIN_DECIM - 1) / GAIN_DECIM);
 
-    gain_judge(s_id.u.g, n, e);
+    gain_judge(s_id.u.g, (n > GAIN_N_MAX) ? (int16_t)GAIN_N_MAX : n, e);
     if (e->verdict == GAIN_V_NONE) { return gain_miss(); }
     s_gain.miss = 0;
     gain_seq_next(&s_gain.q, e->verdict == GAIN_V_CLEAN);
@@ -2037,9 +2042,9 @@ static float next_need(int16_t *free)
     case NX_SWEEP:
         v = rpm_at(SWEEP_LEVEL);
         return run_need(v, SETTLE_TICKS + 2 * WIN_TICKS, DEC_MARGIN_MM + decel_mm(v));
-    case NX_GAIN:                    /* 단계 7: 안정 + 정속 창 GAIN_WIN_MIN 틱 + 감속 */
+    case NX_GAIN:                    /* 단계 7: 안정 + 정속 창 GAIN_TICKS_MIN 틱(6 s) + 감속 */
         v = rpm_at(SWEEP_LEVEL);
-        return run_need(v, SETTLE_TICKS + GAIN_WIN_MIN, DEC_MARGIN_MM + decel_mm(v));
+        return run_need(v, SETTLE_TICKS + GAIN_TICKS_MIN, DEC_MARGIN_MM + decel_mm(v));
     case NX_COAST:                   /* 가감속 찾기는 안정 뒤 감속 */
         v = rpm_at(IDENT_LEVELS - 1u);
         return run_need(v, SETTLE_TICKS, DEC_MARGIN_MM + decel_mm(v));
@@ -2306,7 +2311,7 @@ int ident_run(void)
     }
     if (s_top) { return top_run(); }
     if (mm_since(s_id.begin) > s_id.budget) {
-        if (gain()) { return ((ph == PH_HOLD) && (s_id.t >= GAIN_WIN_MIN)) ? gain_hold_end(s_id.t) : gain_miss(); }   /* 3 s 넘게 봤으면 그만큼으로 판정 */
+        if (gain()) { return ((ph == PH_HOLD) && (s_id.t >= GAIN_TICKS_MIN)) ? gain_hold_end(s_id.t) : gain_miss(); }   /* 6 s 넘게 봤으면 그만큼으로 판정 */
         if (ph == PH_RAMP) { return slow_down(); }
         lv->cut |= 1;
         sl_stop();

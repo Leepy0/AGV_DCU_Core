@@ -1972,7 +1972,8 @@ static void rv_tick(int reply)
     scan();
 }
 
-typedef struct { int b, c, err, tape_on, seq_on, move_on, turned, move_after; float run_mm, vmax_mpm, over_mm, ctr_mm, b_run; } rv_res_t;
+typedef struct { int b, c, err, tape_on, seq_on, move_on, turned, move_after, b_t; float run_mm, vmax_mpm, over_mm, ctr_mm, b_run; } rv_res_t;
+static int s_rv_gd, s_rv_los, s_rv_dcc;   /* mvgd: GD·LOS·DCC(0 = 기본) */
 
 static void rv_flow(int seq, float d, float cmd_at, int autod, int turn, rv_res_t *r)
 {
@@ -1985,7 +1986,7 @@ static void rv_flow(int seq, float d, float cmd_at, int autod, int turn, rv_res_
     memset(r, 0, sizeof(*r));
     memset(&s_v, 0, sizeof(s_v));
     s_c = &c;
-    s_gd = 250.0f;
+    s_gd = s_rv_gd ? (float)s_rv_gd : 250.0f;
     s_cross_w = 0.0f;
     s_v.s = GD_MM;
     s_xa = 90.0f; s_x30w = (d > 0.0f) ? 20.0f : 0.0f;
@@ -1999,9 +2000,10 @@ static void rv_flow(int seq, float d, float cmd_at, int autod, int turn, rv_res_
     assert(sys_power_on());
     assert(param_set_ram(P_GEAR_RATIO, 60) == 0);
     assert(param_set_ram(P_WHEEL_BASE_MM, (int16_t)(WB_MM / 10.0f)) == 0);
-    assert(param_set_ram(P_GUIDE_DIST_MM, 250) == 0);
+    assert(param_set_ram(P_GUIDE_DIST_MM, (int16_t)GD_MM) == 0);
     assert(param_set_ram(P_SPEED_HIGH, 30) == 0);
-    assert(param_set_ram(P_SPEED_LOW, 25) == 0);
+    assert(param_set_ram(P_SPEED_LOW, (int16_t)(s_rv_los ? s_rv_los : 25)) == 0);
+    if (s_rv_dcc) { assert(param_set_ram(P_DCC, (int16_t)s_rv_dcc) == 0); }
     assert(param_set_ram(P_AUTO_DRIVE_MODE, (int16_t)autod) == 0);
     if (turn) { assert(param_set_ram(P_TURN_FORBACK, 10) == 0); assert(param_set_ram(P_SPEED_TURN, 13) == 0); }
     for (t = 0; t < 30; t++) { rv_tick(1); }
@@ -2018,7 +2020,7 @@ static void rv_flow(int seq, float d, float cmd_at, int autod, int turn, rv_res_
         if (v > r->vmax_mpm) { r->vmax_mpm = v; }
         if (D.flag_turn) { r->turned = 1; }
         else if (r->turned && D.move_on) { r->move_after = 1; }   /* 회전이 끝난 뒤 이동이 걸렸다 */
-        if (!r->b && (io_out_mask() & (1UL << OUT_EXT_3))) { r->b = 1; r->b_run = run; }
+        if (!r->b && (io_out_mask() & (1UL << OUT_EXT_3))) { r->b = 1; r->b_run = run; r->b_t = t; }
         if ((io_out_mask() & (1UL << OUT_EXT_5)) || D.system_err || D.stop_err || !seq_is_active()) {
             if (++after > 100) { break; }
         }
@@ -2291,9 +2293,10 @@ typedef struct {
     float phase, scan_ph, head_deg, lat_mm, J, coast, noise, dia, slip, cw, pw, br_deg, br_x;
     uint32_t seed;
 } xs_case_t;
-typedef struct { int found, err, restart, sl_n, passed, seq; float up, early, sens, ctr, th_found, th_stop, t_stop, v_find, lat_seen, log_mm, log_w, log_t, sl_over, sl_target; } xs_res_t;
+typedef struct { int found, err, restart, sl_n, passed, seq; float up, early, sens, ctr, th_found, th_stop, t_stop, v_find, lat_seen, log_mm, log_w, log_t, sl_over, sl_target;
+                 float t_tag, y_stop, v_ack; } xs_res_t;   /* 태그 → 정지 s, 정지 때 회전 중심 옆 mm, 인정 때 지령 m/min */
 
-static float s_xs_cmd, s_xs_obs;   /* > 0: 센서가 교차선 이만큼 앞에서 명령 정지(서면 다시 출발) / 장애물 1 s */
+static float s_xs_cmd, s_xs_obs;   /* 0 아님: 센서가 교차선 이만큼 앞에서(음수 = 지나서, GD 구간) 명령 정지(서면 다시 출발) / 장애물 1 s */
 static int   s_xs_did;             /* 시험이 실제로 일어났다: 1 명령 정지 뒤 다시 출발, 2 장애물로 섰다 */
 /* 요청의 일생: 0 보통. 5 태그 자리에서 명령 정지를 걸고 감속 중에 태그를 읽는다(태그 해석기로, 서면 다시 출발).
  * 6 찾는 중(교차선 300 mm 앞) 사람의 STOP → START: 요청이 지워져 교차선을 지나 직진한다(레거시와 같다) */
@@ -2301,7 +2304,11 @@ static int   s_xs_mode;
 /* 태그 장면(xtin): s_xs_tv > 0 이면 그 진입 속도(m/min)로 달리다 태그를 처리하는 순간 센서가 교차선 가운데에서 s_xs_tpos mm
  * (음수 = 앞) 자리에 요청을 건다. method 1 은 일반 회전(태그 뒤 SL 정지, 견줌용) */
 static float s_xs_tv, s_xs_tpos;
-#define XS_PASS_MM 15.0f                   /* want 7: 센서가 교차선 가운데 이만큼 앞에서 명령 정지 → 감속하며 교차선을 지나친다 */
+/* 찾기 속도 시험(xgin, 태그 장면). 0 이면 쓰지 않는다: GD mm, LOS m/min, 기어비(바퀴 202 mm), 바퀴 1차 지연 s(바퀴 rpm 이 바퀴 지령을
+ * 따른다. 0 = 토크 모형), 인정한 틱에 센서 점을 축으로 차체를 돌리는 각(도, 진입 방향 오차) */
+static float s_xs_gdv, s_xs_lag, s_xs_yaw;
+static int   s_xs_los, s_xs_gear;
+#define XS_PASS_MM 15.0f                  /* want 7: 센서가 교차선 가운데 이만큼 앞에서 명령 정지 → 감속하며 교차선을 지나친다 */
 #ifndef XS_OLD
 static const tag_rule_t s_xs_tags[] = {          /* 900 + method */
     { 902, 0, 0, 0, 0, { TA_TURN_TAPE | TURN_CW | (18u << 2), 0, 0, 0 } },  /* AGV_TURN( CW, 90, 0, 0, 0, TAPE ), 5도 단위 */
@@ -2322,7 +2329,13 @@ static void xs_plant(void)
         for (i = 0; i < 2; i++) {
             float u = 0.64f * ((m < 6) ? s_xs.tq[i] : (D.amp_run ? (float)D.tq_cmd[i] : 0.0f));
             float r = s_v.rpm[i], rn = r + (u - r) * (0.001f / s_xs.tau);
-            if ((s_xs.a_c > 0.0f) && (rn < r - s_xs.a_c * 0.001f)) { rn = r - s_xs.a_c * 0.001f; }   /* 제동 토크 없음 */
+            if (s_xs_lag > 0.0f) {      /* 1차 지연 모형: 바퀴 지령을 따른다(가감속 한계 ACC_LIM) */
+                u = D.amp_run ? (float)D.w_cmd[i] : 0.0f;
+                rn = r + (u - r) * (0.001f / s_xs_lag);
+                if (rn > r + ACC_LIM * 0.001f) { rn = r + ACC_LIM * 0.001f; }
+                if (rn < r - ACC_LIM * 0.001f) { rn = r - ACC_LIM * 0.001f; }
+            }
+            else if ((s_xs.a_c > 0.0f) && (rn < r - s_xs.a_c * 0.001f)) { rn = r - s_xs.a_c * 0.001f; }   /* 제동 토크 없음 */
             if (rn < 0.0f) { rn = 0.0f; }
             s_v.rpm[i] = rn;
             if (rn > 1.0f) {
@@ -2406,7 +2419,7 @@ static void xs_sim(const xs_case_t *q, xs_res_t *r)
     static case_t c;
     const case_t c0 = { 32, 0.0f, 0.0f, 1, 25, 25, 30, 0.1f, 0, 0 };
     float vmm, d_tag = 500.0f;
-    int t, armed = 0, found = 0, still = 0, stopped = 0, t_found = 0, t_last = 0, jog = 0, trace = getenv("XS_TRACE") != 0, cmd = 0, obs = 0, odone = 0;
+    int t, armed = 0, found = 0, still = 0, stopped = 0, t_found = 0, t_last = 0, t_arm = 0, jog = 0, trace = getenv("XS_TRACE") != 0, cmd = 0, obs = 0, odone = 0;
     int pre = 0, sw = 0;               /* 모드 5: 태그까지 틱, 모드 6: STOP·START 단계 */
     int vin_lo = -1;
 #ifndef XS_OLD
@@ -2420,7 +2433,7 @@ static void xs_sim(const xs_case_t *q, xs_res_t *r)
     memset(&s_xs, 0, sizeof(s_xs));
     s_xs.q = q;
     s_c = &c;
-    s_gd = 250.0f;
+    s_gd = (s_xs_gdv > 0.0f) ? s_xs_gdv : 250.0f;
     s_cross_w = 0.0f;
     s_x30w = 0.0f;
     s_v.s = GD_MM;
@@ -2438,9 +2451,9 @@ static void xs_sim(const xs_case_t *q, xs_res_t *r)
     assert(sys_power_on());
     assert(param_set_ram(P_GEAR_RATIO, 60) == 0);            /* 94.5 rpm 당 1 m/min */
     assert(param_set_ram(P_WHEEL_BASE_MM, (int16_t)(WB_MM / 10.0f)) == 0);
-    assert(param_set_ram(P_GUIDE_DIST_MM, 250) == 0);
+    assert(param_set_ram(P_GUIDE_DIST_MM, (int16_t)GD_MM) == 0);
     assert(param_set_ram(P_SPEED_HIGH, 30) == 0);
-    assert(param_set_ram(P_SPEED_LOW, 25) == 0);
+    assert(param_set_ram(P_SPEED_LOW, (int16_t)(s_xs_los ? s_xs_los : 25)) == 0);
     assert(param_set_ram(P_SPEED_MIN, (int16_t)((q->method == 3) ? q->v_mpm : 4)) == 0);
     assert(param_set_ram(P_ACC, 58) == 0);
     assert(param_set_ram(P_DCC, (int16_t)q->dcc) == 0);
@@ -2460,7 +2473,8 @@ static void xs_sim(const xs_case_t *q, xs_res_t *r)
         s_xs.X = GD_MM + 2500.0f + q->phase * s_xs_tv * (1000.0f / 60.0f) * 0.01f;
         assert(param_set_ram(P_STOP_LEN_MM, (int16_t)((q->method == 1) ? q->v_mpm : 100)) == 0);   /* method 1: SL(cm). 그 밖: 찾는 창 2 m */
         assert(param_set_ram(P_SPEED_MIN, 4) == 0);
-        assert(param_set_ram(P_GEAR_RATIO, 45) == 0);    /* 70.9 rpm 당 1 m/min: 토크 모형 상한(2560 rpm)에서 35 m/min 이 나오게 */
+        assert(param_set_ram(P_GEAR_RATIO, (int16_t)(s_xs_gear ? s_xs_gear : 45)) == 0);    /* 45: 70.9 rpm 당 1 m/min. 토크 모형 상한(2560 rpm)에서 35 m/min 이 나오게 */
+        if (s_xs_gear) { assert(param_set_ram(P_WHEEL_DIA_MM, 202) == 0); }
         s_xs.a_c = q->coast * 60.0f * P.one_meter_rpm;
     }
     host.bus_in[BUS_IN_A] &= (uint16_t)~RAW_START;
@@ -2472,12 +2486,12 @@ static void xs_sim(const xs_case_t *q, xs_res_t *r)
         s_xs.k = t;
         if (!jog && (q->lat_mm != 0.0f) && (sxp >= s_xs.X - ((q->shape == 5) ? 400.0f : 50.0f))) { s_v.y += q->lat_mm; jog = 1; }
         if ((jog == 1) && (q->shape == 5) && (q->br_deg == 0.0f) && (sxp >= s_xs.X + 400.0f)) { s_v.y -= q->lat_mm; jog = 2; }   /* 넓은 주행선: 가운데로 되돌린다 */
-        if ((s_xs_obs > 0.0f) && (sxp >= s_xs.X - s_xs_obs) && (obs < 100)) {
+        if ((s_xs_obs != 0.0f) && (sxp >= s_xs.X - s_xs_obs) && (obs < 100)) {
             host.bus_in[BUS_IN_B] &= (uint16_t)~0x02u;
             if ((++obs > 50) && (s_v.rpm[0] < 1.0f) && (s_v.rpm[1] < 1.0f)) { s_xs_did = 2; }
         }
         else { host.bus_in[BUS_IN_B] |= 0x02u; }
-        if ((s_xs_cmd > 0.0f) && (cmd == 0) && armed && (sxp >= s_xs.X - s_xs_cmd)) {   /* ACS 교통 정지('C' '0') */
+        if ((s_xs_cmd != 0.0f) && (cmd == 0) && armed && (sxp >= s_xs.X - s_xs_cmd)) {   /* ACS 교통 정지('C' '0') */
             stop_request_rapid(STOP_REASON_COMMAND);
             D.flag_stopping = 1;
             cmd = 1;
@@ -2490,7 +2504,7 @@ static void xs_sim(const xs_case_t *q, xs_res_t *r)
 #ifdef XS_OLD
             if (q->method == 2) { D.tape_turn_dir = TURN_CW; D.tape_turn_deg = 90; D.tape_turn_next = 0; }   /* 옛 코드는 출발이 지웠다 */
 #else
-            assert((q->method == 2) ? (D.tape_turn_dir == TURN_CW) : (D.tape_stop_kind == (int16_t)q->method));
+            assert(found || ((q->method == 2) ? (D.tape_turn_dir == TURN_CW) : (D.tape_stop_kind == (int16_t)q->method)));   /* 인정 뒤 끊김은 맡은 채 */
 #endif
             cmd = 3;
             s_xs_did = 1;
@@ -2505,6 +2519,7 @@ static void xs_sim(const xs_case_t *q, xs_res_t *r)
         sxp = s_v.x + GD_MM * cosf(s_v.th);
         if (!armed && (sxp >= s_xs.X - d_tag)) {      /* 태그: 센서가 교차선 d_tag 앞 */
             armed = 1;
+            t_arm = t;
             if (s_xs_mode == 5) {                      /* 명령 정지(ACS 'C' '0')를 걸고 두 틱 뒤 감속 중에 태그 */
                 stop_request_rapid(STOP_REASON_COMMAND);
                 D.flag_stopping = 1;
@@ -2557,9 +2572,18 @@ static void xs_sim(const xs_case_t *q, xs_res_t *r)
             r->lat_seen = (float)D.guide_pos;
             r->th_found = s_v.th * 180.0f / PI_F;
             r->sl_n = (int)stop_last.n;
+            r->v_ack = (float)D.vin_out / P.one_meter_rpm;
 #ifndef XS_OLD
             nlog = run_tape_last.n;
 #endif
+            if (s_xs_yaw != 0.0f) {       /* 진입 방향 오차: 센서 점(선 위)을 축으로 차체를 돌린다. XS_YAWC: 회전 중심(선 위)을 축으로 */
+                float sx = s_v.x + GD_MM * cosf(s_v.th), sy0 = s_v.y + GD_MM * sinf(s_v.th);
+                s_v.th += s_xs_yaw * PI_F / 180.0f;
+                if (!getenv("XS_YAWC")) {
+                    s_v.x = sx - GD_MM * cosf(s_v.th);
+                    s_v.y = sy0 - GD_MM * sinf(s_v.th);
+                }
+            }
         }
         if (trace && (armed || t > 0)) {
             printf("  t %4d f %d ph %d rs %d sp %5d vin %5d w %5d %5d rpm %6.0f %6.0f pos %3d led %08lx th %6.3f sens %7.2f ctr %7.2f y %6.2f\n", t - t_found, found, stop_phase(), stop_reason(),
@@ -2571,7 +2595,7 @@ static void xs_sim(const xs_case_t *q, xs_res_t *r)
             if ((s_v.rpm[0] >= 1.0f) || (s_v.rpm[1] >= 1.0f)) { if (stopped && (vr > 5.0f)) { r->restart++; stopped = 0; } t_last = t; }
             else { stopped = 1; }
             if (obs >= 100) { odone++; }       /* 장애물이 풀린 뒤 이어 가는 것까지 본다 */
-            if (D.flag_turn || ((s_v.rpm[0] < 1.0f) && (s_v.rpm[1] < 1.0f) && (++still > 60) && ((obs == 0) || (odone > 150)))) { break; }
+            if (D.flag_turn || ((s_v.rpm[0] < 1.0f) && (s_v.rpm[1] < 1.0f) && (++still > 60) && ((cmd == 0) || (cmd == 3)) && ((obs == 0) || (odone > 150)))) { break; }
             if (vr >= 1.0f) { still = 0; }
         }
         if (armed && !found && (D.system_err || D.stop_err)) { break; }
@@ -2581,8 +2605,10 @@ static void xs_sim(const xs_case_t *q, xs_res_t *r)
         r->ctr = s_v.x - xs_line_x(s_v.y);
     }
     r->th_stop = s_v.th * 180.0f / PI_F;
+    r->y_stop = s_v.y;
     r->found = found;
     r->t_stop = (float)(t_last + 1 - t_found) * 0.01f;
+    r->t_tag = (float)(t_last + 1 - t_arm) * 0.01f;
     r->err = D.system_err ? D.system_err : D.stop_err;
     r->sl_n = (int)stop_last.n - r->sl_n;          /* 인정 뒤 stop_last 기록 수 */
     r->sl_over = stop_last.overshoot_mm;
@@ -2616,6 +2642,27 @@ static int xs_main(int argc, char **argv)
             q.seed = sd;
             xs_sim(&q, &r);
             xs_line(tag, &q, &r);
+        }
+        return 1;
+    }
+    /* xgin: 찾기 속도 시험 한 줄 = method v_entry tpos LOS GD lag_ms yaw leds shape hd dcc cw pw phase scan J br_deg br_x br_merge seed 꼬리표.
+     * 기어비 40·바퀴 202 mm(63 rpm 당 1 m/min), lag_ms 0 = 토크 모형(J). 결과 한 줄 CSV:
+     * 꼬리표,찾음,오류,중심,센서,early,방향(찾음),방향(섬),옆(섬),찾음→섬 s,태그→섬 s,찾은 속도,인정 때 지령,기록 mm,기록 폭,stop_last 넘침 */
+    if ((argc > 1) && (strcmp(argv[1], "xgin") == 0)) {
+        static const xs_case_t c1 = { 4, 32, 0, 0, 20, 0, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 1.0f, 0.0f, 0.0f, 0.0f, 20.0f, 25.0f, 0.0f, 0.0f, 1u };
+        float lag_ms;
+        s_xs_gear = 40;
+        if (getenv("XS_OBS")) { s_xs_obs = (float)atof(getenv("XS_OBS")); }
+        if (getenv("XS_CMD")) { s_xs_cmd = (float)atof(getenv("XS_CMD")); }
+        while (q = c1, scanf("%d %f %f %d %f %f %f %d %d %f %d %f %f %f %f %f %f %f %d %u %63s", &q.method, &s_xs_tv, &s_xs_tpos, &s_xs_los, &s_xs_gdv,
+                             &lag_ms, &s_xs_yaw, &q.leds, &q.shape, &q.head_deg, &q.dcc, &q.cw, &q.pw, &q.phase, &q.scan_ph, &q.J, &q.br_deg, &q.br_x,
+                             &q.br_merge, &sd, tag) == 21) {
+            s_xs_lag = lag_ms * 0.001f;
+            q.seed = sd;
+            s_xs_did = 0;
+            xs_sim(&q, &r);
+            printf("%s,%d,%d,%.2f,%.2f,%.2f,%.3f,%.3f,%.2f,%.2f,%.2f,%.2f,%.2f,%.1f,%.1f,%.2f,%d,%d\n", tag, r.found, r.err, r.ctr, r.sens, r.early,
+                   r.th_found, r.th_stop, r.y_stop, r.t_stop, r.t_tag, r.v_find, r.v_ack, r.log_mm, r.log_w, r.sl_over, s_xs_did, r.restart);
         }
         return 1;
     }
@@ -2789,6 +2836,18 @@ int main(int argc, char **argv)
     if ((argc > 1) && (strcmp(argv[1], "salign") == 0)) { return salign_table() ? 1 : 0; }   /* 시퀀스 정렬 회전 */
     if ((argc > 1) && (strcmp(argv[1], "mtape") == 0))  { return mtape_table() ? 1 : 0; }    /* 시퀀스 교차선까지 이동 */
     if ((argc > 1) && (strcmp(argv[1], "rv") == 0))     { return rv_table() ? 1 : 0; }       /* 시퀀스 이동 결함 시나리오 */
+    if ((argc > 1) && (strcmp(argv[1], "mvgd") == 0)) {  /* AGV_MOVE( 300, TAPE_GD ): GD·DCC·LOS·교차선 거리별 출발 → 도착(출력 B) 시간 */
+        static const int gd[4] = { 250, 300, 400, 600 }, dc[2] = { 20, 50 }, lo[2] = { 25, 8 };
+        static const float dd[2] = { 600.0f, 1500.0f };
+        int a, b, k, m;
+        rv_res_t rr;
+        for (a = 0; a < 4; a++) for (b = 0; b < 2; b++) for (k = 0; k < 2; k++) for (m = 0; m < 2; m++) {
+            s_rv_gd = gd[a]; s_rv_dcc = dc[b]; s_rv_los = lo[k];
+            rv_flow(6, dd[m], 0.0f, 0, 0, &rr);
+            printf("MVGD,%d,%d,%d,%.0f,%d,%d,%.2f,%.1f,%.1f\n", gd[a], dc[b], lo[k], dd[m], rr.b, rr.err, (float)rr.b_t * 0.01f, rr.ctr_mm, rr.vmax_mpm);
+        }
+        return 0;
+    }
 #ifndef XS_OLD
     if ((argc > 1) && (strcmp(argv[1], "xs") == 0))     { return xs_check() ? 1 : 0; }       /* 교차선 회귀 */
 #endif
@@ -2928,14 +2987,14 @@ int main(int argc, char **argv)
         if (i == 40) { assert(r.jump >= 8); }                            /* 긴 것은 받는다(지속 확인이 없으면 10 mm 도 이렇다) */
     }
 #endif
-    {   /* 교차 테이프 찾기. 정렬 회전 앞은 계산 속도(SPN 4 대신 8.7~12 m/min)로 찾아 회전 중심이 테이프 ±12 mm 안에 선다
+    {   /* 교차 테이프 찾기. 정렬 회전 앞은 계산 속도(SPN 4 대신 8.7~15 m/min, v0.64.0 전 상한 12)로 찾아 회전 중심이 테이프 ±12 mm 안에 선다
          * (SPN 4: -1~+6 mm, 찾기 6.6~8.0 s → 2.7~3.7 s). 테이프 정지는 SPN 그대로 */
         tape_res_t tr;
         for (i = 0; i < 4; i++) {
             tape_sim(0, (i & 1) ? 400.0f : 250.0f, (i & 2) ? 50 : 20, 0.15f, 10.0f, &tr);
             printf("  교차 테이프 회전 GD %d DCC %d: 찾기 %.1f m/min %.2f s, 정지 위치 %.1f mm\n", (i & 1) ? 400 : 250, (i & 2) ? 50 : 20,
                    tr.v_cmd, tr.t_seek, tr.stop_x);
-            assert(tr.found && (tr.err == 0) && (tr.v_cmd > 8.0f) && (tr.v_cmd < 12.1f) && (fabsf(tr.stop_x) < 12.0f) && (tr.t_seek < 4.0f));
+            assert(tr.found && (tr.err == 0) && (tr.v_cmd > 8.0f) && (tr.v_cmd < 15.1f) && (fabsf(tr.stop_x) < 12.0f) && (tr.t_seek < 4.0f));
         }
         tape_sim(1, 250.0f, 50, 0.15f, 10.0f, &tr);
         assert(tr.found && (tr.err == 0) && (fabsf(tr.v_cmd - 4.0f) < 0.1f) && (tr.stop_x < -240.0f) && (tr.stop_x > -255.0f));
