@@ -24,6 +24,9 @@
  *   p2 : D.tape_turned 하위 16비트(본 회전 두 바퀴 펄스 합. 정착·보정 중에는 늘지 않는다)
  *   io : b0~11 D.tape_fix_turned(4095 에서 자름, 보정마다 0 부터), b12~14 D.tape_step(0~4, 정렬 아님 7), b15 D.motion == MOTION_CW
  *   v_cmd, rpm[0], rpm[1] : 회전 지령(두 바퀴 같다), 실측 rpm 좌·우(부호 없는 크기)
+ *   io b12~14 가 7(정렬 아님)이면 p2 와 io b0~11 은 무효다.
+ *   회전 기록에도 주행용 사건(LOST·JUMP 등)이 찍힐 수 있으니 회전 기록에서는 사건을 무시한다.
+ *   방향 비트(b15)는 v_cmd 0 인 틱과 보정 첫 틱에서 직전 방향을 든다.
  * 센서는 정렬 회전(tape_align)에서만 요청하므로 다른 회전은 pos 가 멈춰 있다
  */
 #ifndef AGV_STEERLOG_H

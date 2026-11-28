@@ -1385,6 +1385,9 @@ static void test_tst(void)
         boot_keys(0, 1);
         assert(param_get(P_DEV_TEST) == 0 && param_tst == 0 && !param_tst_steer_old && !param_tst_speed_old);
     }
+    host.ee[PARAM_DEV_TEST_ADDR] = 9;                 /* 9 는 예약: 저장돼 있어도 부팅 때 0 */
+    boot_keys(0, 1);
+    assert(param_get(P_DEV_TEST) == 0 && param_tst == 0 && !param_tst_steer_old && !param_tst_speed_old);
     for (k = 4; k <= 8; k += 4) {                     /* 새 번지에 이 이미지가 쓴 4·8 은 되살아난다 */
         host.ee[PARAM_DEV_TEST_ADDR] = (uint16_t)k;
         boot_keys(0, 1);
@@ -5358,6 +5361,7 @@ static void test_steerlog_turn(void)
         assert(((agv_steerlog.s[0].io >> 12) & 7) == 0 && agv_steerlog.s[0].p2 == 0);
     }
     assert(h[0] == h[1]);
+    assert(h[0] == 0x6cb3381dul);                     /* 변경 전(v0.65.0 코어) 주행 기록 해시 */
     (void)param_set_ram(P_DEV_TEST, 0);
     printf("  steerlog turn ok (회전 %d 표본, TST 0 주행 해시 %08lx)\n", n, (unsigned long)h[0]);
 }

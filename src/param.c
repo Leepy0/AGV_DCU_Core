@@ -356,6 +356,7 @@ static void after_load(void)
     D.p_kp = (float)param_gain(P_STEER_KP);
     D.p_ki = (float)param_gain(P_STEER_KI) * 0.1f;
 #if AGV_DEV_TESTS
+    if (s_set[P_DEV_TEST] == 9) { s_set[P_DEV_TEST] = 0; }     /* 9 는 아직 뜻이 없는 예약 번호: 저장돼 있어도 시험이 걸리지 않게 */
     param_tst_apply();
 #endif
     /* 특정 차종군은 자동 주행 모드를 강제하고 저장한다 (AGV_Type_Mode == 60) */
