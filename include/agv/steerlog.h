@@ -16,6 +16,18 @@
  *   v_cmd, rpm[0], rpm[1] : 속도 지령, 실측 rpm 좌·우(D.rpm)
  *   w_cmd 는 담지 않고 푼다: 좌 = max(0, v_cmd + p + offset_kp), 우 = max(0, v_cmd - p - offset_kp)
  *   (motor.c motor_speed_pi 의 RUN_DRIVE 식. 정지 처리가 속도 루프를 건너뛴 틱만 다를 수 있다)
+ *
+ * 회전 기록(TST STEERLOG_TST_TURN): 조향·주행·회전 제어는 TST 0 과 같고 기록기만 다르다. 주행은 기록하지도 지우지도 않고,
+ * 제자리 회전 동작(flag_turn 이고 RUN_TURN: 본 회전·정착·보정·끝 정지까지) 동안 매 틱 표본을 남긴다. 새 회전이 시작될 때 새로 시작한다.
+ * cfg.tst 가 이 번호이고 cfg.turn_90 은 그 회전의 D.turn_90(90도 두 바퀴 펄스). 회전 표본:
+ *   pf : 위와 같고 b8~10 은 6(회전 표본 표시. 주행 표본은 0~5·7)
+ *   p2 : D.tape_turned 하위 16비트(본 회전 두 바퀴 펄스 합. 정착·보정 중에는 늘지 않는다)
+ *   io : b0~11 D.tape_fix_turned(4095 에서 자름, 보정마다 0 부터), b12~14 D.tape_step(0~4, 정렬 아님 7), b15 D.motion == MOTION_CW
+ *   v_cmd, rpm[0], rpm[1] : 회전 지령(두 바퀴 같다), 실측 rpm 좌·우(부호 없는 크기)
+ *   io b12~14 가 7(정렬 아님)이면 p2 와 io b0~11 은 무효다.
+ *   회전 기록에도 주행용 사건(LOST·JUMP 등)이 찍힐 수 있으니 회전 기록에서는 사건을 무시한다.
+ *   방향 비트(b15)는 v_cmd 0 인 틱과 보정 첫 틱에서 직전 방향을 든다.
+ * 센서는 정렬 회전(tape_align)에서만 요청하므로 다른 회전은 pos 가 멈춰 있다
  */
 #ifndef AGV_STEERLOG_H
 #define AGV_STEERLOG_H
@@ -27,6 +39,8 @@
 
 #define STEERLOG_N   600     /* 6.00 s. 표본 6워드. 상태(s_sl)·헤더와 같이 cmd RAML0D(0xF80 워드)에 들어가야 한다. 616 은 실기 링크에서 34워드 넘쳤다 */
 #define STEERLOG_EV  16
+#define STEERLOG_TST_TURN   10   /* TST 회전 기록 */
+#define STEERLOG_STEP_TURN  6    /* 회전 표본의 pf b8~10 */
 
 enum {                       /* 사건 종류. 모두 '진입' 순간 한 건 */
     STEERLOG_EV_RISK = 1,    /* 위험 감속 진입(risk_stop 0 → 1, motor.c motor_drive_step) */
@@ -66,7 +80,8 @@ typedef struct {             /* 출발 때 설정 */
     int16_t  los, drs, acc, dcc;        /* P.low_speed, P.target_speed rpm, P.acc, P.dcc */
     int16_t  obs_use;        /* D.obs_use. 1 일 때만 auto_speed_change 가 돈다(2 = OBS_OFF_AUTO 끔) */
     int16_t  speed_high;     /* param P_SPEED_HIGH(m/min). 자동 감속은 이 값 범위에서만 */
-    int16_t  tst;            /* TST(P_DEV_TEST) 임시 시험 번호. 뒤에 1워드 채움(int32 정렬): cfg 14워드 */
+    int16_t  tst;            /* TST(P_DEV_TEST) 임시 시험 번호 */
+    int16_t  turn_90;        /* 회전 기록만 D.turn_90, 아니면 0. 예전 채움 자리라 cfg 는 그대로 14워드 */
 } steerlog_cfg_t;
 
 typedef struct {

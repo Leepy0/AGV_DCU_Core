@@ -46,7 +46,7 @@ enum {
     P_EMPTY_DCC,            /* 57 EDC: 공차 감속 (적재 13번) */
     P_LOAD_DETECT,          /* 58 LDS: 적재 감지 사용. 0 = 늘 적재(예전과 같다) */
 #if AGV_DEV_TESTS
-    P_DEV_TEST,             /* 59 TST: 임시 시험 고르기 0~8(param_tst_apply, param.c). 체크섬 밖 EEPROM 85(KEEP 빈 칸, v0.64.0 까지 82). 개발 이미지에만 */
+    P_DEV_TEST,             /* 59 TST: 임시 시험 고르기 0~10(param_tst_apply, param.c). 체크섬 밖 EEPROM 85(KEEP 빈 칸, v0.64.0 까지 82). 개발 이미지에만 */
 #endif
     /* 60 AD: 시퀀스 액추에이터 지연 0.1초 단위 0~999(99.9초), 기본 0(v0.61.0). 표는 PARAM_TIME( AD, DSEC ) 로 읽는다. 체크섬 밖 EEPROM 84(KEEP 빈 칸).
      * 번호는 두 이미지 모두 60 이다(현장 이미지는 59 가 빈 번호): 앱 생성기가 개발 헤더로 표를 만들어도 번호가 같게 */
@@ -169,6 +169,7 @@ int16_t  param_gain(uint16_t idx);
  *  3 예전 조향 + 새 속도 루프. 1·3 은 원인 가르기용으로 기존 경로를 고르기만 한다(v0.57.0).
  *  4~8 긴 차 직선 사행 시험(v0.65.0). 그 밖의 조향·속도 루프는 0 과 같다.
  *    4 차동 오차 되먹임 kw 0.6, 5 kw 0.8(steer.c diff_fb), 6 속도 루프 좌우 차 비례 ×4, 7 ×8(motor.c diff_p, 0.1 s 거름), 8 = 4 + 6.
+ *  10 회전 기록: 제어는 0 과 같고 조향 기록기가 주행 대신 제자리 회전을 기록한다(steerlog.h STEERLOG_TST_TURN). 9 는 다른 시험 몫이라 지금은 0 과 같다.
  * 두 깃발·param_tst 와 D.p_kp·D.p_ki 는 이 함수가 맞춘다: 부팅·TST 저장 때, 주행 시작 때(TST 0 이 아니면. 튜닝 주행은 param_tst 0) */
 extern int16_t param_tst_steer_old;
 extern int16_t param_tst_speed_old;
