@@ -99,7 +99,7 @@ static const para_view_t s_view[P_COUNT] = {
     {"GD ", 3}, {"OPT", 2}, {"FF ", 3}, {"ES ", 2},
     {"EDS", 2}, {"ETN", 2}, {"EAC", 2}, {"EDC", 2}, {"LDS", 0}
 #if AGV_DEV_TESTS
-    , {"TST", 1}
+    , {"TST", 2}                /* 0~10 */
 #else
     , {"   ", 2}                /* 59: 현장 이미지에는 TST 가 없다(번호만 비워 둔다) */
 #endif

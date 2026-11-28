@@ -1349,13 +1349,15 @@ static void test_tst(void)
     assert(param_get(P_STEER_KI) == 0);
     assert(D.p_kp == 60.0f && D.p_ki == 0.5f && motor_speed_ff() == 0.999f);          /* 부팅: K_P·K_I 0 = 권장값 */
     ui_param_text(P_DEV_TEST, 5, c);
-    assert(memcmp(c, "TST 5", 5) == 0);
-    assert(param_set(P_DEV_TEST, 9) != 0 && param_set(P_DEV_TEST, -1) != 0);
+    assert(memcmp(c, "TST05", 5) == 0);
+    ui_param_text(P_DEV_TEST, 10, c);
+    assert(memcmp(c, "TST10", 5) == 0);
+    assert(param_set(P_DEV_TEST, 11) != 0 && param_set(P_DEV_TEST, -1) != 0);
     assert(param_get(P_DEV_TEST) == 0 && param_tst == 0);
     assert(param_set_ram(P_SPEED_FF, 300) == 0);
     for (k = 0; k < 2; k++) {                         /* K_P·K_I 파라미터 45·3, 0·0 */
         assert((param_set_ram(P_STEER_KP, (int16_t)(k ? 0 : 45)) == 0) && (param_set_ram(P_STEER_KI, (int16_t)(k ? 0 : 3)) == 0));
-        for (t = 0; t <= 8; t++) {
+        for (t = 0; t <= 10; t++) {
             int16_t so = (int16_t)((t == 2) || (t == 3)), vo = (int16_t)((t == 1) || (t == 2));   /* 예전 조향, 예전 속도 루프 */
             assert(param_set(P_DEV_TEST, t) == 0);
             assert(param_tst == t && param_tst_steer_old == so && param_tst_speed_old == vo && param_get(P_OPT_FLAGS) == 0);
@@ -1378,8 +1380,8 @@ static void test_tst(void)
     assert(host.ee[PARAM_DEV_TEST_ADDR] == 2 && host.ee[82] == 8);   /* 새 번지 85 에만 쓴다 */
     boot_keys(0, 1);                                  /* 전원을 다시 켜도 2 */
     assert(param_get(P_DEV_TEST) == 2 && param_tst_steer_old && param_tst_speed_old);
-    for (k = 0; k < 2; k++) {                         /* 범위 밖(9 이상)이 EEPROM 에 남아 있으면 부팅 때 0 */
-        host.ee[PARAM_DEV_TEST_ADDR] = (uint16_t)(k ? 15 : 9);
+    for (k = 0; k < 2; k++) {                         /* 범위 밖(11 이상)이 EEPROM 에 남아 있으면 부팅 때 0 */
+        host.ee[PARAM_DEV_TEST_ADDR] = (uint16_t)(k ? 15 : 11);
         boot_keys(0, 1);
         assert(param_get(P_DEV_TEST) == 0 && param_tst == 0 && !param_tst_steer_old && !param_tst_speed_old);
     }
@@ -1831,10 +1833,8 @@ static void test_edge_release(void)
     assert(D.guide_track == GUIDE_TRK_NORMAL && D.guide_pos == 4);              /* 풀리면 덩어리 가운데 */
 }
 
-static void align_start(uint16_t next)
+static void align_go(uint16_t next)      /* 지금 상태에서 정렬 회전을 걸고 회전 상태로 넘긴다 */
 {
-    boot();
-    (void)param_set(P_TURN_FORBACK, 10);
     D.vin_out = 50;
     D.flag_run = 0;
     tagact_turn_align(TURN_CW, 90, next);
@@ -1846,6 +1846,13 @@ static void align_start(uint16_t next)
     D.flag_turn = 1;
     D.control = RUN_TURN;
     D.guide_all_off = 1;
+}
+
+static void align_start(uint16_t next)
+{
+    boot();
+    (void)param_set(P_TURN_FORBACK, 10);
+    align_go(next);
 }
 
 /* 태그 회전을 걸고 회전 상태로 넘긴다(정지는 끝난 것으로 본다) */
@@ -5241,6 +5248,120 @@ static void test_steerlog(void)
     printf("  steerlog ok (%lu 표본, 사건 %u)\n", (unsigned long)total, agv_steerlog.ev_n);
 }
 
+static int s_sl_turn_ticks;     /* 회전 상태(flag_turn, RUN_TURN)로 끝난 틱 수 */
+
+static void sl_tscan(uint16_t leds, int32_t pulses)
+{
+    host.sci[HAL_SCI_B].rx_len = host.sci[HAL_SCI_B].rx_pos = 0;
+    turn_scan(leds, pulses);
+    if (D.flag_turn && (D.control == RUN_TURN)) { s_sl_turn_ticks++; }
+}
+
+/* test_align_turn 과 같은 정렬 회전: 본 회전 → 중앙 정지·정착 → +2 지나쳐 반대로 보정 1번 → 정착 → 끝 → 정지 처리 */
+static void sl_turn(void)
+{
+    int32_t total = D.tape_total_pulse, t0;
+    int i;
+
+    s_sl_turn_ticks = 0;
+    sl_tscan(LED_CENTER, 0);
+    sl_tscan(LED_EDGE, total / 4);
+    for (i = 0; i < 7; i++) { sl_tscan(0, 0); }
+    assert(D.tape_step == 1);
+    D.tape_target_cnt = (float)total;
+    sl_tscan(0, total - D.tape_turned - D.tape_max + 1);
+    sl_tscan(LED_NEAR, 0);
+    sl_tscan(LED_NEAR, 0);
+    sl_tscan(LED_CENTER, 0);
+    assert(D.tape_step == TAPE_STEP_SETTLE && D.vin_out == 0);
+    t0 = D.tape_turned;
+    for (i = 0; i < 20; i++) { sl_tscan(LED_OVER2, 0); }
+    assert(D.tape_step == TAPE_STEP_FIX && D.tape_fix_rev == 1);
+    sl_tscan(LED_OVER2, 30);
+    assert(D.motion == MOTION_CCW && D.tape_turned == t0 && D.tape_fix_turned == 30);
+    for (i = 0; i < 21; i++) { sl_tscan(LED_CENTER, 0); }
+    assert(D.tape_align == 0 && D.tape_fix_end == 0 && D.tape_fix_cnt == 1);
+    for (i = 0; (i < 60) && D.flag_turn; i++) { sl_tscan(LED_CENTER, 0); }
+    assert(D.flag_turn == 0 && D.turn_motion == 0 && D.system_err == 0);
+}
+
+static uint32_t sl_hash(void)
+{
+    const unsigned char *b = (const unsigned char *)&agv_steerlog;
+    uint32_t h = 2166136261u;
+    size_t i;
+    for (i = 0; i < sizeof(agv_steerlog); i++) { h = (h ^ b[i]) * 16777619u; }
+    return h;
+}
+
+/* 회전 기록(TST 10). (가) 다른 TST 는 회전을 기록하지 않고 주행은 예전처럼 기록한다(주행 해시는 변경 전 코어와 같다).
+ * (나) 회전 기록은 본 회전·정착·보정·끝 정지가 한 기록에 이어진다. (다) 그 뒤 주행이 지우지도 쓰지도 않는다. (라) 다음 회전이 새로 시작한다 */
+static void test_steerlog_turn(void)
+{
+    static steerlog_t keep;
+    const steerlog_smp_t *s;
+    int16_t tst[3] = { 0, 9, STEERLOG_TST_TURN };
+    uint32_t h[2];
+    int k, i, n, st, last, seen[8];
+
+    for (k = 0; k < 3; k++) {
+        align_start(0x10);
+        assert(param_set_ram(P_DEV_TEST, tst[k]) == 0);
+        sl_turn();
+        n = s_sl_turn_ticks;
+        if (k < 2) {                                        /* (가) */
+            assert(agv_steerlog.total == 0 && agv_steerlog.runs == 0);
+            assert(param_set_ram(P_LEGACY_QUIRKS, 0) == 0);
+            drive_up();
+            for (i = 0; i < 300; i++) { sl_scan(LED_CENTER); }
+            assert(agv_steerlog.runs == 1 && agv_steerlog.total > 250u && agv_steerlog.cfg.turn_90 == 0);
+            assert(((sl_last()->pf >> 8) & 7u) != STEERLOG_STEP_TURN);
+            agv_steerlog.cfg.tst = 0;                       /* 해시는 TST 칸만 빼고 견준다 */
+            h[k] = sl_hash();
+            continue;
+        }
+        /* (나) */
+        assert(n > 60 && n < STEERLOG_N && agv_steerlog.runs == 1 && agv_steerlog.total == (uint32_t)n && agv_steerlog.n == (uint16_t)n);
+        assert(agv_steerlog.cfg.tst == STEERLOG_TST_TURN && agv_steerlog.cfg.turn_90 == D.turn_90 && D.turn_90 > 0);
+        memset(seen, 0, sizeof(seen));
+        last = 0;
+        for (i = 0; i < n; i++) {                           /* 단계는 0 → 1 → 2 → 정착 ⇄ 보정 → 7(정렬 끝, 정지 처리) 으로 끊김 없이 */
+            s = &agv_steerlog.s[i];
+            st = (s->io >> 12) & 7;
+            assert(((s->pf >> 8) & 7u) == STEERLOG_STEP_TURN);
+            assert((st == last) || (st == last + 1) || ((last == TAPE_STEP_FIX) && (st == TAPE_STEP_SETTLE))
+                   || ((last == TAPE_STEP_SETTLE) && (st == 7)));
+            last = st;
+            seen[st]++;
+            if (st == TAPE_STEP_SETTLE) { assert(s->v_cmd == 0); }
+            if ((st == TAPE_STEP_FIX) && (seen[st] > 1)) { assert(((uint16_t)s->io >> 15) == 0u); }   /* 보정은 반대(CCW). 넘어가는 틱은 D.motion 이 아직 CW */
+            if (st <= 2) { assert(((uint16_t)s->io >> 15) == 1u && (s->io & 0xFFF) == 0); }   /* 본 회전 CW, 보정 펄스 0 */
+        }
+        assert(seen[0] && seen[1] && seen[2] && seen[TAPE_STEP_SETTLE] >= 40 && seen[TAPE_STEP_FIX] && seen[7]);
+        assert(((agv_steerlog.s[0].io >> 12) & 7) == 0 && ((sl_last()->io >> 12) & 7) == 7);
+        assert(sl_last()->p2 == (int16_t)D.tape_turned && D.tape_turned > 0);
+        for (i = 0; i < n; i++) {                           /* 보정 30 펄스가 남았다 */
+            if ((((agv_steerlog.s[i].io >> 12) & 7) == TAPE_STEP_FIX) && ((agv_steerlog.s[i].io & 0xFFF) == 30)) { break; }
+        }
+        assert(i < n && (agv_steerlog.s[i].pf & 0xFFu) == 2u);   /* 그 틱 센서 위치 +2 */
+        /* (다) */
+        keep = agv_steerlog;
+        assert(param_set_ram(P_LEGACY_QUIRKS, 0) == 0);
+        drive_up();
+        for (i = 0; i < 300; i++) { sl_scan(LED_CENTER); }
+        assert(D.vin_out > 1000 && memcmp(&keep, &agv_steerlog, sizeof(keep)) == 0);
+        /* (라) */
+        D.flag_run = 0;
+        align_go(0x10);
+        sl_turn();
+        assert(agv_steerlog.runs == 2 && agv_steerlog.total == (uint32_t)s_sl_turn_ticks && agv_steerlog.n == (uint16_t)s_sl_turn_ticks);
+        assert(((agv_steerlog.s[0].io >> 12) & 7) == 0 && agv_steerlog.s[0].p2 == 0);
+    }
+    assert(h[0] == h[1]);
+    (void)param_set_ram(P_DEV_TEST, 0);
+    printf("  steerlog turn ok (회전 %d 표본, TST 0 주행 해시 %08lx)\n", n, (unsigned long)h[0]);
+}
+
 #else
 #ifdef STEERLOG_N
 #error "AGV_DEV_TESTS 0 이미지에는 조향 기록기가 없어야 한다"
@@ -5320,6 +5441,7 @@ int main(void)
     test_curvelog();
 #if AGV_DEV_TESTS
     test_steerlog();
+    test_steerlog_turn();
 #endif
     test_edge_release();
     test_turn_scale();

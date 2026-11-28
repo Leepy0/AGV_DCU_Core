@@ -117,10 +117,14 @@ void steerlog_tick(void)
     steerlog_smp_t *s;
     int16_t p, lim, at, step;
     int16_t on = (int16_t)(D.guide_all_on != 0), off = (int16_t)(D.guide_all_off != 0);
+    int16_t turn = (int16_t)(param_get(P_DEV_TEST) == STEERLOG_TST_TURN);
 
-    if ((D.control != RUN_DRIVE) || (D.vin_out == 0)) { s_sl.active = 0; }
+    if (turn ? !(D.flag_turn && (D.control == RUN_TURN)) : ((D.control != RUN_DRIVE) || (D.vin_out == 0))) { s_sl.active = 0; }
     else {
-        if (!s_sl.active) { start(); }
+        if (!s_sl.active) {
+            start();
+            if (turn) { agv_steerlog.cfg.turn_90 = D.turn_90; }
+        }
         else if (P.one_length_pulse > 0.0f) {
             s_sl.dist += 0.5f * (float)((p0 - s_sl.last_p[0]) + (p1 - s_sl.last_p[1])) / P.one_length_pulse;
         }
@@ -142,11 +146,20 @@ void steerlog_tick(void)
         p = (int16_t)D.p_pi_out;
         step = (int16_t)(D.step - DRIVE_CHANGE_SPEED);
         if ((step < 0) || (step > 5)) { step = 7; }
+        if (turn) { step = STEERLOG_STEP_TURN; }
         s->pf = (uint16_t)(((uint16_t)clip8(D.guide_pos) & 0xFFu) | ((uint16_t)step << 8)
                            | ((uint16_t)(D.guide_track & 3) << 11) | ((uint16_t)on << 13) | ((uint16_t)off << 14)
                            | ((uint16_t)curve_now() << 15));
-        s->p2 = (int16_t)(p * 2 + (D.risk_stop ? 1 : 0));
-        s->io = (int16_t)(uint16_t)(((uint16_t)clip8(D.offset_kp) << 8) | ((uint16_t)clip8((int16_t)(steer_i_out() / 16.0f)) & 0xFFu));
+        if (turn) {          /* 회전 표본(steerlog.h) */
+            int32_t f = D.tape_fix_turned;
+            s->p2 = (int16_t)D.tape_turned;
+            s->io = (int16_t)(uint16_t)(((f > 4095) ? 4095u : (uint16_t)f) | ((uint16_t)(D.tape_align ? (D.tape_step & 7) : 7) << 12)
+                                        | ((uint16_t)(D.motion == MOTION_CW) << 15));
+        }
+        else {
+            s->p2 = (int16_t)(p * 2 + (D.risk_stop ? 1 : 0));
+            s->io = (int16_t)(uint16_t)(((uint16_t)clip8(D.offset_kp) << 8) | ((uint16_t)clip8((int16_t)(steer_i_out() / 16.0f)) & 0xFFu));
+        }
         s->v_cmd = D.v_cmd;
         s->rpm[0] = D.rpm[0];
         s->rpm[1] = D.rpm[1];
